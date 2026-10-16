@@ -30,8 +30,11 @@
 // each; mount adds its paint and click marks through `perf`. The buffer goes to the daemon as `perf` batches of at most
 // 50 marks, right after panel.usable and then with each poll, only when the welcome lists "perf" (an older daemon would
 // answer error{unknown_type}). A daemon that lists "push" sends states on change (no id);
-// they are handled like the snapshot answers, and the 2 s poll stays as the fallback (H6 lengthens it once push is
-// proven live).
+// they are handled like the snapshot answers.
+//
+// Lean footprint (Addendum G2 H6): with a daemon whose welcome lists "push" the snapshot poll is only the fallback and
+// the keepalive, every PUSH_POLL_MS (15 s; the daemon pings a session silent for 30 s); without push it stays POLL_MS
+// (2 s). A reconnect asks the new welcome again.
 import { ACTION_NAMES, PROGRESS_PHASES, PROTOCOL } from "./contract.ts";
 import type { ActionName, ProgressPhase, RequestEnvelope } from "./contract.ts";
 import { linkFixCommand, NOT_YET_CODE, scrubToken } from "./diagnostics.ts";
@@ -42,8 +45,8 @@ import type {
 } from "./session.ts";
 import { NO_PERF, PERF_BATCH_MAX, PerfRecorder } from "./perf.ts";
 import type { PerfSink } from "./perf.ts";
-import { CLAUDE_STATES, JOB_STATES, STEP_IDS } from "./source.ts";
-import type { Approval, ClaudeState, ConnectionState, FlaggedItem, HostState, JobState, JobSummary, Language, LogLine, PanelDataSource, PanelState, PipelineStep, QcFrame, Result, StepId, StepStatus } from "./source.ts";
+import { CLAUDE_STATES, HOST_BUSY, JOB_STATES, STEP_IDS } from "./source.ts";
+import type { Approval, ClaudeState, ConnectionState, FlaggedItem, HostBusy, HostState, JobState, JobSummary, Language, LogLine, PanelDataSource, PanelState, PipelineStep, QcFrame, Result, StepId, StepStatus } from "./source.ts";
 
 // ------------------------------------------------------------------------------------------------ injected transport
 
@@ -92,6 +95,8 @@ export interface DaemonTransport {
 
 export const ENGINE_JSON_PATH = "~/.whynot-cut/bridge/engine.json";
 export const POLL_MS = 2000;
+/** the snapshot poll while the daemon pushes states (welcome.features has "push"): fallback and keepalive (H6) */
+export const PUSH_POLL_MS = 15_000;
 export const HELLO_TIMEOUT_MS = 5000;
 export const INTENT_TIMEOUT_MS = 30_000;
 export const CANCEL_WAIT_MS = 1500;
@@ -208,6 +213,9 @@ function parseConnection(c: unknown): ConnectionState | null {
   if (!optStr(host["detail"])) return null;
   const out: ConnectionState = { engine, claude: claude as ClaudeState, host: { state: st } };
   if (isStr(host["detail"])) out.host.detail = host["detail"].slice(0, 256);
+  // H6: read only; a value this panel does not know (a newer daemon) is "unknown", never a dropped state
+  const busy = host["busy"];
+  if (isStr(busy)) out.host.busy = (HOST_BUSY as readonly string[]).includes(busy) ? (busy as HostBusy) : "unknown";
   return out;
 }
 
@@ -415,6 +423,8 @@ export interface DaemonSourceOptions {
   language?: Language;
   editor_name?: string;
   pollMs?: number;
+  /** the poll once the welcome lists "push" (H6; default PUSH_POLL_MS, never below pollMs) */
+  pushPollMs?: number;
   helloTimeoutMs?: number;
   intentTimeoutMs?: number;
   cancelWaitMs?: number;
@@ -487,6 +497,9 @@ export class DaemonSource implements PanelDataSource {
   private readonly build: string;
   private panelUpdateState: PanelUpdate = "unknown";
   private readonly pollMs: number;
+  private readonly pushPollMs: number;
+  /** the daemon's welcome listed "push": it sends states on change, so the poll is the slow fallback */
+  private pushOn = false;
   private readonly helloTimeoutMs: number;
   private readonly intentTimeoutMs: number;
   private readonly cancelWaitMs: number;
@@ -532,6 +545,7 @@ export class DaemonSource implements PanelDataSource {
     this.version = (opts.version || "0.0.0").slice(0, 64);
     this.build = (opts.build ?? "").slice(0, 64);
     this.pollMs = opts.pollMs ?? POLL_MS;
+    this.pushPollMs = Math.max(this.pollMs, opts.pushPollMs ?? PUSH_POLL_MS);
     this.helloTimeoutMs = opts.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
     this.intentTimeoutMs = opts.intentTimeoutMs ?? INTENT_TIMEOUT_MS;
     this.cancelWaitMs = opts.cancelWaitMs ?? CANCEL_WAIT_MS;
@@ -825,6 +839,7 @@ export class DaemonSource implements PanelDataSource {
       if (m.type === "welcome") {
         this.panelUpdateState = m.update;
         this.perfOn = m.features.includes("perf");
+        this.pushOn = m.features.includes("push");
         return this.onWelcome(sock, m.daemon_version);
       }
       if (m.type === "error") {
@@ -898,7 +913,7 @@ export class DaemonSource implements PanelDataSource {
     if (this.sock !== sock) return;
     this.flushPerf(sock);
     if (this.sock !== sock) return;
-    this.stopPoll = this.t.setTimer(() => this.poll(sock), this.pollMs);
+    this.stopPoll = this.t.setTimer(() => this.poll(sock), this.pushOn ? this.pushPollMs : this.pollMs);
   }
 
   /** One perf batch (at most PERF_BATCH_MAX marks), only to a daemon that takes them (H3). */

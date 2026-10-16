@@ -23,6 +23,7 @@ PANEL_UPDATES = ("ok", "stale", "newer", "unknown")                         # we
 BUILD_ID_RE = re.compile(r"[0-9]{8}T[0-9]{6}Z")                             # the build id: 20261013T142530Z (UTC)
 BUILD_MAX = 64                                                              # hello client.build maxLength
 JOBS_MAX = 50                                                               # panel_state.jobs maxItems
+HOST_BUSY = ("exporting", "rendering", "idle", "unknown")                   # connection.host.busy (G2 H6)
 FEATURES = ("perf", "push")                                                 # welcome.features (G2 H3)
 
 
@@ -104,15 +105,18 @@ def welcome(session_id: str, daemon_version: str, update: str = "unknown", featu
 
 
 def state(host_state: str, host_detail: str | None = None, id: str | None = None, item: dict | None = None,
-          jobs: list | None = None, stale: bool = False) -> dict:
+          jobs: list | None = None, stale: bool = False, host_busy: str | None = None) -> dict:
     """The daemon's `state`: the connection (engine connected, which host path is live; the Claude pill stays "unknown"
     until the T6.2b probe exists) and, from engine_state.panel_fields, the item's client, item, pipeline, approval and
     QC tiles. Language, editor name, context and log are the panel's own. `jobs`: the job journal's newest summaries
     (serve/jobs.py summaries(); G2 H1), by which a reconnected panel reattaches to its commands. `stale` (G2 H3): the
-    item comes from the last good engine-state read because the fresh one did not answer in time."""
+    item comes from the last good engine-state read because the fresh one did not answer in time. `host_busy` (G2
+    H6): connection.host.busy, read only; a value outside HOST_BUSY is "unknown", None leaves it out."""
     host: dict = {"state": host_state}
     if host_detail:
         host["detail"] = clip(host_detail, 256)
+    if host_busy is not None:
+        host["busy"] = host_busy if host_busy in HOST_BUSY else "unknown"
     out: dict = {"type": "state", "state": {
         "connection": {"engine": "connected", "claude": "unknown", "host": host},
         "client": "", "item": "", "language": "en", "editor_name": "",

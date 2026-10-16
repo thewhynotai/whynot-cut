@@ -6,7 +6,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
-import { DaemonSource, ENGINE_JSON_RETRIES, ENGINE_JSON_RETRY_MS, backoffMs, sessionUrl, statusUrl } from "../src/daemon-source.ts";
+import { DaemonSource, ENGINE_JSON_RETRIES, ENGINE_JSON_RETRY_MS, PUSH_POLL_MS, backoffMs, sessionUrl, statusUrl } from "../src/daemon-source.ts";
+import { HOST_BUSY } from "../src/source.ts";
 import type { DaemonSocket, DaemonTransport, LinkDiagnosis } from "../src/daemon-source.ts";
 import { diagnosticsText } from "../src/diagnostics.ts";
 import type { PanelState, Result } from "../src/source.ts";
@@ -1247,4 +1248,83 @@ test("H3 review P1-3: a malformed item part is dropped whole, and a running comm
   assert.ok(validPanelState(s), JSON.stringify(validPanelState.errors));
   r.src.stop();
   await p;
+});
+
+// ---------------------------------------------------------------------------------------------------- lean footprint (H6)
+const TEN_MIN_MS = 10 * 60 * 1000;
+
+/** the panel idle for 10 simulated minutes against a daemon with these welcome features: snapshots sent and timer
+ *  callbacks run (every one is a wakeup of the panel) */
+async function idleTenMinutes(features: string[] | undefined): Promise<{ snapshots: number; wakeups: number; r: Rig }> {
+  const r = rig();
+  r.daemon.features = features;
+  let wakeups = 0;
+  const set = r.transport.setTimer;
+  r.transport.setTimer = (fn, ms) => set(() => { wakeups++; fn(); }, ms);
+  r.src.start();
+  await r.clock.advance(0);
+  assert.equal(r.src.diagnosis.code, "connected");
+  const before = { snapshots: sentOf(r.daemon.last, "snapshot").length, wakeups };
+  await r.clock.advance(TEN_MIN_MS);
+  return { snapshots: sentOf(r.daemon.last, "snapshot").length - before.snapshots, wakeups: wakeups - before.wakeups, r };
+}
+
+test("H6 idle: a daemon that pushes is polled every 15 s (40 in 10 min), one that does not every 2 s (300)", async () => {
+  const push = await idleTenMinutes(["perf", "push"]);
+  assert.equal(push.snapshots, 40);
+  assert.equal(push.wakeups, 40);
+  const noPush = await idleTenMinutes(["perf"]);
+  assert.equal(noPush.snapshots, 300);
+  assert.equal(noPush.wakeups, 300);
+  const older = await idleTenMinutes(undefined);
+  assert.equal(older.snapshots, 300);
+  for (const x of [push, noPush, older]) assert.deepEqual(x.r.daemon.invalid, []);
+  assert.equal(PUSH_POLL_MS, 15_000);
+  assert.ok(PUSH_POLL_MS < 30_000, "the poll stays the keepalive: the daemon pings a session silent for 30 s");
+});
+
+test("H6: pushed states still land with the slow poll, and a reconnect to a daemon without push polls at 2 s again", async () => {
+  const r = rig();
+  r.daemon.features = ["push"];
+  r.src.start();
+  await r.clock.advance(0);
+  const pushed = stubState("cep");
+  ((pushed["state"] as Record<string, unknown>)["connection"] as Record<string, unknown>)["host"] = { state: "cep", busy: "exporting" };
+  r.daemon.last.deliver(pushed); // no id: a push
+  assert.deepEqual((await r.src.snapshot()).connection.host, { state: "cep", busy: "exporting" });
+  const s1 = sentOf(r.daemon.last, "snapshot").length;
+  await r.clock.advance(14_999);
+  assert.equal(sentOf(r.daemon.last, "snapshot").length, s1, "no poll before 15 s");
+  await r.clock.advance(1);
+  assert.equal(sentOf(r.daemon.last, "snapshot").length, s1 + 1);
+  r.daemon.features = undefined; // the next daemon is an older one
+  r.daemon.last.serverClose(1001, "reel serve is stopping");
+  await r.clock.advance(1000);
+  assert.equal(r.src.diagnosis.code, "connected");
+  const s2 = sentOf(r.daemon.last, "snapshot").length;
+  await r.clock.advance(2000);
+  assert.equal(sentOf(r.daemon.last, "snapshot").length, s2 + 1);
+  r.src.stop();
+});
+
+test("H6: connection.host.busy is kept when known, an unknown word is 'unknown', a non-string is left out", async () => {
+  const r = rig();
+  r.src.start();
+  await r.clock.advance(0);
+  const send = (busy: unknown) => {
+    const st = stubState("cep");
+    ((st["state"] as Record<string, unknown>)["connection"] as Record<string, unknown>)["host"] = { state: "cep", busy };
+    r.daemon.last.deliver(st);
+  };
+  for (const v of HOST_BUSY) {
+    send(v);
+    assert.equal((await r.src.snapshot()).connection.host.busy, v);
+  }
+  send("thinking");
+  assert.equal((await r.src.snapshot()).connection.host.busy, "unknown");
+  send(7);
+  const s = await r.src.snapshot();
+  assert.equal(s.connection.host.state, "cep");
+  assert.equal("busy" in s.connection.host, false);
+  r.src.stop();
 });

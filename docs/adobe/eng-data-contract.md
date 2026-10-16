@@ -320,12 +320,43 @@ The daemon's rules:
 The panel times durations on a monotonic clock (`performance.now()`), `t` stays epoch ms. It now reads the item part
 of the state too (`client`, `item`, `pipeline`, `approval`, `qc`, `stale`; data only, nothing new is rendered yet), so
 `panel.usable` is the first state that is not stale. The panel sends its marks right after `panel.usable` and then once
-per poll. Clicks are sampled (1 in 5), and a click whose handler paints nothing records nothing. The panel's 2 s snapshot poll stays as the fallback for pushed
-states; H6 lengthens it once push is proven live.
+per poll. Clicks are sampled (1 in 5), and a click whose handler paints nothing records nothing. The snapshot poll is
+the fallback for pushed states: 15 s once the welcome lists `push`, 2 s otherwise (H6, §2.12).
 
 ```json
 { "type": "perf", "marks": [ { "mark": "panel.boot", "t": 1760000000000 },
   { "mark": "panel.usable", "t": 1760000000812, "ms": 812 }, { "mark": "ui.paint", "t": 1760000001000, "ms": 6.5, "rid": "c-12" } ] }
+```
+
+### 2.12 Lean footprint and `connection.host.busy` (H6; Addendum G13)
+
+Landed in H6 (`js/bridge.js`, `serve/host_busy.py`, `serve/app.py`, `src/daemon-source.ts`).
+
+| Where | Field | Type | Meaning |
+|---|---|---|---|
+| `connection.host` | `busy` | `"exporting"` \| `"rendering"` \| `"idle"` \| `"unknown"`, optional | Read only. The CEP bridge's own word on whether Premiere is exporting (Media Encoder jobs counted from `app.encoder` events, or the bridge's own export job) or After Effects is rendering (`renderQueue.rendering`, probed just before a job, believed 15 s). `unknown` = the bridge cannot vouch for it (no event yet, a missed event, an older bridge). Absent = no host, a UXP host (it does not report it yet), or an older daemon. A panel that meets a word it does not know shows `unknown`. |
+| bridge heartbeat | `host_busy` | the same four words | Written with every heartbeat (every 2 s) and at once when it changes. Never read with an `evalScript` on a timer. |
+
+Who reads it:
+- **The panel**: data only for now (`ConnectionState.host.busy`); nothing new is rendered.
+- **The engine GPU lock (Phase 4, executor)**: `serve.host_busy.host_busy(home=None, *, now=None)` →
+  `{"premiere", "after_effects", "overall"}`. Per app it is one of the four words, or `"offline"` when no bridge beats
+  there. `overall` is `exporting` > `rendering` > `unknown` > `idle`; apps that are offline do not count. Read only.
+  `reel serve` gives the same thing as `App.read_host_busy()`.
+
+Idle cost (counted with fake timers over 10 simulated minutes):
+
+| Part | Before H6 | After H6 |
+|---|---|---|
+| Panel snapshot poll | 300 (every 2 s) | 40 with a daemon that lists `push` (every 15 s, still the keepalive under the daemon's 30 s ping); 300 without it |
+| CEP daemon wakeups | 600 (one 1 s tick) | about 302: a 2 s heartbeat whose every 5th beat is the 10 s safety tick, plus the 1 s scans until `fs.watch` delivers its first event |
+| CEP queue scans | 601 | 63: a job arrives through `fs.watch` on the queue folder (duplicates are one scan; a missed event waits for the 10 s safety tick; a watch error or a deaf watch goes back to the 1 s scan and is re-armed) |
+| CEP engine checks | 21 (every 30 s) | 7 (30 s, then 60, then 120 s while the engine runs and no job comes) |
+| Host calls (`evalScript`) | 0 | 0 (the probe or the encoder bind rides on a job only) |
+| `reel serve` push look | every 1 s, only while a panel is connected | the same. One look = one engine-state read (a cache hit when nothing changed), one bridge status, one `host_busy` heartbeat read (none once `cep_queue.status` carries `host_busy`) |
+
+```json
+{ "connection": { "engine": "connected", "claude": "unknown", "host": { "state": "cep", "busy": "exporting" } } }
 ```
 
 ## 3. Screen → fields

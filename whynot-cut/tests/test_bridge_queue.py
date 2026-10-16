@@ -1352,25 +1352,28 @@ class TestWaitForMedia(_Home):
 
 # ===================================================================================================== bridge.js
 NODE = shutil.which("node")
-# The bridge runs on its own clock (its 1 s setInterval, 50 ms here), and the run ends on that clock, never on wall
+# The bridge runs on its own clock (its setIntervals, 50 ms each here; its setTimeouts 1/20 of their delay), and the
+# run ends on that clock, never on wall
 # time: a loaded machine stretches every tick, so a fixed lifetime ended the bridge before it had done its work (jobs
 # left unanswered, a claimed job never finished, an engine submit finding the bridge already gone). The test closes
 # this process's stdin to ask for the end (once the outcome it waits for is on disk, or at once); the harness then
 # lets the bridge tick until it has ticked `minTicks` times in all and SETTLE times since the request with no
 # evalScript in flight (a result written, then a heartbeat after it), writes what it saw and exits. A bridge that
 # starts no clock (the bundle's panel) has nothing left to do: it ends at the request. A test process that dies
-# closes the pipe too, so the child never outlives it.
+# closes the pipe too, so the child never outlives it. fs.watch is the real one (H6: bundle 3.0.0 watches its queue).
+# An evalScript that is not a job (H6: the After Effects render-queue probe, the Premiere encoder-event bind) is
+# answered at once ("idle" / "unavailable") and recorded in hostEvals, never in evals.
 HARNESS = r"""
 const vm = require('vm'), fs = require('fs');
 const [bridgeJs, extDir, role, minTicks, outFile, host] = process.argv.slice(2);
 const SETTLE = 2;
-const evals = [], state = { textContent: '' }, logEl = { textContent: '' };
+const evals = [], hostEvals = [], state = { textContent: '' }, logEl = { textContent: '' };
 let clocks = 0, ticks = 0, inFlight = 0, stopAsked = false, settled = 0, ended = false;
 function end() {
   if (ended) { return; }
   ended = true;
   const b = ctx.window.WNC_BRIDGE;
-  fs.writeFileSync(outFile, JSON.stringify({ evals, ticks, state: state.textContent, log: logEl.textContent,
+  fs.writeFileSync(outFile, JSON.stringify({ evals, hostEvals, ticks, state: state.textContent, log: logEl.textContent,
     panel: b ? { role: b.role, host: b.host, bundle: b.bundle, queue: b.queue, beat: b.readBeat() } : null }));
   process.exit(0);
 }
@@ -1383,6 +1386,7 @@ const cep = {
   getSystemPath: () => 'file:///' + extDir.replace(/\\/g, '/'),
   evalScript: (code, cb) => {
     const m = /^\$\.evalFile\(new File\(("(?:[^"\\]|\\.)*")\)\); (\w+)\.run\(("(?:[^"\\]|\\.)*")\);$/.exec(code);
+    if (!m) { hostEvals.push(code); return cb(/renderQueue/.test(code) ? 'idle' : 'unavailable'); }
     const data = JSON.parse(fs.readFileSync(JSON.parse(m[3]), 'ascii'));
     evals.push({ action: data.action, file: JSON.parse(m[1]), entry: m[2] });
     inFlight += 1;
@@ -1398,6 +1402,7 @@ const ctx = { window: { __adobe_cep__: cep, cep_node: { require } }, document: {
                 if (stopAsked && inFlight === 0) { settled += 1; }
                 maybeEnd();
               }, 50); },
+              clearInterval, setTimeout: (f, ms) => setTimeout(f, Math.ceil((+ms || 0) / 20)), clearTimeout,
               process, console };
 vm.runInNewContext(fs.readFileSync(bridgeJs, 'utf8'), ctx);
 const stop = () => { stopAsked = true; maybeEnd(); };
@@ -1605,8 +1610,10 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
         self.run_bridge()
         hb = self.beat()
         self.assertEqual(sorted(hb), sorted(["at", "busy", "role", "host", "hostVersion", "bundle", "version", "protocol",
-                                             "build", "libs", "current", "action", "engine_start", "engine_retry"]))
+                                             "build", "libs", "current", "action", "engine_start", "engine_retry",
+                                             "host_busy"]))
         self.assertIsNone(hb["engine_retry"])                                # H2: "slow" only after 5 failed engine starts
+        self.assertEqual(hb["host_busy"], "unknown")                         # H6: no job yet, so no encoder bind
         self.assertEqual(hb["engine_start"]["outcome"], "no_launcher")       # config.json launcher null (Task 5)
         build = json.loads((self.ext / "build.json").read_text(encoding="utf-8"))
         self.assertEqual((hb["bundle"], hb["version"], hb["protocol"], hb["build"], hb["hostVersion"], hb["role"]),

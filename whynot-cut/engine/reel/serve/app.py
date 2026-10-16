@@ -70,7 +70,13 @@ G2 H3 (perf hooks and a faster first state):
     the PanelFields cache generation (engine_state.PanelFields.generation), `stale`, the host connection and the job
     journal's in-memory summaries; a stuck item read still lets host and job changes through, marked stale with the
     last good item. A session gets no push before its welcome, nor before its first state. The panel's snapshot poll
-    stays as the fallback.
+    stays as the fallback (H6: 15 s once the welcome lists "push", 2 s otherwise).
+G2 H6 (lean footprint): the pusher runs only while a panel session is connected (no panel, no look at all), and one
+look costs one engine-state read (a cache hit when nothing changed), one bridge status (the Premiere heartbeat and the
+queue's *.running) and, while the CEP bridge is alive, the heartbeat's host_busy (serve/host_busy.py; read from the
+status itself once cep_queue.status carries it, else one more heartbeat read). `connection.host.busy` = the CEP
+Premiere host's "exporting" | "rendering" | "idle" | "unknown" (read only; absent for a UXP host, which does not report
+it yet, and with no host). App.read_host_busy() = serve/host_busy.py host_busy() for this home (both lanes, overall).
 """
 from __future__ import annotations
 
@@ -84,7 +90,7 @@ import time
 
 from lib import common
 
-from . import engine_state, messages, push, security, ws
+from . import engine_state, host_busy, messages, push, security, ws
 from . import perf as perf_log
 from .adapters import FileQueueAdapter, HostLink, QueueWorker
 from .router import Router
@@ -739,29 +745,42 @@ class App:
         except (OSError, ValueError):
             return []
 
-    async def _host(self) -> tuple[str, str | None]:
-        """(host state, detail): a UXP Premiere panel connected, else the CEP heartbeat. Only a session that implements
-        something counts as the host: a uxp session with no capabilities (spike 0.1.3, a probe) cannot run a command,
-        so it is not the Premiere host the pill means. Nor does a session whose socket has closed while its removal
-        (_end, async) is still pending."""
+    async def _host(self) -> tuple[str, str | None, str | None]:
+        """(host state, detail, busy): a UXP Premiere panel connected, else the CEP heartbeat. Only a session that
+        implements something counts as the host: a uxp session with no capabilities (spike 0.1.3, a probe) cannot run a
+        command, so it is not the Premiere host the pill means. Nor does a session whose socket has closed while its
+        removal (_end, async) is still pending. busy (H6): the CEP heartbeat's host_busy (host_busy.lane_value), read
+        in the same worker call as the status; None (left out) for a UXP host, which does not report it yet, and
+        offline."""
         for s in reversed(list(self.sessions.values())):
             if s.kind == "uxp" and s.host == "premiere" and s.capabilities and not s.sock.closed and not s.link.closed:
-                return "uxp", (f"Premiere Pro {s.host_version}".strip() if s.host_version else None)
+                return "uxp", (f"Premiere Pro {s.host_version}".strip() if s.host_version else None), None
         ctx = common.Context(home=self.home)
 
-        def cep_alive() -> bool:
+        def cep_state() -> tuple[bool, str | None]:
             from lib import ppro_bridge
             with common.use_context(ctx):
-                return bool(ppro_bridge.status().get("alive"))
+                st = ppro_bridge.status()
+                if not st.get("alive"):
+                    return False, None
+                if "host_busy" in st:                  # cep_queue.status carries it: no second read
+                    return True, host_busy.beat_value(st)
+                return True, host_busy.lane_value(ppro_bridge.queue_dir())
         try:
-            alive = await asyncio.to_thread(cep_alive)
+            alive, busy = await asyncio.to_thread(cep_state)
         except Exception:
-            alive = False
-        return ("cep" if alive else "offline"), None
+            alive, busy = False, None
+        return ("cep", None, busy) if alive else ("offline", None, None)
+
+    def read_host_busy(self) -> dict:
+        """Read only (H6): Adobe exporting or rendering, per app and overall (serve/host_busy.py host_busy), for this
+        daemon's engine home. The engine GPU lock may call serve.host_busy.host_busy() itself; this is the same."""
+        return host_busy.host_busy(self.home)
 
     @staticmethod
     def _compose(id, item, stale: bool, host: tuple, jobs: list) -> dict:
-        return messages.state(host[0], host[1], id, item, jobs=jobs, stale=stale)
+        return messages.state(host[0], host[1], id, item, jobs=jobs, stale=stale,
+                              host_busy=host[2] if len(host) > 2 else None)
 
     @staticmethod
     def _fingerprint(item, gen, stale: bool, host: tuple, jobs: list) -> tuple:

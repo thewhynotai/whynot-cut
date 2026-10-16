@@ -898,9 +898,14 @@ class TestInstallPrefersTheSignedZxp(_Sandbox):
 # ===================================================================================================== Task 5: engine start
 NODE = shutil.which("node")
 # Runs the real js/bridge.js in node with a stubbed CEP, a fake child_process (records every spawn), a fake clock and
-# fake timers (the harness steps virtual seconds), a fake process.kill (only the scenario's pids are alive) and, when
-# the scenario says so, os.platform() and fs.statSync uid / mode overrides (POSIX checks on any host). The scenario is
-# a JSON file; HOME / USERPROFILE of the node process are a temp folder.
+# fake timers (setInterval / setTimeout / clear*, run in due order as the harness steps virtual seconds; every timer that
+# fires is one wakeup), a fake fs.watch on the queue folder (H6: it reports every write, rename and unlink in the queue
+# like the real one, asynchronously; `watch` = "ok" | "throw" | "deaf" | "errorAt:<s>", `dup` = deliveries per event,
+# `missJobs` = job events are lost), a fake process.kill (only the scenario's pids are alive) and, when the scenario says
+# so, os.platform() and fs.statSync uid / mode overrides (POSIX checks on any host). `addJobs` {second: {name: text}}
+# writes a job the engine's way (<id>.tmp, then the rename) at that second; `encoder` {second: [kind]} fires the CEP
+# encoder event; `aeRendering` is what the render-queue probe answers. The scenario is a JSON file; HOME / USERPROFILE of
+# the node process are a temp folder.
 SPAWN_HARNESS = r"""
 const vm = require('vm'), fs = require('fs'), path = require('path'), os = require('os');
 const sc = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
@@ -909,7 +914,7 @@ class FakeDate extends Date {
   constructor(...a) { if (a.length) { super(...a); } else { super(now); } }
   static now() { return now; }
 }
-const alive = new Set(sc.alive || []), timers = [], spawns = [], pending = [], evals = [];
+const alive = new Set(sc.alive || []), spawns = [], pending = [], evals = [], kills = [];
 const queueDir = path.dirname(sc.heartbeat);
 const listQueue = () => { try { return fs.readdirSync(queueDir).sort(); } catch (e) { return []; } };
 if (sc.preFiles) {
@@ -918,13 +923,71 @@ if (sc.preFiles) {
 }
 const snaps = {};
 const norm = (p) => { const r = path.resolve(p); return process.platform === 'win32' ? r.toLowerCase() : r; };
+const inQueue = (p) => norm(path.dirname(String(p))) === norm(queueDir);
 const statOv = {};
 for (const k of Object.keys(sc.stat || {})) { statOv[norm(k)] = sc.stat[k]; }
+// ---- fake timers
+const timers = [];
+let tseq = 0;
+const count = { wakeups: 0, scans: 0, beatWrites: 0, watchCalls: 0, watchScanEvents: 0, engineChecks: 0 };
+function addTimer(f, ms, repeat) {
+  const t = { id: ++tseq, f, ms: Math.max(repeat ? 1 : 0, +ms || 0), repeat, live: true };
+  t.at = now + t.ms;
+  timers.push(t);
+  return t.id;
+}
+const clearTimer = (id) => { const t = timers.find((x) => x.id === id); if (t) { t.live = false; } };
+const flush = () => { while (pending.length) { pending.shift()(); } };
+function runUntil(target) {
+  for (;;) {
+    let due = null;
+    for (const t of timers) { if (t.live && t.at <= target && (!due || t.at < due.at || (t.at === due.at && t.id < due.id))) { due = t; } }
+    if (!due) { break; }
+    now = due.at;
+    count.wakeups += 1;
+    if (due.repeat) { due.at += due.ms; } else { due.live = false; }
+    due.f();
+    flush();
+  }
+  now = target;
+}
+// ---- fake fs.watch
+const watchers = [];
+const watchMode = String(sc.watch || 'ok');
+function emit(type, name) {
+  if (watchMode === 'deaf') { return; }
+  if (sc.missJobs && /\.job\.json$/.test(name)) { return; }
+  for (const w of watchers.slice()) {
+    if (w.closed) { continue; }
+    for (let i = 0; i < (sc.dup || 1); i++) {
+      pending.push(() => {
+        if (w.closed) { return; }
+        count.watchCalls += 1;
+        if (/\.job\.json$/.test(name)) { count.watchScanEvents += 1; }
+        w.cb(type, name);
+      });
+    }
+  }
+}
+function fakeWatch(dir, opts, cb) {
+  if (watchMode === 'throw') { const e = new Error('EMFILE: too many open files, watch'); e.code = 'EMFILE'; throw e; }
+  const ls = {};
+  const w = { cb: typeof opts === 'function' ? opts : cb, closed: false,
+              on(ev, f) { (ls[ev] = ls[ev] || []).push(f); return w; },
+              close() { w.closed = true; },
+              fireError() { (ls.error || []).forEach((f) => f(new Error('EPERM: operation not permitted, watch'))); } };
+  watchers.push(w);
+  return w;
+}
 let resultAttempts = 0;       // result-file write attempts (one per temp-file write: the in-place fallback is the same attempt)
 const fakeFs = Object.assign({}, fs, {
   statSync(p, o) {
     const s = fs.statSync(p, o), ov = statOv[norm(p)];
     return ov ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, ov) : s;
+  },
+  readdirSync(p, o) {
+    if (norm(p) === norm(queueDir)) { count.scans += 1; }
+    return fs.readdirSync(p, o);
   },
   writeFileSync(p, data, o) {
     const name = String(p);
@@ -933,8 +996,24 @@ const fakeFs = Object.assign({}, fs, {
       if (resultAttempts <= sc.failResult) { const e = new Error('ENOSPC: no space left on device'); e.code = 'ENOSPC'; throw e; }
     }
     if (/\.error(\.daemon\.tmp)?$/.test(name) && sc.failMarker) { const e = new Error('ENOSPC'); e.code = 'ENOSPC'; throw e; }
-    return fs.writeFileSync(p, data, o);
-  }
+    if (/bridge\.heartbeat(\.daemon\.tmp)?$/.test(name) && !/\.tmp$/.test(name)) { count.beatWrites += 1; }
+    const r = fs.writeFileSync(p, data, o);
+    if (inQueue(p)) { emit('change', path.basename(name)); }
+    return r;
+  },
+  renameSync(a, b) {
+    const r = fs.renameSync(a, b);
+    if (/bridge\.heartbeat$/.test(String(b))) { count.beatWrites += 1; }
+    if (inQueue(a)) { emit('rename', path.basename(String(a))); }
+    if (inQueue(b)) { emit('rename', path.basename(String(b))); }
+    return r;
+  },
+  unlinkSync(p) {
+    const r = fs.unlinkSync(p);
+    if (inQueue(p)) { emit('rename', path.basename(String(p))); }
+    return r;
+  },
+  watch: fakeWatch
 });
 const fakeOs = Object.assign({}, os, { platform: () => sc.platform || os.platform() });
 let died = false;
@@ -962,43 +1041,75 @@ if (sc.realSpawn) { fakeCp.spawn = require('child_process').spawn; }
 const fakeRequire = (n) => n === 'child_process' ? fakeCp : n === 'os' ? fakeOs : n === 'fs' ? fakeFs : require(n);
 const fakeProcess = {
   env: Object.assign({}, process.env, sc.env || {}),
-  kill(pid, sig) { if (alive.has(pid)) { return true; } const e = new Error('kill ESRCH'); e.code = 'ESRCH'; throw e; },
+  kill(pid, sig) {
+    count.engineChecks += 1;
+    kills.push(now);
+    if (alive.has(pid)) { return true; } const e = new Error('kill ESRCH'); e.code = 'ESRCH'; throw e;
+  },
   getuid: () => (sc.uid === undefined ? 501 : sc.uid)
 };
 const state = { textContent: '' }, logEl = { textContent: '' };
+const cepListeners = {};
 const cep = {
   getExtensionId: () => 'ai.thewhynot.cut.bridge.' + sc.role,
   getHostEnvironment: () => JSON.stringify({ appName: sc.host || 'PPRO', appVersion: '26.5.2' }),
   getSystemPath: () => 'file:///' + sc.ext.replace(/\\/g, '/'),
-  evalScript: (code, cb) => { evals.push(code); cb('{}'); }
+  addEventListener: (type, f) => { (cepListeners[type] = cepListeners[type] || []).push(f); },
+  evalScript: (code, cb) => {
+    evals.push(code);
+    if (/renderQueue\.rendering/.test(code)) { return cb(sc.aeRendering === undefined ? 'idle' : sc.aeRendering); }
+    if (/app\.encoder\.bind/.test(code)) { return cb(sc.encoderBind === undefined ? 'bound' : sc.encoderBind); }
+    if (sc.jobDelay) { addTimer(() => cb('{}'), sc.jobDelay, false); return; }
+    cb('{}');
+  }
 };
+if (sc.noCepEvents) { delete cep.addEventListener; }
 const ctx = { window: { __adobe_cep__: cep, cep_node: { require: fakeRequire } },
               document: { getElementById: (id) => id === 'state' ? state : logEl },
-              setInterval: (f) => { timers.push(f); }, process: fakeProcess, console, Date: FakeDate };
+              setInterval: (f, ms) => addTimer(f, ms, true), setTimeout: (f, ms) => addTimer(f, ms, false),
+              clearInterval: clearTimer, clearTimeout: clearTimer, process: fakeProcess, console, Date: FakeDate };
 vm.runInNewContext(fs.readFileSync(sc.bridge, 'utf8'), ctx);
-const flush = () => { while (pending.length) { pending.shift()(); } };
 const beat = () => { try { return JSON.parse(fs.readFileSync(sc.heartbeat, 'utf8')); } catch (e) { return null; } };
-const outcomes = [], retries = [];
+const outcomes = [], retries = [], hostBusy = [], atStart = Object.assign({}, count);
 flush();
+runUntil(now);
 for (let s = 0; s < (sc.seconds || 0); s++) {
-  now += 1000;
+  if (sc.addJobs && sc.addJobs[s]) {
+    for (const k of Object.keys(sc.addJobs[s])) {
+      const tmp = path.join(queueDir, k.replace(/\.job\.json$/, '.tmp'));
+      fakeFs.writeFileSync(tmp, sc.addJobs[s][k]);
+      fakeFs.renameSync(tmp, path.join(queueDir, k));
+    }
+    flush();
+  }
+  if (sc.encoder && sc.encoder[s]) {
+    for (const kind of sc.encoder[s]) { (cepListeners['ai.thewhynot.cut.encoder'] || []).forEach((f) => f({ type: 'ai.thewhynot.cut.encoder', data: kind })); }
+  }
+  if (watchMode.indexOf('errorAt:') === 0 && +watchMode.slice(8) === s) { watchers.forEach((w) => { if (!w.closed) { w.fireError(); } }); flush(); }
   if (sc.dieAt && s + 1 === sc.dieAt) { died = true; alive.delete(sc.startEngine); fs.unlinkSync(sc.engineJson); }
-  timers.forEach((f) => f());
-  flush();
+  runUntil(now + 1000);
   const b = beat();
   outcomes.push(b && b.engine_start ? b.engine_start.outcome : null);
   retries.push(b && b.engine_retry !== undefined ? b.engine_retry : null);
+  hostBusy.push(b && b.host_busy !== undefined ? b.host_busy : null);
   if ((sc.snapAt || []).includes(s + 1)) { snaps[s + 1] = listQueue(); }
 }
+// one read per file: a file the antivirus holds for a moment (EBUSY on a loaded Windows) must not drop every file
+// listed after it (it did, once in a full run: x.data.json and y.claimed "vanished")
 const queueFiles = {};
-try {
-  for (const f of fs.readdirSync(path.dirname(sc.heartbeat))) {
-    queueFiles[f] = fs.readFileSync(path.join(path.dirname(sc.heartbeat), f), 'utf8');
+const readQueued = (f) => {
+  for (let i = 0; i < 20; i++) {
+    try { return fs.readFileSync(path.join(queueDir, f), 'utf8'); } catch (e) { if (e.code === 'ENOENT') { return null; } }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);       // 25 ms, then read it again
   }
-} catch (e) {}
+  return '<unreadable>';
+};
+for (const f of listQueue()) { const t = readQueued(f); if (t !== null) { queueFiles[f] = t; } }
+const jobEvals = evals.filter((c) => /^\$\.evalFile\(/.test(c));
 fs.writeFileSync(sc.out, JSON.stringify({ spawns, beat: beat(), outcomes, log: logEl.textContent, state: state.textContent,
   panel: ctx.window.WNC_BRIDGE ? { role: ctx.window.WNC_BRIDGE.role } : null, start: 1000000000000, queueFiles,
-  evals, resultAttempts, snaps, retries }));
+  evals, jobEvals, resultAttempts, snaps, retries, hostBusy, count, atStart, kills,
+  watchers: watchers.map((w) => ({ closed: w.closed })), liveTimers: timers.filter((t) => t.live).map((t) => t.ms) }));
 """
 TOKEN = "7f" * 32          # what engine.json's token looks like (64 hex): must never leave the file
 
@@ -1411,11 +1522,11 @@ class TestQueueDurability(_NodeBridge):
             self.assertNotIn(f"{jid}.running", out["queueFiles"], jid)
         self.assertTrue(self.result(out, "o3")["ok"])                      # a job that has its result keeps it
         self.assertNotIn("o3.running", out["queueFiles"])
-        self.assertEqual(len(out["evals"]), 1)                              # only the queued o4 ran: no orphan did
+        self.assertEqual(len(out["jobEvals"]), 1)                           # only the queued o4 ran: no orphan did
         self.assertTrue(self.result(out, "o4")["ok"])
         self.assertFalse(any(k.endswith(".error") for k in out["queueFiles"]))
         again = self.run_bridge(seconds=3)                                  # a second start: nothing runs again
-        self.assertEqual(again["evals"], [])
+        self.assertEqual(again["jobEvals"], [])
         self.assertEqual(self.result(again, "o1")["error"], "interrupted")
 
     def test_the_orphan_result_is_the_one_the_engine_reads_as_failed(self):
@@ -1435,29 +1546,31 @@ class TestQueueDurability(_NodeBridge):
     def test_a_job_that_is_not_an_orphan_is_left_alone(self):
         pre = {"q1.job.json": self.job("q1"), "x.data.json": "{}", "y.claimed": "{}", "notes.running.txt": "x"}
         out = self.run_bridge(seconds=3, preFiles=pre)
-        self.assertEqual(len(out["evals"]), 1)
+        self.assertEqual(len(out["jobEvals"]), 1)
         self.assertEqual(sorted(k for k in out["queueFiles"] if k.startswith(("x.", "y.", "notes"))),
                          ["notes.running.txt", "x.data.json", "y.claimed"])
 
     # ---------------------------------------------------------------- the result cannot be written
     def test_a_failed_result_write_is_retried_with_backoff_and_then_lands(self):
+        """The job runs at start (H6: the first scan is at once), so the attempts are at 0 s and 1 s (both fail) and
+        2 s after the second one, at 3 s; each retry is its own timer, due to the millisecond."""
         out = self.run_bridge(seconds=10, preFiles={"j1.job.json": self.job("j1")}, failResult=2, snapAt=[1, 2, 3, 4])
-        for sec in (1, 2, 3):                                              # attempts at 1 s and 2 s fail; the next waits 2 s
+        for sec in (1, 2):                                                 # attempts at 0 s and 1 s fail; the next waits 2 s
             self.assertIn("j1.running", out["snaps"][str(sec)], sec)       # (the job stays claimed meanwhile)
             self.assertNotIn("j1.result.json", out["snaps"][str(sec)], sec)
-        self.assertIn("j1.result.json", out["snaps"]["4"])
-        self.assertNotIn("j1.running", out["snaps"]["4"])
+        self.assertIn("j1.result.json", out["snaps"]["3"])
+        self.assertNotIn("j1.running", out["snaps"]["3"])
         self.assertEqual(out["resultAttempts"], 3)
         self.assertTrue(self.result(out, "j1")["ok"])
         self.assertFalse(any(k.endswith(".error") for k in out["queueFiles"]))
-        self.assertEqual(len(out["evals"]), 1)                              # it ran once: a retry is not a re-run
+        self.assertEqual(len(out["jobEvals"]), 1)                           # it ran once: a retry is not a re-run
 
     def test_a_result_write_that_keeps_failing_ends_in_a_minimal_error_marker(self):
-        out = self.run_bridge(seconds=12, preFiles={"j1.job.json": self.job("j1")}, failResult=999, snapAt=[7, 8])
-        self.assertIn("j1.running", out["snaps"]["7"])
-        self.assertNotIn("j1.error", out["snaps"]["7"])
-        self.assertIn("j1.error", out["snaps"]["8"])                        # 1 try + 3 retries (1 s, 2 s, 4 s later)
-        self.assertNotIn("j1.running", out["snaps"]["8"])
+        out = self.run_bridge(seconds=12, preFiles={"j1.job.json": self.job("j1")}, failResult=999, snapAt=[6, 7])
+        self.assertIn("j1.running", out["snaps"]["6"])
+        self.assertNotIn("j1.error", out["snaps"]["6"])
+        self.assertIn("j1.error", out["snaps"]["7"])                        # 1 try at 0 s + 3 retries (1 s, 2 s, 4 s later)
+        self.assertNotIn("j1.running", out["snaps"]["7"])
         self.assertEqual(out["resultAttempts"], 4)
         self.assertNotIn("j1.result.json", out["queueFiles"])
         marker = json.loads(out["queueFiles"]["j1.error"])
@@ -1469,7 +1582,7 @@ class TestQueueDurability(_NodeBridge):
     def test_the_queue_keeps_moving_while_a_result_is_retried(self):
         pre = {"j1.job.json": self.job("j1"), "j2.job.json": self.job("j2")}
         out = self.run_bridge(seconds=14, preFiles=pre, failResult=999)
-        self.assertEqual(len(out["evals"]), 2)                              # j2 ran at the next tick, not after j1's retries
+        self.assertEqual(len(out["jobEvals"]), 2)                           # j2 ran right after j1, not after j1's retries
         for jid in ("j1", "j2"):
             self.assertIn(f"{jid}.error", out["queueFiles"], jid)
             self.assertNotIn(f"{jid}.running", out["queueFiles"], jid)
@@ -1497,6 +1610,216 @@ class TestQueueDurability(_NodeBridge):
         self.assertIn("typeof readConfig === 'function'", js)               # engineHome stays liftable on its own
         for needle in ("RESULT_RETRY_MS = [1000, 2000, 4000]", "ENGINE_SLOW_MS = 5 * 60 * 1000", "engine_retry"):
             self.assertIn(needle, js)
+
+
+AE_JOB_DOC = dict(JOB_DOC, lib="wnc_ae_bridge.jsx")
+TEN_MIN = 600
+
+
+@unittest.skipUnless(NODE, "needs node to run js/bridge.js with a stubbed CEP")
+class TestIdleFootprint(_NodeBridge):
+    """G2 H6 (Addendum G13): the daemon idles on a 2 s heartbeat whose every 5th beat is the 10 s safety tick; a job
+    arrives through fs.watch on the queue folder; the engine check backs off 30 -> 60 -> 120 s while the engine runs;
+    no evalScript on a timer. Fake timers and a fake fs.watch: every number below is counted, never timed."""
+
+    def setUp(self):
+        super().setUp()
+        self.config(self.launcher())
+        self.engine(4242)                                   # a running engine: the usual idle state
+
+    def idle(self, **sc):
+        return self.run_bridge(seconds=TEN_MIN, alive=[4242], **sc)
+
+    def job(self, jid, doc=JOB_DOC):
+        return json.dumps(dict(doc, id=jid))
+
+    def test_ten_idle_minutes_cost_about_300_wakeups_and_no_host_call(self):
+        out = self.idle()
+        c = out["count"]
+        # before H6 (one 1 s setInterval): 600 wakeups, 600 queue scans, 601 heartbeat writes, 21 engine checks
+        self.assertLessEqual(c["wakeups"], 305, c)             # 300 beats + the 1 s scans until the watch proved live
+        self.assertGreaterEqual(c["wakeups"], 300, c)
+        self.assertLessEqual(c["scans"], 65, c)                # 1 at start + 60 safety ticks (+ <= 4 before the watch)
+        self.assertLessEqual(c["beatWrites"], 302, c)
+        self.assertEqual(out["kills"], [out["start"] + s * 1000 for s in (0, 30, 90, 210, 330, 450, 570)])
+        self.assertEqual(out["evals"], [], "no host call while idle")
+        self.assertEqual(out["liveTimers"], [2000], "one timer left: the heartbeat")
+        self.assertEqual(c["watchScanEvents"], 0)              # the daemon's own writes never ask for a scan
+        self.assertGreater(c["watchCalls"], 0)                 # ... but they reach the watch (it is alive)
+        self.assertEqual(out["beat"]["engine_start"]["outcome"], "running")
+
+    def test_a_job_the_engine_writes_runs_on_its_watch_event_not_the_safety_tick(self):
+        out = self.run_bridge(seconds=6, alive=[4242], addJobs={"3": {"j1.job.json": self.job("j1")}}, snapAt=[3, 4])
+        self.assertNotIn("j1.result.json", out["snaps"]["3"])
+        self.assertIn("j1.result.json", out["snaps"]["4"])           # at 3.05 s; the safety tick is at 10 s
+        self.assertEqual(len(out["jobEvals"]), 1)
+        self.assertGreaterEqual(out["count"]["watchScanEvents"], 1)
+
+    def test_duplicate_events_are_one_scan(self):
+        one = self.run_bridge(seconds=6, alive=[4242], addJobs={"3": {"j1.job.json": self.job("j1")}})
+        (self.home / "ppro-queue" / "j1.result.json").unlink()
+        five = self.run_bridge(seconds=6, alive=[4242], addJobs={"3": {"j2.job.json": self.job("j2")}}, dup=5)
+        self.assertEqual(five["count"]["watchScanEvents"], 5 * one["count"]["watchScanEvents"])
+        self.assertEqual(five["count"]["scans"], one["count"]["scans"])
+        self.assertEqual(len(five["jobEvals"]), 1)
+
+    def test_a_missed_event_is_caught_by_the_10_s_safety_tick(self):
+        out = self.run_bridge(seconds=12, alive=[4242], addJobs={"3": {"j1.job.json": self.job("j1")}}, missJobs=True,
+                              snapAt=[4, 9, 10])
+        self.assertNotIn("j1.result.json", out["snaps"]["9"])
+        self.assertIn("j1.result.json", out["snaps"]["10"])
+        self.assertEqual(len(out["jobEvals"]), 1)
+
+    def test_a_watch_error_falls_back_to_the_1_s_scan_and_the_safety_tick_re_arms_it(self):
+        out = self.run_bridge(seconds=30, alive=[4242], watch="errorAt:5",
+                              addJobs={"6": {"j1.job.json": self.job("j1")}}, snapAt=[6, 7])
+        self.assertNotIn("j1.result.json", out["snaps"]["6"])
+        self.assertIn("j1.result.json", out["snaps"]["7"])           # the fallback scan, 1 s later
+        self.assertIn("queue watch error", out["log"])
+        self.assertEqual([w["closed"] for w in out["watchers"]], [True, False])   # re-armed at the next safety tick
+        self.assertEqual(out["liveTimers"], [2000], "the fallback scan stops once the new watch delivers")
+
+    def test_a_watch_that_throws_keeps_the_1_s_scan(self):
+        out = self.run_bridge(seconds=60, alive=[4242], watch="throw", addJobs={"20": {"j1.job.json": self.job("j1")}},
+                              snapAt=[21])
+        self.assertIn("j1.result.json", out["snaps"]["21"])
+        self.assertIn("queue watch unavailable", out["log"])
+        self.assertEqual(sorted(out["liveTimers"]), [1000, 2000])
+        self.assertGreaterEqual(out["count"]["scans"], 60)
+
+    def test_a_deaf_watch_is_dropped_and_the_queue_still_moves(self):
+        out = self.run_bridge(seconds=40, alive=[4242], watch="deaf", addJobs={"25": {"j1.job.json": self.job("j1")}},
+                              snapAt=[26])
+        self.assertIn("j1.result.json", out["snaps"]["26"])
+        self.assertIn("queue watch deaf", out["log"])
+        self.assertIn(1000, out["liveTimers"])                        # never proven: the 1 s scan stays on
+
+    def test_a_job_sets_the_engine_check_back_to_30_s(self):
+        out = self.idle(addJobs={"100": {"j1.job.json": self.job("j1")}})
+        self.assertEqual([(k - out["start"]) // 1000 for k in out["kills"]], [0, 30, 90, 210, 240, 300, 420, 540])
+
+    def test_a_queue_of_jobs_runs_back_to_back_without_waiting_for_a_tick(self):
+        jobs = {f"j{i}.job.json": self.job(f"j{i}") for i in range(3)}
+        out = self.run_bridge(seconds=5, alive=[4242], addJobs={"3": jobs}, jobDelay=100, snapAt=[4])
+        # one scan at 3.05 s (the three events are one), then each job's end starts the next: done by 3.45 s
+        for i in range(3):
+            self.assertIn(f"j{i}.result.json", out["snaps"]["4"], out["snaps"]["4"])
+        self.assertEqual(len(out["jobEvals"]), 3)
+
+    def test_no_evalscript_is_reachable_from_a_timer(self):
+        """The source: evalScript is called in runJob and in hostTouch only, and hostTouch only from runJob."""
+        js = (SRC / "js" / "bridge.js").read_text(encoding="utf-8")
+        body = re.sub(r"/\*.*?\*/|//[^\n]*", "", js, flags=re.S)
+        self.assertEqual(len(re.findall(r"\.evalScript\(", body)), 3)          # the job, the AE probe, the PPro bind
+        self.assertEqual(len(re.findall(r"(?<!function )\bhostTouch\(\)", body)), 1)   # its one call, in runJob
+        run_job = body[body.index("function runJob("):body.index("function hostBusy(")]
+        self.assertIn("hostTouch();", run_job)
+        for needle in ("HEARTBEAT_MS = 2000", "SAFETY_EVERY = 5", "FALLBACK_SCAN_MS = 1000", "ENGINE_IDLE_MAX_MS = 120000",
+                       "fs.watch(QUEUE"):
+            self.assertIn(needle, js)
+
+
+@unittest.skipUnless(NODE, "needs node to run js/bridge.js with a stubbed CEP")
+class TestHostBusy(_NodeBridge):
+    """G2 H6: the heartbeat's host_busy "exporting" | "rendering" | "idle" | "unknown", from memory: Premiere counts
+    app.encoder's job events (bound once, riding on the first job), After Effects probes renderQueue.rendering just
+    before each job. A missed event degrades to "unknown", never a stuck "exporting". Fake hosts: the stubbed CEP
+    answers the probe / bind and fires the CSXS encoder event."""
+
+    def setUp(self):
+        super().setUp()
+        self.config(None)
+
+    def job(self, jid, doc=JOB_DOC, **kw):
+        return json.dumps(dict(doc, id=jid, **kw))
+
+    def ppro(self, seconds, events=None, **sc):
+        return self.run_bridge(seconds=seconds, addJobs={"1": {"j1.job.json": self.job("j1")}},
+                               encoder={str(k): v for k, v in (events or {}).items()}, **sc)
+
+    def test_premiere_before_any_job_is_unknown_and_nothing_is_bound(self):
+        out = self.run_bridge(seconds=30, encoder={"5": ["queued"]})
+        self.assertEqual(set(out["hostBusy"]), {"unknown"})
+        self.assertEqual(out["evals"], [])
+
+    def test_premiere_binds_the_encoder_events_once_before_the_first_job(self):
+        out = self.run_bridge(seconds=10, addJobs={"1": {"j1.job.json": self.job("j1")},
+                                                   "3": {"j2.job.json": self.job("j2")}})
+        self.assertEqual(len(out["jobEvals"]), 2)
+        self.assertEqual(len(out["evals"]), 3)
+        self.assertIn("app.encoder.bind(\"onEncoderJobQueued\"", out["evals"][0])
+        for ev in ("onEncoderJobComplete", "onEncoderJobError", "onEncoderJobCanceled", "onEncoderJobProgress"):
+            self.assertIn(ev, out["evals"][0])
+        self.assertIn("$.global.__wncEncoderBound", out["evals"][0])          # never bound twice in one engine
+        self.assertTrue(out["evals"][1].startswith("$.evalFile("))
+        self.assertEqual(out["hostBusy"][5], "unknown")                       # bound, not proven yet
+
+    def test_premiere_counts_the_encoder_jobs(self):
+        ev = {5: ["queued"], 8: ["progress"], 10: ["complete"], 20: ["queued", "queued"], 22: ["error"], 25: ["canceled"],
+              30: ["complete"], 40: ["queued"], 45: ["complete"]}
+        hb = self.ppro(50, ev)["hostBusy"]
+        self.assertEqual(hb[4], "unknown")
+        self.assertEqual(hb[5:10], ["exporting"] * 5)
+        self.assertEqual(hb[10:20], ["idle"] * 10)                            # one full cycle proved the events
+        self.assertEqual(hb[20:25], ["exporting"] * 5)                        # two queued, one error: still one left
+        self.assertEqual(hb[25:30], ["idle"] * 5)
+        self.assertEqual(hb[30:40], ["unknown"] * 10)                         # a done event with nothing queued
+        self.assertEqual(hb[40:45], ["exporting"] * 5)                        # a fresh queued clears the doubt
+        self.assertEqual(hb[45:], ["idle"] * 5)
+
+    def test_a_missed_done_event_degrades_to_unknown_never_a_stuck_exporting(self):
+        hb = self.ppro(260, {5: ["queued"], 200: ["complete"], 210: ["queued"], 215: ["complete"]})["hostBusy"]
+        self.assertEqual(set(hb[5:120]), {"exporting"})
+        self.assertEqual(set(hb[127:210]), {"unknown"})                       # 120 s with no encoder event
+        self.assertEqual(set(hb[210:215]), {"exporting"})
+        self.assertEqual(set(hb[215:]), {"idle"})
+
+    def test_progress_keeps_an_export_alive_and_a_missed_queued_is_unknown(self):
+        ev = {5: ["queued"], **{s: ["progress"] for s in range(60, 240, 60)}, 250: ["complete"],
+              300: ["progress"], 305: ["complete"]}
+        hb = self.ppro(320, ev)["hostBusy"]
+        self.assertEqual(set(hb[5:250]), {"exporting"})                       # progress events keep it fresh
+        self.assertEqual(set(hb[250:300]), {"idle"})
+        self.assertEqual(set(hb[300:305]), {"exporting"})                     # rendering, its queued was missed
+        self.assertEqual(set(hb[305:]), {"unknown"})
+
+    def test_a_bind_that_failed_or_no_cep_events_is_unknown(self):
+        for sc in ({"encoderBind": "unavailable"}, {"noCepEvents": True}):
+            with self.subTest(sc):
+                out = self.ppro(20, {5: ["queued"], 8: ["complete"]}, **sc)
+                self.assertEqual(set(out["hostBusy"]), {"unknown"})
+        self.assertEqual(len(out["evals"]), 1, "no CEP events: no bind is even tried")
+
+    def test_this_daemons_own_export_job_is_exporting(self):
+        out = self.run_bridge(seconds=10, jobDelay=4000, addJobs={"1": {"j1.job.json": self.job("j1", action="export_frames")},
+                                                                  "6": {"j2.job.json": self.job("j2")}})
+        hb = out["hostBusy"]
+        self.assertEqual(hb[1:4], ["exporting"] * 3)
+        self.assertEqual(hb[6:9], ["unknown"] * 3)                            # a ping is not an export
+
+    def ae(self, seconds, **sc):
+        home_q = self.home / "ae-queue"
+        return self.run_bridge(seconds=seconds, host="AEFT", heartbeat=str(home_q / "bridge.heartbeat"),
+                               addJobs={"1": {"j1.job.json": self.job("j1", AE_JOB_DOC)}}, **sc)
+
+    def test_after_effects_probes_the_render_queue_just_before_each_job(self):
+        out = self.ae(30, aeRendering="idle")
+        self.assertEqual(len(out["evals"]), 2)
+        self.assertIn("app.project.renderQueue.rendering", out["evals"][0])
+        self.assertTrue(out["evals"][1].startswith("$.evalFile("))
+        hb = out["hostBusy"]
+        self.assertEqual(hb[0], "unknown")
+        self.assertEqual(set(hb[1:15]), {"idle"})                             # believed for 15 s
+        self.assertEqual(set(hb[17:]), {"unknown"})
+
+    def test_after_effects_rendering_and_a_bad_answer(self):
+        self.assertEqual(self.ae(5, aeRendering="rendering")["hostBusy"][2], "rendering")
+        self.assertEqual(set(self.ae(5, aeRendering="EvalScript error.")["hostBusy"]), {"unknown"})
+
+    def test_after_effects_idle_never_touches_the_host(self):
+        out = self.run_bridge(seconds=TEN_MIN, host="AEFT", heartbeat=str(self.home / "ae-queue" / "bridge.heartbeat"))
+        self.assertEqual(out["evals"], [])
+        self.assertEqual(set(out["hostBusy"]), {"unknown"})
 
 
 def _ui_strings() -> list:

@@ -54,6 +54,16 @@
               "type": "string",
               "maxLength": 256,
               "description": "e.g. Premiere Pro 26.5.2"
+            },
+            "busy": {
+              "type": "string",
+              "enum": [
+                "exporting",
+                "rendering",
+                "idle",
+                "unknown"
+              ],
+              "description": "G2 H6, read only: is the Adobe host exporting (Premiere: Media Encoder jobs by app.encoder events, or the bridge's own export job) or rendering (After Effects: renderQueue.rendering)? unknown = the bridge cannot vouch for it (no event seen yet, a missed event, an older bridge). Absent = no host, a UXP host (it does not report it yet), or an older daemon"
             }
           },
           "required": [

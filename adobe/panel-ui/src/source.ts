@@ -54,11 +54,14 @@ export const CLAUDE_STATES: readonly ClaudeState[] = [
 ];
 export type EngineState = "connected" | "offline";
 export type HostState = "uxp" | "cep" | "offline";
+/** G2 H6, read only: is the Adobe host exporting or rendering (the CEP bridge's heartbeat; unknown = not vouched for) */
+export type HostBusy = "exporting" | "rendering" | "idle" | "unknown";
+export const HOST_BUSY: readonly HostBusy[] = ["exporting", "rendering", "idle", "unknown"];
 
 export interface ConnectionState {
   engine: EngineState;
   claude: ClaudeState;
-  host: { state: HostState; /** e.g. "Premiere Pro 26.5.2" */ detail?: string };
+  host: { state: HostState; /** e.g. "Premiere Pro 26.5.2" */ detail?: string; /** absent: no host, a UXP host, an older daemon */ busy?: HostBusy };
 }
 
 export interface FlaggedItem {

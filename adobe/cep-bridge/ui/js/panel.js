@@ -12,6 +12,7 @@
   var APP = { AEFT: 'After Effects', PPRO: 'Premiere Pro' };
   var START_GRACE_MS = 10000;          // the daemon loads with the app; give it this long before saying it is not there
   var COPY_LABEL = 'Copy diagnostics';
+  var RENDER_MS = 2000;                // the daemon beats every 2 s (js/bridge.js HEARTBEAT_MS): no faster re-read
   function appName(b) { return (b && APP[b.host]) || 'After Effects'; }
   function freshBeat(b) {
     var hb = b ? b.readBeat() : null;
@@ -65,5 +66,5 @@
   }
   if (btn) { btn.addEventListener('click', copyDiagnostics); }
   render();
-  setInterval(render, 1000);
+  setInterval(render, RENDER_MS);
 })();

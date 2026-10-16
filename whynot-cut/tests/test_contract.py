@@ -2692,10 +2692,12 @@ class SessionContractTests(unittest.TestCase):
             self.assertEqual(set(schema["properties"]), set(ts), ts_name)
             self.assertEqual(set(schema["required"]), {k for k, req in ts.items() if req}, ts_name)
             self.assertIs(schema["additionalProperties"], False, ts_name)
-        self.assertRegex(ts_text(), r"host: \{ state: HostState; /\*\*[^*]*\*/ detail\?: string \}")
+        self.assertRegex(ts_text(), r"host: \{ state: HostState; /\*\*[^*]*\*/ detail\?: string; /\*\*[^*]*\*/ busy\?: "
+                                    r"HostBusy \}")
         host = defs["connection"]["properties"]["host"]
-        self.assertEqual(set(host["properties"]), {"state", "detail"})
+        self.assertEqual(set(host["properties"]), {"state", "detail", "busy"})        # busy: G2 H6, optional
         self.assertEqual(host["required"], ["state"])
+        self.assertEqual(host["properties"]["busy"]["enum"], ts_union("HostBusy"))
 
     def test_panel_state_enums_equal_source_ts(self):
         defs = V.load(SESSION)["$defs"]
