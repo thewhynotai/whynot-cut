@@ -190,6 +190,9 @@
   };
   /* SHARED: the path shown in a path field, cut in the MIDDLE so it stays on ONE line (E-T1; the field is 32 px tall, never wraps).
      RULE (production copies this exactly), for a path longer than the budget (characters, "…" counted as 1):
+       0. first drop a Windows verbatim prefix (I.pathNorm; Rust canonicalize and some Win32 APIs return it): "\\?\C:\x" is
+          shown as "C:\x" and "\\?\UNC\server\share\x" as "\\server\share\x"; any other "\\?\" path (a volume GUID) and a
+          "\\.\" device path are shown as they are. The tooltip shows the same normalised path;
        1. keep the FIRST segment plus its separator: the drive "D:\", or the root "/" with its first folder ("/Volumes/"); on macOS
           under /Users and /Volumes the account or the volume name is the identity, so it is kept too ("/Users/sara/",
           "/Volumes/Samsung T7 Shield/") when head + "…" + separator + the last segment still fits the budget, else only the first folder;
@@ -207,7 +210,14 @@
      640 in the narrower language (EN), so 46 and 38 characters keep a little spare. Arabic letters are narrower than a mono cell.
      If the last segment alone is longer than the budget the field's CSS cuts it at its end (text-overflow), the only case it can. */
   I.PATH_BUDGET = { 760: 46, 640: 38 };
+  I.pathNorm = function (path) {
+    var m = /^\\\\\?\\([A-Za-z]:\\.*)$/.exec(path);
+    if (m) return m[1];
+    m = /^\\\\\?\\UNC\\(.+)$/i.exec(path);
+    return m ? "\\\\" + m[1] : path;
+  };
   I.pathShort = function (path, budget) {
+    path = I.pathNorm(path);
     if (path.length <= budget) return path;
     var sep = path.indexOf("\\") >= 0 ? "\\" : "/";
     var parts = path.replace(/[\\/]+$/, "").split(sep); /* "/Users/a/b" -> ["", "Users", "a", "b"]; "D:\x\y" -> ["D:", "x", "y"] */
@@ -230,6 +240,7 @@
   I.pathField = function (label, path, o) {
     o = o || {};
     var cls = o.kind ? " i-path-" + o.kind : "";
+    path = I.pathNorm(path);
     var shown = I.pathShort(path, I.PATH_BUDGET[W]);
     return '<div class="t-label">' + label + "</div>" +
       '<div class="i-pathrow mt-1"><div class="i-path i-clip' + cls + '" title="' + M.esc(path) + '"><bdi dir="ltr" class="mono m-path">' + M.esc(shown) + "</bdi></div>" + /* R3 S-08: one LTR isolate, drive colon inside; .i-path is left-aligned in both languages. E-T1: middle ellipsis (I.pathShort), full path in title */
