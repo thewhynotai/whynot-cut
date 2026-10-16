@@ -58,3 +58,14 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
       `whynot-cut/engine/reel/lib/client_move*.py`, `whynot-cut/engine/reel/lib/ref_style.py`
     - `whynot-cut/tests/test_t44*.py`, `whynot-cut/tests/test_t45*.py`, `whynot-cut/tests/test_t49*.py`
   - `whynot-cut/engine/reel/cli.py` stays the executor's; each track commits only its own subcommand hunks
+  - Adobe track, extra grants (2026-10-17): T4.1 `lib/camera_ease.py` (new), `templates/premiere/wnc_ppro_lib.jsx`,
+    `contract/build_project.schema.json`, premiere-craft skill text; after the T4.2 commit also `lib/plan.py`,
+    `config/defaults/style.json` + the profile style schema, client-craft SKILL.md, story-craft edit-decision-engine.md
+    (hunks only). T4.6 `lib/motion_plan.py`, `templates/after_effects/wnc_ae_bridge.jsx`, `lib/motion_readback.py`,
+    `schemas/motion-script.schema.json`, `lib/recipes.py`, `lib/podcast_cli.py` (cmd_music), `lib/handoff.py` (music
+    line), the motion skill/agent text (hunks only); `wnc_motion_lib.jsx` WNCM.audio hunk only, agreed with looks first.
+  - Addendum J track (2026-10-17), J-T1…J-T5 (Tasks 31–35): `whynot-cut/engine/reel/lib/brand_web/**`,
+    `whynot-cut/engine/reel/lib/linksafe.py` (shared later with L-T8 / Task 15), `tools/build_open_fonts_index.py`,
+    the open-fonts index data file, `schemas/brand-candidates*.json`, `whynot-cut/tests/test_j*.py`,
+    `whynot-cut/tests/fixtures/brand_web/**`; cli.py `brand-fetch` + `scaffold --fill-missing` hunks only.
+    J-T6…J-T8 paths are granted when Tasks 7 + 8 land. `requirements.txt` / locks stay the executor's (Task 12).
