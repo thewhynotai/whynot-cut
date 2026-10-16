@@ -137,6 +137,8 @@ class TestPluginVersionConsistency(unittest.TestCase):
         self.assertEqual(pj["version"], "3.0.0")
 
 
+@unittest.skipUnless((SK.parent / "adobe/cep-bridge/CSXS/manifest.xml").is_file(),
+                     "repo-root adobe/ sources not in this tree (they never ship in the plugin zip)")
 class TestBridgeVersionTriple(unittest.TestCase):
     def test_every_place_agrees(self):
         """manifest bundle == both extensions == bridge.js BUNDLE == BRIDGE_VERSION == plugin.json == build.json."""
@@ -276,7 +278,7 @@ class TestReleaseZipContents(unittest.TestCase):
         names = [p.relative_to(self.pk.ROOT).as_posix() for p in self.pk.package_files()]
         self.assertTrue(names)
         self.assertEqual([n for n in names if n.split("/")[0] not in self.pk.SHIP_TOP], [])
-        self.assertEqual([n for n in names if n.startswith("adobe/") or "node_modules" in n or "_upstream" in n], [])
+        self.assertEqual([n for n in names if n.startswith("adobe/") or "node_modules" in n or "/_upstream/" in "/" + n], [])  # a path part, not tests/test_*_upstream_js.py
         self.assertEqual([n for n in names if n.startswith("guide-ar/")], [])          # guide SOURCES stay out
         # the built artefacts master plan D1 / T11.1 requires in the zip (when built in this checkout)
         for built in ("whynot-cut/docs/WhyNot-Cut-Guide-AR.pdf", "whynot-cut/installer/install.ps1",
