@@ -176,6 +176,7 @@ That matches the mock line "6:40 raw → 52 s reel · saved about 45 min".
 | `flagged_count` | integer ≥ 0 | no | flagged lines at approval | `3` |
 | `current` | boolean | yes | its fingerprint equals the current plan's; false = the plan changed since (P-07 stale) | `true` |
 | `version` | integer | no | the `plan.version` approved | `2` |
+| `previous_approval` | object, sent as `panel_state.previous_approval` | no | the approval that no longer counts, so the editor can see it and re-approve without redoing unchanged work (R3, P-07 older and stale): `{by` string 1..256, `at` date-time, `via` `"panel"` \| `"claude"` (where it was given), `format` string ≤ 16 (the approval-record format version it was written in, e.g. `"2.2"`), `reason` `"older_whynot_cut"` \| `"plan_changed"`, `confirmed_with?` string ≤ 256, `lines?` array ≤ 64 of `{graphic_id` string ≤ 64, `text` string ≤ 1024 (the on-screen text as approved), `checked` boolean`}}`. The panel shows who approved, when and with whom. A flagged line is prefilled as ticked, marked "From the earlier approval" / «من الموافقة اللي قبل كده», ONLY when a `lines[]` entry has the same `graphic_id` AND the same `text` as the current plan's line and `checked` is true; every other line stays empty with "The wording changed, so this line needs a fresh look." `confirmed_with` is shown, never prefilled into the field. **Absent** = nothing is prefilled: every line starts empty (today's behaviour); absent `lines` = the who/when line only, no prefill. | `{"by": "Yunus", "at": "2026-10-14T11:32:00Z", "via": "panel", "format": "2.2", "reason": "older_whynot_cut", "lines": [{"graphic_id": "g1", "text": "…", "checked": true}]}` |
 
 ```json
 "approval_record": { "by": "Yunus", "at": "2026-10-14T11:32:00Z", "confirmed_with": "د. هناء مصطفى",
@@ -272,15 +273,16 @@ connection.
 
 | Field | Type | Req | Meaning | Example |
 |---|---|---|---|---|
-| `url` | https URL ≤ 512 | no | what "Contact support" opens. For 3.0 it is the WhyNot Cut support WhatsApp chat (Yunus, 2026-10-16): a `https://wa.me/<number>?text=…` link whose fixed text says it is a support request; the panel copies the details first, the editor pastes them into the chat. Absent = the link is hidden: "Copy details" stays and a plain-text "Support page coming soon" shows (H24) | `"https://wa.me/20XXXXXXXXXX?text=WhyNot%20Cut%20support"` |
+| `url` | https URL ≤ 512 | no | what "Contact support" opens. For 3.0 it is the WhyNot Cut support WhatsApp chat (Yunus, 2026-10-16): a `https://wa.me/<number>?text=…` link whose fixed text says it is a support request. It is live, so the engine sends it by default and the panel shows "Copy details and open WhatsApp" (one action: copy the details, then open the chat; the editor pastes them) with the D-05 reply promise "We reply within one working day (Sun–Thu, Cairo time)." Absent = the link is hidden: "Copy details for support" only copies and one plain-text line says "The support chat is coming soon." (H24; mockups: `?support=off`) | `"https://wa.me/20XXXXXXXXXX?text=WhyNot%20Cut%20support"` |
 | `data_url` | https URL ≤ 512 | no | the "Cost and data" sheet (what is sent, where, retention per Claude plan; owner decision D-02); absent = the link is hidden and the D-02 line stands alone | `"https://thewhynot.ai/data"` |
 
 ```json
 "support": { "url": "https://wa.me/20XXXXXXXXXX?text=WhyNot%20Cut%20support", "data_url": "https://thewhynot.ai/data" }
 ```
 
-The panel opens either URL with the host's external-open call and never adds query parameters. Both stay absent until
-Yunus publishes the page (H24): the panel never links to a page that isn't live. Diagnostics are copied to the
+The panel opens either URL with the host's external-open call and never adds query parameters. `url` (WhatsApp) is live
+and sent by default; `data_url` stays absent until Yunus publishes the page (H24): the panel never links to a page that
+isn't live. Diagnostics are copied to the
 clipboard by the editor (P-22 "Copy details"), never attached to the URL.
 
 ## 3. Screen → fields

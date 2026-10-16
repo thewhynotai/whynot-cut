@@ -21,6 +21,8 @@
      signing D-04 = BETA ONLY, support D-05 (support.copy / support.copy_open / support.soon / support.promise).
    - H24: the support and "Cost and data" pages are linked only when live (mockup.js M.live): not live = "Copy details for
      support" copies only and a plain-text "Support page coming soon" sits beside it.
+     R3 (D-05 update 2026-10-16): the support chat is WhatsApp and live, so every failure card shows "Copy details and
+     open WhatsApp" + the reply promise by default; the copy-only state is the ?support=off alternate.
    Every MOCK line needs the string-table owner; every Arabic line needs a native writer (direction §11 draft). */
 (function () {
   var NB = "\u00A0";

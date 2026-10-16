@@ -20,13 +20,18 @@
   var missing = [];
 
   var M = (window.M = { lang: LANG, w: W, rtl: LANG === "ar", D: window.MOCK_DATA, capture: CAPTURE });
-  /* H24 (executor rule, owner decisions D-02 / D-05): the panel never links to a page that isn't live. Two mock states:
-     LIVE = the engine sends support.url / support.data_url / download_url / guide_url (state name ends in "-live", or
-     ?support=live on any screen);
-     NOT LIVE (the default, nothing is published yet) = no link: "Copy details for support" copies only and a plain-text
-     line says "Support page coming soon"; "Cost and data" is hidden and the data line stands alone; the download page
-     and the guide show "Download page coming soon" / "Guide coming soon" in place of their button (M.soonLine). */
+  /* H24 (executor rule, owner decisions D-02 / D-05): the panel never links to a page that isn't live. Two mock states
+     for the PAGES (thewhynot.ai/data, /download, /help):
+     LIVE = the engine sends support.data_url / download_url / guide_url (state name ends in "-live", or ?support=live);
+     NOT LIVE (the default, none is published yet) = no link: "Cost and data" is hidden and the data line stands alone;
+     the download page and the guide show ONE "coming soon" line in place of their button (M.soonLine). */
   M.live = q.get("support") === "live";
+  /* Round 3 (D-05 update 2026-10-16, R3-fix-list S-01): support is the WhyNot Cut WhatsApp chat, which IS live, so the
+     support action is shown by default: "Copy details and open WhatsApp" (one action: copy, then open the chat; the
+     details are never in the link) with the reply promise. ?support=off draws the alternate state (support.url absent:
+     copy only + "The support chat is coming soon."). M.live above now only gates the PAGES that are not published yet
+     (thewhynot.ai/data, /download, /help). */
+  M.supportLive = q.get("support") !== "off";
   /* "<state>-live" is a twin of "<state>" when both are in the screen's list ("success-live" of P-07 is its own state) */
   M.resolve = function (screen, raw) {
     var valid = screen.states.indexOf(raw) >= 0;
@@ -44,7 +49,9 @@
 
   /* A Latin run (letters, then words, digits, dots, hyphens) inside Arabic goes in <bdi dir="ltr" class="lat">.
      R2: a path (C:\Users\..., ~/x, /Users/x) is one isolated run too, so drive letters and separators never reverse. */
-  var LATIN = /(?:[A-Za-z]:[\\\/]|~\/|\/(?=[A-Za-z]))[^\s«»؟،]*|[A-Za-z][A-Za-z0-9.'_\-]*(?:[ \u00A0][A-Za-z0-9][A-Za-z0-9.'_\-]*)*/g;
+  /* R3 (designer F-04, F-09): a slash INSIDE a run keeps it whole, so a URL ("claude.ai/download") or a unit ("mg/dL")
+     is one isolate and never reorders into two. */
+  var LATIN = /(?:[A-Za-z]:[\\\/]|~\/|\/(?=[A-Za-z]))[^\s«»؟،]*|[A-Za-z][A-Za-z0-9.'_\-]*(?:\/[A-Za-z0-9.'_\-]+)*(?:[ \u00A0][A-Za-z0-9][A-Za-z0-9.'_\-]*(?:\/[A-Za-z0-9.'_\-]+)*)*/g;
   var PATHSTART = /^(?:[A-Za-z]:[\\\/]|~\/|\/)/;
   /* Round 3 bidi (the locked D-01 / D-02 lines; the strings themselves are never changed). Three render-time rules:
      1. a quote or bracket PAIR that encloses exactly one Latin run ("Help improve our AI models", (Cam 1)) goes INSIDE
@@ -60,6 +67,8 @@
     s = String(s);
     if (LANG !== "ar") return esc(s);
     s = s.replace(/(ـ) (?=[A-Za-z])/g, "$1 ");
+    /* R3 (designer F-17): «ما» and a joined «و» never end a line alone: bound to the next word with a no-break space */
+    s = s.replace(/(^|[\s(«])(ما|و) (?=\S)/g, "$1$2\u00A0");
     var out = "", last = 0, m;
     LATIN.lastIndex = 0;
     while ((m = LATIN.exec(s))) {
@@ -83,19 +92,25 @@
     return s.replace(/(\S{1,12}) (\S{1,12})$/, "$1\u00A0$2");
   }
 
-  /* t(key, vars): the string for this language, escaped, Latin runs isolated; a var is text or M.html(markup). */
+  /* t(key, vars): the string for this language, escaped, Latin runs isolated; a var is text or M.html(markup).
+     R3 (designer F-09): a plain-text var is substituted BEFORE the Latin runs are isolated, so "After Effects {version}"
+     is one LTR run ("After Effects 25.4") and never splits; markup vars go in through private-use placeholders.
+     R3 (designer F-17): "· estimate" / "(estimate)" never sits alone on a line (no-break space before it). */
   function t(key, vars) {
     var s = S[key];
     if (s === undefined) { missing.push(key); return "[" + esc(key) + "]"; }
-    var parts = s.split(/\{(\w+)\}/), out = "";
+    var parts = s.split(/\{(\w+)\}/), str = "", marks = [];
     for (var i = 0; i < parts.length; i++) {
-      if (i % 2 === 0) out += txt(i === parts.length - 1 ? nbLast(parts[i]) : parts[i]);
+      if (i % 2 === 0) str += parts[i];
       else {
         var v = vars ? vars[parts[i]] : undefined;
-        out += v && typeof v === "object" ? v.html : txt(v === undefined ? "{" + parts[i] + "}" : v);
+        if (v && typeof v === "object") { str += "\uE000" + marks.length + "\uE001"; marks.push(v.html); }
+        else str += v === undefined ? "{" + parts[i] + "}" : String(v);
       }
     }
-    return out;
+    if (parts[parts.length - 1]) str = nbLast(str);
+    str = str.replace(/ \u00B7 (estimate|تقدير)/g, "\u00A0\u00B7\u00A0$1").replace(/ \((estimate|تقدير)\)/g, "\u00A0($1)");
+    return txt(str).replace(/\uE000(\d+)\uE001/g, function (_, n) { return marks[Number(n)]; });
   }
   M.t = t;
   M.raw = function (key) { return S[key]; };
@@ -149,7 +164,12 @@
   M.COND = {
     service_running: "ok", service_starting: "pending", service_off: "error", service_noanswer: "error",
     claude_ready: "ok", claude_unchecked: "pending", claude_signed_out: "warn", claude_missing: "error", claude_offline: "warn",
-    premiere_linked: "ok", premiere_checking: "pending", premiere_unlinked: "error", host_restart: "warn"
+    premiere_linked: "ok", premiere_checking: "pending", premiere_unlinked: "error", host_restart: "warn",
+    /* R3 (designer F-08): one kind each for three conditions that were drawn in several kinds. restart_needed = the one
+       Premiere / After Effects restart (P-02, P-11: one card, one Check again); panel_not_installed = Adobe did not install
+       the panel (I-04, I-06, I-07: one red card); frame_missing = a QC frame that could not be exported (P-08: one amber
+       tile + one amber chip, no violet info icon). */
+    restart_needed: "warn", panel_not_installed: "error", frame_missing: "warn"
   };
 
   /* ---- components ---- */
@@ -161,7 +181,10 @@
     var refuse = o.kind === "danger" || !!o.destructive;
     var kbd = refuse ? null : o.kbd;
     var kind = o.disabled ? "m-btn-disabled" : "m-btn-" + (o.kind || "secondary");
-    var cls = ["m-btn", kind, o.destructive ? "m-btn-destructive" : "", o.block ? "m-btn-block" : "", o.start ? "m-btn-start" : "", o.flush ? "m-btn-flush" : "", o.focus ? "m-btn-focus" : "", o.cls || ""].join(" ");
+    /* R3 (designer F-01): a disabled MAIN action (a primary, or a keycapped button) is marked m-main-off: the header
+       never says "All set" over it, and the self-check counts it */
+    var mainOff = o.disabled && (o.kind === "primary" || !!kbd) ? "m-main-off" : "";
+    var cls = ["m-btn", kind, mainOff, o.destructive ? "m-btn-destructive" : "", o.block ? "m-btn-block" : "", o.start ? "m-btn-start" : "", o.flush ? "m-btn-flush" : "", o.focus ? "m-btn-focus" : "", o.cls || ""].join(" ");
     var attrs = o.disabled ? ' aria-disabled="true" tabindex="-1"' : ' tabindex="0"';
     var icon = o.icon ? (o.icon === "busy" ? M.status("busy") : ico(o.icon, 16, "ink-text")) : "";
     return '<div class="' + cls + '" role="button"' + attrs + ">" + icon + '<span class="m-block">' + label + "</span>" +
@@ -195,14 +218,15 @@
       var b = o.btn;
       var bo = b ? { kind: b.primary ? "primary" : "secondary", icon: b.busy ? "busy" : b.icon, focus: b.focus, disabled: b.disabled || b.busy,
         kbd: b.primary && b.kbd !== false && !b.busy ? true : false } : null;
-      /* the support action (H24): when it is the card's only action it is the secondary button, else a ghost beside the fix */
-      var sp = o.support ? M.supportParts({ kind: b ? "ghost" : "secondary", promise: o.promise }) : null;
+      /* the support action (D-05): when it is the card's only action it is the secondary button, else a ghost beside the
+         fix; the promise (live) or the "coming soon" line (?support=off) sits UNDER the buttons, one placement (R3 F-03) */
+      var sp = o.support ? M.supportParts({ kind: b ? "ghost" : "secondary" }) : null;
       body += '<div class="m-row m-wrap">' +
         (b ? '<div class="m-row me-2 mt-3">' + M.btn(b.label, bo) + "</div>" : "") +
-        (sp ? '<div class="m-row me-2 mt-3">' + sp.btn + "</div>" + (sp.soon ? '<div class="mt-3 m-soon">' + sp.soon + "</div>" : "") : "") + "</div>" +
-        (sp && sp.promise ? '<div class="t-meta tx-muted mt-2">' + sp.promise + "</div>" : "");
+        (sp ? '<div class="m-row me-2 mt-3">' + sp.btn + "</div>" : "") + "</div>" + (sp ? sp.under : "");
     }
-    var dismissible = o.dismiss === undefined ? kind !== "error" : !!o.dismiss;
+    /* R3 (designer F-19): a notice whose button is the screen's fix (primary) is blocking too: no close button */
+    var dismissible = o.dismiss === undefined ? kind !== "error" && !(o.btn && o.btn.primary) : !!o.dismiss;
     var x = !dismissible ? "" :
       '<div class="m-x" role="button" tabindex="0" aria-label="' + esc(S["notice.dismiss"] || "Dismiss") + '">' + ico("x", 16, "ink-muted") + "</div>";
     return '<div class="m-notice m-notice-' + kind + " " + (o.cls || "") + '"' + (o.pill ? ' data-pill="' + esc(o.pill) + '"' : "") +
@@ -213,31 +237,37 @@
   M.slot = function (html) { return html + '<div class="mt-4"></div>'; };
 
   /* ---- support and data links (D-01, D-02, D-05; H24). One place decides what is shown in which state. ----
-     supportParts(o): {btn, soon, promise}. LIVE: "Copy details and open support" is ONE action and the reply promise
-     follows when o.promise; NOT LIVE: "Copy details for support" only copies, and `soon` is the plain-text line next to it. */
+     R3 (D-05 update 2026-10-16; R3-fix-list S-01): support is the WhyNot Cut WhatsApp chat (MOCK_DATA.support.url, a
+     wa.me link with a fixed "WhyNot Cut support" text). It is live, so by default the button is "Copy details and open
+     WhatsApp": ONE action that copies the details, then opens the chat (the details are never put in the link), and the
+     D-05 reply promise is ALWAYS shown with it. ?support=off (support.url absent) is the alternate state: "Copy details
+     for support" only copies, and the one "coming soon" line sits under it.
+     supportParts(o): {btn, under, promise, soon}; `under` is the line block that goes under the button row. */
   M.supportParts = function (o) {
     o = o || {};
-    var kind = o.kind || "ghost";
-    var btn = M.btn(t(M.live ? "support.copy_open" : "support.copy"), { kind: kind, icon: M.live ? "headset" : "copy", cls: "m-btn-wrap" + (o.cls ? " " + o.cls : ""), flush: !!o.flush });
-    return {
-      btn: btn,
-      soon: M.live ? "" : '<span class="t-meta tx-muted">' + t("support.soon") + "</span>",
-      promise: M.live && o.promise ? t("support.promise") : ""
-    };
+    var kind = o.kind || "ghost", live = M.supportLive;
+    var btn = M.btn(t(live ? "support.copy_open" : "support.copy"), { kind: kind, icon: live ? "message-square" : "copy", cls: "m-btn-wrap" + (o.cls ? " " + o.cls : ""), flush: !!o.flush });
+    var promise = live ? t("support.promise") : "";
+    var soon = live ? "" : M.soonLine("support.soon");
+    return { btn: btn, promise: promise, soon: soon,
+      under: live ? '<div class="t-meta tx-muted mt-2 m-support-promise">' + promise + "</div>" : soon };
   };
-  /* the same as one standalone row (button, the "coming soon" line beside it, the promise under it) */
+  /* the same as one standalone block: the button, then the promise (or the "coming soon" line) under it */
   M.supportRow = function (o) {
     var sp = M.supportParts(o);
-    return '<div class="m-row m-wrap"><div class="m-row me-2">' + sp.btn + "</div>" + (sp.soon ? '<div class="m-soon">' + sp.soon + "</div>" : "") + "</div>" +
-      (sp.promise ? '<div class="t-meta tx-muted mt-1">' + sp.promise + "</div>" : "");
+    return '<div class="m-row m-wrap"><div class="m-row me-2">' + sp.btn + "</div></div>" + sp.under;
   };
   /* D-01: "See plans" opens support.claude.com (a live page, so it is always shown) */
   M.plansLink = function () { return '<div class="m-row mt-1">' + M.linkbtn(t("plans.link"), "external-link") + "</div>"; };
   /* D-02: "Cost and data" opens thewhynot.ai/data. Not live: nothing is drawn and the D-02 line stands alone. */
   M.dataLink = function () { return M.live ? '<div class="m-row mt-1">' + M.linkbtn(t("data.link"), "external-link") + "</div>" : ""; };
-  /* H24 for every other thewhynot.ai page (the download page, the guide): live = the link the caller draws; not live =
-     this one plain-text line ("Download page coming soon", "Guide coming soon"), never a button. key = a "<page>.soon" string. */
-  M.soonLine = function (key, cls) { return '<div class="t-meta tx-muted ' + (cls || "mt-1") + '">' + t(key) + "</div>"; };
+  /* H24 for the pages that are NOT published yet (the download page, the guide; the support chat under ?support=off):
+     live = the link the caller draws; not live = this ONE "coming soon" line, never a button. One layout everywhere
+     (R3 designer F-03): under the button row, mt-2, a 12 px info icon, meta text. key = a "<page>.soon" string. */
+  M.soonLine = function (key, cls) {
+    return '<div class="m-row-top m-soonline ' + (cls || "mt-2") + '"><div class="m-last-ico">' + ico("info", 12, "ink-muted") + "</div>" +
+      '<div class="t-meta tx-muted ms-1 m-grow">' + t(key) + "</div></div>";
+  };
   /* the three recurring blocking notices, one wording and one button each (R2 designer §4) */
   M.offline = function (o) {
     o = o || {};
@@ -283,7 +313,7 @@
   };
 
   M.verb = function (o) {
-    var kind = (o.disabled ? "m-verb-disabled" : o.primary ? "m-verb-primary" : "m-verb-secondary") + (o.focus ? " m-verb-focus" : "");
+    var kind = (o.disabled ? "m-verb-disabled" + (o.primary || o.main ? " m-main-off" : "") : o.primary ? "m-verb-primary" : "m-verb-secondary") + (o.focus ? " m-verb-focus" : "");
     var ink = o.disabled ? "ink-disabled" : o.primary ? "ink-on-primary" : "ink-text";
     var attrs = o.disabled ? ' aria-disabled="true" tabindex="-1"' : ' tabindex="0"';
     return '<div class="m-verb ' + kind + ' ' + (o.cls || "") + '" role="button"' + attrs + ">" +
@@ -340,7 +370,7 @@
   M.segbar = function (n, done, label, kind) {
     var segs = "";
     for (var i = 0; i < n; i++) segs += '<span class="m-stepseg' + (i < done ? " m-stepseg-done" : "") + '"></span>';
-    return '<div class="m-steps"><div class="m-stepbar" aria-hidden="true">' + segs + "</div>" +
+    return '<div class="m-steps' + (done < n ? " m-steps-open" : "") + '"><div class="m-stepbar" aria-hidden="true">' + segs + "</div>" +
       '<div class="m-row mt-2">' + M.status(kind || (done === n ? "ok" : "pending"), 12) + '<div class="t-meta tx-muted ms-1 m-grow">' + label + "</div></div></div>";
   };
   /* a timecode that seeks the Premiere playhead: a 32 px ghost control with a 12 px play icon (never mirrors);
@@ -527,8 +557,10 @@
         '<div class="mt-2"><div class="m-inset">' + M.path(o.backup) + "</div></div>"
       : '<div class="m-row-top mt-4">' + M.status("error") + '<div class="t-body ms-2 m-grow">' + o.nobackup + "</div></div>";
     if (o.untouched) backup += '<div class="mt-3">' + M.trust(o.untouched) + "</div>";
-    var confirm = M.btn(c.label, { kind: danger ? "danger" : "primary", block: true, icon: c.busy ? "busy" : c.icon, disabled: c.disabled || c.busy, focus: c.focus && !danger, kbd: !danger });
-    var keep = M.btn(o.keep, { kind: "secondary", block: true, kbd: "Esc", focus: danger });
+    /* R3 (designer F-21): in ANY confirm the keycap goes on the SAFE button; the confirm (Rebuild replaces the editor's
+       own timeline changes even with a backup) needs a click. Mod+Enter in a confirm lands on the safe button (keys()). */
+    var confirm = M.btn(c.label, { kind: danger ? "danger" : "primary", block: true, icon: c.busy ? "busy" : c.icon, disabled: c.disabled || c.busy, focus: c.focus && !danger });
+    var keep = M.btn(o.keep, { kind: "secondary", block: true, kbd: "Esc", focus: danger || !c.focus });
     return '<div class="m-dialog' + (danger ? " m-dialog-danger" : "") + '" role="alertdialog">' +
       '<div class="m-row-top">' + M.status(danger ? "error" : "warn") + '<div class="t-label ms-2 m-grow">' + o.title + "</div></div>" +
       (o.text ? '<div class="t-body mt-2">' + o.text + "</div>" : "") +
@@ -552,18 +584,43 @@
       var st = PILL[k][p[k] || PILL_OK[k]];
       var showKey = W >= 360 || st[0] !== "ok";
       var key = showKey ? '<span class="m-pill-key">' + t("pill." + k) + "</span> " : "";
-      out += '<div class="m-pill">' + M.status(st[0], 12) + '<span class="m-pill-txt">' + key + t(st[1]) + "</span></div>";
+      /* R3: a stopped service (off / not responding) is marked, so the self-check can catch a spinner under it (F-07) */
+      var stop = k === "engine" && (st[0] === "error") ? " m-pill-stop" : "";
+      out += '<div class="m-pill' + stop + '">' + M.status(st[0], 12) + '<span class="m-pill-txt">' + key + t(st[1]) + "</span></div>";
     });
     return '<div class="m-pills">' + out + "</div>";
   }
   function pill1(kind, text, cls) {
     return '<div class="m-pills"><div class="m-pill ' + (cls || "") + '">' + M.status(kind, 12) + '<span class="m-pill-txt">' + text + "</span></div></div>";
   }
-  /* ---- the live state of the screen's own body (R2 designer P0-1, owner F-06). The header status is derived from what is
-     on screen, never from the pill values alone: an error card (or a danger confirm) is "Needs attention" in red; a
-     restart notice or any warn card is amber with its specific text; "All set" shows only when NOTHING is open
-     (no card, no Needs-you item). When Needs-you is the only reason, there is no status pill: the badge says it.
+  /* ---- the live state of the screen's own body (R2 designer P0-1, owner F-06; R3 designer F-01, owner N-13, editor
+     P2-01). The header status is derived from what is on screen, never from the pill values alone, and it never says
+     "All set" over ANY open problem. One list of body signals (SIG) feeds both the header (liveState) and the page
+     self-check (M.selfCheckExtras), and the self-check judges the RENDERED header against the rendered body, so a screen's
+     own view.status, a group after-mount patch or a new component cannot hide a problem under a green pill.
+     Precedence (first match wins):
+       a confirm card (any .m-dialog / .pc-dialog / .ta-dialog) -> no pill: the card is the state;
+       an error (error card, danger confirm, error chip, failed tile, red status icon) -> red, "Needs attention";
+       a restart notice -> amber "{host} needs a restart" (while work runs: "restart after this job", see stalePass);
+       a warn card or paused work (amber pause bar) -> amber, the notice's own data-pill or "Needs a look";
+       a warn chip or amber status icon (a partial result, "Left out", a flagged line) -> amber "Needs a look", unless
+         the Needs-you badge already says it (a problem outranks progress);
+       running work (spinner, indeterminate bar) -> busy "Working…";
+       first-run setup with steps open -> waiting "Setting up · 3 of 4";
+       a Needs-you item -> no pill (the badge says it);
+       a disabled main action (m-main-off) -> amber "Waiting" (the screen names the reason with view.status or data-pill);
+       nothing open -> "All set".
      A screen may set view.status = {kind, text} to name its own state; view.pillx / view.noCollapse keep the three pills. ---- */
+  var SIG = {
+    confirm: ".m-dialog, .pc-dialog, .ta-dialog",
+    err: ".m-notice-error, .m-dialog-danger, .pc-dialog-danger, .ta-dialog-danger, .m-chip-error, .m-tile-fail, .ink-error",
+    warn: ".m-notice-warn, .m-fill-paused",
+    busy: ".m-spin, .pc-indet",
+    soft: ".m-chip-warn, .ink-warn",
+    open: ".m-steps-open",
+    off: ".m-main-off"
+  };
+  M.SIG = SIG;
   var STALE_KEYS = ["update.stale", "p13.stale", "a01.stale"];
   function plain(html) { var d = document.createElement("div"); d.innerHTML = html; return (d.textContent || "").replace(/\s+/g, " ").trim(); }
   function staleNotices(root) {
@@ -576,14 +633,36 @@
     }
     return out;
   }
+  /* running work in the body (outside the restart notices themselves): a spinner, an indeterminate bar, a running fill */
+  var RUNNING = ".m-spin, .pc-indet, .m-track .m-fill:not(.m-fill-paused)";
+  function runningIn(root, notices) {
+    var els = root.querySelectorAll(RUNNING), n = 0;
+    for (var i = 0; i < els.length; i++) {
+      var inNotice = false;
+      for (var j = 0; j < notices.length; j++) if (notices[j].contains(els[i])) inNotice = true;
+      if (!inNotice) n++;
+    }
+    return n;
+  }
+  /* counts of every signal in a root (the probe of view.body + view.bar, or the rendered .m-scroll + .m-actionbar) */
+  function signals(roots) {
+    var c = { confirm: 0, err: 0, warn: 0, busy: 0, soft: 0, open: 0, off: 0, stale: 0, running: 0 };
+    roots.forEach(function (r) {
+      if (!r) return;
+      for (var k in SIG) c[k] += r.querySelectorAll(SIG[k]).length;
+      var st = staleNotices(r);
+      c.stale += st.length;
+      c.running += runningIn(r, st);
+    });
+    return c;
+  }
   function liveState(view) {
     var probe = document.createElement("div");
     probe.innerHTML = (view.body || "") + (view.bar || "");
-    var err = probe.querySelectorAll(".m-notice-error, .pc-dialog-danger, .ta-dialog-danger, .m-dialog-danger").length;
-    var warn = probe.querySelectorAll(".m-notice-warn").length;
-    var stale = staleNotices(probe).length;
+    var st = signals([probe]);
     var tagged = probe.querySelector("[data-pill]");
-    return { err: err, warn: warn, stale: stale, pillText: tagged ? tagged.getAttribute("data-pill") : "" };
+    st.pillText = tagged ? tagged.getAttribute("data-pill") : "";
+    return st;
   }
   function statusRow(view) {
     var p = view.pills || {};
@@ -592,11 +671,17 @@
     for (var k in p) if (p[k] !== PILL_OK[k]) allOk = false;
     if (!allOk) return pills3(p);
     if (view.status) return pill1(view.status.kind, view.status.text);
-    var st = liveState(view);
-    if (st.err) return pill1("error", esc(st.pillText) || t("pill.attention"));
-    if (st.stale) return pill1("warn", t("pill.restart", { host: S["pill.host"] }));
-    if (st.warn) return pill1("warn", esc(st.pillText) || t("pill.check"));
+    var st = liveState(view), tagged = esc(st.pillText);
+    if (st.confirm) return "";
+    if (st.err) return pill1("error", tagged || t("pill.attention"));
+    if (st.stale) return pill1("warn", t(st.running ? "pill.restart_after" : "pill.restart", { host: S["pill.host"] }));
+    if (st.warn) return pill1("warn", tagged || t("pill.check"));
+    if (st.soft && !(view.needs > 0)) return pill1("warn", tagged || t("pill.check"));
+    if (st.busy) return pill1("busy", tagged || t("pill.working"));
+    var su = view.setup && typeof view.setup === "object" ? view.setup : null;
+    if (st.open || (su && su.done < su.of)) return pill1("waiting", t("pill.setup", { n: su ? su.done : 0, of: su ? su.of : 4 }));
     if (view.needs > 0) return "";
+    if (st.off) return pill1("warn", tagged || t("pill.waiting"));
     return pill1("ok", t("pill.all_set"), "m-pill-allset");
   }
   /* Needs-you badge (E-D3 r1 editor #8, decision 9): ONE count, the same number as the Edit tab count; a control
@@ -605,7 +690,7 @@
     if (!n || n <= 0) return "";
     var count = n > 99 ? "99+" : String(n);
     var chev = ico(LANG === "ar" ? "chevron-left" : "chevron-right", 12, "ink-on-accent");
-    var inner = '<span class="m-badge"><span class="m-block">' + t("needs.label") + '</span><span class="m-badge-count ms-1">' + M.ltr(count, "lat") + "</span>" + chev + "</span>";
+    var inner = '<span class="m-badge' + (n > 99 ? " m-badge-99" : "") + '"><span class="m-block">' + t("needs.label") + '</span><span class="m-badge-count ms-1">' + M.ltr(count, "lat") + "</span>" + chev + "</span>";
     return '<div class="m-badge-hit me-1" role="button" tabindex="0" aria-label="' + esc((S["needs.open"] || "").replace("{n}", count)) + '">' + inner + "</div>";
   }
   /* the language switch: both glyphs from 360 px; at 300 px one 32 px control showing the language you would switch TO */
@@ -655,41 +740,57 @@
       '<span class="t-label ms-1">' + t("log.toggle") + '</span><span class="m-spacer"></span><span class="t-meta">' + t("log.lines", { n: n }) + "</span></div></div>";
   }
   function footer() {
-    return '<footer class="m-footer"><bdi dir="ltr" class="m-footer-txt">' + esc(S["footer.powered"]) + "</bdi></footer>";
+    /* R3 (editor P2-17): the Arabic footer is an Arabic line («من thewhynot.ai»), so it is set RTL with the domain isolated */
+    return '<footer class="m-footer"><bdi dir="' + (M.rtl ? "rtl" : "ltr") + '" class="m-footer-txt">' + t("footer.powered") + "</bdi></footer>";
   }
 
   /* ---- stale pass (R2 designer P1-1): under a restart notice the screen's main action is OFF, with the reason, and the
      notice's own "Check again" takes the violet. Runs on every screen, so a group screen needs no change of its own. ---- */
   function disableBtn(el) {
-    el.className = el.className.replace("m-btn-primary", "m-btn-disabled").replace(/\bm-btn-focus\b/, "");
+    el.className = el.className.replace("m-btn-primary", "m-btn-disabled m-main-off").replace("m-btn-secondary", "m-btn-disabled").replace(/\bm-btn-focus\b/, "");
     el.setAttribute("aria-disabled", "true"); el.setAttribute("tabindex", "-1");
     var k = el.querySelector(".m-kbd"); if (k) k.parentNode.removeChild(k);
   }
   function disableVerb(el, reason) {
-    el.className = el.className.replace("m-verb-primary", "m-verb-disabled").replace(/\bm-verb-focus\b/, "");
+    el.className = el.className.replace("m-verb-primary", "m-verb-disabled m-main-off").replace(/\bm-verb-focus\b/, "");
     el.setAttribute("aria-disabled", "true"); el.setAttribute("tabindex", "-1");
     var k = el.querySelector(".m-kbd"); if (k) k.parentNode.removeChild(k);
     var svgs = el.querySelectorAll("svg");
     for (var i = 0; i < svgs.length; i++) svgs[i].setAttribute("class", String(svgs[i].getAttribute("class")).replace(/ink-[a-z-]+/, "ink-disabled"));
     var sub = el.querySelector(".m-verb-sub"); if (sub && reason) sub.innerHTML = reason;
   }
+  /* R3 (designer F-02, decision 7): while work is RUNNING (a build, a render, a download) the restart notice never tells
+     the editor to restart now: it says to let the job finish or stop it first, and its Check again stays grey until the
+     job ends. The rest of the screen's main actions are still off with the reason. Buttons that need the host but are
+     not primaries carry .m-needs-host and are switched off too (F-20: P-01 "Try the sample clip"). */
+  function bodyRoots(panel) { return [panel.querySelector(".m-scroll"), panel.querySelector(".m-actionbar")]; }
   function stalePass(panel) {
     var notices = staleNotices(panel);
     if (!notices.length) return;
     var reason = t("stale.reason", { host: S["pill.host"] });
     var inside = function (el) { for (var i = 0; i < notices.length; i++) if (notices[i].contains(el)) return true; return false; };
+    var running = 0;
+    bodyRoots(panel).forEach(function (r) { if (r) running += runningIn(r, notices); });
     notices.forEach(function (n) {
-      var b = n.querySelector(".m-btn-secondary");
-      if (b) {
+      if (n.className.indexOf("m-notice-stale") < 0) n.className += " m-notice-stale";
+      var b = n.querySelector(".m-btn-secondary, .m-btn-primary");
+      if (running) {
+        var body = n.querySelector(".m-notice-body > .t-body");
+        if (body) body.innerHTML = t("update.stale_running", { host: S["pill.host"] });
+        if (b) { disableBtn(b); b.className = b.className.replace(" m-main-off", ""); }
+        n.setAttribute("data-running", "1");
+      } else if (b) {
         b.className = b.className.replace("m-btn-secondary", "m-btn-primary");
         if (!b.querySelector(".m-kbd")) b.insertAdjacentHTML("beforeend", M.kbd(M.KEY_PRIMARY));
       }
     });
     var told = false;
-    var prim = panel.querySelectorAll(".m-btn-primary");
+    var prim = panel.querySelectorAll(".m-btn-primary, .m-needs-host");
     for (var i = 0; i < prim.length; i++) {
       if (inside(prim[i]) || prim[i].className.indexOf("m-btn-disabled") >= 0) continue;
+      var wasPrimary = prim[i].className.indexOf("m-btn-primary") >= 0;
       disableBtn(prim[i]);
+      if (!wasPrimary) { prim[i].className = prim[i].className.replace(" m-main-off", ""); continue; }
       if (!told) {
         var host = prim[i].parentNode && prim[i].parentNode.className.indexOf("m-row") >= 0 ? prim[i].parentNode : prim[i];
         host.insertAdjacentHTML("afterend", '<div class="t-meta tx-muted mt-2 m-stale-reason">' + reason + "</div>");
@@ -698,6 +799,14 @@
     }
     var verbs = panel.querySelectorAll(".m-verb-primary");
     for (var j = 0; j < verbs.length; j++) disableVerb(verbs[j], reason);
+  }
+  /* R3 (designer F-19): a warn notice keeps no close button while the screen's main action is off: it is the only way on */
+  function dismissPass(panel) {
+    var off = 0;
+    bodyRoots(panel).forEach(function (r) { if (r) off += r.querySelectorAll(".m-main-off").length; });
+    if (!off) return;
+    var xs = panel.querySelectorAll(".m-notice-warn > .m-x");
+    for (var i = 0; i < xs.length; i++) xs[i].parentNode.removeChild(xs[i]);
   }
 
   /* ---- mount: one screen, one state ---- */
@@ -731,6 +840,7 @@
     document.body.innerHTML = "";
     document.body.appendChild(panel);
     stalePass(panel);
+    dismissPass(panel);
     if (!CAPTURE) document.body.appendChild(nav(screen, full));
     keys(panel);
     check(panel, full, valid);
@@ -742,7 +852,7 @@
   function keys(panel) {
     document.addEventListener("keydown", function (e) {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        var danger = panel.querySelector(".m-dialog-danger, .pc-dialog-danger, .ta-dialog-danger");
+        var danger = panel.querySelector(".m-dialog, .pc-dialog, .ta-dialog"); /* R3 F-21: any confirm, not only danger */
         var p = danger ? danger.querySelector(".m-btn-secondary") : panel.querySelector(".m-btn-primary:not(.m-btn-disabled):not(.m-btn-destructive), .m-verb-primary:not(.m-verb-disabled)");
         if (p) { p.className += " m-btn-focus m-verb-focus"; p.focus && p.focus(); }
       } else if (e.key === "Escape") {
@@ -773,13 +883,47 @@
   }
 
   /* self-check for _build/render_all.py (read with --dump-dom): direction, mirroring, sideways overflow, copy, and the
-     R2 rules: statuslie (the "All set" pill over an open card or a Needs-you badge), dangerkbd (a keycap on a danger or
-     destructive button), violet (more than one live violet fill) */
+     R2 / R3 rules (render_all.py and render_280.py fail on any of them):
+     - statuslie: a green header pill ("All set", or a screen's own view.status of kind ok) over ANY body signal of SIG
+       (confirm, error, warn card, paused bar, running work, warn chip or amber icon, open setup, a disabled main action,
+       a restart notice) or a Needs-you badge. It reads the RENDERED header and body (after stalePass and any group
+       after-mount patch), so it shares no blind spot with liveState's own decision (R3 designer F-01);
+     - dangerkbd: a keycap on a danger or destructive button;
+     - confirmkbd: a keycap on the confirm button of ANY confirm card (R3 F-21: the keycap goes on the safe button);
+     - violet: more than one live violet-family fill (#5400FB, #4800D8 pressed, #6A1FFF hover, #390796 deep), outermost
+       fills only, read from the computed style (R3 F-10: the P-19 deep tile was not counted);
+     - stalerun: a restart notice whose button is live while work is running (R3 F-02: never "restart now" mid-build);
+     - spinoff: a spinner while the header says the WhyNot Cut service is off or not responding (R3 F-07). */
+  var VIOLET = { "rgb(84, 0, 251)": 1, "rgb(72, 0, 216)": 1, "rgb(106, 31, 255)": 1, "rgb(57, 7, 150)": 1 };
   M.selfCheckExtras = function (panel) {
-    var lie = panel.querySelector(".m-pill-allset") && panel.querySelector(".m-notice-warn, .m-notice-error, .m-dialog-danger, .pc-dialog-danger, .ta-dialog-danger, .m-badge") ? 1 : 0;
+    var roots = bodyRoots(panel);
+    var c = signals(roots);
+    var pills = panel.querySelectorAll(".m-hdr .m-pill");
+    var okPill = pills.length === 1 && !!pills[0].querySelector(".ink-ok");
+    var problem = c.confirm + c.err + c.warn + c.busy + c.soft + c.open + c.off + c.stale + (panel.querySelector(".m-badge") ? 1 : 0);
+    var lie = okPill && problem ? 1 : 0;
     var dk = panel.querySelectorAll(".m-btn-danger .m-kbd, .m-btn-destructive .m-kbd, .m-btn-danger .i-kbd, .m-btn-destructive .i-kbd").length;
-    var violet = panel.querySelectorAll(".m-btn-primary:not(.m-btn-disabled), .m-verb-primary").length;
-    return ["statuslie=" + lie, "dangerkbd=" + dk, "violet=" + violet];
+    var ck = panel.querySelectorAll(".m-dialog .m-btn-primary .m-kbd, .pc-dialog .m-btn-primary .m-kbd, .ta-dialog .m-btn-primary .m-kbd, " +
+      ".m-dialog .m-btn-primary .i-kbd, .pc-dialog .m-btn-primary .i-kbd, .ta-dialog .m-btn-primary .i-kbd").length;
+    var violet = 0, fills = [];
+    var all = panel.querySelectorAll("*");
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i];
+      if (!VIOLET[getComputedStyle(el).backgroundColor]) continue;
+      var nested = false;
+      for (var j = 0; j < fills.length; j++) if (fills[j].contains(el)) { nested = true; break; }
+      if (!nested) { fills.push(el); violet++; }
+    }
+    var stalerun = 0;
+    roots.forEach(function (r) {
+      if (!r) return;
+      var st = staleNotices(r);
+      if (!runningIn(r, st)) return;
+      st.forEach(function (n) { if (n.querySelector(".m-btn-primary:not(.m-btn-disabled), .m-btn-secondary")) stalerun++; });
+    });
+    var spinoff = 0;
+    if (panel.querySelector(".m-hdr .m-pill-stop")) roots.forEach(function (r) { if (r) spinoff += r.querySelectorAll(".m-spin").length; });
+    return ["statuslie=" + lie, "dangerkbd=" + dk, "violet=" + violet, "confirmkbd=" + ck, "stalerun=" + stalerun, "spinoff=" + spinoff];
   };
   function check(panel, state, valid) {
     var done = function () {

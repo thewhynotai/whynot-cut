@@ -15,12 +15,13 @@
      (claude.cost, with a "See plans" link to support.claude.com, which is live), the data line D-02 (claude.data), the
      Egyptian privacy line D-03 (privacy.claude_sees, ending in a full stop) and the support promise D-05
      (support.promise). Re-check the Anthropic facts on release day (the list at the top of that file);
-   - H24 (executor rule): never link to a page that isn't live. thewhynot.ai/support, /data, /download and /help are shown only
-     in the LIVE state (the engine sends support.url / data_url / download_url / guide_url; add ?support=live or a
-     "-live" state). The default is NOT-LIVE: "Copy details for support" copies only and a plain-text line says "Support
-     page coming soon"; "Cost and data" is hidden; the download page and the guide show "Download page coming soon" /
-     "Guide coming soon" instead of a button. mockup.js (M.live, M.supportRow, M.dataLink, M.soonLine) is the only place
-     that decides;
+   - H24 (executor rule): never link to a page that isn't live. Round 3 (D-05 update 2026-10-16): support is the WhyNot
+     Cut WhatsApp chat, which IS live, so it is shown by default: "Copy details and open WhatsApp" (one action: copy, then
+     open the chat; the details are never in the link) with the reply promise (support.promise); ?support=off is the
+     alternate state (copy only + "The support chat is coming soon."). thewhynot.ai/data, /download and /help are still
+     NOT live: "Cost and data" is hidden and the download page and the guide show ONE "coming soon" line instead of a
+     button («… هتنزل قريب», never «قريب» alone, which reads as "nearby"); ?support=live or a "-live" state draws them
+     live. mockup.js (M.supportLive, M.live, M.supportRow, M.dataLink, M.soonLine) is the only place that decides;
    - ONE ARABIC WORD LIST (R2 editor P2-02, designer P1-9), used by every group: «جرّب تاني» (Try again), «افحص تاني»
      (Check again), «تراجع» (Undo), «دوس» (press), «شباك» (window), «نموذج» (model), «المتكلم» (speaker), «إنت»,
      «ريندر» (render), «مراجعة الصور»; Latin names stay in <bdi>. The D-08 register pass applied it to every group and
@@ -71,6 +72,9 @@
       "pill.host.linked": "linked", "pill.host.unlinked": "not linked", "pill.host.checking": "checking",
       "pill.all_set": "All set",
       "pill.attention": "Needs attention", "pill.check": "Needs a look", "pill.restart": "{host} needs a restart",
+      /* R3 (designer F-01, F-02): the header never says "All set" over running work, open setup or a disabled main action */
+      "pill.working": "Working…", "pill.waiting": "Waiting", "pill.setup": "Setting up · {n} of {of}",
+      "pill.restart_after": "{host}: restart after this job",
       "stale.reason": "Restart {host} first.",
       "net.off": "No internet. Claude needs it to make the plan.",
       "net.off.sub": "Transcription and the tools keep working on this computer. Editing continues by itself when the internet is back.",
@@ -82,6 +86,10 @@
       "checklist.engine.explain": "Runs on this computer and does the heavy work.",
       "checklist.claude.explain": "Claude — the AI assistant that does the editing. It opens in its own window.",
       "claude.cost": "Each editor needs their own Claude Pro or Max plan, paid to Anthropic (Pro from $20 a month; prices vary by country). WhyNot Cut adds nothing on top.", /* D-01, verbatim */
+      /* R3 (designer F-06, editor P1-06c): the healthy P-01 Claude row is title + "Signed in" + this one line; the full D-01,
+         D-02 and privacy lines sit behind "Cost and privacy" (words unchanged, only where they sit) */
+      "claude.cost.short": "Needs a Claude Pro or Max plan, paid to Anthropic.",
+      "firstrun.cost.more": "Cost and privacy", "firstrun.cost.less": "Hide cost and privacy",
       "plans.link": "See plans", /* D-01: opens support.claude.com, the Pro plan article (live) */
       "claude.data": "What Claude reads is handled under your Claude plan's terms. For client work, turn off 'Help improve our AI models' in Claude's privacy settings. Medical clients: use a Team or Enterprise plan, where data isn't used for training.", /* D-02, verbatim */
       "data.link": "Cost and data", /* D-02: thewhynot.ai/data, shown only when the engine sends support.data_url (H24) */
@@ -89,13 +97,22 @@
       "privacy.link": "What Claude sees",
       "privacy.extra": "No telemetry, and WhyNot Cut trains on nothing.",
       /* D-05 + H24: the support action in its two states (live = the engine sends support.url; not live = copy only) */
-      "support.copy_open": "Copy details and open support",
-      "support.copy": "Copy details for support",
-      "support.soon": "Support page coming soon",
-      "download.soon": "Download page coming soon", /* H24: thewhynot.ai/download, until it is published */
-      "guide.soon": "Guide coming soon", /* H24: thewhynot.ai/help, until it is published */
+      /* D-05 update (2026-10-16): the support chat is WhatsApp and live; one action: copy the details, then open the chat */
+      "support.copy_open": "Copy details and open WhatsApp",
+      "support.copy": "Copy details for support", /* ?support=off only (support.url absent) */
+      "support.soon": "The support chat is coming soon.", /* ?support=off only */
+      "download.soon": "The download page is coming soon.", /* H24: thewhynot.ai/download, until it is published */
+      "guide.soon": "The guide is coming soon.", /* H24: thewhynot.ai/help, until it is published */
       "support.promise": "We reply within one working day (Sun–Thu, Cairo time).",
       "approval.older": "This plan was approved with an older WhyNot Cut. Have one more look and approve it again.", /* the engine's OLDER_APPROVAL text (whynot-cut/engine/reel/lib/plan.py), verbatim */
+      /* R3 (decision 4, editor P1-01): panel_state.previous_approval (eng-data-contract §2.5). A line keeps its tick only
+         when its graphic id AND its on-screen text are the same as in the earlier approval */
+      "approval.older.by": "Approved by {name} · {date}",
+      "approval.older.with": "Confirmed with {who} at the time",
+      "approval.prev.kept": "{n} of {of} lines are unchanged, so their ticks are kept from the earlier approval. A line whose wording changed needs a fresh look.",
+      "approval.prev.all": "The wording of all {n} lines is unchanged, so their ticks are kept from the earlier approval.",
+      "approval.prev": "From the earlier approval",
+      "approval.changed": "The wording changed, so this line needs a fresh look.",
       "checklist.premiere.ok": "Linked to Premiere", "checklist.claude.ok": "Signed in",
       "checklist.clients.ok": "1 client · {client}",
       "firstrun.progress": "{n} of {of} ready",
@@ -118,6 +135,8 @@
       "retry.hint": "If Try again fails, close Premiere and open it again.",
       "action.start_app": "Start WhyNot Cut",
       "update.stale": "WhyNot Cut was updated. Close Premiere and open it again, then press Check again.",
+      /* R3 (designer F-02, decision 7): the same notice while work runs: never "restart now" in the middle of a build */
+      "update.stale_running": "WhyNot Cut was updated. Let the running job finish, or stop it first. Then close {host}, open it again and press Check again.",
       /* MOCK: home */
       "home.current": "Current video",
       "home.drop": "Add footage", "home.drop.sub": "Opens the client folder.",
@@ -133,9 +152,10 @@
       "home.step_off": "Paused until the service is back",
       "home.drop.done": "1 clip added · 6:40",
       "home.edit.done": "Plan ready · 52" + NB + "s reel",
-      "home.week.scope": "This week ·",
+      "home.week.scope": "This week · {client}",
       "home.week": "About 4" + NB + "h 30" + NB + "min saved (estimate) · 7 reels",
       "home.edit.needs_claude": "Sign in to Claude first.", "home.edit.needs_claude_missing": "Install Claude first.",
+      "home.edit.needs_service": "Start WhyNot Cut first.", "home.edit.needs_retry": "Press Try again first.", /* R3 F-16 */
       "home.change_video": "Change video",
       "home.week.how": "How is this worked out?",
       "home.turnaround": "Average turnaround: 6" + NB + "h from raw to approved",
@@ -188,13 +208,16 @@
       "demo.date": "Tue 14 Oct 2026, 14:32",
       "demo.raw": "6:40", "demo.reel": "52" + NB + "s", "demo.reel2": "48" + NB + "s", "demo.min": "45" + NB + "min",
       "demo.tidy.last": "214 files sorted", "demo.tidy.ago": "1" + NB + "d ago",
-      "demo.hush.last": "18 silences cut", "demo.hush.ago": "2" + NB + "h ago"
+      /* R3 (owner N-07, N-08; editor P2-04): one Hush count everywhere (24 pieces = 18 pauses + 6 filler words, = P-13 / P-17);
+         Kalam's last run is shown, because its 40 min is part of the tools' 1 h 10 min */
+      "demo.hush.last": "24 pieces cut", "demo.hush.ago": "2" + NB + "h ago",
+      "demo.kalam.last": "64 captions placed", "demo.kalam.ago": "3" + NB + "d ago"
     },
     ar: {
       /* I18N (identical) */
       "product.name": "WhyNot Cut",
       "lang.ar": "العربية", "lang.en": "English", "lang.ar.short": "ع", "lang.en.short": "EN",
-      "footer.powered": "Powered by thewhynot.ai",
+      "footer.powered": "من thewhynot.ai", /* R3 (editor P2-17): an Arabic footer line */
       /* MOCK (professional Egyptian, Addendum G r1): re-registered I18N lines */
       "needs.label": "مطلوب منك", "notice.dismiss": "اقفل",
       "tab.home": "الرئيسية", "tab.edit": "المونتاج", "tab.tools": "الأدوات",
@@ -231,6 +254,8 @@
       "pill.host.linked": "متوصّل", "pill.host.unlinked": "مش متوصّل", "pill.host.checking": "بنفحص",
       "pill.all_set": "كله تمام",
       "pill.attention": "محتاج تدخّل", "pill.check": "محتاج مراجعة", "pill.restart": "{host} محتاج يتقفل ويتفتح",
+      "pill.working": "شغّالين…", "pill.waiting": "مستني", "pill.setup": "بنجهّز · {n} من {of}",
+      "pill.restart_after": "{host}: اقفله بعد الشغل ده",
       "stale.reason": "اقفل {host} وافتحه الأول.",
       "net.off": "مفيش نت. Claude محتاج نت عشان يعمل الخطة.",
       "net.off.sub": "التفريغ والأدوات شغّالين على جهازك عادي، والمونتاج هيكمّل لوحده لما النت يرجع.",
@@ -241,20 +266,28 @@
       "checklist.engine": "خدمة WhyNot Cut",
       "checklist.engine.explain": "شغّالة على جهازك وبتعمل الشغل التقيل.",
       "checklist.claude.explain": "Claude — المساعد الذكي اللي بيخطّط المونتاج. بيفتح في شباك لوحده.",
-      "claude.cost": "كل مونتير محتاج اشتراك Claude Pro أو Max باسمه، بيدفعه لـ Anthropic (Pro بيبدأ من 20 دولار في الشهر، والسعر بيختلف من بلد للتاني). WhyNot Cut مش بيزوّد عليه حاجة.", /* D-01, verbatim */
+      "claude.cost": "كل مونتير محتاج اشتراك Claude Pro أو Max باسمه، بيدفعه لـ Anthropic (اشتراك Pro بيبدأ من 20" + NB + "دولار في الشهر، والسعر بيختلف من بلد للتاني). WhyNot Cut مش بيزوّد عليه حاجة.", /* D-01, verbatim */
       "plans.link": "شوف الاشتراكات",
       "claude.data": "اللي Claude بيقراه بيتعامل معاه حسب شروط اشتراكك في Claude. لشغل العملاء، اقفل \"Help improve our AI models\" من إعدادات الخصوصية في Claude. للعملاء الطبيين: استخدم اشتراك Team أو Enterprise، لأن بياناته ما بتتستخدمش في التدريب.", /* D-02, verbatim */
       "data.link": "التكلفة والبيانات",
       "privacy.claude_sees": "ملفات الفيديو والصوت عمرها ما بتترفع. Claude بيقرا نصوص بس (التفريغ والخطة) وشوية صور ثابتة: لقطات قليلة من التايملاين عشان المراجعة، وصور البراند.", /* D-03, the approved Egyptian line, verbatim */
       "privacy.link": "Claude بيشوف إيه",
+      "claude.cost.short": "محتاج اشتراك Claude Pro أو Max، بيتدفع لـ Anthropic.",
+      "firstrun.cost.more": "التكلفة والخصوصية", "firstrun.cost.less": "خبّي التكلفة والخصوصية",
       "privacy.extra": "مفيش أي تتبّع، و WhyNot Cut مش بيدرّب أي حاجة على شغلك.",
-      "support.copy_open": "انسخ التفاصيل وافتح الدعم",
+      "support.copy_open": "انسخ التفاصيل وافتح واتساب",
       "support.copy": "انسخ التفاصيل للدعم",
-      "support.soon": "صفحة الدعم قريب",
-      "download.soon": "صفحة التحميل قريب",
-      "guide.soon": "الدليل قريب",
+      "support.soon": "شات الدعم هيتفتح قريب.",
+      "download.soon": "صفحة التحميل هتنزل قريب.",
+      "guide.soon": "الدليل هينزل قريب.",
       "support.promise": "بنرد خلال يوم عمل واحد (من الأحد للخميس، بتوقيت القاهرة).",
       "approval.older": "الخطة دي اتوافق عليها بنسخة أقدم من WhyNot Cut. بص عليها بصّة كمان ووافق عليها تاني.",
+      "approval.older.by": "وافق عليها {name} · {date}",
+      "approval.older.with": "وأكّدها ساعتها {who}",
+      "approval.prev.kept": "{n} من {of} جمل ما اتغيّرتش، فعلامتها فضلت من الموافقة اللي قبل كده. الجملة اللي كلامها اتغيّر محتاجة بصّة جديدة.",
+      "approval.prev.all": "كلام كل الجمل ({n}) ما اتغيّرش، فعلامتها فضلت من الموافقة اللي قبل كده.",
+      "approval.prev": "من الموافقة اللي قبل كده",
+      "approval.changed": "الكلام اتغيّر، فالجملة دي محتاجة بصّة جديدة.",
       "checklist.premiere.ok": "متوصّل مع Premiere", "checklist.claude.ok": "مسجّل دخول",
       "checklist.clients.ok": "عميل واحد · {client}",
       "firstrun.progress": "{n} من {of} جاهزين",
@@ -277,6 +310,7 @@
       "retry.hint": "لو «جرّب تاني» ما نفعتش، اقفل Premiere وافتحه تاني.",
       "action.start_app": "شغّل WhyNot Cut",
       "update.stale": "WhyNot Cut اتحدّث. اقفل Premiere وافتحه تاني، وبعدين دوس «افحص تاني».",
+      "update.stale_running": "WhyNot Cut اتحدّث. سيب الشغل اللي شغّال يخلص، أو وقّفه الأول. بعد كده اقفل {host} وافتحه تاني ودوس «افحص تاني».",
       /* MOCK: home */
       "home.current": "الفيديو الحالي",
       "home.drop": "ضيف الفيديوهات", "home.drop.sub": "بيفتح فولدر العميل.",
@@ -292,9 +326,10 @@
       "home.step_off": "واقف لحد ما الخدمة ترجع",
       "home.drop.done": "اتضاف كليب واحد · 6:40",
       "home.edit.done": "الخطة جاهزة · ريل 52" + NB + "ثانية",
-      "home.week.scope": "الأسبوع ده ·",
+      "home.week.scope": "الأسبوع ده · {client}",
       "home.week": "وفّرت حوالي 4" + NB + "ساعات ونص (تقدير) · 7 ريلز",
       "home.edit.needs_claude": "سجّل دخول Claude الأول.", "home.edit.needs_claude_missing": "سطّب Claude الأول.",
+      "home.edit.needs_service": "شغّل WhyNot Cut الأول.", "home.edit.needs_retry": "دوس «جرّب تاني» الأول.",
       "home.change_video": "غيّر الفيديو",
       "home.week.how": "بنحسبه إزاي؟",
       "home.turnaround": "متوسط وقت التسليم: 6" + NB + "ساعات من الخام للموافقة",
@@ -340,14 +375,15 @@
       "approval.no_claude_missing.hint": "سطّب Claude وسجّل دخول، والبناء هيبدأ لوحده.",
       "map.cut": "قطعة", "map.statement": "جملة على الشاشة", "map.broll": "B-roll", "map.flagged": "محتاجة مراجعة",
       "map.aria": "خريطة مونتاج الريل",
-      "demo.summary": "ريل 52" + NB + "ثانية عن قياس السكر الصبح: 6" + NB + "قطعات، و4" + NB + "جمل على الشاشة، وكابشن عربي، و2" + NB + "لقطة B-roll.",
+      "demo.summary": "ريل 52" + NB + "ثانية عن قياس السكر الصبح: 6" + NB + "قطعات، و4" + NB + "جمل على الشاشة، وكابشن عربي، ولقطتين B-roll.",
       "demo.summary2": "ريل 48" + NB + "ثانية عن قياس السكر الصبح: 7" + NB + "قطعات، و4" + NB + "جمل على الشاشة، وكابشن عربي، ولقطة B-roll واحدة.",
       "demo.diff": "48" + NB + "ثانية بدل 52 · 7" + NB + "قطعات بدل 6 · لقطة B-roll واحدة بدل 2",
       "demo.changes": "قصّر المقدمة لحد 3" + NB + "ثواني وشيل لقطة B-roll التانية.",
       "demo.date": "الثلاثاء 14 أكتوبر 2026، 14:32",
       "demo.raw": "6:40", "demo.reel": "52" + NB + "ثانية", "demo.reel2": "48" + NB + "ثانية", "demo.min": "45" + NB + "دقيقة",
       "demo.tidy.last": "اترتّب 214 ملف", "demo.tidy.ago": "يوم",
-      "demo.hush.last": "اتشال 18 سكتة", "demo.hush.ago": "ساعتين"
+      "demo.hush.last": "اتقطّع 24 قطعة", "demo.hush.ago": "ساعتين",
+      "demo.kalam.last": "اتحط 64 كابشن", "demo.kalam.ago": "3" + NB + "أيام"
     }
   };
 })();
@@ -388,14 +424,29 @@ window.MOCK_DATA = {
     { id: "edit", state: "todo" },
     { id: "approve", state: "blocked", reason: "no_plan" } ],
   approval_record: { by: "Yunus", at: "2026-10-14T11:32:00Z", confirmed_with: "د. هناء مصطفى", flagged_checked: true, flagged_count: 3, current: true, version: 1 },
+  /* R3 (decision 4): panel_state.previous_approval (eng-data-contract §2.5). older = approved with an older WhyNot Cut
+     (P-07 older: the wording of line g3 changed, so only g1 and g2 keep their ticks); plan_changed = the plan changed
+     since (P-07 stale: the wording of every line is the same, so all three keep their ticks). Absent = no prefill. */
+  previous_approval: {
+    older: { by: "Yunus", at: "2026-10-14T11:32:00Z", via: "panel", format: "2.2", reason: "older_whynot_cut", confirmed_with: "د. هناء مصطفى",
+      lines: [ { graphic_id: "g1", text: "قياس السكر الصايم الصبح بيقولك أكتر من أي قراية تانية في اليوم.", checked: true },
+        { graphic_id: "g2", text: "لو القراية فوق 126 مرتين ورا بعض، لازم تكشف عند الدكتور على طول.", checked: true },
+        { graphic_id: "g3", text: "الصيام مش مبرر إنك توقف علاج السكر.", checked: true } ] },
+    plan_changed: { by: "Yunus", at: "2026-10-14T11:32:00Z", via: "panel", format: "3.0", reason: "plan_changed", confirmed_with: "د. هناء مصطفى",
+      lines: [ { graphic_id: "g1", text: "قياس السكر الصايم الصبح بيقولك أكتر من أي قراية تانية في اليوم.", checked: true },
+        { graphic_id: "g2", text: "لو القراية فوق 126 مرتين ورا بعض، لازم تكشف عند الدكتور على طول.", checked: true },
+        { graphic_id: "g3", text: "الصيام مش مبرر إنك توقف علاج السكر من غير ما تسأل دكتورك.", checked: true } ] } },
   /* H24: these four are read ONLY in the live state (M.live); until Yunus publishes the pages the engine sends none of them */
-  support: { url: "https://thewhynot.ai/support", data_url: "https://thewhynot.ai/data", download_url: "https://thewhynot.ai/download", guide_url: "https://thewhynot.ai/help" },
+  /* support.url = the WhyNot Cut support WhatsApp chat (D-05 update 2026-10-16, eng-data-contract §2.10): live, read by
+     default; the panel copies the details first and never adds them to the link. The other three stay unread until
+     Yunus publishes the pages (H24) */
+  support: { url: "https://wa.me/20XXXXXXXXXX?text=WhyNot%20Cut%20support", data_url: "https://thewhynot.ai/data", download_url: "https://thewhynot.ai/download", guide_url: "https://thewhynot.ai/help" },
   claude: { how_to_url: "https://support.claude.com", plans_url: "https://support.claude.com" },
   who: { en: "Dr. Hana Mostafa", ar: "د. هناء مصطفى" },
   long: { client: "Al-Mustaqbal Family Medicine and Diabetes Care Center", item: "C0239_interview_final_v2", editor: "Mohamed Abdel-Rahman El-Sayed", needs: 120, seq: "C0239_interview_final_v2_v1" },
   flagged: [
-    { kind: "medical", tc: "00:00:14:08", text: "قياس السكر الصايم الصبح بيقولك أكتر من أي قراية تانية في اليوم." },
-    { kind: "medical", tc: "00:00:31:20", text: "لو القراية فوق 126 مرتين ورا بعض، لازم تكشف عند الدكتور على طول." },
-    { kind: "religious", tc: "00:00:47:02", text: "الصيام مش مبرر إنك توقف علاج السكر من غير ما تسأل دكتورك." }
+    { id: "g1", kind: "medical", tc: "00:00:14:08", text: "قياس السكر الصايم الصبح بيقولك أكتر من أي قراية تانية في اليوم." },
+    { id: "g2", kind: "medical", tc: "00:00:31:20", text: "لو القراية فوق 126 مرتين ورا بعض، لازم تكشف عند الدكتور على طول." },
+    { id: "g3", kind: "religious", tc: "00:00:47:02", text: "الصيام مش مبرر إنك توقف علاج السكر من غير ما تسأل دكتورك." }
   ]
 };

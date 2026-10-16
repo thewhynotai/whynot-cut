@@ -150,17 +150,35 @@ def job(exe: str, work: pathlib.Path, screen: str, page: pathlib.Path, state: st
         row["problems"].append("brand fonts not loaded")
     if chk.get("missing"):
         row["problems"].append(f"missing: {chk.get('missing')}")
-    # R2 page self-checks: the header status never says "All set" over an open card or a Needs-you badge; a danger or
-    # destructive action never carries a keycap; one live violet fill per screen
-    if chk.get("statuslie", "0") != "0":
-        row["problems"].append("header says All set over an open card or a Needs-you badge")
-    if chk.get("dangerkbd", "0") != "0":
-        row["problems"].append(f"{chk.get('dangerkbd')} keycap(s) on a danger or destructive button")
-    if chk.get("violet", "0").isdigit() and int(chk.get("violet", "0")) > 1:
-        row["problems"].append(f"{chk.get('violet')} live violet fills (one per screen)")
+    row["problems"].extend(rule_checks(chk))
     if row["px_w"] != w * SCALE:
         row["problems"].append(f"png width {row['px_w']}")
     return row
+
+
+def rule_checks(chk: dict) -> list[str]:
+    """The page's R2 / R3 rule fields (mockup.js M.selfCheckExtras); render_280.py uses the same list.
+    - statuslie: a green header pill ("All set", or a screen's own ok status) over ANY open problem in the body (confirm,
+      error, warn card, paused bar, running work, warn chip or amber icon, open setup, a disabled main action, a restart
+      notice) or a Needs-you badge (R3 designer F-01: the rendered header is judged against the rendered body);
+    - dangerkbd: a keycap on a danger or destructive button; confirmkbd: a keycap on the confirm button of a confirm card
+      (R3 F-21: it goes on the safe button);
+    - violet: more than one violet-family fill (R3 F-10: computed colour, #5400FB / #4800D8 / #6A1FFF / #390796);
+    - stalerun: a live restart button while work runs (R3 F-02); spinoff: a spinner while the service is off (R3 F-07)."""
+    out = []
+    if chk.get("statuslie", "0") != "0":
+        out.append("header says All set over an open problem or a Needs-you badge")
+    if chk.get("dangerkbd", "0") != "0":
+        out.append(f"{chk.get('dangerkbd')} keycap(s) on a danger or destructive button")
+    if chk.get("confirmkbd", "0") != "0":
+        out.append(f"{chk.get('confirmkbd')} keycap(s) on a confirm card's confirm button (the safe button takes it)")
+    if chk.get("violet", "0").isdigit() and int(chk.get("violet", "0")) > 1:
+        out.append(f"{chk.get('violet')} live violet fills (one per screen)")
+    if chk.get("stalerun", "0") != "0":
+        out.append("restart notice is live while work runs (say: let it finish or stop it first)")
+    if chk.get("spinoff", "0") != "0":
+        out.append(f"{chk.get('spinoff')} spinner(s) while the WhyNot Cut service is off (draw it paused)")
+    return out
 
 
 def sheets(rows: list[dict], widths: dict) -> list[pathlib.Path]:

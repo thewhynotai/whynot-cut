@@ -84,6 +84,7 @@ def job(exe: str, work: pathlib.Path, screen: str, page: pathlib.Path, state: st
         row["problems"].append("brand fonts not loaded")
     if chk.get("missing"):
         row["problems"].append(f"missing: {chk.get('missing')}")
+    row["problems"].extend(R.rule_checks(chk))  # R3: the same rule fields as render_all.py (header, keycaps, violet, ...)
     if img.shape[1] != W * R.SCALE:
         row["problems"].append(f"png width {img.shape[1]}")
     return row

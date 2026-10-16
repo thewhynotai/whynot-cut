@@ -113,11 +113,11 @@
   I.fail = function (text, o) {
     o = o || {};
     var chip = o.safety ? '<div class="m-row">' + M.chip("error", T("i07.safety"), "shield-x") + "</div>" : "";
-    /* H24: live = "Copy details and open support" (one action) and the reply promise; not live = "Copy details for support"
-       (copies only) with the plain-text "Support page coming soon" beside it. Save a report is its own button either way. */
-    var sp = M.supportParts({ kind: "ghost", flush: true, promise: true });
-    var support = '<div class="m-row m-wrap mt-2 i-support"><div class="m-row me-2">' + sp.btn + "</div>" + (sp.soon ? '<div class="m-soon">' + sp.soon + "</div>" : "") + "</div>" +
-      (sp.promise ? '<div class="t-meta tx-muted mt-1">' + sp.promise + "</div>" : "") +
+    /* D-05 update (2026-10-16): the support chat is WhatsApp and live: "Copy details and open WhatsApp" (one action) and
+       the reply promise under it; ?support=off = "Copy details for support" (copies only) with the ONE "coming soon" line
+       under it (M.supportParts, the same block as the panel, R3 designer F-03). Save a report is its own button either way. */
+    var sp = M.supportParts({ kind: "ghost", flush: true });
+    var support = '<div class="m-row m-wrap mt-2 i-support"><div class="m-row me-2">' + sp.btn + "</div></div>" + sp.under +
       '<div class="m-row m-wrap i-support">' + M.btn(T("i00.save_report"), { kind: "ghost", icon: "download", flush: true }) + "</div>"; /* both flush: a wrapped second line stays aligned */
     var body = chip + '<div class="t-body tx-text' + (o.safety ? " mt-2" : "") + '">' + text + "</div>" +
       (o.sub ? '<div class="t-meta tx-muted mt-1">' + o.sub + "</div>" : "") +
@@ -233,7 +233,7 @@
       '<div class="m-hairline" aria-hidden="true"></div>' +
       '<div class="i-body"><nav class="i-rail" aria-label="Steps">' + rail(v.rail) + '<span class="m-spacer"></span>' +
         '<div class="i-rail-end"><div class="t-meta tx-muted">' + T("i00.version", { app: I.app(D.version) }) + '</div><div class="mt-1">' + trust + "</div></div>" +
-        '<footer class="m-footer"><bdi dir="ltr" class="m-footer-txt">' + M.esc(S["footer.powered"]) + "</bdi></footer></nav>" +
+        '<footer class="m-footer"><bdi dir="' + (M.rtl ? "rtl" : "ltr") + '" class="m-footer-txt">' + M.t("footer.powered") + "</bdi></footer></nav>" +
       '<div class="i-main"><div class="i-scrollrow"><main class="i-scroll" id="scroll"><div class="i-scroll-in">' + v.body + "</div></main>" +
         '<div class="i-sbar" aria-hidden="true"><span class="i-sbar-gap"></span><span class="i-sbar-thumb"></span></div></div>' + bar + "</div></div></div>";
     document.body.innerHTML = "";

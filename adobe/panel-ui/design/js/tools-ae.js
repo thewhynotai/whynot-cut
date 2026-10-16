@@ -42,7 +42,9 @@
        destructive action, never on a disabled one. M.dialog already decides its own keycaps. The other keys are listed in
        each screen's <meta name="mock-keys">. */
     var prim = panel.querySelectorAll(".m-btn-primary:not(.m-btn-destructive):not(.m-btn-disabled)");
-    for (var i = 0; i < prim.length; i++) if (!prim[i].querySelector(".m-kbd")) prim[i].insertAdjacentHTML("beforeend", M.kbd(M.KEY_PRIMARY));
+    /* R3 (designer F-21): never on the confirm button of a confirm card (M.dialog gives the keycap to the safe button) */
+    var inDialog = function (el) { for (var a = el; a && a !== panel; a = a.parentNode) if (/\b(m|ta|pc)-dialog\b/.test(a.className || "")) return true; return false; };
+    for (var i = 0; i < prim.length; i++) if (!prim[i].querySelector(".m-kbd") && !inDialog(prim[i])) prim[i].insertAdjacentHTML("beforeend", M.kbd(M.KEY_PRIMARY));
     /* height probe for the group's own checks (render_all captures 2600 CSS px at most) */
     var probe = function () {
       var meta = document.createElement("meta");

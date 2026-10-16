@@ -10,6 +10,8 @@
      (support.copy / support.copy_open / support.soon / support.promise, owner decision D-05): "Copy details and open
      support" only when the engine provides support.url, else "Copy details for support" (copies only) with the plain-text
      "Support page coming soon" (H24: never link to a page that isn't live); the log lives only in Settings > Details for support;
+     R3 (D-05 update 2026-10-16): support.url is the WhatsApp chat and live, so "Copy details and open WhatsApp" + the
+     reply promise is the default and the copy-only state is the ?support=off alternate;
    - every action that changes the project says what it creates or changes and that the originals stay untouched;
    - results show the time saved (mock numbers; needs engine data);
    - «وافق» for approve, no tatweel, U+00A0 inside number + unit and time phrases, no English glosses in brackets.
@@ -270,7 +272,7 @@
     "p11.t.tidy": "Organise project didn't start: the project is open in another Premiere window.", "p11.t.tidy.sub": "Close the other window, then try again.",
     "p11.t.kalam": "Captions need the caption pack.", "p11.t.kalam.sub": "It isn't downloaded yet. Get it in Settings, Models (about 1.2" + NB + "GB).",
     "p11.btn.models": "Open Models",
-    "p11.copied": "The details are copied.", "p11.copied.live": "The details are copied and the support page opened in your browser.",
+    "p11.copied": "The details are copied.", "p11.copied.live": "The details are copied and WhatsApp is open. Paste them in the chat.",
     "p11.starting_btn": "Starting…",
 
     /* ---- P-12 AI action sheet ---- */
@@ -373,9 +375,9 @@
     "p22.privacy": "Privacy",
     "p22.privacy.fact": "Video and audio files are never uploaded. Claude reads text (the transcript and the plan) and a few still images: some timeline frames for checking, and brand photos.",
     "p22.privacy.telemetry": "No telemetry: WhyNot Cut sends no usage data anywhere.",
-    "p22.privacy.training": "WhyNot Cut trains on nothing: your footage and edits never train any model.",
-    "p22.support.opens": "Opens {url} with your details copied.", /* live state only (H24) */
-    "p22.support.copyonly": "Copies your details to the clipboard. Nothing is opened or sent.", /* not live (H24) */
+    "p22.privacy.training": "WhyNot Cut trains on nothing.", /* R3 decision 2 (owner N-01): scoped to what WhyNot Cut controls; what Claude reads is the D-02 line under it */
+    "p22.support.opens": "Copies your details, then opens our WhatsApp support chat. Paste them there; nothing is sent until you do.", /* D-05 update: support.url is the WhatsApp chat (live) */
+    "p22.support.copyonly": "Copies your details to the clipboard. Nothing is opened or sent.", /* ?support=off only */
     "p02.claude.offline.row": "No internet. Claude can't be reached",
     "p04.demo.total": "10 h 20 min",
     "p04.total": "All clients, this week: {t} saved · estimate",
@@ -682,7 +684,7 @@
     "p11.t.tidy": "«رتّب المشروع» ما بدأش: المشروع مفتوح في شباك Premiere تاني.", "p11.t.tidy.sub": "اقفل الشباك التاني وجرّب تاني.",
     "p11.t.kalam": "الكابشن محتاج حزمة الكابشن.", "p11.t.kalam.sub": "لسه ما نزلتش. نزّلها من الإعدادات ← النماذج (حوالي 1.2" + NB + "جيجا).",
     "p11.btn.models": "افتح النماذج",
-    "p11.copied": "التفاصيل اتنسخت.", "p11.copied.live": "التفاصيل اتنسخت وصفحة الدعم اتفتحت في المتصفح.",
+    "p11.copied": "التفاصيل اتنسخت.", "p11.copied.live": "التفاصيل اتنسخت وواتساب اتفتح. الصقها في الشات.",
     "p11.starting_btn": "بتشتغل…",
 
     /* ---- P-12 ---- */
@@ -785,8 +787,8 @@
     "p22.privacy": "الخصوصية",
     "p22.privacy.fact": "ملفات الفيديو والصوت عمرها ما بتترفع. Claude بيقرا نصوص بس (التفريغ والخطة) وشوية صور ثابتة: لقطات قليلة من التايملاين عشان المراجعة، وصور البراند.",
     "p22.privacy.telemetry": "مفيش تتبّع: WhyNot Cut مش بيبعت أي بيانات استخدام لأي مكان.",
-    "p22.privacy.training": "WhyNot Cut مش بيدرّب أي نموذج: الفيديو والمونتاج بتوعك عمرهم ما بيدرّبوا حاجة.",
-    "p22.support.opens": "بيفتح {url} والتفاصيل منسوخة.",
+    "p22.privacy.training": "WhyNot Cut نفسه مش بيدرّب أي نموذج.",
+    "p22.support.opens": "بينسخ التفاصيل وبعدين بيفتح شات الدعم على واتساب. الصقها هناك؛ مفيش حاجة بتتبعت غير لما تبعتها إنت.",
     "p22.support.copyonly": "بينسخ التفاصيل للحافظة بس. مفيش حاجة بتتفتح ولا بتتبعت.",
     "p02.claude.offline.row": "مفيش نت. مش قادرين نوصل لـ Claude",
     "p04.demo.total": "10 ساعات و20 دقيقة",

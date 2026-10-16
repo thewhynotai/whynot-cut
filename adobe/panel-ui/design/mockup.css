@@ -132,6 +132,9 @@ html.m-capture, html.m-capture body { background: #FF00FF; } /* render sentinel:
 .tx-disabled { color: var(--mk-text-disabled); }
 .tx-center { text-align: center; }
 .nowrap { white-space: nowrap; }
+/* R3 (designer F-12, owner N-15): one line that ends in an ellipsis instead of wrapping (P-03 "This week · {client}") */
+.m-trunc { display: block; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-trunc bdi { display: inline; }
 
 /* ---- icons: Lucide outlined to fills (icons.js); colour by fill class only ---- */
 .m-ico { display: block; flex: 0 0 auto; }
@@ -235,7 +238,8 @@ html.m-capture, html.m-capture body { background: #FF00FF; } /* render sentinel:
 .m-logwrap { display: flex; flex-direction: column; flex: 0 0 auto; }
 .m-logrow { display: flex; flex-direction: row; align-items: center; height: 32px; padding: 0 2px; border: 2px solid transparent; border-radius: 8px; color: var(--twn-text-muted); cursor: pointer; }
 .m-footer { display: flex; flex-direction: row; align-items: center; justify-content: center; flex: 0 0 32px; height: 32px; }
-.m-footer-txt { display: block; direction: ltr; font: 400 var(--mk-type-caption) var(--twn-font-ui); color: var(--twn-text-muted); }
+.m-footer-txt { display: block; font: 400 var(--mk-type-caption) var(--twn-font-ui); color: var(--twn-text-muted); }
+.m-rtl .m-footer-txt { font: 400 var(--mk-type-ar-caption) var(--twn-font-ar); } /* R3: the Arabic footer is an Arabic line */
 
 /* ---- card ---- */
 /* paddings count the border: 1 px border + 15 px = 16 (11 + 1 = 12 at 300 px) */
@@ -265,8 +269,9 @@ html.m-capture, html.m-capture body { background: #FF00FF; } /* render sentinel:
 /* a button whose label may wrap on a narrow panel (the support action: "Copy details and open support") */
 .m-btn-wrap { height: auto; min-height: 32px; padding-top: 3px; padding-bottom: 3px; flex: 0 1 auto; min-width: 0; white-space: normal; text-align: left; }
 .m-rtl .m-btn-wrap { text-align: right; }
-/* the plain-text "Support page coming soon" line beside the copy button (H24) */
-.m-soon { display: block; flex: 1 1 112px; min-width: 0; }
+/* R3 (designer F-03): the ONE "coming soon" line (M.soonLine: support chat under ?support=off, download page, guide):
+   always under the button row, a 12 px info icon and meta text; never beside a live control */
+.m-soonline { display: flex; }
 .m-btn-primary { background: var(--twn-primary); border-color: var(--twn-primary); color: var(--twn-on-primary); }
 .m-btn-primary .m-ico { fill: var(--twn-on-primary); }
 .m-btn-secondary { background: var(--mk-control); border-color: var(--mk-control); }
@@ -450,6 +455,9 @@ html.m-capture, html.m-capture body { background: #FF00FF; } /* render sentinel:
 .m-linkbtn { display: flex; flex-direction: row; align-items: center; min-height: 32px; padding: 2px 6px; margin: 0 -8px; border: 2px solid transparent; border-radius: 8px; color: var(--twn-primary-text); cursor: pointer; font: 600 var(--mk-type-meta) var(--twn-font-ui); }
 .m-rtl .m-linkbtn { font: 600 var(--mk-type-ar-meta) var(--twn-font-ar); }
 .m-linkbtn .m-ico { margin-top: 0; }
+/* R3 (P-01 Claude row): link controls side by side in a wrapping row; the cell's end margin pays back the link's -8 px */
+.m-linkcell { display: flex; flex: 0 0 auto; margin-right: 24px; }
+.m-rtl .m-linkcell { margin-right: 0; margin-left: 24px; }
 
 /* solid tappable row (Settings on Home): solid #141414, radius 8, 2 px matching border (padding 10 + 2 = 12) */
 .m-rowbtn { display: flex; flex-direction: row; align-items: center; min-height: 40px; padding: 0 10px; border: 2px solid var(--mk-card-solid); border-radius: 8px; background: var(--mk-card-solid); cursor: pointer; }
@@ -564,7 +572,9 @@ html.m-capture, html.m-capture body { background: #FF00FF; } /* render sentinel:
 /* tile (frame, template, thumbnail) */
 .m-tile { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; padding: 6px; border: 2px solid var(--mk-card-solid); border-radius: 8px; background: var(--mk-card-solid); cursor: pointer; }
 .m-tile .t-meta { color: var(--twn-text-muted); }
-.m-tile-on { background: var(--twn-deep); border-color: var(--twn-deep); }
+/* R3 (designer F-10): selected = the neutral card + a 2 px violet border (+ the caller's "Selected" check and word),
+   never a violet fill: the screen's primary stays its one violet fill */
+.m-tile-on { background: var(--mk-card-solid); border-color: var(--twn-primary-text); }
 .m-tile-on .t-meta { color: var(--twn-text); }
 .m-tile-fail { border-color: var(--mk-error-line); }
 .m-tile-focus { border-color: var(--mk-focus-border); }
@@ -594,7 +604,10 @@ html.m-capture, html.m-capture body { background: #FF00FF; } /* render sentinel:
 .m-w300 .m-badge { padding: 0 6px; }
 .m-w300 .m-badge .m-ico { margin-left: 2px; }
 .m-rtl.m-w300 .m-badge .m-ico { margin-left: 0; margin-right: 2px; }
-/* 280 px (CEP minimum, After Effects): the lockup, the count and the 32 px language control leave no room for the label,
-   so the badge shows its count and chevron only; aria-label still says "Needs you: n" */
-.m-w280 .m-badge > .m-block { display: none; }
-.m-w280 .m-badge-count.ms-1, .m-rtl.m-w280 .m-badge-count.ms-1 { margin-left: 0; margin-right: 0; }
+/* 280 px (CEP minimum, After Effects). R3 (designer F-23): the badge keeps its LABEL ("Needs you 1") and drops the
+   chevron instead; the badge is still a control (2 px rest border) and its aria-label says "Needs you: n. Open the list." */
+.m-w280 .m-badge > .m-ico { display: none; }
+.m-w280 .m-badge { padding: 0 6px; }
+/* the one case with no room for the label at 280: "99+" (long). The count stays; aria-label still says "Needs you: 99+" */
+.m-w280 .m-badge-99 > .m-block { display: none; }
+.m-w280 .m-badge-99 .m-badge-count.ms-1, .m-rtl.m-w280 .m-badge-99 .m-badge-count.ms-1 { margin-left: 0; margin-right: 0; }

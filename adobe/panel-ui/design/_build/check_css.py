@@ -8,7 +8,8 @@ spacing property, the two-dimensional layout module, the native button element, 
 inherited-colour keyword, logical inline margins, and @font-face anywhere except mockup.css (mockup-only). In the
 strings files it also checks the VALUES: no "engine" / "المحرك" (it is "WhyNot Cut service"), never "Claude Code" in
 panel copy, and every link on the allowlist (https thewhynot.ai, dl.thewhynot.ai, claude.ai, support.claude.com,
-code.claude.com). Prints one line per hit and a summary line; exit 1 on any hit.
+code.claude.com; wa.me ONLY for the support chat, MOCK_DATA.support.url in strings.js: D-05 update 2026-10-16,
+eng-data-contract §7.10). Prints one line per hit and a summary line; exit 1 on any hit.
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ JS_PATTERNS = {  # the JS group files use words like Array.filter(); match the C
     "currentColor": r"currentColor", "margin-inline": r"margin-inline",
 }
 ALLOWED_HOSTS = {"thewhynot.ai", "www.thewhynot.ai", "dl.thewhynot.ai", "claude.ai", "support.claude.com", "code.claude.com"}
+SUPPORT_ONLY = {"wa.me"}  # the WhatsApp support chat: allowed only as support.url (the `support:` line of MOCK_DATA)
 VALUE = re.compile(r'"((?:[^"\\]|\\.)*)"')
 
 
@@ -85,6 +87,8 @@ def main() -> int:
                     hits += 1
                     print(f"{rel}:{n}: copy says Claude Code: {v[:90]}")
                 for u in re.findall(r"https?://([^/\s\"'«»)]+)", v):
+                    if u.lower() in SUPPORT_ONLY and rel == "strings.js" and line.lstrip().startswith("support:"):
+                        continue
                     if u.lower() not in ALLOWED_HOSTS:
                         hits += 1
                         print(f"{rel}:{n}: link host not on the allowlist: {u}")

@@ -54,16 +54,19 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
   function verbs(o) {
     var out = M.verb({ icon: "folder-input", title: t("home.drop"), done: t("home.drop.done"), disabled: o.disabled });
     var editDone = o.next === "approve";
+    /* R3 (designer F-16): a disabled main verb always says why ("Start WhyNot Cut first.", "Press Try again first.") */
     out += '<div class="mt-2"></div>' + M.verb({ icon: "clapperboard", title: t("home.edit"),
-      sub: o.editBlocked ? t(o.missing ? "home.edit.needs_claude_missing" : "home.edit.needs_claude") : t("home.edit.sub"),
+      sub: o.editBlocked ? t(o.missing ? "home.edit.needs_claude_missing" : "home.edit.needs_claude") : o.reason ? t(o.reason) : t("home.edit.sub"),
       done: editDone ? t("home.edit.done") : null,
-      primary: o.next === "edit" && !o.disabled && !o.editBlocked, disabled: o.disabled || o.editBlocked,
+      primary: o.next === "edit" && !o.disabled && !o.editBlocked, main: o.next === "edit", disabled: o.disabled || o.editBlocked,
       focus: o.focus && o.next === "edit" });
     /* Approve shows only once a plan exists */
     if (o.next === "approve") out += '<div class="mt-2"></div>' + M.verb({ icon: "circle-check-big", title: t("home.approve"), sub: t("home.approve.sub"),
-      primary: !o.disabled, disabled: o.disabled, focus: o.focus });
+      primary: !o.disabled, main: true, disabled: o.disabled, focus: o.focus });
     return '<div class="m-col mt-4">' + out + '</div>' +
-      '<div class="m-saved mt-3">' + M.ico("timer", 16, o.disabled ? "ink-muted" : "ink-ok") + '<div class="m-col ms-2 m-grow"><div class="m-row t-meta tx-muted"><span class="nowrap">' + t("home.week.scope") + '</span><span class="m-ctx-name ms-1">' + M.ltr(D.client) + '</span></div>' +
+      '<div class="m-saved mt-3">' + M.ico("timer", 16, o.disabled ? "ink-muted" : "ink-ok") + '<div class="m-col ms-2 m-grow">' +
+        /* R3 (designer F-12, owner N-15): the scope is ONE line, "This week · Sahha Clinic", the name cut with an ellipsis */
+        '<div class="t-meta tx-muted m-trunc">' + t("home.week.scope", { client: D.client }) + '</div>' +
         '<div class="t-meta tx-muted">' + t("home.week") + '</div>' +
         '<div class="t-meta tx-muted mt-1">' + t("home.turnaround") + '</div>' +
         '<div class="m-row mt-1">' + M.linkbtn(t("home.week.how")) + '</div></div></div>';
@@ -77,7 +80,8 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
       '<div class="m-col mt-2">' +
       one("folder-tree", "tidy", "Tidy", last("demo.tidy.last", "demo.tidy.ago"), "ok") + '<div class="mt-2"></div>' +
       one("audio-waveform", "hush", "Hush", last("demo.hush.last", "demo.hush.ago"), "ok") + '<div class="mt-2"></div>' +
-      one("captions", "kalam", "Kalam", t("home.last.none"), "pending") +
+      /* R3 (owner N-08): Kalam's last run is shown (its 40 min is part of the tools' 1 h 10 min); = P-13 "64 captions placed" */
+      one("captions", "kalam", "Kalam", last("demo.kalam.last", "demo.kalam.ago"), "ok") +
       '</div>';
   }
   function settings() { return '<div class="m-col mt-5">' + M.rowbtn("settings", t("home.settings")) + '</div>'; }
@@ -122,14 +126,14 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
       return {
         needs: 0, pills: { engine: "noanswer" },
         body: slot(M.notice("error", t("engine.noanswer"), { sub: t("retry.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true }, support: true })) +
-          hero({ step: "off", disabled: true }) + verbs({ next: "edit", disabled: true }) + tools(true) + settings()
+          hero({ step: "off", disabled: true }) + verbs({ next: "edit", disabled: true, reason: "home.edit.needs_retry" }) + tools(true) + settings()
       };
     },
     offline: function () {
       return {
         needs: 0, pills: { engine: "off", claude: "unchecked", host: "unlinked" },
         body: slot(M.offline()) +
-          hero({ step: "off", disabled: true }) + verbs({ next: "edit", disabled: true }) + tools(true) + settings()
+          hero({ step: "off", disabled: true }) + verbs({ next: "edit", disabled: true, reason: "home.edit.needs_service" }) + tools(true) + settings()
       };
     },
     "no-claude-signed-out": function () { return noClaude(false); },

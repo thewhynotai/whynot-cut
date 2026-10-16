@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="loading,normal,normal-live,focus,error,error-live,offline,no-claude-signed-out,no-claude-missing,stale,success,long">
+<meta name="mock-states" content="loading,normal,normal-live,cost-open,focus,error,error-live,offline,no-claude-signed-out,no-claude-missing,stale,success,long">
 <meta name="mock-keys" content="Mod+Enter = the screen's one primary (Set up my first client, or the red row's fix); Esc = close the top notice; no single-key shortcuts (Premiere owns them). Tabs are hidden during setup, so Alt+1/2/3 does nothing here. UXP keydown capture: lab item.">
 <meta name="mock-motion" content="trigger | property | token | final static state
 row turns green | icon fill, detail colour | --mk-dur-base, --mk-ease | ok icon + white detail;
@@ -28,9 +28,14 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
    - The background program is "the WhyNot Cut service", explained once on its row; Claude is introduced once on its row,
      with the cost (D-01: each editor's own Claude Pro or Max plan, paid to Anthropic, "See plans" to support.claude.com),
      where the footage goes (D-03), what happens to the data at Anthropic (D-02) and, only when live, "Cost and data".
-   - H24 (two states, not live is the default): the support action is "Copy details for support" (copies only) with the
-     plain-text "Support page coming soon"; in normal-live / error-live the engine has support.url / support.data_url, so
-     it is "Copy details and open support" (one action) with the D-05 reply promise, and "Cost and data" shows.
+   - Support (D-05 update 2026-10-16): the WhatsApp chat is live, so the support action is "Copy details and open WhatsApp"
+     (one action) with the D-05 reply promise in every state (?support=off draws the alternate copy-only state). H24 still
+     gates "Cost and data" (thewhynot.ai/data): it shows only in normal-live / error-live.
+   - R3 (designer F-06, editor P1-06c): the healthy Claude row is "Signed in" + one cost line + See plans / What Claude
+     sees / "Cost and privacy". The approved D-01, D-03 and D-02 lines (words unchanged) sit behind "Cost and privacy"
+     (cost-open, and normal-live with "Cost and data"), so "Set up my first client" is inside the first screen at 360.
+   - R3 (designer F-01, owner N-13, editor P2-01): while setup has steps open the header says "Setting up · 3 of 4",
+     never "All set"; in stale "Try the sample clip" is off too (F-20: it needs Premiere).
    - A row's fix sits under its sentence with a one-line hint; the first red row's fix is the one primary.
    - no-claude-signed-out / no-claude-missing: the Claude row turns red and its fix is the primary.
    - When the service, the link and Claude are green: "Set up my first client" (primary) + "Try the sample clip".
@@ -61,16 +66,30 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
     if (kind === "error" || kind === "warn") {
       /* needs the person: one sentence, one button, one link; the facts live behind the link */
       o.under = '<div class="m-row mt-1">' + M.linkbtn(t("privacy.link"), "info") + '</div>';
-    } else {
-      o.explain = t("checklist.claude.explain"); o.account = t("claude.cost"); o.privacy = t("privacy.claude_sees");
+      return row(kind, t("checklist.claude"), o);
     }
-    return row(kind, t("checklist.claude"), o);
+    if (kind !== "ok") { o.explain = t("checklist.claude.explain"); return row(kind, t("checklist.claude"), o); }
+    /* healthy: "Signed in" + one cost line + the links; the approved D-01 / D-03 / D-02 lines behind "Cost and privacy" */
+    var open = !!o.open;
+    var links = '<div class="m-row m-wrap mt-1">' +
+      '<div class="m-linkcell">' + M.linkbtn(t("plans.link"), "external-link") + '</div>' +
+      '<div class="m-linkcell">' + M.linkbtn(t("privacy.link"), "info") + '</div>' +
+      '<div class="m-linkcell">' + M.linkbtn(t(open ? "firstrun.cost.less" : "firstrun.cost.more"), open ? "chevron-up" : "chevron-down") + '</div></div>';
+    var more = !open ? '' :
+      '<div class="m-inset mt-2"><div class="t-meta tx-muted">' + t("claude.cost") + '</div>' +
+      '<div class="m-saved mt-2">' + M.ico("lock", 16, "ink-muted") + '<div class="m-col ms-2 m-grow"><div class="t-meta tx-muted">' + t("privacy.claude_sees") + '</div>' +
+        '<div class="t-meta tx-muted mt-1">' + t("privacy.extra") + '</div>' +
+        '<div class="t-meta tx-muted mt-1">' + t("claude.data") + '</div>' + M.dataLink() + '</div></div></div>';
+    return '<div class="m-check">' + M.status("ok") +
+      '<div class="m-check-text"><div class="t-label">' + t("checklist.claude") + '</div>' +
+      '<div class="t-meta tx-muted">' + detail + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("claude.cost.short") + '</div>' + links + more + '</div></div>';
   }
   function primaryBtn(label, icon, focus) { return M.btn(label, { kind: "primary", icon: icon, focus: focus, kbd: true }); }
   function clientPrimary(focus) {
     return '<div class="m-col mt-3">' + M.btn(t("firstrun.client"), { kind: "primary", block: true, icon: "folder-input", focus: focus, kbd: true }) +
       '<div class="t-meta tx-muted mt-2">' + t("firstrun.client_hint") + '</div>' +
-      '<div class="m-col mt-3">' + M.btn(t("firstrun.sample"), { kind: "secondary", block: true, icon: "play" }) + '</div>' +
+      '<div class="m-col mt-3">' + M.btn(t("firstrun.sample"), { kind: "secondary", block: true, icon: "play", cls: "m-needs-host" }) + '</div>' +
       '<div class="t-meta tx-muted mt-2">' + t("firstrun.sample_hint") + '</div></div>';
   }
   function intro(done, kind, extra, finished) {
@@ -82,10 +101,10 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
     /* one support action (H24): copy only while the page is not live, copy and open when it is; the reply promise shows when live */
     return '<div class="mt-3">' + M.supportRow({ flush: true, promise: true }) + '</div>';
   }
-  function threeGreenRows(focus) {
+  function threeGreenRows(focus, open) {
     return serviceRow("ok", t("checklist.engine.ok")) +
       row("ok", t("checklist.premiere"), { detail: t("checklist.premiere.ok") }) +
-      claudeRow("ok", t("checklist.claude.ok")) +
+      claudeRow("ok", t("checklist.claude.ok"), { open: open }) +
       row("pending", t("checklist.clients"), { detail: t("checklist.clients.none"), under: clientPrimary(focus) });
   }
   function noClaude(missing) {
@@ -113,7 +132,8 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
             row("pending", t("checklist.clients"), { detail: t("status.pending") }), "m-card-flush mt-3")
       };
     },
-    normal: function () { return { body: intro(3) + M.card(threeGreenRows(false), "m-card-flush mt-4") }; },
+    normal: function () { return { body: intro(3) + M.card(threeGreenRows(false, M.live), "m-card-flush mt-4") }; },
+    "cost-open": function () { return { body: intro(3) + M.card(threeGreenRows(false, true), "m-card-flush mt-4") }; },
     focus: function () { return { body: intro(3) + M.card(threeGreenRows(true), "m-card-flush mt-4") }; },
     error: function () {
       return {
@@ -159,11 +179,13 @@ notice in (stale, ready) | background-color, border-color | --mk-dur-base | noti
 
   M.mount({
     id: "P-01", name: "First-run checklist",
-    states: ["loading", "normal", "normal-live", "focus", "error", "error-live", "offline", "no-claude-signed-out", "no-claude-missing", "stale", "success", "long"],
+    states: ["loading", "normal", "normal-live", "cost-open", "focus", "error", "error-live", "offline", "no-claude-signed-out", "no-claude-missing", "stale", "success", "long"],
     defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
-      v.noclient = true; v.setup = true; v.tab = null;
+      /* setup progress for the header: "Setting up · 3 of 4" while a step is open (R3 F-01) */
+      var done = { loading: 0, offline: 0, error: 2, "no-claude-signed-out": 2, "no-claude-missing": 2, success: 4, long: 4 }[state];
+      v.noclient = true; v.setup = { done: done === undefined ? 3 : done, of: 4 }; v.tab = null;
       return v;
     }
   });

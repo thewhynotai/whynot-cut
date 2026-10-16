@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="mock-states" content="checksum,checksum-live,manifest,manifest-live,address,dlfail,nointernet,diskfull,panel,hostopen,focus,long,win">
 <meta name="mock-widths" content="760,640">
-<meta name="mock-keys" content="Return: the card's one fix (Try again / Check again / Show me) · Esc: Close · S: Save a report for support · Tab order: fix, Copy details for support (live: Copy details and open support), Save a report for support, Show details, Close">
+<meta name="mock-keys" content="Return: the card's one fix (Try again / Check again / Show me) · Esc: Close · S: Save a report for support · Tab order: fix, Copy details and open WhatsApp (?support=off: Copy details for support), Save a report for support, Show details, Close">
 <meta name="mock-motion" content="the card enters a reserved slot above the list by colour (200 ms); the stopped row turns red by fill colour in place; on Try again the fix button shows a spinner with its width locked; static fallback: final state">
 <title>I-07 Failure cards</title>
 <link rel="stylesheet" href="../mockup.css">
@@ -28,7 +28,7 @@
    and resume-from-where-it-stopped need the core's partial-download support.
    Support (D-05, H24: never link to a page that isn't live): the installer core sends the support address only when
    thewhynot.ai/support is published. NOT LIVE (the default): "Copy details for support" copies only and "Support page
-   coming soon" sits beside it. LIVE (checksum-live): "Copy details and open support" is one click and the card adds
+   coming soon" sits beside it. [R3: Support (D-05 update 2026-10-16, R3-fix-list S-01): the WhatsApp chat is live, so the support action is "Copy details and open WhatsApp" + the reply promise by default; ?support=off draws the copy-only alternate.] LIVE (checksum-live): "Copy details and open support" is one click and the card adds
    "We reply within one working day (Sun–Thu, Cairo time)." The same two states apply to every failure card (M.supportParts).
    The download page (manifest card, thewhynot.ai/download) is gated the same way (H24): NOT LIVE (manifest, win) = the plain
    line "Download page coming soon", no address and no button; LIVE (manifest-live) = the address and "Open download page".

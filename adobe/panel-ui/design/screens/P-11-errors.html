@@ -32,6 +32,7 @@
    - D-05 + H24: the support action is shared (M.supportParts). NOT LIVE (the default; nothing is published): "Copy details
      for support" only copies and "Support page coming soon" sits beside it. LIVE (the engine provides support.url; the
      "-live" states): "Copy details and open support" is one click and the card adds "We reply within one working day
+     [R3: Support (D-05 update 2026-10-16, R3-fix-list S-01): the WhatsApp chat is live, so the support action is "Copy details and open WhatsApp" + the reply promise by default; ?support=off draws the copy-only alternate.]
      (Sun–Thu, Cairo time)." The dismissed card says what happened in each state.
    R2 D-P1-10: no developer words ("a message was too large" is "the connection closed unexpectedly").
    R2 D-P0-1: each state sets the header to match its cards (pills for one cause, else the shell derives the pill).
@@ -150,7 +151,7 @@
         M.notice("error", t("p11.c.timeout"), { sub: t("p11.c.timeout.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", disabled: true } })
       ]) };
     },
-    dismissed: function () { return { body: top() + group("p11.g.dismissed", [M.notice("ok", t(M.live ? "p11.copied.live" : "p11.copied"))]) }; },
+    dismissed: function () { return { body: top() + group("p11.g.dismissed", [M.notice("ok", t(M.supportLive ? "p11.copied.live" : "p11.copied"))]) }; },
     focus: function () { return { pills: { engine: "off" }, body: top() + G.absent({ focus: true }) }; },
     long: function () { return { body: top() + G.claude() + G.validation() }; }
   };

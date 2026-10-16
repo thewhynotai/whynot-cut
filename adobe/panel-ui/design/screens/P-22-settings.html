@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="mock-states" content="loading,normal,normal-live,advanced,formula,focus,saved,apikey,apikey-saved,error,offline,no-claude,support,support-live,support-empty,long">
-<meta name="mock-keys" content="Cmd/Ctrl+,: open Settings from anywhere in the panel; Tab order follows the page top to bottom (language, Change, start-up, AI choice, Advanced settings, Models, tool rows, Export my week, Details for support, Copy details and open support, Open guide); Space: tick a box or pick a choice; the name is locked (read-only); Cmd/Ctrl+Enter: the violet fix of a card on top; Esc: back to Home (or closes Details for support when it is open)">
+<meta name="mock-keys" content="Cmd/Ctrl+,: open Settings from anywhere in the panel; Tab order follows the page top to bottom (language, Change, start-up, AI choice, Advanced settings, Models, tool rows, Export my week, Details for support, Copy details and open WhatsApp, Open guide); Space: tick a box or pick a choice; the name is locked (read-only); Cmd/Ctrl+Enter: the violet fix of a card on top; Esc: back to Home (or closes Details for support when it is open)">
 <meta name="mock-motion" content="Saved: the green check and word fade in 150 ms next to the control, stay 2 s, fade out 200 ms (the space is reserved, nothing moves); radio dot and check box fill 150 ms ease; Details for support opens with a 200 ms fade below its row (the one height change on this page, at the bottom; static fallback: instant); skeleton shimmer 1200 ms linear (static fallback: flat bars). No primary fill on this page.">
 <title>P-22 Settings</title>
 <link rel="stylesheet" href="../mockup.css">
@@ -33,6 +33,7 @@
      FAILED lines); ONE support action (R2 G-F-09, D-05): live = "Copy details and open support" (one click) + "We reply
      within one working day (Sun–Thu, Cairo time)."; not live (the default, H24) = "Copy details for support", which only
      copies, with the plain-text "Support page coming soon" beside it. Live states: normal-live, support-live.
+     R3: Support (D-05 update 2026-10-16, R3-fix-list S-01): the WhatsApp chat is live, so the support action is "Copy details and open WhatsApp" + the reply promise by default; ?support=off draws the copy-only alternate. "-live" now draws the guide and "Cost and data" live.
    - D-01 (cost): under the AI choice, "Each editor needs their own Claude Pro or Max plan, paid to Anthropic ..." and "See
      plans" (support.claude.com, live); the API-key mode (Advanced, owner) says "Paid per use to Anthropic. Not needed if
      you have Pro or Max" and is never the default. D-02 + D-03: the privacy section carries the approved privacy line, the
@@ -127,6 +128,8 @@
   }
   function privacy() {
     var line = function (h, i) { return PC.iconrow(M.ico("circle-check", 16, "ink-ok"), h, i ? "mt-2" : ""); };
+    /* R3 decision 2 (owner N-01): the green ticks speak only for WhyNot Cut ("trains on nothing"); the D-02 line about what
+       Claude reads keeps the neutral info icon, never a tick */
     /* D-03 line, no telemetry, trains on nothing, then the D-02 data line; "Cost and data" only when live (H24) */
     return sec(t("p22.privacy"), '<div class="m-col">' + line(t("p22.privacy.fact"), 0) + line(t("p22.privacy.telemetry"), 1) + line(t("p22.privacy.training"), 2) +
       PC.iconrow(M.ico("info", 16, "ink-muted"), t("claude.data"), "mt-2") + "</div>" + M.dataLink());
@@ -136,10 +139,9 @@
       '<div class="t-label ms-2 m-grow">' + (open ? t("p22.support.hide") : t("p22.support.show", { n: P.log.length })) + "</div>" +
       /* keycap and chevron side by side (the keycap first, as on buttons) */
       '<div class="m-row ms-2">' + (open ? PC.key("Esc") : "") + '<span class="ms-2">' + M.ico(open ? "chevron-up" : "chevron-down", 16, "ink-muted") + "</span></div></div>";
-    /* H24: the support address is read only when the engine provides it (M.live); not live, the button only copies */
-    var where = M.live
-      ? t("p22.support.opens", { url: M.html(M.ltr(D.support.url.replace("https://", ""), "lat")) })
-      : t("p22.support.copyonly");
+    /* D-05 update (2026-10-16): support.url is the WhatsApp chat (live by default, M.supportLive); the details are
+       copied first and never put in the link. ?support=off: the button only copies */
+    var where = M.supportLive ? t("p22.support.opens") : t("p22.support.copyonly");
     return sec(t("p22.support"), '<div class="t-meta tx-muted">' + t("p22.support.sub") + "</div>" +
       '<div class="t-meta tx-muted mt-1">' + where + "</div>" +
       '<div class="m-col mt-2">' + toggle + "</div>" +
