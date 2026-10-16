@@ -528,7 +528,7 @@ def stop(home=None, *, wait: float = STOP_WAIT) -> dict:
     deadline = time.monotonic() + max(0.0, float(wait))
     while True:
         gone = (security.read_engine_json(home) or {}).get("pid") != pid
-        exited = None if own else not _alive(info)
+        exited = None if own else (not _alive(info) or (gone and _zombie(pid)))   # a zombie only once it let go
         pointer = gone and _points_at(disc, home, pid, created)
         if pointer and exited:         # the daemon exited without removing it (its retries ran out): a dead pid's
             security.remove_engine_json(disc, pid, pid_created=created)     # record, removed pid- and start-guarded
@@ -552,3 +552,32 @@ def stop(home=None, *, wait: float = STOP_WAIT) -> dict:
 
 def _in_process(pid) -> bool:
     return pid == os.getpid()
+
+
+def _zombie(pid) -> bool:
+    """Has POSIX process `pid` ended but not been reaped yet (a zombie)? Its parent (a test, a launcher) may not have
+    waited for it, and os.kill(pid, 0) and `ps` still report a zombie; it runs no code and holds no port. Windows has
+    none. Linux reads /proc/<pid>/stat, macOS / BSD runs ps with fixed arguments (no shell)."""
+    if os.name == "nt":
+        return False
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    try:                               # the state is the first field after the ")" that closes the command name
+        stat = Path(f"/proc/{pid}/stat").read_text(encoding="ascii", errors="replace")
+        return stat.rpartition(")")[2].split()[:1] == ["Z"]
+    except OSError:
+        if os.path.isdir("/proc/self"):  # Linux: no stat file = no such process
+            return False
+    ps = next((p for p in ("/bin/ps", "/usr/bin/ps") if os.path.exists(p)), None)
+    if ps is None:
+        return False
+    try:
+        out = subprocess.run([ps, "-o", "stat=", "-p", str(pid)], stdin=subprocess.DEVNULL, capture_output=True,
+                             text=True, timeout=2.0).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return out.strip().startswith("Z")

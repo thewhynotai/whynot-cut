@@ -935,5 +935,66 @@ class AuditBounded(_Home):
         self.assertTrue(any(r["event"] == "audit" and r["outcome"] == "truncated" for r in rows), rows[:2])
 
 
+class StopSeesAZombieAsExited(unittest.TestCase):
+    """On POSIX an exited child its parent has not reaped yet (a zombie) still passes os.kill(pid, 0) and shows in
+    `ps`, so stop() saw a daemon that had shut down as "did not exit" for its whole STOP_WAIT (state "stopping")."""
+
+    def _stop_with(self, pid, *, zombie=None):
+        home = Path(tempfile.mkdtemp(prefix="wnc-zombie-"))
+        self.addCleanup(shutil.rmtree, home, True)
+        info = {"pid": pid, "pid_created": None, "port": 1, "token": "t"}
+        patches = [mock.patch.object(daemon, "_own_record", return_value=info),
+                   mock.patch.object(daemon, "_discovery_for", return_value=None),
+                   mock.patch.object(daemon, "_http", return_value=(202, None)),
+                   mock.patch.object(daemon.security, "read_engine_json", return_value={})]
+        if zombie is not None:
+            patches.append(mock.patch.object(daemon, "_zombie", side_effect=zombie))
+        with contextlib.ExitStack() as st:
+            for p in patches:
+                st.enter_context(p)
+            t0 = time.monotonic()
+            res = daemon.stop(home, wait=2.0)
+            return res, time.monotonic() - t0
+
+    def test_a_live_pid_that_is_a_zombie_counts_as_exited(self):
+        # a live process (this test's own child) stands in for the zombie: only _zombie() says it has ended
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: (p.kill(), p.wait(T)))
+        res, took = self._stop_with(p.pid, zombie=lambda pid: int(pid) == p.pid)
+        self.assertTrue(res["ok"], res)
+        self.assertEqual((res["state"], res["exited"]), ("stopped", True), res)
+        self.assertLess(took, 1.0, res)
+
+    def test_a_running_process_is_not_a_zombie(self):
+        p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(lambda: (p.kill(), p.wait(T)))
+        self.assertFalse(daemon._zombie(p.pid))
+        res, _ = self._stop_with(p.pid)
+        self.assertFalse(res["ok"], res)
+        self.assertEqual(res["state"], "stopping", res)
+
+    def test_no_pid_or_a_gone_pid_is_not_a_zombie(self):
+        for pid in (None, "x", 0, -5, dead_pid()):
+            self.assertFalse(daemon._zombie(pid), pid)
+
+    @unittest.skipIf(WIN, "Windows has no zombie processes")
+    def test_a_real_unreaped_child_stops_at_once(self):
+        p = subprocess.Popen([sys.executable, "-c", "pass"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        self.addCleanup(p.wait, T)                      # reaped only after the checks: until then it is a zombie
+        for _ in range(int(T / 0.05)):
+            if daemon._zombie(p.pid):
+                break
+            time.sleep(0.05)
+        else:
+            self.fail("the exited child never showed as a zombie")
+        self.assertTrue(daemon.writer_lock.pid_alive(p.pid), "os.kill(pid, 0) no longer sees the zombie")
+        res, took = self._stop_with(p.pid)
+        self.assertEqual((res["state"], res.get("exited")), ("stopped", True), res)
+        self.assertLess(took, 1.0, res)
+
+
 if __name__ == "__main__":
     unittest.main()
