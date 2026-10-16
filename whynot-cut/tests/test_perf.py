@@ -65,28 +65,38 @@ class TestParallelMap(unittest.TestCase):
         return t
 
     def test_ctrl_c_cancels_the_queued_items(self):
-        """T2.14 review I1: 12 slow items, 2 workers, Ctrl+C at 0.05 s -> raised at once, no queued item starts."""
+        """T2.14 review I1: 12 items, 2 workers, Ctrl+C while both run -> raised at once, no queued item starts.
+        Event-ordered, not clock-ordered (Phase 4: a Ctrl+C on a timer at 0.05 s came before the 2nd worker had started
+        under load, started == [0], in the installer's t9r9 suite): the items block until the test releases them, and
+        Ctrl+C comes only once both run, so the raise cannot be waiting for them."""
+        import _thread
         import threading
         import time
         from lib.parallel import parallel_map
         started, lock = [], threading.Lock()
+        both, release, raised_at = threading.Event(), threading.Event(), {}
 
         def slow(i):
             with lock:
                 started.append(i)
-            time.sleep(0.4)
+                if len(started) == 2:
+                    both.set()
+            release.wait(30)
             return i
-        t0 = time.monotonic()
-        timer = self.interrupt_at(0.05)
+
+        def interrupt_when_both_run():
+            if both.wait(60):
+                raised_at["ctrl_c"] = time.monotonic()
+                _thread.interrupt_main()
+        threading.Thread(target=interrupt_when_both_run, daemon=True).start()
         try:
             with self.assertRaises(KeyboardInterrupt):
                 parallel_map(slow, range(12), workers=2)
+            gap = time.monotonic() - raised_at["ctrl_c"]
         finally:
-            timer.cancel()
-        # not after the 12 items (12 x 0.4 s / 2 workers = 2.4 s); the bound leaves room for a busy machine (a full
-        # suite next to GPU jobs measured 1.5 s for the raise), the real proof is the line after the sleep below
-        self.assertLess(time.monotonic() - t0, 2.0)
-        time.sleep(0.8)                                                   # the running two end; nothing new starts
+            release.set()                       # the two running items end now; a queued one would start right after
+        self.assertLess(gap, 5.0)               # raised while both items still block: never waited for them (30 s)
+        time.sleep(0.5)
         self.assertEqual(sorted(started), [0, 1])
 
     def test_ctrl_c_kills_the_processes_the_workers_registered(self):
