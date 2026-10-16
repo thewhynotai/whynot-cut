@@ -38,12 +38,46 @@ fn focus_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     }
 }
 
+/// The app's own origin, the only place the window may navigate to: `http://tauri.localhost` on Windows (Tauri's
+/// custom protocol over WebView2), `tauri://localhost` on macOS/Linux. CSP does not govern navigation, so this does.
+/// (Tauri itself always lets its isolation iframe load; that check runs before ours.)
+pub fn is_app_url(url: &tauri::Url) -> bool {
+    is_app_url_on(url, cfg!(windows))
+}
+
+/// `is_app_url` for a given platform (testable on every OS).
+pub fn is_app_url_on(url: &tauri::Url, windows: bool) -> bool {
+    let (scheme, host) = if windows { ("http", "tauri.localhost") } else { ("tauri", "localhost") };
+    url.scheme() == scheme
+        && url.host_str() == Some(host)
+        && url.port().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+}
+
 /// Start the app.
 pub fn run() {
     tauri::Builder::default()
         // single-instance must be the first plugin (upstream rule): the second process exits before anything else.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| focus_main_window(app)))
         .invoke_handler(tauri::generate_handler![app_info])
+        .setup(|app| {
+            // The window is declared in tauri.conf.json with create:false and built here, so it gets the guards:
+            // navigation only within the bundle, and no new windows at all (window.open, target=_blank).
+            let conf = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|w| w.label == "main")
+                .cloned()
+                .ok_or("tauri.conf.json has no main window")?;
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &conf)?
+                .on_navigation(|url| is_app_url(url))
+                .on_new_window(|_url, _features| tauri::webview::NewWindowResponse::Deny)
+                .build()?;
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("WhyNot Cut Setup could not start");
 }
@@ -63,9 +97,10 @@ mod tests {
 
     const ISOLATION_STYLE_HASH: &str = "'sha256-YEercZJImS+vUX2bz7vkQ0aA4rtBIPLuCEWz+yraQ/g='";
     const CSP: &str = "default-src 'self'; script-src 'self'; \
-                       style-src 'self' 'sha256-YEercZJImS+vUX2bz7vkQ0aA4rtBIPLuCEWz+yraQ/g='; img-src 'self' data:; \
+                       style-src 'self' 'sha256-YEercZJImS+vUX2bz7vkQ0aA4rtBIPLuCEWz+yraQ/g='; img-src 'self'; \
                        font-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; \
-                       base-uri 'none'; frame-ancestors 'none'";
+                       base-uri 'none'; form-action 'none'; frame-ancestors 'none'; \
+                       require-trusted-types-for 'script'; trusted-types 'none'";
 
     fn context() -> tauri::Context<tauri::Wry> {
         tauri::generate_context!()
@@ -165,13 +200,27 @@ mod tests {
         }
         let mut files = Vec::new();
         walk(&ui, &ui, &mut files);
+        let vendor: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(ui.join("vendor.json")).unwrap()).unwrap();
+        // With ui/stage.json, exactly its files ship and nothing in dev_only does.
+        if let Ok(text) = std::fs::read_to_string(ui.join("stage.json")) {
+            let list: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let strs = |k: &str| -> Vec<String> {
+                list[k].as_array().unwrap().iter().map(|x| x.as_str().unwrap().to_owned()).collect()
+            };
+            files.retain(|f| f != "stage.json");
+            let (ship, dev) = (strs("files"), strs("dev_only"));
+            for d in &dev {
+                assert!(assets.get(&AssetKey::from(d.as_str())).is_none(), "dev_only {d} is shipped");
+            }
+            files.retain(|f| ship.contains(f));
+            assert_eq!(files.len(), ship.len(), "every listed file exists in ui/");
+        }
         assert!(files.iter().any(|f| f == "index.html"));
         for f in &files {
             assert!(assets.get(&AssetKey::from(f.as_str())).is_some(), "ui/{f} missing from the app");
         }
         // 2. every vendor file, byte-equal to its one source in the repo
-        let vendor: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(ui.join("vendor.json")).unwrap()).unwrap();
         let entries = vendor["files"].as_array().unwrap();
         assert!(!entries.is_empty());
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
@@ -182,12 +231,50 @@ mod tests {
         }
         // 3. build metadata is not shipped
         assert!(assets.get(&AssetKey::from("vendor.json")).is_none());
+        assert!(assets.get(&AssetKey::from("stage.json")).is_none());
         // 4. the header is the only CSP in the app: no staged page keeps the meta (build_support/csp.rs)
         for f in files.iter().filter(|f| f.ends_with(".html")) {
             let html = assets.get(&AssetKey::from(f.as_str())).unwrap();
             let html = String::from_utf8_lossy(html.as_ref()).to_ascii_lowercase();
             assert!(!html.contains("content-security-policy"), "{f} still carries a CSP meta");
         }
+    }
+
+    // --- navigation guard -------------------------------------------------------------------------------------
+
+    fn u(s: &str) -> tauri::Url {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn windows_allows_only_its_own_origin() {
+        for ok in ["http://tauri.localhost/", "http://tauri.localhost/index.html?lang=ar&os=win#top",
+                   "http://tauri.localhost/js/main.js"] {
+            assert!(is_app_url_on(&u(ok), true), "{ok} must be allowed");
+        }
+        for bad in ["https://tauri.localhost/", "http://tauri.localhost:8080/", "http://user@tauri.localhost/",
+                    "http://u:p@tauri.localhost/", "http://tauri.localhost.evil.example/", "http://evil.example/",
+                    "https://wa.me/201000000000", "http://ipc.localhost/app_info", "http://localhost/",
+                    "tauri://localhost/", "file:///C:/Windows/win.ini", "about:blank", "javascript:alert(1)",
+                    "data:text/html,hi", "blob:http://tauri.localhost/x"] {
+            assert!(!is_app_url_on(&u(bad), true), "{bad} must be refused");
+        }
+    }
+
+    #[test]
+    fn macos_allows_only_its_own_origin() {
+        assert!(is_app_url_on(&u("tauri://localhost/index.html"), false));
+        for bad in ["http://tauri.localhost/", "tauri://evil/", "tauri://localhost.evil/", "https://localhost/",
+                    "tauri://user@localhost/", "file:///etc/passwd", "about:blank"] {
+            assert!(!is_app_url_on(&u(bad), false), "{bad} must be refused");
+        }
+    }
+
+    #[test]
+    fn the_main_window_is_built_in_code_with_the_guards() {
+        // create:false in the config, so run() builds it with on_navigation + on_new_window (Deny).
+        let ctx = context();
+        assert!(!ctx.config().app.windows[0].create);
     }
 
     #[test]
