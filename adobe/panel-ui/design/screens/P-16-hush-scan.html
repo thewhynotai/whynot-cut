@@ -43,9 +43,9 @@
     o = o || {};
     var tracks = [["V1", "on"], ["V2", "off"], ["A1", "on"], ["A2", o.locked ? "locked" : "on"]];
     /* o.noScan: the notice above carries the one "Scan again" */
-    var scan = o.scanBtn || (o.noScan ? "" : M.btn(t("p16.rescan"), { icon: "refresh-cw", disabled: o.disabled }));
+    var scan = o.scanBtn || (o.noScan ? "" : M.btn(t("p16.rescan"), { icon: "refresh-cw", disabled: o.disabled, cls: "m-needs-host" }));
     return M.card('<div class="t-label">' + t("p16.target", { label: M.raw("p16.target.whole") }) + '</div>' +
-      '<div class="t-meta tx-muted">' + t("p13.sequence", { name: M.html(M.mono(o.seq || X.seq)) }) + '</div>' +
+      '<div class="t-meta tx-muted">' + t("p13.sequence", { name: TA.mono(o.seq || X.seq) }) + '</div>' +
       '<div class="t-meta tx-muted mt-1">' + t("p16.target.hint") + '</div>' +
       '<div class="t-meta tx-muted mt-3">' + t("p16.tracks") + '</div>' + TA.tracks(tracks, { disabled: o.disabled }) +
       TA.row(M.status("warn", 16), t("p16.not_moving", { tracks: M.html(M.ltr("V2")) }), "mt-2") +

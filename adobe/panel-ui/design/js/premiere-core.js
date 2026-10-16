@@ -3,7 +3,7 @@
    <span> chips, inline SVG coloured by .ink-* classes, physical margins).
    R2: everything the shell now owns is used from M (notice, slot, offline / noClaude / stale / noNet, dialog, radio,
    tile / media, listrow, stages, bullet, back, trust / saved, logline, path / mid). What is left here is group-only:
-   - PC.code / PC.title / PC.acts: an item code in a sentence, title + sub, a wrapping row of buttons (280 px safe);
+   - PC.code / PC.seq / PC.title / PC.acts: an item code in a sentence, title + sub, a wrapping row of buttons (280 px safe);
    - PC.pick: the selectable list row of the client and clip pickers (a control, not a plain row);
    - PC.key / PC.kbtn / PC.k: keycaps through the shell's M.kbd (never on a danger button: M.btn refuses it);
    - PC.info / PC.iconrow: an info line and an icon + sentence row built on the shell's .m-saved row;
@@ -17,12 +17,15 @@
   var PC = (window.PC = { state: q.get("state"), D: window.PC_DATA });
   if (PC.state === "long") for (var k in PC.D.long) PC.D[k] = PC.D.long[k];
 
-  /* a long file name breaks only at "_" (R2 designer P2-9); a short code never breaks. In a sentence only. */
-  function soft(s) { return M.esc(s).replace(/(_)/g, "$1<wbr>"); }
+  /* R3 (designer F-17, fix list S-13): an item code or file name in a sentence is ONE no-break run; one longer than 22
+     characters keeps its start and its end with a middle ellipsis (M.mid), so it never breaks mid-token ("C0239_ / v3"). */
   PC.code = function (s) {
-    return String(s).length <= 12 ? M.html(M.ltr(s, "lat code pc-nb")) : M.html('<bdi dir="ltr" class="lat code pc-cw">' + soft(s) + "</bdi>");
+    s = String(s);
+    return M.html(M.ltr(s.length <= 22 ? s : M.mid(s, 22), "lat code pc-nb"));
   };
-  /* a name in a row that must stay on one line: middle ellipsis keeps the start and the end */
+  /* R3 (editor P1-04, fix list S-19): the NEW sequence is named once, from plan.sequence_name (MOCK_DATA.seq), as one
+     no-break mono run (middle ellipsis when too long). P-06, P-07, P-09 and the support log all say the same name. */
+  PC.seq = function () { return M.html(M.ltr(M.mid(String(M.D.seq), 22), "mono pc-nb")); };
   PC.name = function (s, max) { return M.html(M.ltr(M.mid(String(s), max || 22), "lat code pc-nb")); };
   PC.title = function (title, sub) {
     return '<div class="t-title">' + title + "</div>" + (sub ? '<div class="t-body tx-muted mt-1">' + sub + "</div>" : "");
@@ -59,6 +62,14 @@
   };
   /* indeterminate progress (G9) */
   PC.indet = function () { return '<span class="pc-indet"></span>'; };
+  /* R3 (designer F-07, fix list S-06): work stopped by a problem is drawn paused, never running. The step strip keeps the
+     shell's "Step n of 7 · name" line (with the paused icon, M.steps(..., "paused")) and gets one more line under it:
+     "Paused · {reason}". strip = the M.steps markup, reason = the plain sentence. */
+  PC.pausedStrip = function (strip, reason) {
+    return strip.replace(/(m-grow">)([\s\S]*?)(<\/div><\/div><\/div>)$/, function (_, a, b, c) {
+      return a + b + '<div class="tx-warn">' + reason + "</div>" + c;
+    });
+  };
 
   /* ---- keyboard hints (Addendum G2) use the shell's keycap (M.kbd) and its OS switch (?os=win shows Ctrl).
      PC.k maps a short spec to the OS form: "enter" = the primary (M.KEY_PRIMARY), "mod+X" = Cmd/Ctrl + X, else as is. */

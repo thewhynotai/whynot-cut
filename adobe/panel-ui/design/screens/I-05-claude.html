@@ -61,7 +61,7 @@
   /* R2 D-P0-2: the title follows the state: Claude isn't installed -> Installing Claude... -> Sign in to Claude -> Claude is ready.
      The lead and "I already have Claude" only show before the install has started or after it failed. */
   function head(mode) {
-    var title = { run: "i05.title.installing", signin: "i05.title.signin", ready: "i05.title.ready" }[mode] || "i05.title";
+    var title = I.titleKey("I-05", I.state); /* R3 I-1: from the one table */
     var intro = !mode;
     return I.title(t(title)) + (intro ? '<div class="i-lead tx-muted mt-2">' + t("i05.text") + "</div>" +
       '<div class="m-row mt-1">' + M.btn(t("i05.have"), { kind: "ghost", icon: "refresh-cw", flush: true }) + "</div>" : "");
@@ -100,7 +100,7 @@
     error: function () { return { body: head() + refused() + how({ dl: "ok", ck: "error" }), rail: "error", bar: { start: skip() } }; },
     offline: function () {
       return {
-        body: head() + card(M.notice("warn", t("i05.offline", { url: url }), { dismiss: false, btn: { label: t("i03.again"), primary: true, icon: "refresh-cw" } })) + how() + know(),
+        body: head() + card(I.notice("warn", t("i05.offline", { url: url }), { dismiss: false, btn: { label: t("i03.again"), primary: true, icon: "refresh-cw" } })) + how() + know(),
         bar: { start: skip(), end: M.btn(t("i05.install"), { disabled: true, icon: "download" }) }
       };
     },

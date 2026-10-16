@@ -28,6 +28,9 @@
    - older: a plan that was approved with an older WhyNot Cut is back in the list as the first item (the engine's
      OLDER_APPROVAL text, verbatim). It is information, not a fault: an amber line (never red) and the normal flow, "Review
      and approve" (the one primary) opens the approval screen (P-07 older), where the editor approves it again.
+   - R3 (editor P1-01, fix list S-18, P-5): the older-approval row says WHO approved it, WHEN, with whom the lines were
+     confirmed, and how many lines are unchanged ("2 of 3 lines unchanged"), the same facts as P-07 older (previous_approval,
+     eng-data-contract §2.5); the claim row names who confirms: "The doctor or the sheikh".
    - empty is also the success state ("Nothing needs you right now."). Stale: not applicable. */
 (function () {
   var t = M.t, D = M.D, P = PC.D;
@@ -50,7 +53,15 @@
   ];
   /* a plan approved with an older WhyNot Cut: the detail line is the engine's text, in amber (information, not an error) */
   var PLAN = ["circle-check-big", "p10.k.plan", function () {
-    return '<div class="m-row-top">' + M.status("warn", 12) + '<div class="ms-1 m-grow tx-text">' + t("approval.older") + "</div></div>";
+    var prev = D.previous_approval.older, kept = 0;
+    D.flagged.forEach(function (f) {
+      prev.lines.forEach(function (l) { if (l.graphic_id === f.id && l.text === f.text && l.checked) kept++; });
+    });
+    var by = t("approval.older.by", { name: prev.by === "Yunus" ? D.editor : prev.by, date: M.raw("demo.date") }) +
+      (prev.confirmed_with ? " · " + t("approval.older.with", { who: D.who[M.lang] }) : "");
+    return '<div class="m-row-top">' + M.status("warn", 12) + '<div class="ms-1 m-grow tx-text">' + t("approval.older") + "</div></div>" +
+      '<div class="t-meta tx-muted mt-1">' + by + "</div>" +
+      '<div class="t-meta tx-muted mt-1">' + t(kept === D.flagged.length ? "approval.prev.all" : "p10.older.kept", { n: kept, of: D.flagged.length }) + "</div>";
   }, "p10.b.plan", "circle-check-big"];
   var NUMBERS = ["hash", "p10.k.numbers", function () { return t("p10.d.numbers", { tc: tc("00:00:31:20") }); }, "p10.b.numbers", "circle-check-big"];
 

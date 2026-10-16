@@ -41,15 +41,15 @@
     return M.card(M.saved(t("p17.value", { n: n, m: m })) + '<div class="t-body mt-2">' + t("p16.counts", { s: o.s || 18, f: o.f === undefined ? 6 : o.f }) + '</div>' + stats(o.after, o.saved) +
       '<div class="t-meta tx-muted mt-3">' + t("p17.backup") + '</div><div class="mt-1">' + TA.name(o.backup || X.hushBackup) + '</div>', "mt-4");
   }
-  /* Undo is a secondary with no keycap: right after the cut the violet is Done */
+  /* Undo is a secondary with no keycap: right after the cut the violet is Done. R3 (designer F-22): auto width, start-aligned. */
   function undoCard(o) {
     o = o || {};
     return M.card('<div class="m-row">' + M.ico("undo-2", 16, "ink-muted") + '<div class="t-label ms-2 m-grow">' + t("action.undo") + '</div></div>' +
       '<div class="t-meta tx-muted mt-2">' + t("p17.undo.hint") + '</div><div class="mt-1">' + TA.name(o.cut || X.hushCut) + '</div>' +
-      '<div class="m-col mt-3">' + M.btn(t("action.undo"), { kind: "secondary", block: true, icon: "undo-2", focus: o.focus }) + '</div>', "mt-4");
+      '<div class="m-row mt-3">' + M.btn(t("action.undo"), { kind: "secondary", icon: "undo-2", focus: o.focus, cls: "m-needs-host" }) + '</div>', "mt-4");
   }
   function after() {
-    return '<div class="ta-btnrow mt-4">' + M.btn(t("p13.done"), { kind: "primary" }) + M.btn(t("p17.reveal"), { kind: "ghost", icon: "eye" }) + '</div>';
+    return '<div class="ta-btnrow mt-4">' + M.btn(t("p13.done"), { kind: "primary" }) + M.btn(t("p17.reveal"), { kind: "ghost", icon: "eye", cls: "m-needs-host" }) + '</div>';
   }
   function ok(n) { return M.slot(M.notice("ok", t("p17.result", { n: n || 24, time: M.raw("p13.sec").replace("{n}", n === 20 ? "11" : "14") }))); }
 
@@ -68,7 +68,7 @@
             '<div class="mt-3">' + TA.wave({ regions: REGIONS, head: 22 }) + '</div>' +
             TA.ruler("00:00", "00:36", "01:12"), "mt-4") +
           '<div class="m-col mt-4">' + M.btn(t("p13.done"), { kind: "primary", block: true, icon: "check" }) + '</div>' +
-          '<div class="m-row mt-2">' + M.btn(t("p17.clear"), { kind: "ghost", icon: "bookmark-x", flush: true }) + '</div>'
+          '<div class="m-row mt-2">' + M.btn(t("p17.clear"), { kind: "ghost", icon: "bookmark-x", flush: true, cls: "m-needs-host" }) + '</div>'
       };
     },
     error: function () {

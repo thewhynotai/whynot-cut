@@ -41,7 +41,18 @@
    - H24: "Open guide" (thewhynot.ai/help) is the same: live states only; not live, the plain line "Guide coming soon".
    - apikey / apikey-saved: the key field; a saved key is never shown again. no-claude: the AI section's Claude card.
    - offline: everything that needs the service is disabled; language still works.
-   - error: one control failed; its card sits under it with Try again. Empty and stale: not applicable. */
+   - error: one control failed; its card sits under it with Try again. Empty and stale: not applicable.
+   - R3 (fix list P-7, P-9, P-10, S-01, S-20, S-23):
+     * Advanced (owner): "Combine the team's weeks" (reads every *-week.csv in the clients folder, writes one sheet: reels,
+       turnaround, estimated vs logged hours per editor; engine data E-5);
+     * the API-key sub no longer repeats the billing sentence (D-01 "Paid per use to Anthropic" covers it); the sign-off
+       hint names both kinds of lines; the sign-off lines quote the field as P-07 shows it («اتأكدت مع مين؟»);
+     * "How is this worked out?" has one formula per tool: Hush counts "pieces" (a pause or a filler word, 24 = 4 min), a new
+       Captions formula (38 s by hand per caption: 64 captions = about 40 min, the P-13 / P-20 number) and a Motion formula
+       (5 min by hand per finished second: 34 s = about 3 h, the A-04 number); the cap line applies to footage jobs only;
+       the AI job has ONE name, "Fix captions (Claude)", as in P-12;
+     * support card: the WhatsApp block, the reply promise and the guide "coming soon" line each sit under the one above with
+       the same 8 px; the "-live" twins differ only by "Cost and data" and the guide button. */
 (function () {
   var t = M.t, D = M.D, P = PC.D;
 
@@ -105,6 +116,10 @@
       '<div class="mt-3">' + PC.checkbox(t("p22.signoff.req"), true, { disabled: dis }) + "</div>" +
       '<div class="t-meta tx-muted mt-1">' + t("p22.signoff.req.hint") + "</div>" +
       '<span class="m-divider mt-3"></span>' +
+      '<div class="t-label mt-3">' + t("p22.team") + "</div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("p22.team.sub") + "</div>" +
+      PC.acts([M.btn(t("p22.team.btn"), { icon: "layers", disabled: dis })]) +
+      '<span class="m-divider mt-3"></span>' +
       '<div class="t-label mt-3">' + t("p22.adv.risky") + "</div>" +
       '<div class="mt-1">' + PC.checkbox(t("p22.backup"), true, { disabled: dis }) + "</div>" +
       '<div class="t-meta tx-muted mt-1">' + t("p22.backup.hint") + "</div>", "mt-4");
@@ -121,10 +136,10 @@
     var f = function (k) { return '<div class="t-meta tx-muted mt-1">' + t(k) + "</div>"; };
     return sec(t("p22.rate"), '<div class="t-label">' + t("p22.rate.label") + "</div>" +
       '<div class="m-row mt-2"><div class="m-inset m-row">' + M.ico("lock", 16, "ink-muted") + '<span class="t-body ms-2">' + M.ltr(String(P.rate), "lat") + "</span></div>" +
-        '<span class="ms-2"></span>' + M.chip("neutral", t("p22.rate.agency"), "lock") + "</div>" +
+        '<span class="ms-2"></span>' + M.chip("neutral", t("p22.rate.agency")) + "</div>" +
       '<div class="t-meta tx-muted mt-2">' + t("p22.rate.hint") + "</div>" +
       '<div class="mt-2">' + M.sechead(t("p22.how"), "", !!o.formula) + "</div>" +
-      (o.formula ? f("p22.f.reel") + f("p22.f.hush") + f("p22.f.tidy") + f("p22.f.captions") + f("p22.f.cap") : ""));
+      (o.formula ? f("p22.f.reel") + f("p22.f.hush") + f("p22.f.tidy") + f("p22.f.kalam") + f("p22.f.captions") + f("p22.f.motion") + f("p22.f.cap") : ""));
   }
   function privacy() {
     var line = function (h, i) { return PC.iconrow(M.ico("circle-check", 16, "ink-ok"), h, i ? "mt-2" : ""); };
@@ -148,7 +163,7 @@
       (open ? '<div class="mt-2">' + M.logline(lines) + "</div>" : "") +
       '<div class="mt-2">' + M.supportRow({ kind: "secondary", promise: true }) + "</div>" +
       /* H24: "Open guide" opens thewhynot.ai/help (MOCK_DATA.support.guide_url), not published yet: not live = the plain line */
-      (M.live ? PC.acts([M.btn(t("p22.guide"), { kind: "ghost", icon: "life-buoy", flush: true })]) : M.soonLine("guide.soon", "mt-3")) +
+      (M.live ? PC.acts([M.btn(t("p22.guide"), { kind: "ghost", icon: "life-buoy", flush: true })]) : M.soonLine("guide.soon", "mt-2")) +
       '<div class="t-meta tx-muted mt-3">' + M.ltr("WhyNot Cut " + P.version, "lat") + "</div>");
   }
   function more(o) {

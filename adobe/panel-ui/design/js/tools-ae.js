@@ -158,5 +158,16 @@
     return '<div class="ta-srow ' + (cls || "mt-2") + '">' + iconHtml + '<div class="t-meta ms-2 m-grow">' + html + "</div></div>";
   };
   TA.code = function (s) { return M.html(M.ltr(s, "lat code")); };
-  TA.mono = function (s) { return M.html(M.mono(s)); };
+  /* R3 (designer F-09, F-17): a file, sequence, project or font name inside a sentence is ONE no-break LTR run; a name that is
+     too long for a line keeps its start and end with a middle ellipsis (M.mid), so it never breaks mid-token ("seque/nce_for_reels").
+     The full name is always shown in the inset well (TA.name) where the editor needs to read it all. */
+  TA.mono = function (s, max) { return M.html('<bdi dir="ltr" class="mono nowrap">' + M.esc(M.mid(s, max || 30)) + "</bdi>"); };
+  /* font names: each name is one no-break run (the list may wrap between names, never inside "IBM Plex Sans Arabic") */
+  TA.fonts = function (list) {
+    return M.html(list.map(function (f) { return '<bdi dir="ltr" class="lat nowrap">' + M.esc(f) + "</bdi>"; }).join(M.rtl ? "، " : ", "));
+  };
+  /* the reason a disabled main action is off: one meta line under it (R3 designer F-16). key = a string key */
+  TA.reason = function (key, cls) { return '<div class="t-meta tx-muted ' + (cls || "mt-2") + '">' + t(key) + "</div>"; };
+  /* the 300 and 280 px panels (A-01 puts a chip on its own row there) */
+  TA.narrow = W280 || M.w < 360;
 })();

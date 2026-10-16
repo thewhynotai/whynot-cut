@@ -29,8 +29,8 @@
    R2: "Setup sends nothing from your computer" (scoped, G-F-14); offline = "Installs without internet; Claude and sign-in need it
    later"; "Just for you. No admin password and no developer tools."; the list has plain locations only, no raw paths.
    States: loading (skeleton for the size line), normal, focus (keyboard on the primary), adds (the list open), upgrade
-   (2.2.1 found), offline (offline bundle: no internet needed), noclaude (Claude not installed: the I-05 path is
-   announced), internal (test build), error (the checks did not start: what, why, one fix, support), long (every
+   (2.2.1 found: the title and the main button say Update, R3 I-1), offline (the offline installer: an info notice that names it, R3 I-2), noclaude (Claude not installed: the I-05 path is
+   announced), internal (beta test build), error (the checks did not start: what, why, one fix, support), long (every
    notice, a large size), win (Windows chrome and copy). Empty, offline-without-bundle: handled on I-03 / I-07. */
 (function () {
   var t = I.T, D = I.D, st = I.state;
@@ -53,13 +53,14 @@
     var text = loading
       ? '<div class="m-skel-line mt-2" style="height:24px"><span class="m-skel-bar" style="width:72%"></span></div>'
       : '<div class="i-lead tx-muted mt-2">' + t("i01.text", { gb: I.gb(D.total) }) + "</div>";
-    return M.eyebrow(t("i01.eyebrow", { version: I.ver(D.version) })) + '<div class="i-display mt-2">' + t("i01.title") + "</div>" + text;
+    /* R3 I-1: the title follows the state (an earlier install = "Update WhyNot Cut"), from the one table I.TITLES */
+    return M.eyebrow(t("i01.eyebrow", { version: I.ver(D.version) })) + '<div class="i-display mt-2">' + t(I.titleKey("I-01", I.state)) + "</div>" + text;
   }
   function bar(o) {
     o = o || {};
     return {
       end: M.btn(t("i01.customise"), { disabled: o.disabled }) +
-        I.btn(t("i01.install"), { kind: "primary", icon: o.busy ? "busy" : "download", focus: o.focus, disabled: o.disabled, key: "enter" })
+        I.btn(t(o.update ? "i01.update" : "i01.install"), { kind: "primary", icon: o.busy ? "busy" : "download", focus: o.focus, disabled: o.disabled, key: "enter" })
     };
   }
   var notice = function (kind, key, vars) { return '<div class="mt-4">' + M.notice(kind, t(key, vars), { dismiss: false }) + "</div>"; };
@@ -69,8 +70,10 @@
     normal: function () { return { body: intro() + facts() + adds(), bar: bar() }; },
     focus: function () { return { body: intro() + facts() + adds(), bar: bar({ focus: true }) }; },
     adds: function () { return { body: intro() + facts() + adds(true), bar: bar(), scroll: "#adds" }; },
-    upgrade: function () { return { body: intro() + notice("info", "i01.upgrade", { app: I.app(D.old) }) + facts() + adds(), bar: bar() }; },
-    offline: function () { return { body: intro() + notice("ok", "i01.offline") + facts() + adds(), bar: bar() }; },
+    upgrade: function () { return { body: intro() + notice("info", "i01.upgrade", { app: I.app(D.old) }) + facts() + adds(), bar: bar({ update: true }) }; },
+    /* R3 I-2: an info notice that NAMES the offline installer (the old green "Installs without internet" contradicted I-03, where a
+       missing connection blocks the online installer); the page that hosts the offline installer is gated, so nothing links to it */
+    offline: function () { return { body: intro() + notice("info", "i01.offline") + facts() + adds(), bar: bar() }; },
     noclaude: function () { return { body: intro() + notice("info", "i01.noclaude") + facts() + adds(), bar: bar() }; },
     internal: function () { return { internal: true, body: intro() + notice("warn", "i01.internal") + facts() + adds(), bar: bar() }; },
     error: function () {
@@ -82,8 +85,8 @@
     long: function () {
       return {
         internal: true,
-        body: intro() + notice("info", "i01.upgrade", { app: I.app(D.old) }) + notice("ok", "i01.offline") + notice("info", "i01.noclaude") + notice("warn", "i01.internal") + facts() + adds(true),
-        bar: bar(), scroll: "#adds"
+        body: intro() + notice("info", "i01.upgrade", { app: I.app(D.old) }) + notice("info", "i01.offline") + notice("info", "i01.noclaude") + notice("warn", "i01.internal") + facts() + adds(true),
+        bar: bar({ update: true }), scroll: "#adds"
       };
     },
     win: function () { return { body: intro() + facts() + adds(), bar: bar() }; }

@@ -31,6 +31,10 @@ a Latin run renders as "Pro)" to a bilingual reader (R3 designer). Meaning uncha
 **P-22:** "Billed by Anthropic" stays. The API-key mode is labelled "Paid per use to Anthropic. Not needed if you
 have Pro or Max", and it is never the default.
 
+*Round 3 (2026-10-16):* the separate "Billed by Anthropic to your account." sentence is dropped from the P-22 API-key
+line (R3 editor E-P2-14: it repeated the line before it). "Paid per use to Anthropic" still says who bills, so the
+decision's meaning is unchanged; that label stays word for word.
+
 **Not in the UI:** a price list. One "from" price only, plus the link.
 
 ## D-02: client data at Anthropic (decided: option b now, c later)

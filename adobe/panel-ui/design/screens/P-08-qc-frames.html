@@ -27,7 +27,18 @@
    - R2 G-F-18: the chips say who acts: "Needs your editor" (fail) and "Claude is fixing" (after Fix this).
    - R2 D-P1-2: a frame whose file is gone counts as "missing", not "fail".
    - success: all passed; the strip advances to step 7 "Ready for you" and Open project is the violet.
-   - offline: tiles stay, tapping and the buttons are off. no-claude: the shell's Claude card; Fix this is off with the reason. */
+   - offline: tiles stay, tapping and the buttons are off. no-claude: the shell's Claude card; Fix this is off with the reason.
+   - R3 (R3-fix-list §2 P-1, P-2, S-06, S-07, S-14, S-15):
+     * a tile's title is the ELEMENT and its time ("Caption" over 00:00:14:08); the defect ("Runs past the safe area") shows
+       only while the tile fails, so a passing tile never carries a failure sentence;
+     * the footnote under the tiles is helper text with a muted info icon, never the red cross;
+     * the chip says "Has a problem" and the violet button "Let Claude fix it" (the editor is the one who presses it;
+       "needs your editor" read as someone else's job). A "needs you" chip would be drawn only when the fix really is the
+       editor's, with one line saying what to do: no state here has such a frame;
+     * work that cannot run (service off, Claude signed out, the export failed) is drawn paused or failed, never spinning:
+       step 6 reads "Paused · {reason}" and a video still that waits for Premiere shows "Not checked yet";
+     * a missing frame is one condition (M.COND.frame_missing): an amber notice, an amber chip and an amber tile, no violet
+       info icon; the notice's button is the screen's fix, so it has no close button. */
 (function () {
   var t = M.t, D = M.D;
   var WARN = { kind: "warn", text: t("pill.check") };
@@ -59,15 +70,24 @@
     else o.inner = PC.scene(i, THUMB_W, { safe: f.v === "fail" || f.v === "fixing", bad: f.v === "fail" });
     return M.media(o);
   }
+  /* the defect line of a failing frame (only while it fails); the rest say nothing */
+  var DEFECT = { "p08.l.cap": "p08.d.cap" };
   function tile(i, f, o) {
+    /* work that cannot run is not "loading": a still that waits for Premiere reads "Not checked yet" while the service is
+       off, Claude is signed out or the export failed (S-06) */
+    if (o.idle && f.v === "media") f = { tc: f.tc, v: "pending", l: f.l };
     var v = VERDICT[f.v], dis = o.disabled;
     var h = Math.round(THUMB_W * (o.aspect === "4x5" ? 5 / 4 : 16 / 9));
-    var head = still(i, f, h) + '<div class="t-mono tx-muted mt-2">' + M.mono(f.tc) + "</div>" +
-      '<div class="m-row mt-1">' + M.status(v[0], 12) + '<span class="t-caption ' + v[2] + ' ms-1">' + t(v[1]) + "</span></div>";
-    var html = M.tile({ media: head, label: t(f.l), reason: f.v === "media" ? t("p08.media.sub") : "", fail: f.v === "fail" || f.v === "fixing", focus: o.focus === i, disabled: dis });
+    /* title = the element and its time (two short lines: the time never breaks inside); then the verdict */
+    var title = t(f.l) + '<div class="t-mono tx-muted">' + M.mono(f.tc) + "</div>";
+    var verdict = '<div class="m-row mt-1">' + M.status(v[0], 12) + '<span class="t-caption ' + v[2] + ' ms-1">' + t(v[1]) + "</span></div>";
+    var failing = f.v === "fail" || f.v === "fixing";
+    var reason = f.v === "media" ? t("p08.media.sub") : failing && DEFECT[f.l] ? t(DEFECT[f.l]) : "";
+    var html = M.tile({ media: still(i, f, h), label: title, meta: verdict, reason: reason, fail: failing, focus: o.focus === i, disabled: dis });
+    if (f.v === "gone") html = html.replace(/class="m-tile(["\s])/, 'class="pc-tile-warn m-tile$1'); /* M.tile writes class="m-tile" bare when it has no modifier */
     var btn = "";
-    if (f.v === "fail") btn = '<div class="m-col mt-2">' + M.btn(t("p08.fix"), { kind: o.fixPrimary && !dis && !o.noClaude ? "primary" : "secondary", icon: "message-square", disabled: dis || o.noClaude, kbd: o.fixPrimary && !dis && !o.noClaude }) + "</div>";
-    if (f.v === "pending") btn = '<div class="m-col mt-2">' + PC.kbtn(t("p08.reexport"), "R", { icon: "refresh-cw", disabled: dis }) + "</div>";
+    if (f.v === "fail") btn = '<div class="m-col mt-2">' + M.btn(t("p08.fix"), { kind: o.fixPrimary && !dis && !o.noClaude ? "primary" : "secondary", cls: "m-btn-wrap", disabled: dis || o.noClaude, kbd: o.fixPrimary && !dis && !o.noClaude }) + "</div>";
+    if (f.v === "pending") btn = '<div class="m-col mt-2">' + PC.kbtn(t("p08.reexport"), "R", { icon: "refresh-cw", cls: "m-needs-host", disabled: dis }) + "</div>";
     return btn ? html.replace(/<\/div>$/, btn + "</div>") : html;
   }
   function tiles(frames, o) {
@@ -96,8 +116,8 @@
   }
   function failCard(o) {
     o = o || {};
-    return M.card('<div class="m-row-top">' + M.status("error") + '<div class="t-body ms-2 m-grow">' + t("p08.fail_hint") + "</div></div>" +
-      PC.acts([M.btn(t("p08.export"), { kind: "ghost", icon: "film", flush: true, disabled: o.disabled })]) +
+    return M.card('<div class="m-row-top">' + M.ico("info", 16, "ink-muted") + '<div class="t-body ms-2 m-grow">' + t("p08.fail_hint") + "</div></div>" +
+      PC.acts([M.btn(t("p08.export"), { kind: "ghost", icon: "film", flush: true, cls: "m-needs-host", disabled: o.disabled })]) +
       (o.noClaude ? '<div class="t-meta tx-muted mt-1">' + t("p08.no_claude") + "</div>" : ""), "mt-4");
   }
   function slot(n) { return n + '<div class="mt-4"></div>'; }
@@ -126,21 +146,26 @@
       return { status: { kind: "busy", text: t("p08.fixing") }, body: head(fr) + tiles(fr) + failCard() };
     },
     error: function () {
+      /* the export failed: step 6 says "didn't finish" (red, like P-06 failed), nothing spins */
+      var strip = M.steps(["done", "done", "done", "done", "done", "fail", "pend"], 5, "error");
       return { body: slot(M.notice("error", t("p08.failed", { item: code(D.item) }), { sub: t("p08.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
-        head(FRAMES) + tiles(FRAMES) + failCard() };
+        head(FRAMES, strip) + tiles(FRAMES, { idle: true }) + failCard() };
     },
     offline: function () {
+      var strip = PC.pausedStrip(M.steps(["done", "done", "done", "done", "done", "pend", "pend"], 5, "paused"), t("p08.paused.off"));
       return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },
-        body: slot(M.offline({ hintKey: "p08.offline_hint" })) + head(FRAMES) + tiles(FRAMES, { disabled: true }) + failCard({ disabled: true }) };
+        body: slot(M.offline({ hintKey: "p08.offline_hint" })) + head(FRAMES, strip) + tiles(FRAMES, { disabled: true, idle: true }) + failCard({ disabled: true }) };
     },
     "no-claude": function () {
+      var strip = PC.pausedStrip(M.steps(["done", "done", "done", "done", "done", "pend", "pend"], 5, "paused"), t("p08.paused.claude"));
       return { pills: { claude: "signed_out" },
-        body: slot(M.noClaude("signed_out")) + head(FRAMES) + tiles(FRAMES, { noClaude: true, fixPrimary: true }) + failCard({ noClaude: true }) };
+        body: slot(M.noClaude("signed_out")) + head(FRAMES, strip) + tiles(FRAMES, { noClaude: true, fixPrimary: true, idle: true }) + failCard({ noClaude: true }) };
     },
     stale: function () {
+      /* one missing frame = frame_missing (amber): an amber notice, an amber chip, an amber tile; no violet info icon */
       var fr = FRAMES.map(function (f) { return f.v === "fail" ? { tc: f.tc, v: "pass", l: f.l } : f; });
       fr[1] = { tc: "00:00:09:12", v: "gone", l: "p08.l.bar" };
-      return { body: slot(M.notice("info", t("p08.bad_frame", { tc: M.html(M.mono("00:00:09:12")) }), { sub: t("p08.bad_frame.sub"), btn: { label: t("p08.export"), icon: "film", primary: true } })) +
+      return { body: slot(M.notice(M.COND.frame_missing, t("p08.bad_frame", { tc: M.html(M.mono("00:00:09:12")) }), { sub: t("p08.bad_frame.sub"), btn: { label: t("p08.export"), icon: "film", primary: true } })) +
         head(fr) + tiles(fr) };
     },
     success: function () {
@@ -148,7 +173,7 @@
       return { body: slot(M.notice("ok", t("p08.all_pass"))) + head(fr, M.steps(["done", "done", "done", "done", "done", "done", "done"], 6, "ok")) + tiles(fr) +
         '<div class="m-col mt-4">' + PC.kbtn(t("p06.open"), "enter", { kind: "primary", block: true, icon: "external-link" }) + "</div>" +
         '<div class="t-meta tx-muted mt-2">' + t("p06.open_note") + "</div>" +
-        PC.acts([M.btn(t("p08.export"), { kind: "ghost", icon: "film", flush: true })], "mt-2") };
+        PC.acts([M.btn(t("p08.export"), { kind: "ghost", icon: "film", flush: true, cls: "m-needs-host" })], "mt-2") };
     },
     long: function () {
       var fr = FRAMES.slice(); fr[1] = { tc: "00:00:09:12", v: "pass", l: "p08.l.long" };

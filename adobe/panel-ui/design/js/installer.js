@@ -18,7 +18,9 @@
    - I.btn: M.btn with a keycap hint (Return / Esc);
    - I.radio: a single-choice control row with a 20 px ring;
    - I.pathField: a recessed path field with one button and a field message;
-   - I.adds: "what Setup adds, and where" rows (trust, G2-r1 d). */
+   - I.adds: "what Setup adds, and where" rows (trust, G2-r1 d).
+   R3 (installer group): I.TITLES / I.titleKey (one title table), I.notice (the "↵" keycap), I.offlineGet (the gated offline
+   installer), I.fail takes a list of buttons that wrap, I.step carries data-kind, M.path in the path field, rail r.none. */
 (function () {
   "use strict";
   var M = window.M;
@@ -79,17 +81,19 @@
       (o.sub ? '<div class="t-meta tx-muted">' + o.sub + "</div>" : "") + (o.under || "") + "</div></div>";
   };
 
-  /* SHARED: checklist row. kind ok|warn|error|info|pending|busy; o = {detail, end, prog:{pct, meta, time}, act, cls, under} */
+  /* SHARED: checklist row. kind ok|warn|error|info|pending|busy|waiting; o = {detail, extra, end, prog:{pct, meta, time}, act, cls, under}; data-kind lets a screen count its rows (I-03 chips) */
   I.step = function (kind, name, o) {
     o = o || {};
     var pend = kind === "pending";
     var detailCls = kind === "error" || kind === "warn" ? "tx-text" : "tx-muted";
     var end = o.end ? '<span class="i-step-end t-meta">' + o.end + "</span>" : "";
     var prog = o.prog ? '<div class="i-step-prog">' + M.progress(o.prog.pct) +
-      '<div class="m-row mt-1"><div class="t-meta tx-muted m-grow">' + o.prog.meta + '</div>' + (o.prog.time ? '<div class="t-meta tx-muted ms-2">' + M.mono(o.prog.time) + "</div>" : "") + "</div></div>" : "";
-    return '<div class="i-step' + (pend ? " i-step-pend" : "") + (o.prog ? " i-step-run" : "") + " " + (o.cls || "") + '">' + M.status(kind) +
+      '<div class="m-row mt-1"><div class="t-meta tx-muted m-grow">' + o.prog.meta + '</div>' +
+      /* R3 I-6: "0:42 elapsed" / «عدّى 0:42», never a bare time that reads as time left */
+      (o.prog.time ? '<div class="t-meta tx-muted ms-2">' + T("i04.elapsed", { time: M.html(M.mono(o.prog.time)) }) + "</div>" : "") + "</div></div>" : "";
+    return '<div class="i-step' + (pend ? " i-step-pend" : "") + (o.prog ? " i-step-run" : "") + " " + (o.cls || "") + '" data-kind="' + kind + '">' + M.status(kind) +
       '<div class="i-step-text"><div class="i-step-head"><div class="t-label i-step-name m-grow">' + name + "</div>" + end + "</div>" +
-      (o.detail ? '<div class="t-meta ' + detailCls + '">' + o.detail + "</div>" : "") + prog +
+      (o.detail ? '<div class="t-meta ' + detailCls + '">' + o.detail + "</div>" : "") + (o.extra ? '<div class="t-meta tx-muted mt-1">' + o.extra + "</div>" : "") + prog +
       (o.act ? '<div class="m-row mt-2">' + o.act + "</div>" : "") + (o.under || "") + "</div></div>";
   };
   I.list = function (rows, cls) { return M.card(rows.join(""), "m-card-flush " + (cls || "")); };
@@ -108,7 +112,7 @@
       (o.icon ? I.ico(o.icon, 16, { ok: "ink-ok", warn: "ink-warn", error: "ink-error", info: "ink-info", waiting: "ink-accent" }[kind]) : M.status(kind)) +
       '<div class="m-notice-body">' + body + "</div></div>";
   };
-  /* SHARED: failure card (I-07 pattern): what happened (white sentence), why (meta), ONE fix (primary), then
+  /* SHARED: failure card (I-07 pattern): what happened (white sentence), why (meta), o.extra (one more meta line), ONE fix (primary), then
      one-click support + Save a report for support (ghost, G2-r1 e) and the privacy note (no log path: R2 D-P1-10) */
   I.fail = function (text, o) {
     o = o || {};
@@ -117,15 +121,50 @@
        the reply promise under it; ?support=off = "Copy details for support" (copies only) with the ONE "coming soon" line
        under it (M.supportParts, the same block as the panel, R3 designer F-03). Save a report is its own button either way. */
     var sp = M.supportParts({ kind: "ghost", flush: true });
-    var support = '<div class="m-row m-wrap mt-2 i-support"><div class="m-row me-2">' + sp.btn + "</div></div>" + sp.under +
+    /* o.soonKey (?support=off only): the card's own "coming soon" (the download page) and support.soon fold into ONE line */
+    var support = '<div class="m-row m-wrap mt-2 i-support"><div class="m-row me-2">' + sp.btn + "</div></div>" + (!M.supportLive && o.soonKey ? M.soonLine(o.soonKey) : sp.under) +
       '<div class="m-row m-wrap i-support">' + M.btn(T("i00.save_report"), { kind: "ghost", icon: "download", flush: true }) + "</div>"; /* both flush: a wrapped second line stays aligned */
+    /* R3 I-3 (designer F-18): o.btn is one button or a list; the row wraps, each button keeps its own top margin */
+    var btns = o.btn ? (Array.isArray(o.btn) ? o.btn : [o.btn]).filter(Boolean) : [];
+    var btnRow = btns.length ? '<div class="m-row m-wrap">' + btns.map(function (b) { return '<div class="m-row me-2 mt-3">' + b + "</div>"; }).join("") + "</div>" : "";
     var body = chip + '<div class="t-body tx-text' + (o.safety ? " mt-2" : "") + '">' + text + "</div>" +
       (o.sub ? '<div class="t-meta tx-muted mt-1">' + o.sub + "</div>" : "") +
+      (o.extra ? '<div class="t-meta tx-muted mt-1">' + o.extra + "</div>" : "") +
       (o.mono ? '<div class="m-row mt-2">' + I.monoBox(o.mono) + "</div>" : "") +
-      (o.btn ? '<div class="m-row mt-3">' + o.btn + "</div>" : "") + support +
+      btnRow + support +
       '<div class="t-meta tx-muted mt-1">' + T("i00.report_note") + "</div>"; /* R2 D-P1-10: no log path in a card; "Save a report" covers it */
     return '<div class="m-notice m-notice-' + (o.kind || "error") + '" role="alert">' + M.status(o.kind || "error") + '<div class="m-notice-body">' + body + "</div></div>";
   };
+
+  /* The notice keycap is the installer's own "↵" (Return), like every other installer primary, not the panel's "⌘ ↵" (R3 designer
+     F-25). M.notice draws the panel keycap for a primary button, so the text is swapped here (a shared change would let
+     M.notice take b.kbd as a string). */
+  I.notice = function (kind, text, o) {
+    return M.notice(kind, text, o).replace(/(<span class="m-kbd [^"]*" aria-hidden="true">)[^<]*(<\/span>)/g, "$1\u21B5$2");
+  };
+  /* H24 + D-05 (R3 S-01): "Get the offline installer" opens thewhynot.ai/download, which is NOT published. Live = the button;
+     not live = no button: the next step is WhatsApp support (live), or the ONE "coming soon" line under ?support=off.
+     Returns {btn, line}: btn = the button (live only), line = the sentence that stands in for it. */
+  I.offlineGet = function (key) {
+    if (M.live) return { btn: M.btn(T("i00.offline_get"), { icon: "external-link" }), line: "" };
+    return { btn: "", line: M.supportLive ? T(key || "i00.offline_ask") : T("download.soon") };
+  };
+  /* ONE title table (R3 designer F-05, same rule as the panel header): the headline says what the screen's STATE is, never
+     what the happy path would be. Keyed by screen, then by the resolved state; "default" is everything else. Screens call
+     t(I.titleKey("I-06", I.state)); a state that is busy, blocked or half done never reads "ready" or "Installing" over it. */
+  I.TITLES = {
+    "I-01": { "default": "i01.title", upgrade: "i01.title.update", "long": "i01.title.update" },
+    /* a finished check with notes is "Ready, with a few things to know"; only a clean pass is "ready"; a red row is "Can't install yet" */
+    "I-03": { "default": "i03.title.notes", loading: "i03.title", success: "i03.title.ready", error: "i03.title.blocked", offline: "i03.title.blocked" },
+    /* the Adobe panel file card is a red problem that needs the person ("panel_not_installed"): not "Installing" */
+    "I-04": { "default": "i04.title", error: "i04.title.stopped", cancelled: "i04.title.stopped", success: "i04.title.done", panelfile: "i06.title.error", "long": "i06.title.error" },
+    "I-05": { "default": "i05.title", loading: "i05.title.installing", checking: "i05.title.installing", waiting: "i05.title.signin", timeout: "i05.title.signin", success: "i05.title.ready" },
+    "I-06": { "default": "i06.title", loading: "i06.checking", amber: "i06.title.almost", "long": "i06.title.almost", nosignin: "i06.title.almost", error: "i06.title.error" },
+    "I-07": { "default": "i07.title" },
+    "I-08": { "default": "i08.title", loading: "i08.title.busy", checking: "i08.title.busy", error: "i08.title.error", "long": "i08.title.error", offline: "i08.title.offline", success: "i08.current", repair: "i08.repair.run" },
+    "I-09": { "default": "i09.title", loading: "i09.removing", error: "i09.title.error", success: "i09.done", empty: "i09.empty.title" }
+  };
+  I.titleKey = function (id, state) { var m = I.TITLES[id] || {}; return m[state] || m["default"]; };
 
   /* SHARED: single-choice row; o = {on, chip, size, focus, disabled} */
   I.radio = function (label, o) {
@@ -140,7 +179,7 @@
     o = o || {};
     var cls = o.kind ? " i-path-" + o.kind : "";
     return '<div class="t-label">' + label + "</div>" +
-      '<div class="i-pathrow mt-1"><div class="i-path i-clip' + cls + '"><bdi dir="ltr" class="mono">' + M.esc(path) + "</bdi></div>" +
+      '<div class="i-pathrow mt-1"><div class="i-path i-clip' + cls + '">' + M.path(path) + "</div>" + /* R3 S-08: M.path = one LTR isolate, drive colon inside; .i-path is left-aligned in both languages */
       M.btn(o.btn || T("i02.change"), { icon: "folder", focus: o.focus, kind: o.btnKind }) + "</div>" +
       (o.msg ? '<div class="i-field-msg">' + M.status(o.msgKind || "info", 16) + '<div class="t-meta ms-2 m-grow ' + (o.msgKind === "warn" || o.msgKind === "error" ? "tx-text" : "tx-muted") + '">' + o.msg + "</div></div>" : "") +
       (o.sub ? '<div class="t-meta tx-muted mt-1">' + o.sub + "</div>" : "");
@@ -177,10 +216,10 @@
     FLOWS[r.flow].forEach(function (s) { if ((s !== "custom" || r.custom) && (s !== "claude" || r.claude)) stages.push(s); });
     var at = stages.indexOf(r.at), out = "";
     stages.forEach(function (s, i) {
-      var kind = i < at || r.all ? "ok" : i === at ? (r.mark || "current") : "pending";
+      var kind = r.none ? "pending" : i < at || r.all ? "ok" : i === at ? (r.mark || "current") : "pending"; /* r.none: nothing ran (I-09 empty), so no green and no active step */
       var icon = kind === "current" ? I.ico("circle-dot", 16, "ink-text") : M.status(kind);
       var sub = s === "custom" || s === "claude";
-      out += '<div class="i-rstep' + (i === at && !r.all ? " i-rstep-on" : "") + (sub ? " i-rstep-sub" : "") + '">' + icon +
+      out += '<div class="i-rstep' + (i === at && !r.all && !r.none ? " i-rstep-on" : "") + (sub ? " i-rstep-sub" : "") + '">' + icon +
         '<span class="t-label ms-2">' + T("i00.stage." + s) + "</span></div>";
     });
     return out;

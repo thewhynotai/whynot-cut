@@ -24,7 +24,13 @@
      is the primary.
    - loading: render progress per piece with Cancel. error: why the render failed + Try again (primary).
    - stale: the project changed after the render; "Render again" takes the fill.
-   - success: QC passed; the done card (as in P-06) with the handoff line; Open project is the primary. While QC is open (normal) the primary is "Wait for QC" (off) and "Open anyway" is a secondary.
+   - success: QC passed; the done card (as in P-06) with the handoff line; Open project is the primary. While QC is open
+     (normal) the primary is "Wait for QC" (off, with its reason) and "Open without the check" is a GHOST link under that
+     reason, smaller than Re-render, which stays secondary (R3 designer F-11).
+   - R3 (editor P1-05): a failed frame says "Has a problem" (never a name for who acts); the button that sends it to Claude is
+     "Let Claude fix it". Only a fix that is really the editor's says "Needs you", with one line on what to do (no-claude:
+     sign in). no-claude: the main action is "Sign in to Claude" (the notice), Wait for QC is off with a reason and no spinner.
+   - R3 (S-06): offline keeps the last verdicts, greyed, with their own words; "Out of date" is only for a stale render.
    - offline: everything that needs the app is disabled; the notice's fix takes the fill.
    - focus: keyboard focus on Open project. long: long id and path. */
 (function () {
@@ -57,16 +63,23 @@
      has no live verdicts at all (nothing spins, no old Fix chip): "Out of date" */
   /* a short status row (icon + wrapping meta text), not a chip: the words are long and a tile is narrow at 280 px */
   function chipFor(kind, mode) {
-    var row = function (icon, key) { return '<div class="ta-srow">' + icon + '<div class="t-meta tx-text ms-1 m-grow">' + t(key) + '</div></div>'; };
+    var row = function (icon, key, tx) { return '<div class="ta-srow">' + icon + '<div class="t-meta ' + (tx || "tx-text") + ' ms-1 m-grow">' + t(key) + '</div></div>'; };
     if (mode === "stale") return row(M.status("paused", 12), "a04.f.stale");
+    /* offline (S-06): the last verdicts stay, greyed, in their own words; nothing spins and nothing says "Out of date" */
+    if (mode === "off") {
+      return kind === "pass" ? row(M.ico("circle-check", 12, "ink-disabled"), "a04.f.pass", "tx-disabled")
+        : kind === "fix" ? row(M.ico("circle-x", 12, "ink-disabled"), "a04.f.fix", "tx-disabled")
+        : row(M.ico("circle-dashed", 12, "ink-disabled"), "a04.f.unchecked", "tx-disabled");
+    }
     if (kind === "pass") return row(M.status("ok", 12), "a04.f.pass");
-    if (mode === "editor") return row(M.status("waiting", 12), "a04.f.editor");
+    /* no Claude: only the problem frame is the editor's (sign in); the rest simply were not checked yet */
+    if (mode === "editor") return kind === "fix" ? row(M.status("waiting", 12), "a04.f.editor") : row(M.status("pending", 12), "a04.f.unchecked");
     if (kind === "fix") return row(M.status("error", 12), "a04.f.fix");
     return row(M.status("busy", 12), "a04.f.pending");
   }
   function frameTile(f, mode) {
     var kind = f[2];
-    var stale = mode === "stale";
+    var stale = mode === "stale" || mode === "off";
     var media = M.media({ kind: "poster", w: 54, h: 96, inner: f[1], safe: kind === "fix" && !stale, disabled: stale });
     return '<div class="ta-cell">' + M.tile({
       media: '<div class="ta-mediarow">' + media + '</div>',
@@ -76,28 +89,36 @@
   }
   function frames(o) {
     o = o || {};
-    var list = FRAMES.map(function (f) { return o.all ? [f[0], f[1], "pass", f[3]] : f; });
+    /* every frame passed: the fixed frame draws its corrected bar, never the red problem box */
+    var list = FRAMES.map(function (f) {
+      return o.all ? [f[0], f[1].replace('<span class="m-media-bad"></span>', '<span class="ta-fr-bar"></span>'), "pass", f[3]] : f;
+    });
     return M.card('<div class="t-label">' + t("a04.frames") + '</div><div class="t-meta tx-muted">' + t("a04.frames.sub", { n: 6 }) + '</div>' +
       '<div class="ta-tiles mt-2">' + list.map(function (f) { return frameTile(f, o.mode); }).join("") + '</div>', "mt-4");
   }
   function report(passed, mode) {
     var rows = [["ok", t("a04.v.verified"), "", t("a04.v.verified.t")]];
-    if (!passed) rows.push([mode === "editor" ? "waiting" : "pending", t("a04.v.not"), "", t("a04.v.not.t") + '<br>' + t("a04.v.not.fail")]);
+    if (!passed) rows.push([mode === "editor" ? "waiting" : "pending", t("a04.v.not"), "", t("a04.v.not.t") + '<br>' + t(mode === "editor" ? "a04.v.not.fail.nc" : "a04.v.not.fail")]);
     rows.push(["waiting", t("a04.v.needs"), "", t("a04.v.needs.t")]);
-    return M.card('<div class="t-label">' + t("a04.verdict") + '</div>' + M.stages(rows), "mt-4");
+    /* R3 (P-2): the frame with a problem has ONE button that sends it to Claude; without Claude there is none (sign in first) */
+    return M.card('<div class="t-label">' + t("a04.verdict") + '</div>' + M.stages(rows) +
+      (!passed && mode !== "editor" ? '<div class="m-row mt-3">' + M.btn(t("a04.fix"), { icon: "pen-line" }) + '</div>' : ''), "mt-4");
   }
   /* mode: "qc" (the quality check is still open: the primary is "Wait for QC", off, and "Open anyway" is a secondary,
      owner F-13) | "open" (QC passed: Open project is the violet) | "secondary" (a notice above carries the violet) | "off" */
   function actions(o) {
     o = o || {};
     var mode = o.mode || "qc";
+    /* R3 (designer F-11): "Open without the check" is a ghost link under the reason, never a full-width button; the paused
+       icon (not a spinner) when Claude cannot run the check (S-06) */
     var main = mode === "qc"
-      ? M.btn(t("a04.wait_qc"), { kind: "primary", block: true, icon: "busy", disabled: true }) +
-        '<div class="t-meta tx-muted mt-2">' + t("a04.wait_qc.hint") + '</div><div class="m-col mt-2">' +
-        M.btn(t("a04.open_anyway"), { block: true, icon: "external-link", focus: o.focus, disabled: o.off }) + '</div>'
-      : M.btn(t("a01.open_aep"), { kind: mode === "open" ? "primary" : "secondary", block: true, icon: "external-link", focus: o.focus, disabled: mode === "off" });
+      ? M.btn(t("a04.wait_qc"), { kind: "primary", block: true, icon: o.noClaude ? "circle-pause" : "busy", disabled: true }) +
+        '<div class="t-meta tx-muted mt-2">' + t(o.noClaude ? "a04.wait_qc.hint.nc" : "a04.wait_qc.hint") + '</div><div class="m-row mt-1">' +
+        M.btn(t("a04.open_anyway"), { kind: "ghost", icon: "external-link", flush: true, focus: o.focus, disabled: o.off, cls: "m-needs-host" }) + '</div>'
+      : M.btn(t("a01.open_aep"), { kind: mode === "open" ? "primary" : "secondary", block: true, icon: "external-link", focus: o.focus, disabled: mode === "off", cls: "m-needs-host" }) +
+        (mode === "off" ? TA.reason("home.edit.needs_service") : "");
     return '<div class="m-col mt-4">' + main + '</div>' +
-      '<div class="ta-btnrow mt-2">' + M.btn(t("a04.rerender"), { icon: "rotate-ccw", disabled: o.off || mode === "off" }) + M.btn(t("a01.reveal"), { kind: "ghost", icon: "folder-open" }) + '</div>';
+      '<div class="ta-btnrow mt-2">' + M.btn(t("a04.rerender"), { icon: "rotate-ccw", disabled: o.off || mode === "off", cls: "m-needs-host" }) + M.btn(t("a01.reveal"), { kind: "ghost", icon: "folder-open" }) + '</div>';
   }
 
   var STATES = {
@@ -138,13 +159,13 @@
     offline: function () {
       return {
         pills: TA.pillsOff,
-        body: M.slot(M.offline()) + steps(["done", "done", "done", "done", "done", "wait", "pend"], 5, "paused") + heading() + '<div class="mt-4"></div>' + fileCard({ off: true }) + frames({ mode: "stale" }) + actions({ mode: "off", off: true })
+        body: M.slot(M.offline()) + steps(["done", "done", "done", "done", "done", "wait", "pend"], 5, "paused") + heading() + '<div class="mt-4"></div>' + fileCard({ off: true }) + frames({ mode: "off" }) + actions({ mode: "off", off: true })
       };
     },
     "no-claude": function () {
       return {
         pills: TA.pillsNoClaude,
-        body: TA.noClaude("a04.no_claude", { primary: true }) + steps(["done", "done", "done", "done", "done", "wait", "pend"], 5, "waiting") + heading() + '<div class="mt-4"></div>' + fileCard() + frames({ mode: "editor" }) + report(false, "editor") + actions()
+        body: TA.noClaude("a04.no_claude", { primary: true }) + steps(["done", "done", "done", "done", "done", "wait", "pend"], 5, "waiting") + heading() + '<div class="mt-4"></div>' + fileCard() + frames({ mode: "editor" }) + report(false, "editor") + actions({ noClaude: true })
       };
     },
     stale: function () {

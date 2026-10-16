@@ -22,15 +22,17 @@
      preview, confirm, backup and undo). Under it, the three tool cards: plain-language label first, the brand name as
      the small line with the purpose, the last result kept in every state.
    - Offline and error: the flow and the cards are disabled (they need the WhyNot Cut app), last results stay, the
-     notice's fix takes the violet fill. Nothing says "Ready" anywhere.
+     notice's fix takes the violet fill. Nothing says "Ready" anywhere. R3: the disabled flow button names its reason
+     under it ("Start WhyNot Cut first." / "Press Try again first.", designer F-16); the error state is ONE condition,
+     Premiere not linked, named by the header pill AND the card (designer F-08).
+   - R3 (owner N-07, N-08): the week line has the Home scope ("This week · Sahha Clinic", one ellipsised run) and the
+     time is Tidy 25 + Hush 4 + Kalam 40 min; the Kalam card shows its last run ("64 captions placed · 3 d ago"), never
+     "Nothing yet" once it has run.
    - models-busy: the captions pack is downloading; the Kalam card says so and the smaller model is offered.
    - focus: keyboard focus on the flow button. long: long client, item and sequence names, 99+ badge. */
 (function () {
   var t = M.t, D = M.D, X = D.ta;
 
-  function seqLine(name) {
-    return '<div class="m-row">' + M.ico("film", 16, "ink-muted") + '<div class="t-meta tx-muted ms-2 m-grow">' + t("p13.sequence", { name: M.html(M.mono(name)) }) + '</div></div>';
-  }
   function flow(o) {
     o = o || {};
     var step = function (n, key, brand) {
@@ -40,7 +42,8 @@
     return M.card(M.eyebrow(t("p13.flow.eyebrow")) +
       '<div class="t-body tx-muted mt-1">' + t("p13.flow.sub") + '</div>' +
       '<div class="m-col mt-2">' + step(1, "tidy", "Tidy") + step(2, "hush", "Hush") + step(3, "kalam", "Kalam") + '</div>' +
-      '<div class="m-col mt-3">' + M.btn(t("p13.flow"), { kind: "primary", block: true, icon: "list-checks", disabled: o.disabled, focus: o.focus }) + '</div>', "mt-3");
+      '<div class="m-col mt-3">' + M.btn(t("p13.flow"), { kind: "primary", block: true, icon: "list-checks", disabled: o.disabled, focus: o.focus }) + '</div>' +
+      (o.reason ? TA.reason(o.reason) : ""), "mt-3");
   }
   function last(textKey, agoKey) { return t("p13.last", { text: M.raw(textKey), ago: M.raw(agoKey) }); }
   function cards(o) {
@@ -49,8 +52,8 @@
     var one = function (icon, key, brand, lastHtml, kind, chip) {
       return M.tool({ icon: icon, name: t("home.tool." + key), brand: M.ltr(brand) + " · " + t("p13." + key + ".sub"), last: lastHtml, lastKind: kind, disabled: dis, chip: chip });
     };
-    var kalamLast = o.kalamNow ? t("p13.last.now", { text: M.raw("p13.kalam.last") }) : o.busy ? t("p13.model_busy", { pct: 42 }) : t("p13.none");
-    var kalamKind = o.kalamNow ? "ok" : o.busy ? "busy" : "pending";
+    var kalamLast = o.kalamNow ? t("p13.last.now", { text: M.raw("p13.kalam.last") }) : o.busy ? t("p13.model_busy", { pct: 42 }) : last("p13.kalam.last", "p13.ago.kalam");
+    var kalamKind = o.busy ? "busy" : "ok";
     return M.eyebrow(t("home.tools"), "mt-5") + '<div class="m-col mt-2">' +
       one("folder-tree", "tidy", "Tidy", last("p13.last.tidy", "p13.ago.tidy"), "ok") + '<div class="mt-2"></div>' +
       one("audio-waveform", "hush", "Hush", last("p13.last.hush", "p13.ago.hush"), "ok") + '<div class="mt-2"></div>' +
@@ -58,7 +61,17 @@
       '</div>';
   }
   function settings() { return M.card(M.li("settings", t("home.settings")), "m-card-flush mt-5"); }
-  function intro(seq) { return '<div class="t-title">' + t("p13.title") + '</div><div class="mt-1">' + seqLine(seq || X.seq) + '</div><div class="mt-2">' + M.saved(t("p13.week")) + '</div>'; }
+  /* R3 (S-10): the scope is ONE line, "This week · Sahha Clinic", the name cut with an ellipsis, as on Home */
+  function week() {
+    return '<div class="m-saved">' + M.ico("timer", 16, "ink-ok") + '<div class="m-col ms-2 m-grow">' +
+      '<div class="t-meta tx-muted m-trunc">' + t("home.week.scope", { client: D.client }) + '</div>' +
+      '<div class="t-meta tx-muted">' + t("p13.week") + '</div></div></div>';
+  }
+  /* R3 S-19: the SOURCE sequence (X.seq, not the new plan sequence) and that the tools keep it, said once, as one mono no-break run */
+  function keepsLine(name) {
+    return '<div class="m-row-top">' + M.ico("film", 16, "ink-muted") + '<div class="t-meta tx-muted ms-2 m-grow">' + t("p13.keeps", { name: TA.mono(name) }) + '</div></div>';
+  }
+  function intro(seq) { return '<div class="t-title">' + t("p13.title") + '</div><div class="mt-1">' + keepsLine(seq || X.seq) + '</div><div class="mt-2">' + week() + '</div>'; }
 
   var STATES = {
     empty: function () {
@@ -86,15 +99,15 @@
     focus: function () { return { body: intro() + flow({ focus: true }) + cards() + settings() }; },
     error: function () {
       return {
-        pills: { engine: "noanswer" },
+        pills: { host: "unlinked" },
         body: M.slot(M.notice("error", t("p13.error"), { sub: t("p13.error.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
-          intro() + flow({ disabled: true }) + cards({ disabled: true }) + settings()
+          intro() + flow({ disabled: true, reason: "home.edit.needs_retry" }) + cards({ disabled: true }) + settings()
       };
     },
     offline: function () {
       return {
         pills: TA.pillsOff,
-        body: M.slot(M.offline()) + intro() + flow({ disabled: true }) + cards({ disabled: true }) + settings()
+        body: M.slot(M.offline()) + intro() + flow({ disabled: true, reason: "home.edit.needs_service" }) + cards({ disabled: true }) + settings()
       };
     },
     "no-claude": function () {

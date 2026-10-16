@@ -39,6 +39,8 @@
 .pc-tilerow .m-tile + .m-tile, .pc-tilerow .m-tile + .pc-tile-fill { margin-left: 8px; }
 .m-rtl .pc-tilerow .m-tile + .m-tile, .m-rtl .pc-tilerow .m-tile + .pc-tile-fill { margin-left: 0; margin-right: 8px; }
 .pc-tile-fill { display: block; flex: 1 1 0; min-width: 0; }
+/* R3 (designer F-08): a frame that could not be exported (frame_missing) is amber, like its chip and its notice: 2 px amber-line border */
+.pc-tile-warn { border-color: var(--mk-warn-line); }
 /* the mock frame: a colour scene, a head and shoulders, caption bars in the lower third */
 .pc-scene { display: flex; flex-direction: column; justify-content: flex-end; align-self: stretch; flex: 1 1 auto; width: 100%; background: linear-gradient(180deg, #3A3050 0%, #231C30 55%, #120F18 100%); }
 .pc-scene-1 { background: linear-gradient(180deg, #24424A 0%, #162A30 55%, #0E1518 100%); }

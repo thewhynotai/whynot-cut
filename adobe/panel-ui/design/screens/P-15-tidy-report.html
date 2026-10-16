@@ -42,13 +42,14 @@
         '<div class="t-mono ms-2 m-grow">' + M.path(b[0]) + '</div>' + M.chip("neutral", M.ltr(String(b[1]))) + '</div>';
     }).join(M.divider()) + '</div>', "mt-4");
   }
-  /* Undo is a secondary with no keycap: right after success the violet is Done, so a habitual Mod+Enter never reverses the work */
+  /* Undo is a secondary with no keycap: right after success the violet is Done, so a habitual Mod+Enter never reverses the work.
+     R3 (designer F-22): at its own width, start-aligned, so the grey card is never bigger than the violet Done. */
   function undoCard(o) {
     o = o || {};
     return M.card('<div class="m-row">' + M.ico("undo-2", 16, "ink-muted") + '<div class="t-label ms-2 m-grow">' + t("p15.backup.title") + '</div></div>' +
       '<div class="mt-2">' + TA.name(o.backup || X.tidyBackup) + '</div>' +
       '<div class="t-meta tx-muted mt-2">' + t("p15.undo.hint") + '</div>' +
-      '<div class="m-col mt-3">' + M.btn(t("action.undo"), { kind: "secondary", block: true, icon: "undo-2", focus: o.focus }) + '</div>' +
+      '<div class="m-row mt-3">' + M.btn(t("action.undo"), { kind: "secondary", icon: "undo-2", focus: o.focus, cls: "m-needs-host" }) + '</div>' +
       '<div class="m-row mt-2">' + M.btn(t("p15.reveal"), { kind: "ghost", icon: "folder-open", flush: true }) + '</div>', "mt-4");
   }
   function syncCard(o) {

@@ -35,7 +35,8 @@
   var KEYS = ["preflight", "engine", "claude"].concat(win ? ["gitbash"] : []).concat(["adobe", "fonts", "always_on", "models", "client", "doctor", "launch"]);
   /* R2 D-P0-2: the headline follows the state; on a failed check it says so and the release note is dropped */
   function head(failed) {
-    return M.eyebrow(t("i08.eyebrow")) + '<div class="i-display mt-2">' + (failed ? t("i08.title.error") : t("i08.title", { app: I.app(D.next) })) + "</div>" +
+    /* R3 I-1: the title follows the state from the one table: "{app} is ready" / "Updating to 3.0.1..." / "Update not installed" */
+    return M.eyebrow(t("i08.eyebrow")) + '<div class="i-display mt-2">' + t(I.titleKey("I-08", I.state), { app: I.app(D.next), version: I.ver(D.next) }) + "</div>" +
       '<div class="i-lead tx-muted mt-2">' + t("i08.have", { version: I.ltr(D.version) }) + (failed ? "" : " " + t("i08.notes")) + "</div>";
   }
   function genuine(kind) {
@@ -50,7 +51,7 @@
   var later = function (dis) { return I.btn(t("i08.later"), { kind: "ghost", flush: true, disabled: dis, key: "esc" }); };
   function bar(o) {
     o = o || {};
-    return { start: later(o.busy), end: I.btn(t("i08.now"), { kind: "primary", icon: o.busy ? "busy" : "rotate-ccw", focus: o.focus, key: o.busy ? "" : "enter" }) };
+    return { start: later(o.busy), end: I.btn(t("i08.now"), { kind: "primary", icon: o.busy ? "busy" : "download", focus: o.focus, key: o.busy ? "" : "enter" }) }; /* R3 I-4: Update = download; rotate-ccw stays on "Go back to ..." */
   }
   function progress(pct) {
     return '<div class="mt-4">' + M.card('<div class="m-row">' + M.status("busy") + '<div class="t-body ms-2 m-grow">' + t("i08.loading", { done: I.mb(64), total: I.mb(180) }) + "</div></div>" +
@@ -75,8 +76,8 @@
     error: function () { return { body: head(true) + badCard(), bar: { end: I.btn(t("i00.close"), { key: "esc" }) }, mark: "error" }; },
     offline: function () {
       return {
-        body: '<div class="i-title">' + t("i00.stage.update") + '</div><div class="mt-4">' + M.notice("warn", t("i08.offline"), { dismiss: false, btn: { label: t("i03.again"), primary: true, icon: "refresh-cw" } }) + "</div>" + repairCard(),
-        bar: { end: I.btn(t("i00.close"), { key: "esc" }) }
+        body: '<div class="i-title">' + t(I.titleKey("I-08", I.state)) + '</div><div class="mt-4">' + I.notice("warn", t("i08.offline"), { dismiss: false, btn: { label: t("i03.again"), primary: true, icon: "refresh-cw" } }) + "</div>" + repairCard(),
+        bar: { end: I.btn(t("i00.close"), { key: "esc" }) }, mark: "warn"
       };
     },
     repair: function () {

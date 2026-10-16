@@ -14,14 +14,27 @@ Owner of the track: Adobe-track session. Spec: docs/superpowers/specs/addendum-e
 - docs/design/: direction.md, brand-facts.md, screen-inventory.md, reviews/
 - adobe/panel-ui/design/: mockups (HTML/CSS) + renders/ (PNG 300/360/480 × AR/EN) + manifest.csv
 
-## Status
-- E-D1 direction: DONE — option B "Studio pro, branded" (docs/design/direction.md; 63 proposed tokens §15; 17 contradictions resolved §14; AI review, Arabic needs a native writer)
-- E-D2 mockups: pattern round RENDERED — P-01 (6 states) / P-03 (7) / P-07 (11) x AR/EN x 300/360/480 = 144 PNGs, checks green (render_all.py, check_css.py; sheets in renders/_sheets/). Pattern QA (designer + first-time Arabic editor) running; fan-out to the other 32 screens after the fixes.
-  Open from the worker: MOCK copy in strings.js needs the string-table owner + a native Arabic writer; icons traced from raster (production needs true stroke-to-path); only Syne Bold in repo; nothing checked in real UXP yet.
-- E-D3 critique: round 1 DONE on the pattern (reviews/ED3-r1-designer.md PASS WITH FIXES; reviews/ED3-r1-first-time-editor.md 20 moments, 10 MAJOR). Pattern fix round running; round 2 after fan-out.
-  UXP paint risks to prove in the next css_lab run before E-D4: icon fill-rule, @keyframes rotate/shimmer, <bdi> isolation, text-transform, letter-spacing, tabular-nums, pinned action bar scroll.
-- Artifact (private, visibility only): TODO
-- Installer mockups → installer track (E-T1): TODO
+## Status (2026-10-16)
+- E-D1 direction: DONE (docs/design/direction.md).
+- E-D2 mockups: DONE. 35 screens (P-01..P-22, A-01..A-04, I-01..I-09) in 3 groups, plus the shared layer
+  (mockup.js / mockup.css / strings.js / tokens):
+  - after round 3, 2368 renders at 280/300/360/480 (installer at its own widths) × EN/AR, 0 failed;
+  - the strict self-check runs on every render: the header never says "All set" over a problem;
+  - render_280 covers every A-* state: 102/102;
+  - check_css: 0 hits.
+- E-D3 critique: rounds 1-3 DONE (docs/design/reviews/):
+  - R2: owner decisions D-01..D-05 (R2-owner-decisions.md; D-05 update: support is WhatsApp) and the AR register pass.
+  - R3 verdicts: designer NOT YET (2 P0, both fixed), first-time editor YES, agency owner PAY AFTER PILOT (2 P0, fixed:
+    training claim, support channel).
+  - R3-fix-list.md: 66 ids. Shared items in dae5a89; the group fixes, an opus diff review and an opus visual check are
+    in the R3 group commit.
+  - §5 lists 8 engine-data items (E-1..E-8), recorded by the executor in EXECUTOR-BRIEF §6. E-2 (re-approving leaves
+    the built sequence untouched) is NOT promised in the copy until the executor confirms it.
+- Not verified yet: nothing has run in real UXP (css_lab risks below). The `?support=off` alternate has no render.
+  UXP paint risks to prove in a css_lab run before E-D4: icon fill-rule, @keyframes rotate/shimmer, <bdi> isolation,
+  text-transform, letter-spacing, tabular-nums, pinned action bar scroll.
+- Artifact (private, for Yunus's review): next.
+- Installer mockups → installer track (E-T1): next.
 
 ## Decisions
 - Footer «Powered by thewhynot.ai» (owner). Widths 300/360/480 (Addendum E). Installer = one Tauri app (E2).
@@ -30,4 +43,4 @@ Owner of the track: Adobe-track session. Spec: docs/superpowers/specs/addendum-e
 
 ## Open
 - Decided 2026-10-13: language segment selected = #383838 (one violet fill incl. header; overrides direction §8 exemption). UI never says «المحرّك»/engine: «برنامج WhyNot Cut» / WhyNot Cut app. Flagged lines gate Approve behind an «اتأكدت» checkbox. Timecodes not clickable in 3.0. Models lives under Settings.
-- Needs the executor/engine: a plan-diff summary for the P-07 stale state (what changed between plan versions).
+- Needs the executor/engine: a plan-diff summary for the P-07 stale state (what changed between plan versions); R3-fix-list §5 E-1..E-8.

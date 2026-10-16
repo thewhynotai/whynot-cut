@@ -26,7 +26,7 @@
    - error-inout / error-selection (FR-2): Start is off; the notice's fix "Use the whole sequence" takes the fill.
    - model-busy: the captions pack is downloading; Start waits; "Use the smaller model" takes the fill.
    - no-correction (FR-6): Claude is not available, captions are made without correction; Start stays the primary.
-   - offline: Start is disabled; the notice's Start WhyNot Cut takes the fill.
+   - offline: Start is disabled and says why ("Start WhyNot Cut first."); the notice's Start WhyNot Cut takes the fill.
    - mogrt: the MOGRT output with the chosen template, its video track and text field.
    - focus: keyboard focus on a range radio. long: long sequence and client names. */
 (function () {
@@ -44,7 +44,7 @@
     var on = o.range === undefined ? 0 : o.range, dis = o.disabled;
     var inoutSub = t("p18.range.inout.sub", { a: M.html(M.mono("00:00:12")), b: M.html(M.mono("00:01:04")) });
     return M.card('<div class="t-label">' + t("p18.range") + '</div>' +
-      '<div class="t-meta tx-muted">' + t("p13.sequence", { name: M.html(M.mono(o.seq || X.seq)) }) + '</div>' +
+      '<div class="t-meta tx-muted">' + t("p13.sequence", { name: TA.mono(o.seq || X.seq) }) + '</div>' +
       '<div class="m-col mt-2">' +
       M.radio(t("p18.range.inout"), on === 0, { sub: o.inoutErr ? "" : inoutSub, focus: o.focus, disabled: dis }) +
       M.radio(t("p18.range.sequence"), on === 1, { disabled: dis }) +
@@ -125,10 +125,12 @@
       };
     },
     offline: function () {
-      return { pills: TA.pillsOff, body: M.slot(M.offline()) + form({ disabled: true }), bar: bar({ off: true }) };
+      return { pills: TA.pillsOff, body: M.slot(M.offline()) + form({ disabled: true }), bar: bar({ off: true, hint: t("home.edit.needs_service") }) };
     },
     "model-busy": function () {
       return {
+        /* R3 (S-02): the header names the work ("Model downloading"), not the generic "Working…" */
+        status: { kind: "busy", text: t("p18.pill.model") },
         body: M.slot(M.card('<div class="m-row-top">' + M.status("busy") + '<div class="m-col ms-2 m-grow"><div class="t-label">' + t("p18.model_busy", { pct: 42 }) + '</div>' +
             '<div class="t-meta tx-muted">' + t("p18.model_busy.sub") + '</div></div></div>' +
             '<div class="mt-3">' + M.progress(42) + '</div>' +

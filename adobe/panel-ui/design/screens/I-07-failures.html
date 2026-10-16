@@ -41,11 +41,11 @@
   var t = I.T, D = I.D, st = I.state, win = I.os === "win";
   var KEYS = ["preflight", "engine", "claude"].concat(win ? ["gitbash"] : []).concat(["adobe", "fonts", "always_on", "models", "client", "doctor", "launch"]);
   var N = KEYS.length;
-  function rows(stop, kind) {
+  function rows(stop, kind, label) {
     var at = KEYS.indexOf(stop);
     return I.list(KEYS.map(function (key, i) {
       return i < at ? I.step("ok", t("i04.step." + key), { end: t("i04.end.done") })
-        : i === at ? I.step(kind || "error", t("i04.step." + key), { end: kind === "warn" ? t("i04.end.you") : "" })
+        : i === at ? I.step(kind || "error", label || t("i04.step." + key), { end: kind === "warn" ? t("i04.end.you") : "" })
         : I.step("pending", t("i04.step." + key));
     }), "mt-4");
   }
@@ -55,22 +55,31 @@
     /* R2 D-P1-6: open the page, never copy a script address. H24: the page is thewhynot.ai/download, not published yet, so
        NOT LIVE (the default) = the plain line "Download page coming soon" and no address, no button; LIVE (manifest-live) = the
        sentence, the address and "Open download page". */
-    manifest: { stop: "preflight", card: function (f) {
+    /* R3 S-01 (E-P1-03): the page is gated, so the next step is WhatsApp support, the card's own support button ("Ask us on WhatsApp for the
+       installer"); ?support=off = the ONE "coming soon" line. R3 I-7 (E-P2-08): the stopped row is the FILE check, not "Check this computer",
+       which the rail already shows as done. */
+    manifest: { stop: "preflight", rowKey: "i07.row.files", card: function (f) {
       return M.live ? I.fail(t("i07.manifest"), { safety: true, sub: t("i07.manifest.sub"), mono: D.downloadPage, btn: fix(t("i07.manifest.btn"), "external-link", f) })
-        : I.fail(t("i07.manifest"), { safety: true, sub: t("download.soon") });
+        : I.fail(t("i07.manifest"), { safety: true, sub: M.supportLive ? t("i07.manifest.ask") : "", soonKey: "i07.soon.both" });
     } },
     address: { stop: "engine", card: function (f) { return I.fail(t("i07.address"), { safety: true, sub: t("i07.address.sub", { host: I.path(D.badHost) }), btn: fix(t("i00.retry"), "refresh-cw", f) }); } },
     dlfail: { stop: "engine", card: function (f) { return I.fail(t("i07.dlfail"), { sub: t("i07.dlfail.sub"), btn: fix(t("i00.retry"), "refresh-cw", f) }); } },
-    nointernet: { stop: "engine", card: function (f) { return I.fail(t("i07.nointernet"), { kind: "warn", sub: t("i07.nointernet.sub"), btn: fix(t("i00.retry"), "refresh-cw", f) + '<div class="ms-2">' + M.btn(t("i00.offline_get"), { icon: "external-link" }) + "</div>" }); } },
+    /* H24: "Get the offline installer" opens thewhynot.ai/download, not published: live = the button (the row wraps, R3 I-3); not live = no
+       button, a line that names the next step (WhatsApp, or the ONE "coming soon" line under ?support=off) */
+    nointernet: { stop: "engine", card: function (f) {
+      var g = I.offlineGet();
+      return I.fail(t("i07.nointernet"), { kind: "warn", sub: t("i07.nointernet.sub"), extra: M.supportLive ? g.line : "", soonKey: "i07.soon.both", btn: [fix(t("i00.retry"), "refresh-cw", f), g.btn] });
+    } },
     diskfull: { stop: "models", card: function (f) { return I.fail(t("i07.diskfull", { gb: I.gb(2.5) }), { sub: t("i07.diskfull.sub", { free: I.gb(0.4), drive: I.ltr(D.drive) }), btn: fix(t("i00.check_again"), "refresh-cw", f) }); } },
-    panel: { stop: "adobe", kind: "warn", card: function (f) { return I.fail(t("i07.panel"), { kind: "warn", mono: D.ccx, btn: fix(t("i07.panel.btn"), "file-search", f) }); } },
+    /* R3 S-07: "Adobe didn't install the panel" is ONE condition, red (M.COND.panel_not_installed), as on I-04 and I-06 (it was amber here) */
+    panel: { stop: "adobe", kind: M.COND.panel_not_installed, card: function (f) { return I.fail(t("i07.panel"), { kind: M.COND.panel_not_installed, mono: D.ccx, btn: fix(t("i07.panel.btn"), "file-search", f) }); } },
     hostopen: { stop: "adobe", kind: "warn", card: function (f) { return I.fail(t("i07.hostopen"), { kind: "warn", sub: t("i07.hostopen.sub"), btn: fix(t("i00.check_again"), "refresh-cw", f) }); } }
   };
   function view(key, focus) {
     var c = C[key], n = KEYS.indexOf(c.stop);
     return {
       body: '<div class="i-title">' + t("i07.title") + "</div>" + (n ? '<div class="t-meta tx-muted mt-1">' + t("i07.done", { n: n, of: N }) + "</div>" : "") +
-        '<div class="mt-3">' + c.card(focus) + "</div>" + rows(c.stop, c.kind),
+        '<div class="mt-3">' + c.card(focus) + "</div>" + rows(c.stop, c.kind, c.rowKey ? t(c.rowKey) : ""),
       bar: { start: M.btn(t("i04.details"), { kind: "ghost", icon: "scroll-text", flush: true }), end: I.btn(t("i00.close"), { key: "esc" }) },
       mark: c.kind === "warn" ? "warn" : "error"
     };

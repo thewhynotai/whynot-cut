@@ -29,7 +29,11 @@
    - rejected: a line the faithfulness check refused keeps the source and says so.
    - no-claude: the shell's Claude card takes the violet. no-internet (new): the shell's M.noNet; Run says why it is off.
      offline: the service card, everything off. Apply carries the trust line (the ticked lines only; Undo puts them back).
-   - success: "Applied to 3 lines." + about 3 min saved, estimate; Undo is secondary. stale: the text changed under the result. */
+   - success: "Applied to 3 lines." + about 3 min saved, estimate; Undo is secondary. stale: the text changed under the result.
+   - R3 (fix list P-4, P-10, S-12): ONE name for the job, "Fix captions (Claude)", here, in Settings (the formula) and in
+     the tools' results; the saved line says what was saved ("of caption fixing saved"); no-internet is about THIS sheet
+     ("No internet. Fix captions (Claude) needs it. Your captions stay as they are.", not the shell's plan line); empty:
+     the disabled Run says why ("Pick a task first."). */
 (function () {
   var t = M.t, D = M.D, P = PC.D;
   function code(s) { return PC.code(s); }
@@ -80,7 +84,7 @@
   function slot(n) { return n + '<div class="mt-4"></div>'; }
 
   var STATES = {
-    empty: function () { return { body: top() + jobs(null), bar: runBar({ disabled: true }) }; },
+    empty: function () { return { body: top() + jobs(null), bar: runBar({ disabled: true, hint: t("p12.run_pick") }) }; },
     normal: function () { return { body: top() + jobs("fix_captions"), bar: runBar() }; },
     loading: function () {
       return { body: top() + M.card('<div class="m-row">' + M.status("busy") + '<div class="t-body ms-2 m-grow">' + t("p12.working") + "</div></div>" +
@@ -101,7 +105,7 @@
     },
     "no-internet": function () {
       return { pills: { claude: "offline" },
-        body: slot(M.noNet()) + top() + jobs("fix_captions", { disabled: true }), bar: runBar({ disabled: true, hint: t("p12.run_net") }) };
+        body: slot(M.noNet({ text: t("p12.net.off"), sub: "" })) + top() + jobs("fix_captions", { disabled: true }), bar: runBar({ disabled: true, hint: t("p12.run_net") }) };
     },
     offline: function () {
       return { pills: { engine: "off", claude: "unchecked", host: "unlinked" },

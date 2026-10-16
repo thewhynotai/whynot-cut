@@ -32,8 +32,10 @@
    E2.1 / G made visible: #3 "only genuine files are used" under the list; #4 every action is a row, Show details opens
    the log with its path; the login item is its own row; G11 the macOS prompt is pictured before it appears.
    No primary while running. An action-needed card carries the screen's one violet button.
+   R3: the title follows the state (I.TITLES); the Adobe panel file card, its row and its rail step are RED (panel_not_installed,
+   S-07) with the title "One step needs you"; the elapsed time says "elapsed" (I-6); the Windows Git row is not a "safety" tool (I-5).
    States: loading, normal, focus (keyboard on Cancel), action (close Premiere Pro, save first), macprompt (the Files
-   and folders prompt explained, with a picture), signin (Creative Cloud), panelfile (Adobe's installer fallback),
+   and folders prompt explained, with a picture), signin (Creative Cloud), panelfile (Adobe's installer fallback, red),
    amber (fonts in use: one sentence, one fix; the rest continue), offline (the model waits, everything else
    installs), error (disk full: what, why, one fix, support), details (log open), confirm (Cancel pressed), cancelled,
    resume, success, long (Arabic/space/external paths, a long file name), win (Windows chrome, 11 rows). */
@@ -56,7 +58,8 @@
   function head(o) {
     o = o || {};
     var meta = o.meta !== undefined ? o.meta : t("i04.position", { n: o.n || 2, of: N, min: t("i00.min", { n: o.min || 6 }) });
-    return '<div class="i-title">' + (o.title || t("i04.title")) + "</div>" +
+    /* R3 I-1: the title comes from the one table (I.TITLES): Installing / Installing stopped / Everything is installed / One step needs you */
+    return '<div class="i-title">' + (o.title || t(I.titleKey("I-04", I.state))) + "</div>" +
       '<div class="m-row mt-1"><div class="t-meta tx-muted m-grow">' + meta + "</div>" +
       M.btn(t(o.open ? "i04.details.hide" : "i04.details"), { kind: "ghost", icon: "scroll-text" }) + "</div>";
   }
@@ -90,6 +93,10 @@
   }
   var card = function (h) { return '<div class="mt-3">' + h + "</div>"; };
   var adobeWait = { k: "waiting", end: t("i04.end.you") }; /* R2 D-P2-4: waiting FOR THE PERSON = the pink dot, amber is for problems */
+  /* R3 S-07 (designer F-08): "Adobe didn't install the panel" is ONE condition, M.COND.panel_not_installed = red, here as in I-06 and I-07
+     (it was pink here, amber on I-07, red on I-06). The row, the card and the rail step all read it. */
+  var PANEL = M.COND.panel_not_installed;
+  var adobeErr = { k: PANEL, end: t("i04.end.you") };
 
   var STATES = {
     loading: function () { return { body: head({ n: 1, min: 8 }) + list(rows("preflight", { preflight: { k: "busy", end: t("i03.checking") } })), bar: runBar() }; },
@@ -116,8 +123,8 @@
     },
     panelfile: function () {
       return {
-        body: head({ n: KEYS.indexOf("adobe") + 1, min: 4 }) + card(I.act("waiting", t("i04.act.ccx.title"), t("i04.act.ccx"), { mono: D.ccx, btns: I.btn(t("i04.act.ccx.btn"), { kind: "primary", icon: "file-search", key: "enter" }), hint: t("i04.act.ccx.hint") })) +
-          list(rows("adobe", { adobe: adobeWait })), bar: runBar()
+        body: head({ n: KEYS.indexOf("adobe") + 1, min: 4 }) + card(I.act(PANEL, t("i04.act.ccx.title"), t("i04.act.ccx"), { mono: D.ccx, btns: I.btn(t("i04.act.ccx.btn"), { kind: "primary", icon: "file-search", key: "enter" }), hint: t("i04.act.ccx.hint") })) +
+          list(rows("adobe", { adobe: adobeErr })), bar: runBar()
       };
     },
     amber: function () {
@@ -137,7 +144,7 @@
     },
     error: function () {
       return {
-        body: head({ title: t("i04.title.stopped"), meta: t("i04.count", { n: KEYS.indexOf("models"), of: N }) }) +
+        body: head({ meta: t("i04.count", { n: KEYS.indexOf("models"), of: N }) }) +
           card(I.fail(t("i07.diskfull", { gb: I.gb(2.5) }), { sub: t("i07.diskfull.sub", { free: I.gb(0.4), drive: I.ltr(D.drive) }), btn: I.btn(t("i00.check_again"), { kind: "primary", icon: "refresh-cw", key: "enter" }) })) +
           list(rows("models", { always_on: always, models: { k: "error", detail: t("i04.red", { gb: I.gb(2.5) }) } })),
         rail: "error", bar: { end: I.btn(t("i00.close"), { key: "esc" }) }
@@ -154,7 +161,7 @@
     },
     cancelled: function () {
       return {
-        body: head({ title: t("i04.title.stopped"), meta: t("i04.count", { n: 1, of: N }) }) + card(M.notice("warn", t("i04.cancelled"), { dismiss: false })) +
+        body: head({ meta: t("i04.count", { n: 1, of: N }) }) + card(M.notice("warn", t("i04.cancelled"), { dismiss: false })) +
           list(rows("engine", { engine: { k: "pending" } })),
         rail: "warn", bar: { end: I.btn(t("i00.close"), { key: "esc" }) + I.btn(t("i04.continue"), { kind: "primary", key: "enter" }) }
       };
@@ -167,15 +174,15 @@
     },
     success: function () {
       return {
-        body: head({ title: t("i04.title.done"), meta: t("i04.count", { n: N, of: N }) }) + card(M.notice("ok", t("i04.success"), { dismiss: false })) +
+        body: head({ meta: t("i04.count", { n: N, of: N }) }) + card(M.notice("ok", t("i04.success"), { dismiss: false })) +
           list(rows("launch", { always_on: always, models: modelsBg(66, 1.9), launch: { k: "ok", end: t("i04.end.done") } })),
         rail: "done", bar: { end: I.btn(t("i00.next"), { kind: "primary", key: "enter" }) }, scroll: ".row-always_on"
       };
     },
     long: function () {
       return {
-        body: head({ n: KEYS.indexOf("client") + 1, min: 12 }) + card(I.act("waiting", t("i04.act.ccx.title"), t("i04.act.ccx"), { mono: D.ccx, btns: I.btn(t("i04.act.ccx.btn"), { kind: "primary", icon: "file-search", key: "enter" }), hint: t("i04.act.ccx.hint") })) +
-          list(rows("client", { adobe: adobeWait, always_on: always, models: modelsBg(12, 0.4), client: { k: "busy", detail: M.mono(D.clients) } })),
+        body: head({ n: KEYS.indexOf("client") + 1, min: 12 }) + card(I.act(PANEL, t("i04.act.ccx.title"), t("i04.act.ccx"), { mono: D.ccx, btns: I.btn(t("i04.act.ccx.btn"), { kind: "primary", icon: "file-search", key: "enter" }), hint: t("i04.act.ccx.hint") })) +
+          list(rows("client", { adobe: adobeErr, always_on: always, models: modelsBg(12, 0.4), client: { k: "busy", detail: M.mono(D.clients) } })),
         bar: runBar(), scroll: ".row-models"
       };
     },
@@ -187,8 +194,9 @@
     build: function (state) {
       var v = STATES[state]();
       /* R2 D-P2-12: no spinner in the rail while the card says "Needs you": that is the waiting dot */
-      var needsYou = ["action", "macprompt", "signin", "panelfile", "long"].indexOf(state) >= 0;
-      var mark = v.rail === "error" ? "error" : v.rail === "warn" ? "warn" : needsYou ? "waiting" : "busy";
+      var needsYou = ["action", "macprompt", "signin"].indexOf(state) >= 0;
+      var panelErr = ["panelfile", "long"].indexOf(state) >= 0; /* R3 S-07: the panel file card is red (panel_not_installed), so the rail step is red too */
+      var mark = v.rail === "error" || panelErr ? "error" : v.rail === "warn" ? "warn" : needsYou ? "waiting" : "busy";
       v.rail = v.rail === "done" ? { flow: "install", at: "finish" } : { flow: "install", at: "install", mark: mark };
       return v;
     }

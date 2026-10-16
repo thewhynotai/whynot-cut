@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="empty,loading,normal,checked,focus,blocked,error,offline,no-claude,stale,success,long">
-<meta name="mock-keys" content="Mod+Enter = Approve (only when it is on) or the notice's fix; Esc = close the top notice; Alt+1 / Alt+2 = Home / Edit; Tab / Shift+Tab move through scenes and numbers, Space ticks the focused number (native checkbox). No single-key shortcuts.">
+<meta name="mock-states" content="empty,loading,normal,checked,who-missing,focus,blocked,error,offline,no-claude,stale,success,long">
+<meta name="mock-keys" content="Mod+Enter = Approve (only when it is on) or the notice's fix; Esc = close the top notice; Alt+1 / Alt+2 = Home / Edit; Tab / Shift+Tab move through the sensitive lines, the "Confirmed with" field, the numbers and the bar; Space ticks the focused line or number (native checkbox). No single-key shortcuts.">
 <meta name="mock-motion" content="Controls: background and border colour 150 ms ease (--mk-ease); focus = border colour only, no layout shift. Notices appear in a reserved slot, background colour 200 ms. Skeleton shimmer 1200 ms linear; static fallback = solid #242424 bars. Progress fill width 250 ms; the n-of-m text always carries the value. Every state is complete with no motion. Approve turning on: fill colour 150 ms, nothing moves.">
-<title>A-02 Motion plan approval</title>
+<title>A-02 Sensitive lines review and motion plan approval</title>
 <link rel="stylesheet" href="../mockup.css">
 <link rel="stylesheet" href="../css/tools-ae.css">
 <script src="../icons.js"></script>
@@ -18,20 +18,29 @@
 <body>
 <script>
 /* A-02 Motion plan approval (screen-inventory.md §4 A-02; motion SKILL §3: approval only from the editor, never before
-   the claims review of the current plan; editorial lines marked as Claude's words; numbers only as said; licensed
-   assets only). Edit tab of the After Effects panel. Built like P-07.
+   the sensitive lines of the current plan are flagged AND signed off by a person; editorial lines marked as Claude's
+   words; numbers only as said; licensed assets only). Edit tab of the After Effects panel. Built like P-07.
+   R3 (T-1, decision 5, editor P1-02): the "claims review" is now "Sensitive lines review" / «مراجعة الجمل الحسّاسة».
+   Claude flags the lines and softens one; it does NOT sign them off. Like P-07: one chip per line (medical / religious),
+   one tick per line ("I've checked this line", the shared approval.checked string), a required "Confirmed with" field
+   (approval.who*), and Approve stays off until every line is ticked, the field is filled and the numbers are confirmed.
+   Engine data (R3-fix-list section 5, E-3, MOCKED here from MOCK_DATA.ta.scenes[].kind): a motion plan carries flagged
+   lines with kind medical / religious, and approval_record takes per-line `checked` + `confirmed_with` for a motion
+   approval, like P-07.
    - Every scene: time (plain text), type chip, the on-screen words in full (never cut). Claude's own lines carry a
      labelled chip "Claude's words, not the speaker's".
    - The claims review result for this plan, the numbers to confirm (each a tick), icons, music and the recipe change.
-   - Approve sits in the pinned action bar ("Approving as …" + 40 px Approve). normal: the two numbers are not
-     confirmed yet, so Approve is off and says why; checked: both ticked, Approve on.
-   - blocked: no claims review for this plan yet; Approve off with the reason; Claude runs the review (no button).
+   - Approve sits in the pinned action bar ("Approving as …" + 40 px Approve). normal: no line is ticked, nobody is
+     named and the two numbers are not confirmed, so Approve is off and says why; checked: all of it done, Approve on;
+     who-missing: ticks and numbers done, "Confirmed with" empty, Approve off and says so.
+   - blocked: Claude has not flagged the lines of this plan yet; Approve off with the reason (no button).
    - error: the approval wasn't saved; Try again. offline: everything that needs the app is disabled.
    - stale: the plan changed (what changed in one line); the numbers must be confirmed again.
    - focus: keyboard focus on Approve. long: long id, editor name, 99+ badge. */
 (function () {
   var t = M.t, D = M.D, X = D.ta;
   var TYPE_ICON = { title: "type", quote: "message-square", number: "hash", list: "list-checks", end: "film" };
+  var who = D.who[M.lang];
 
   function heading(id) {
     return M.steps(["done", "done", "wait", "pend", "pend", "pend", "pend"], 2, "waiting") +
@@ -59,14 +68,37 @@
           (s.claude ? '<div class="m-row mt-2">' + M.chip("info", t("a02.claude_line"), "pen-line") + '</div>' : '') + '</div>';
       }).join(""), "mt-4");
   }
-  function review(blocked) {
-    if (blocked) {
-      return M.card('<div class="m-row">' + M.status("busy") + '<div class="t-label ms-2 m-grow">' + t("a02.review") + '</div>' + M.chip("neutral", t("a02.pending"), "circle-dashed") + '</div>' +
+  /* one flagged line: its kind chip (one per line), the scene and time, the words in full (never cut), who confirms it,
+     the tick. A line Claude softened says so. o: {checked, off} */
+  function lineRow(s, i, o) {
+    var kind = s.kind === "religious" ? M.chip("neutral", t("approval.flagged.religious"), "book-open") : M.chip("neutral", t("approval.flagged.medical"), "stethoscope");
+    var box = o.off ? TA.checkrow({ checked: o.checked, disabled: true, name: t("approval.checked") }) : M.checkbox(t("approval.checked"), o.checked);
+    return '<div class="m-flag"><div class="m-row m-wrap">' + kind + '<span class="m-spacer"></span><span class="t-meta tx-muted ms-2">' +
+      t("a02.scene", { n: i + 1 }) + " · " + M.mono(s.tc) + '</span></div>' +
+      '<div class="m-quote m-quote-ar mt-2" dir="rtl" lang="ar"><span class="ar-run">«' + M.esc(s.text) + '»</span></div>' +
+      (s.softened ? '<div class="m-row mt-2">' + M.chip("info", t("a02.softened"), "pen-line") + '</div>' : '') +
+      '<div class="t-meta tx-muted mt-1">' + t("approval.confirm." + s.kind) + '</div>' +
+      '<div class="m-col mt-1">' + box + '</div></div>';
+  }
+  /* o: {blocked, paused (Claude cannot run it: amber pause icon, never a spinner), checked (every line ticked and the
+     name typed), who (false = the name is still empty), off} */
+  function review(o) {
+    o = o || {};
+    if (o.blocked) {
+      return M.card('<div class="m-row">' + M.status(o.paused ? "paused" : "busy") + '<div class="t-label ms-2 m-grow">' + t("a02.review") + '</div>' + M.chip("neutral", t("a02.pending"), "circle-dashed") + '</div>' +
         '<div class="t-meta tx-muted mt-1">' + t("a02.blocked") + '</div>', "mt-4");
     }
-    return M.card('<div class="m-row">' + M.status("ok") + '<div class="t-label ms-2 m-grow">' + t("a02.review") + '</div></div>' +
-      '<div class="t-meta mt-1">' + t("a02.review.ok", { n: 5 }) + '</div>' +
-      '<div class="t-meta tx-muted mt-1">' + t("a02.review.note") + '</div>', "mt-4");
+    var named = o.checked && o.who !== false;
+    /* every line ticked and the name typed = the review is done: ok icon, no amber count; anything open stays amber */
+    return M.card('<div class="m-row">' + M.status(named ? "ok" : "warn") + '<div class="t-label ms-2 m-grow">' + t("a02.review") + '</div>' + (named ? "" : M.chip("warn", M.ltr(String(X.scenes.length)))) + '</div>' +
+      '<div class="t-meta mt-1">' + t("a02.review.ok", { n: X.scenes.length }) + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("a02.review.note") + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("approval.flagged.hint") + '</div>' +
+      '<div class="m-col mt-1">' + X.scenes.map(function (s, i) { return lineRow(s, i, o); }).join('<span class="m-divider"></span>') + '</div>' +
+      '<span class="m-divider"></span>' +
+      '<div class="t-label mt-3">' + t("approval.who") + '</div>' +
+      '<div class="t-meta tx-muted">' + t("approval.who.required") + '</div>' +
+      '<div class="mt-2">' + M.input(t("approval.who.placeholder"), { value: named ? M.txt(who) : "" }) + '</div>', "mt-4");
   }
   /* each number says what it is: "126 mg/dL" and "2 (twice in a row)", with the time it is said */
   function numbers(checked, dis) {
@@ -87,11 +119,13 @@
   }
   function page(o) {
     o = o || {};
-    return heading(o.id) + animatic(o.off) + scenes() + review(o.blocked) + numbers(o.checked, o.off) + assets() + changes(o.off);
+    return heading(o.id) + animatic(o.off) + scenes() + review(o) + numbers(o.checked, o.off) + assets() + changes(o.off);
   }
-  /* why: ok | numbers | blocked | off | retry (the notice above carries the one fix: Approve waits for it) */
+  /* why: ok | lines (a flagged line is not ticked) | who (nobody named) | numbers | blocked | off | retry (the notice above
+     carries the one fix: Approve waits for it). Every off state names its reason (R3 designer F-16). */
   function bar(why, focus) {
-    var hint = why === "numbers" ? t("a02.tick") : why === "blocked" ? t("a02.blocked") : why === "retry" ? t("a02.retry_first") : "";
+    var hint = why === "lines" ? t("approval.tick_first") : why === "who" ? t("approval.need_who") : why === "numbers" ? t("a02.tick") :
+      why === "blocked" ? t("a02.blocked") : why === "retry" ? t("a02.retry_first") : why === "off" ? t("home.edit.needs_service") : "";
     return '<div class="m-row">' + M.status("info", 12) + '<div class="t-meta tx-muted ms-1 m-grow">' + t("a02.as", { name: D.editor }) + '</div></div><div class="mt-2">' + M.trust(t("a02.trust")) + '</div>' +
       '<div class="m-col mt-2">' + M.btn(t("a02.approve"), { kind: "primary", block: true, icon: "circle-check-big", disabled: why !== "ok", focus: focus }) + '</div>' +
       (hint ? '<div class="t-meta tx-muted mt-2">' + hint + '</div>' : '');
@@ -113,8 +147,10 @@
         bar: '<div class="m-col">' + M.skel(45, 16) + '<div class="mt-2"></div><span class="m-skel-block" style="height:40px"></span></div>'
       };
     },
-    normal: function () { return { needs: 1, body: page(), bar: bar("numbers") }; },
+    normal: function () { return { needs: 1, body: page(), bar: bar("lines") }; },
     checked: function () { return { needs: 1, body: page({ checked: true }), bar: bar("ok") }; },
+    /* every line ticked and the numbers confirmed, but nobody is named yet: Approve stays off and says why */
+    "who-missing": function () { return { needs: 1, body: page({ checked: true, who: false }), bar: bar("who") }; },
     focus: function () { return { needs: 1, body: page({ checked: true }), bar: bar("ok", true) }; },
     /* a blocked approval still counts: the plan is waiting for the review, and the editor has an approval to give */
     blocked: function () { return { needs: 1, body: page({ blocked: true, checked: true }), bar: bar("blocked") }; },
@@ -129,20 +165,21 @@
       return { needs: 1, pills: TA.pillsOff, body: M.slot(M.offline()) + page({ checked: true, off: true }), bar: bar("off") };
     },
     "no-claude": function () {
-      return { needs: 1, pills: TA.pillsNoClaude, body: TA.noClaude("a02.no_claude", { primary: true }) + page({ blocked: true, checked: true }), bar: bar("blocked") };
+      return { needs: 1, pills: TA.pillsNoClaude, body: TA.noClaude("a02.no_claude", { primary: true }) + page({ blocked: true, paused: true, checked: true }), bar: bar("blocked") };
     },
     stale: function () {
       return {
         needs: 1,
         body: M.slot(M.notice("info", t("a02.plan_changed"), { sub: t("a02.diff") })) + page(),
-        bar: bar("numbers")
+        bar: bar("lines")
       };
     },
     success: function () {
       return {
         needs: 0,
         body: M.slot(M.notice("ok", t("a02.done"))) + M.steps(["done", "done", "done", "pend", "pend", "pend", "pend"], 3, "pending") +
-          M.card('<div class="m-row">' + M.status("ok") + '<div class="t-label ms-2 m-grow">' + t("a02.done_by", { name: D.editor, time: M.html(M.mono(X.approvedAt)) }) + '</div></div>', "mt-4") +
+          M.card('<div class="m-row-top">' + M.status("ok") + '<div class="m-col ms-2 m-grow"><div class="t-label">' + t("a02.done_by", { name: D.editor, time: M.raw("a02.at") }) + '</div>' +
+            '<div class="t-meta tx-muted">' + t("approval.with", { who: who }) + '</div></div></div>', "mt-4") +
           '<div class="m-col mt-4">' + M.btn(t("a02.go_home"), { kind: "primary", block: true, icon: "layers" }) + '</div>'
       };
     },
@@ -151,7 +188,7 @@
 
   TA.mount({
     id: "A-02", name: "Motion plan approval",
-    states: ["empty", "loading", "normal", "checked", "focus", "blocked", "error", "offline", "no-claude", "stale", "success", "long"], defaultState: "normal",
+    states: ["empty", "loading", "normal", "checked", "who-missing", "focus", "blocked", "error", "offline", "no-claude", "stale", "success", "long"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.tab = "edit";

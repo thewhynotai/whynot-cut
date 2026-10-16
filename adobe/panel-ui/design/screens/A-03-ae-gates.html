@@ -40,23 +40,24 @@
     o = o || {};
     var title = '<div class="t-label">' + t("a03." + key + ".t") + '</div>';
     var body = '<div class="t-body tx-text mt-1">' + t("a03." + key, { version: X.aeVersion }) + '</div>' + (o.sub ? '<div class="t-meta tx-muted mt-1">' + o.sub + '</div>' : '') +
-      (o.btn ? '<div class="m-row mt-3">' + M.btn(o.btn, { kind: o.primary ? "primary" : "secondary", icon: o.icon, focus: o.focus }) + '</div>' : '');
+      (o.btn ? '<div class="m-row mt-3">' + M.btn(o.btn, { kind: o.primary ? "primary" : "secondary", icon: o.icon, focus: o.focus, cls: o.host ? "m-needs-host" : "" }) + '</div>' : '');
     return '<div class="m-notice m-notice-' + kind + ' mt-3" role="' + (kind === "error" ? "alert" : "status") + '">' +
       (key === "probe" ? M.status(o.paused ? "paused" : "busy") : M.status(kind)) + '<div class="m-notice-body">' + title + body + '</div></div>';
   }
   var G = {
     probe: function (paused) { return gate("info", "probe", { sub: t("a03.probe.meta"), paused: paused }); },
-    fonts: function (p, f) { return gate("error", "fonts", { sub: t("a03.fonts.list", { fonts: M.html(M.ltr("Cairo Bold, Tajawal Medium")) }), btn: t("a03.fonts.btn"), icon: "folder-open", primary: p, focus: f }); },
-    unsaved: function (p, f) { return gate("warn", "unsaved", { btn: t("action.check_again"), icon: "refresh-cw", primary: p, focus: f }); },
-    edited: function (p, f) { return gate("warn", "edited", { btn: t("a03.rebuild"), icon: "rotate-ccw", primary: p, focus: f }); },
-    no_bridge: function (p, f) { return gate("error", "no_bridge", { btn: t("action.check_again"), icon: "refresh-cw", primary: p, focus: f }); },
+    fonts: function (p, f, names) { return gate("error", "fonts", { sub: t("a03.fonts.list", { fonts: TA.fonts(names || ["Cairo Bold", "Tajawal Medium"]) }), btn: t("a03.fonts.btn"), icon: "folder-open", primary: p, focus: f }); },
+    unsaved: function (p, f) { return gate("warn", "unsaved", { btn: t("action.check_again"), icon: "refresh-cw", primary: p, focus: f, host: 1 }); },
+    edited: function (p, f) { return gate("warn", "edited", { btn: t("a03.rebuild"), icon: "rotate-ccw", primary: p, focus: f, host: 1 }); },
+    no_bridge: function (p, f) { return gate("error", "no_bridge", { btn: t("action.check_again"), icon: "refresh-cw", primary: p, focus: f, host: 1 }); },
     script_only: function (p, f) { return gate("warn", "script_only", { sub: t("a03.script_only.hint"), btn: t("action.open_claude"), icon: "external-link", primary: p, focus: f }); }
   };
   function startOff() {
     return '<div class="m-col mt-4">' + M.btn(t("a01.start"), { kind: "primary", block: true, icon: "layers", disabled: true }) + '</div>' +
       '<div class="t-meta tx-muted mt-2">' + t("a03.blocked") + '</div>';
   }
-  function one(key) { return { needs: key === "probe" ? 0 : 1, body: intro() + G[key](true) + startOff() }; }
+  /* the Arabic check is Claude's: it is never the editor's "primary" (G.probe takes the PAUSED flag, not a primary flag) */
+  function one(key) { return { needs: key === "probe" ? 0 : 1, body: intro() + (key === "probe" ? G.probe(false) : G[key](true)) + startOff() }; }
 
   var STATES = {
     loading: function () {
@@ -74,7 +75,8 @@
     focus: function () {
       return { needs: 3, body: intro() + G.fonts(true, true) + G.unsaved(false) + G.edited(false) + G.probe() + startOff() };
     },
-    probe: function () { return one("probe"); },
+    /* R3 (S-02, S-06): a running check draws busy (never the pause icon), and the header names it */
+    probe: function () { var v = one("probe"); v.status = { kind: "busy", text: t("a03.probe.t") }; return v; },
     fonts: function () { return one("fonts"); },
     unsaved: function () { return one("unsaved"); },
     edited: function () { return one("edited"); },
@@ -98,14 +100,14 @@
       };
     },
     "needs-you": function () {
-      var item = function (icon, key, btn, primary) {
+      var item = function (icon, key, btn, primary, host) {
         return '<div class="m-check">' + M.ico(icon, 16, "ink-accent") + '<div class="m-check-text"><div class="t-body">' + t("a03.need." + key) + '</div>' +
-          '<div class="m-row mt-2">' + M.btn(t("a03.need." + key + ".btn"), { kind: primary ? "primary" : "secondary", icon: btn }) + '</div></div></div>';
+          '<div class="m-row mt-2">' + M.btn(t("a03.need." + key + ".btn"), { kind: primary ? "primary" : "secondary", icon: btn, cls: host ? "m-needs-host" : "" }) + '</div></div></div>';
       };
       return {
         needs: 3,
         body: '<div class="t-title">' + t("a03.needs.title", { item: TA.code(X.motion) }) + '</div>' +
-          M.card(item("music", "music", "play", true) + item("hash", "numbers", "file-text") + item("eye", "look", "external-link"), "m-card-flush mt-4")
+          M.card(item("music", "music", "play", true) + item("hash", "numbers", "file-text") + item("eye", "look", "external-link", false, true), "m-card-flush mt-4")
       };
     },
     success: function () {
@@ -119,7 +121,7 @@
       return { needs: 0, pills: TA.pillsOff, body: M.slot(M.offline()) + intro() + startOff() };
     },
     long: function () {
-      return { body: intro() + G.fonts(true).replace("Cairo Bold, Tajawal Medium", "Cairo Bold, Tajawal Medium, IBM Plex Sans Arabic SemiBold, Al-Mustaqbal Brand Display") + G.edited(false) + startOff() };
+      return { body: intro() + G.fonts(true, false, ["Cairo Bold", "Tajawal Medium", "IBM Plex Sans Arabic SemiBold", "Al-Mustaqbal Brand Display"]) + G.edited(false) + startOff() };
     }
   };
 

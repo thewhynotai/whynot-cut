@@ -120,7 +120,7 @@
 /* ---- path field (I-02): a recessed mono value + a Change button; the path is cut in the middle by the product,
    at the end by this mockup (never a path the editor approves) ---- */
 .i-pathrow { display: flex; flex-direction: row; align-items: center; }
-.i-path { display: flex; flex-direction: row; align-items: center; flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 12px; border: 1px solid var(--mk-border-input); border-radius: 8px; background: var(--twn-frame-bg); overflow: hidden; }
+.i-path { display: flex; flex-direction: row; align-items: center; flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 12px; border: 1px solid var(--mk-border-input); border-radius: 8px; background: var(--twn-frame-bg); overflow: hidden; direction: ltr; text-align: left; } /* R3 S-08: a path is LTR and starts at the left edge in Arabic too (M.path is the one isolate inside) */
 .i-path-warn { border-color: var(--twn-warn); }
 .i-path-error { border-color: var(--twn-error); }
 .i-path .mono { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

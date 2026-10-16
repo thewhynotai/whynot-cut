@@ -52,15 +52,19 @@
   }
   function nextCard(o) {
     o = o || {};
-    return M.card('<div class="m-row"><div class="t-label m-grow">' + t("a01.next.title") + '</div>' + (o.off ? '' : M.chip("ok", t("a01.status.approved"), "circle-check")) + '</div>' +
+    /* R3 (designer F-23): at 300 and 280 px the "Plan approved" pill sits on its own row under the title, so the
+       title and "After Effects 25.4" never wrap beside it */
+    var pill = o.off ? '' : M.chip("ok", t("a01.status.approved"), "circle-check");
+    return M.card('<div class="m-row"><div class="t-label m-grow">' + t("a01.next.title") + '</div>' + (TA.narrow ? '' : pill) + '</div>' +
+      (TA.narrow && pill ? '<div class="m-row mt-1">' + pill + '</div>' : '') +
       '<div class="t-meta tx-muted mt-1">' + t("a01.next.sub") + '</div>' + checks(o) + '<div class="mt-2">' + M.trust(t("a01.undo")) + '</div>' +
       '<div class="m-col mt-4">' + M.btn(t("a01.start"), { kind: "primary", block: true, icon: "layers", disabled: o.disabled, focus: o.focus }) + '</div>', "mt-4");
   }
   function secondary(dis) {
-    return '<div class="ta-btnrow mt-4">' + M.btn(t("a01.open_aep"), { icon: "external-link", disabled: true }) + M.btn(t("a01.reveal"), { kind: "ghost", icon: "folder-open", disabled: dis }) + '</div>';
+    return '<div class="ta-btnrow mt-4">' + M.btn(t("a01.open_aep"), { icon: "external-link", disabled: true, cls: "m-needs-host" }) + M.btn(t("a01.reveal"), { kind: "ghost", icon: "folder-open", disabled: dis }) + '</div>';
   }
   function gateFonts() {
-    return M.notice("error", t("a03.fonts"), { sub: t("a03.fonts.list", { fonts: M.html(M.ltr("Cairo Bold, Tajawal Medium")) }), btn: { label: t("a03.fonts.btn"), icon: "folder-open", primary: true }, dismiss: false });
+    return M.notice("error", t("a03.fonts"), { sub: t("a03.fonts.list", { fonts: TA.fonts(["Cairo Bold", "Tajawal Medium"]) }), btn: { label: t("a03.fonts.btn"), icon: "folder-open", primary: true }, dismiss: false });
   }
 
   var STATES = {
@@ -103,7 +107,7 @@
         tab: "home",
         body: M.slot(M.notice("error", t("a01.error"), { sub: t("a01.error.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
           hero() + steps(["done", "done", "done", "fail", "pend", "pend", "pend"], 3, "error") + nextCard({ disabled: true }) +
-          '<div class="ta-btnrow mt-4">' + M.btn(t("a01.open_aep"), { icon: "external-link" }) + '</div><div class="mt-2">' + M.supportRow({ flush: true }) + '</div>'
+          '<div class="ta-btnrow mt-4">' + M.btn(t("a01.open_aep"), { icon: "external-link", cls: "m-needs-host" }) + '</div><div class="mt-2">' + M.supportRow({ flush: true }) + '</div>'
       };
     },
     /* the service is off: ONE notice with ONE button. "After Effects isn't linked" is a result of that, not a second card
@@ -124,7 +128,7 @@
         body: M.slot(M.notice("ok", t("a01.done"))) + hero() + steps(["done", "done", "done", "done", "wait", "pend", "pend"], 4, "waiting") +
           M.card('<div class="m-row"><div class="t-label m-grow">' + M.mono(X.aep) + '</div>' + M.chip("ok", t("a01.status.assembled"), "circle-check") + '</div>' +
             '<div class="m-col mt-3">' + M.btn(t("a01.go_render"), { kind: "primary", block: true, icon: "monitor-play" }) + '</div>' +
-            '<div class="ta-btnrow mt-2">' + M.btn(t("a01.open_aep"), { icon: "external-link" }) + M.btn(t("a01.reveal"), { kind: "ghost", icon: "folder-open" }) + '</div>', "mt-4")
+            '<div class="ta-btnrow mt-2">' + M.btn(t("a01.open_aep"), { icon: "external-link", cls: "m-needs-host" }) + M.btn(t("a01.reveal"), { kind: "ghost", icon: "folder-open" }) + '</div>', "mt-4")
       };
     },
     long: function () { return { tab: "home", body: hero(X.long.motion) + steps(AT_BUILD, 3, "waiting") + nextCard() + secondary() }; }

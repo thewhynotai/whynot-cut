@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="empty,loading,normal,running-early,focus,waiting,failed,offline,no-claude,no-internet,stale,done,long">
+<meta name="mock-states" content="empty,loading,normal,running-early,focus,waiting,failed,offline,no-claude,no-internet,limited,stale,done,long">
 <meta name="mock-keys" content="Cmd/Ctrl+Enter: the violet button (Review and approve / Try again / Open project / Open Claude / Make my edit); Cmd/Ctrl+.: Cancel the running step (asks nothing: the steps before it are kept); Esc: dismiss a card; Tab order: card fix, Cancel, then the done card's buttons. The step list is plain text (not focusable).">
 <meta name="mock-motion" content="Progress fill width 250 ms ease per update (static fallback: width jumps); the running segment and the running step icon: loader rotates 900 ms linear (static fallback: still loader); indeterminate bar: shimmer band moves 1200 ms linear (static fallback: the band sits in the middle); a step turning done: icon colour 200 ms; the done card fades in 200 ms into the slot of the progress card (same top edge, no jump). Never animates height.">
 <title>P-06 Pipeline progress</title>
@@ -26,6 +26,10 @@
    - R2 D-P1-2: work stopped by a problem is never drawn as running: offline = "Paused at 23 of 47, resumes when the
      service is back" with an amber pause icon, a solid amber bar, no spinner, and no "Claude is working" line.
      no-claude (Claude signed out) and no-internet (new, E-P1-03) pause the plan the same way.
+   - R3 (fix list P-3, S-13, S-19, P-8): the count says what is counted ("23 of 47 pieces"); the NEW sequence is named from
+     plan.sequence_name ("C0239_v1", PC.seq: one no-break run, the same name as P-07 and P-09), never "C0239_reel_v3";
+     limited (new, owner N-05): the plan's usage limit is reached: an amber card says whose limit it is ("your Claude plan's
+     limit, not WhyNot Cut"), until when, that the build carries on by itself, with See plans; the build is drawn paused.
    - Steps card: the seven steps (M.stages) as plain text with state and time; waiting = the pink Needs-you dot.
    - waiting: Review and approve (primary). failed: what + why + Try again (one button).
    - done: the handoff card with the time saved (6:40 raw, 52 s reel, about 45 min, estimate), the trust line, Verified /
@@ -65,7 +69,7 @@
   function building(o) {
     o = o || {};
     o.text = t("p06.building", { n: 23, of: 47 });
-    o.sub = t("p06.build_safe", { seq: M.html(M.path(P.sequence)) });
+    o.sub = t("p06.build_safe", { seq: PC.seq() });
     o.cancelNote = true;
     return current(o);
   }
@@ -124,6 +128,15 @@
         body: slot(M.noNet()) + head(s, 1, "paused") +
           current({ paused: true, noBar: true, text: t("p06.paused_net", { item: code(D.item) }), time: "1:05" }) + stepList(s) };
     },
+    limited: function () {
+      /* Claude's plan limit (engine data claude.state "limited" + until): not a WhyNot Cut fault, so amber, and the build is
+         paused, not running; the header names the reason */
+      var s = ["done", "done", "done", "pause", "pend", "pend", "pend"], time = M.html(M.mono(P.limitUntil));
+      return { pillx: { claude: ["warn", t("p11.limit.pill")] },
+        body: slot(M.notice("warn", t("p11.limit", { time: time }), { sub: t("p11.limit.sub", { time: time }), dismiss: false,
+          btn: { label: t("plans.link"), icon: "external-link" } })) +
+          head(s, 3, "paused") + current({ paused: true, text: t("p06.paused_limit", { n: 23, of: 47 }), cancelNote: true }) + stepList(s) };
+    },
     stale: function () {
       return { body: slot(M.stale()) + head(RUN, 3, "busy") + building() + stepList(RUN) };
     },
@@ -146,7 +159,7 @@
 
   PC.mount({
     id: "P-06", name: "Pipeline progress",
-    states: ["empty", "loading", "normal", "running-early", "focus", "waiting", "failed", "offline", "no-claude", "no-internet", "stale", "done", "long"], defaultState: "normal",
+    states: ["empty", "loading", "normal", "running-early", "focus", "waiting", "failed", "offline", "no-claude", "no-internet", "limited", "stale", "done", "long"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.tab = "edit";

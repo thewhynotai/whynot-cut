@@ -30,7 +30,10 @@
      report disabled (the shell's M.offline). empty: no project yet.
    - Addendum G2: no drive paths (the file name and "in C0239's output folder"); every action says what it creates or
      changes (render makes a separate MP4; rebuild keeps a backup and never touches the raw footage); Contact support
-     replaces Copy diagnostics. no-claude: not applicable (every action here runs in the WhyNot Cut service). */
+     replaces Copy diagnostics. no-claude: not applicable (every action here runs in the WhyNot Cut service).
+   - R3 (fix list S-19, S-23): the sequence is named from plan.sequence_name ("C0239_v1", PC.seq: one no-break run, the same
+     name as P-06 and P-07), never "C0239_reel_v3"; the no-backup confirm (AR) says «مش هينفع ترجع عنها». The confirm keycap
+     rule is the shell's (M.dialog: no keycap on any confirm button; Esc is on the safe one). */
 (function () {
   var t = M.t, D = M.D, P = PC.D;
   function code(s) { return PC.code(s); }
@@ -53,7 +56,7 @@
     o = o || {};
     return M.eyebrow(t("p09.section")) + '<div class="t-title mt-1">' + t("p09.title", { item: code(D.item) }) + "</div>" +
       '<div class="t-body mt-2">' + t("p09.project", { file: M.html(M.path(P.projectFile)), item: PC.code(D.item) }) + "</div>" +
-      '<div class="t-meta tx-muted mt-1">' + t("p09.sequence", { name: M.html(M.path(P.sequence)) }) + "</div>";
+      '<div class="t-meta tx-muted mt-1">' + t("p09.sequence", { name: PC.seq() }) + "</div>";
   }
   function actions(o) {
     return M.card(ACTS.map(function (a) { return row(a[0], a[1], o); }).join(""), "m-card-flush mt-4") +
@@ -61,7 +64,7 @@
   }
   function dialog(o) {
     o = o || {};
-    var changes = [t("p09.dlg.c1", { seq: M.html(M.path(P.sequence)) }), t("p09.dlg.c2", { time: M.html(M.mono(D.time)) }), t("p09.dlg.c3")];
+    var changes = [t("p09.dlg.c1", { seq: PC.seq() }), t("p09.dlg.c2", { time: M.html(M.mono(D.time)) }), t("p09.dlg.c3")];
     return '<div class="mt-4">' + M.dialog({
       title: t("p09.rebuild.title"), text: t("p09.rebuild.warning"), changesLabel: t("p09.dlg.changes"), changes: changes,
       backupLabel: t("p09.dlg.backup"), backupText: t("p09.dlg.backup_text"),

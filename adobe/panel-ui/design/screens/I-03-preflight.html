@@ -23,7 +23,9 @@
    onedrive_documents, icloud_documents, claude_found, sac, adobe_hosts[{app, version, running}], nvidia, existing}.
    Thresholds as the core (red under 6 GB, amber under 9 GB) are the real product's safety margins; the mock keeps one size (3.6 GB, as I-01). NOT in the core yet: an internet check, the offline-bundle
    flag, Claude signed-in, the macOS privacy-prompt rows (they are fixed copy).
-   Rows are ordered problems first (red, amber, info, ready) so what needs the editor is in view; chips count them.
+   Rows are ordered problems first (red, amber, info, ready) so what needs the editor is in view; chips COUNT them (R3 I-2: from the
+   rows, never typed); the title follows the result (R3 I-1).
+   Offline: the red row blocks the online installer; the offline installer's page is gated (H24), so WhatsApp is the next step (R3 S-01).
    E2.1 / G made visible: #2 "This check changes nothing"; G11: the two macOS privacy prompts (Files and folders,
    Automation) are explained BEFORE they appear; Gatekeeper stays on (never asked to turn it off); Arabic/space paths
    are fine (info). Windows: Smart App Control "We never turn it off".
@@ -55,18 +57,41 @@
     existing: function () { return I.step("info", t("i03.existing"), { detail: t("i03.existing.info", { app: I.app(D.old) }) }); },
     access: function () { return I.step("info", t("i03.access"), { detail: t("i03.access.info") }); },
     auto: function () { return I.step("info", t("i03.auto"), { detail: t("i03.auto.info") }); },
-    gk: function () { return I.step("ok", t("i03.gk"), { detail: t("i03.gk.ok") }); },
+    /* BETA ONLY (D-04, R3 I-8 / owner N-09): on the beta test build macOS has already warned once, so the row says why; protection stays on */
+    gk: function (beta) { return I.step("ok", t("i03.gk"), { detail: t(beta ? "i03.gk.beta" : "i03.gk.ok") }); },
     sac: function () { return I.step("warn", t("i03.sac"), { detail: t("i03.sac.amber") }); },
-    net: function (on) { return on ? I.step("ok", t("i03.net"), { detail: t("i03.net.ok") }) : I.step("warn", t("i03.net"), { detail: t("i03.net.off"), act: M.btn(t("i00.offline_get"), { icon: "external-link" }) }); },
+    /* R3 I-2: no connection BLOCKS the online installer, so it is a red row (never filed under "Good to know") and it counts in
+       "Blocking the install". "Get the offline installer" opens thewhynot.ai/download, which is not live (H24): the next step is
+       WhatsApp support (live); ?support=off = the ONE "coming soon" line. A live page = the button. */
+    net: function (on) {
+      if (on) return I.step("ok", t("i03.net"), { detail: t("i03.net.ok") });
+      var live = M.live, ask = !live && M.supportLive, sp = ask ? M.supportParts({ kind: "secondary" }) : null;
+      return I.step("error", t("i03.net"), { detail: t("i03.net.off"), extra: ask ? t("i00.offline_ask") : "",
+        act: live ? M.btn(t("i00.offline_get"), { icon: "external-link" }) : sp ? sp.btn : "",
+        under: sp ? sp.under : live ? "" : M.soonLine("download.soon") });
+    },
     pend: function (key) { return I.step("pending", t(key), { end: t("i03.checking") }); },
     busy: function (key) { return I.step("busy", t(key), { end: t("i03.checking") }); }
   };
-  function summary(ok, note, block) {
+  /* R3 I-2: the chips are COUNTED from the rows (data-kind), never typed in: Ready = ok rows, Good to know = warn + info rows,
+     Blocking the install = error rows; the rows are ordered problems first (red, amber, info, ready) once the check is done */
+  var ORDER = { error: 0, warn: 1, info: 2, ok: 3 };
+  var kindOf = function (h) { var m = /data-kind="(\w+)"/.exec(h); return m ? m[1] : "ok"; };
+  function done(rows, tail) {
+    var n = { error: 0, warn: 0, info: 0, ok: 0 };
+    rows.forEach(function (h) { n[kindOf(h)]++; });
+    var sorted = rows.map(function (h, i) { return [h, i]; }).sort(function (a, b) { return (ORDER[kindOf(a[0])] - ORDER[kindOf(b[0])]) || (a[1] - b[1]); }).map(function (a) { return a[0]; });
+    return head(summary(n.ok, n.warn + n.info, n.error, n.warn > 0)) + I.list(sorted, "mt-3") + (tail || "");
+  }
+  /* "Good to know" is amber only when an amber row is in it; info rows alone keep it info (their icons are info) */
+  function summary(ok, note, block, noteWarn) {
     return '<div class="i-chips">' + (block ? M.chip("error", t("i03.sum.block", { n: block }), "circle-x") : "") +
-      (note ? M.chip("warn", t("i03.sum.note", { n: note }), "triangle-alert") : "") +
+      (note ? (noteWarn ? M.chip("warn", t("i03.sum.note", { n: note }), "triangle-alert") : M.chip("info", t("i03.sum.note", { n: note }), "info")) : "") +
       (ok ? M.chip("ok", t("i03.sum.ok", { n: ok }), "circle-check") : "") + "</div>";
   }
-  function head(chips) { return I.title(t("i03.title"), t("i03.sub")) + (chips || ""); }
+  /* R3 I-1: the title follows the result (I.TITLES): "Checking this computer" only while it checks */
+  function head(chips) { return I.title(t(I.titleKey("I-03", I.state)), t("i03.sub")) + (chips || ""); }
+  var blocked = '<div class="m-row-top mt-3">' + M.status("info", 16) + '<div class="t-meta tx-muted ms-2 m-grow">' + t("i03.blocked") + "</div></div>";
   var back = function (dis) { return I.btn(t("i00.back"), { kind: "ghost", flush: true, key: "esc", disabled: dis }); };
   function bar(o) {
     o = o || {};
@@ -84,35 +109,31 @@
         bar: { start: back(true), end: M.btn(t("i03.again"), { disabled: true, icon: "refresh-cw" }) + M.btn(t("i00.continue"), { disabled: true }) }
       };
     },
-    normal: function () { return { body: head(summary(5, 1)) + I.list(macRows("missing"), "mt-3"), bar: bar() }; },
-    focus: function () { return { body: head(summary(5, 1)) + I.list(macRows("missing"), "mt-3"), bar: bar({ focus: true }) }; },
+    normal: function () { return { body: done(macRows("missing")), bar: bar() }; },
+    focus: function () { return { body: done(macRows("missing")), bar: bar({ focus: true }) }; },
     error: function () {
-      return {
-        body: head(summary(5, 0, 1)) + I.list([R.disk("error"), R.access(), R.auto(), R.claude("missing"), R.system(), R.gk(), R.adobe(false), R.net(true)], "mt-3") +
-          '<div class="m-row-top mt-3">' + M.status("info", 16) + '<div class="t-meta tx-muted ms-2 m-grow">' + t("i03.blocked") + "</div></div>",
-        bar: blockedBar()
-      };
+      return { body: done([R.disk("error"), R.access(), R.auto(), R.claude("missing"), R.system(), R.gk(), R.adobe(false), R.net(true)], blocked), bar: blockedBar() };
     },
     offline: function () {
-      return { body: head(summary(4, 1)) + I.list([R.net(false), R.access(), R.claude("missing"), R.disk("ok"), R.system(), R.gk(), R.adobe(false)], "mt-3"), bar: blockedBar() };
+      return { body: done([R.net(false), R.access(), R.claude("missing"), R.disk("ok"), R.system(), R.gk(), R.adobe(false)], blocked), bar: blockedBar() };
     },
     nosignin: function () {
-      return { body: head(summary(6)) + I.list([R.access(), R.auto(), R.claude("signedout"), R.disk("ok"), R.system(), R.gk(), R.adobe(false), R.net(true)], "mt-3"), bar: bar() };
+      return { body: done([R.access(), R.auto(), R.claude("signedout"), R.disk("ok"), R.system(), R.gk(), R.adobe(false), R.net(true)]), bar: bar() };
     },
     success: function () {
-      return { body: head(summary(7)) + I.list([R.access(), R.auto(), R.disk("ok"), R.system(), R.gk(), R.adobe(false), R.claude("ok"), R.gpu(), R.net(true)], "mt-3"), bar: bar() };
+      return { body: done([R.access(), R.auto(), R.disk("ok"), R.system(), R.gk(), R.adobe(false), R.claude("ok"), R.gpu(), R.net(true)]), bar: bar() };
     },
     long: function () {
       return {
         internal: true,
-        body: head(summary(4, 3)) + I.list([R.disk("warn"), R.adobe(true), R.cloud(), R.path(), R.access(), R.auto(), R.existing(), R.claude("missing"), R.system(), R.gk(), R.gpu(), R.net(true)], "mt-3"),
+        body: done([R.disk("warn"), R.adobe(true), R.cloud(), R.path(), R.access(), R.auto(), R.existing(), R.claude("missing"), R.system(), R.gk(true), R.gpu(), R.net(true)]),
         bar: bar(), scroll: "end"
       };
     },
     win: function () {
       return {
         internal: true,
-        body: head(summary(4, 3)) + I.list([R.sac(), R.adobe(true), R.cloud(), R.claude("missing"), R.disk("ok"), R.system(), R.gpu(), R.net(true)], "mt-3"),
+        body: done([R.sac(), R.adobe(true), R.cloud(), R.claude("missing"), R.disk("ok"), R.system(), R.gpu(), R.net(true)]),
         bar: bar()
       };
     }

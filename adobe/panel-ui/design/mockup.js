@@ -163,7 +163,7 @@
   };
   M.COND = {
     service_running: "ok", service_starting: "pending", service_off: "error", service_noanswer: "error",
-    claude_ready: "ok", claude_unchecked: "pending", claude_signed_out: "warn", claude_missing: "error", claude_offline: "warn",
+    claude_ready: "ok", claude_unchecked: "pending", claude_signed_out: "warn", claude_missing: "error", claude_offline: "warn", claude_limited: "warn",
     premiere_linked: "ok", premiere_checking: "pending", premiere_unlinked: "error", host_restart: "warn",
     /* R3 (designer F-08): one kind each for three conditions that were drawn in several kinds. restart_needed = the one
        Premiere / After Effects restart (P-02, P-11: one card, one Check again); panel_not_installed = Adobe did not install
@@ -572,7 +572,7 @@
   /* ---- shell: header (G1-G3), hairline, tabs (G4), scroll, log row (G7), footer (G8) ---- */
   var PILL = {
     engine: { running: ["ok", "pill.engine.running"], off: ["error", "pill.engine.off"], starting: ["pending", "pill.engine.starting"], noanswer: ["error", "pill.engine.noanswer"] },
-    claude: { ready: ["ok", "pill.claude.ready"], unchecked: ["pending", "pill.claude.unchecked"], signed_out: ["warn", "pill.claude.signed_out"], missing: ["error", "pill.claude.missing"], offline: ["warn", "pill.claude.offline"] },
+    claude: { ready: ["ok", "pill.claude.ready"], unchecked: ["pending", "pill.claude.unchecked"], signed_out: ["warn", "pill.claude.signed_out"], missing: ["error", "pill.claude.missing"], offline: ["warn", "pill.claude.offline"], limited: ["warn", "pill.claude.limited"] },
     host: { linked: ["ok", "pill.host.linked"], unlinked: ["error", "pill.host.unlinked"], checking: ["pending", "status.pending"] }
   };
   var PILL_OK = { engine: "running", claude: "ready", host: "linked" };

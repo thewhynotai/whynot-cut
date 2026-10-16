@@ -23,6 +23,9 @@
      support" copies only and a plain-text "Support page coming soon" sits beside it.
      R3 (D-05 update 2026-10-16): the support chat is WhatsApp and live, so every failure card shows "Copy details and
      open WhatsApp" + the reply promise by default; the copy-only state is the ?support=off alternate.
+   R3 (installer group, R3-fix-list section 4): titles follow the result (I.TITLES in ../js/installer.js); one name for the
+     beta build ("Beta test build" / «نسخة تجربة»); the offline installer and the download page are gated (H24), so the next
+     step is WhatsApp support (live); AR editor fixes (Git tools, start with the computer, elapsed time, «سينك»).
    Every MOCK line needs the string-table owner; every Arabic line needs a native writer (direction §11 draft). */
 (function () {
   var NB = "\u00A0";
@@ -32,7 +35,7 @@
     /* shell */
     "i00.setup": "Setup",
     "i00.wintitle": "WhyNot Cut Setup",
-    "i00.internal": "Internal build", /* NEW inst.internal */
+    "i00.internal": "Beta test build", /* BETA ONLY (D-04); R3 I-9 (owner N-16): ONE name in the chip, the rail and the copy */
     "i00.version": "{app}",
     "i00.signed": "Genuine Setup from The" + NB + "Why" + NB + "Not",
     "i00.unsigned": "Beta test build. For testing only.", /* BETA ONLY (owner decision D-04): the paid edition ships signed; this line is never shown to a customer */
@@ -47,6 +50,7 @@
     "i00.retry": "Try again",
     "i00.check_again": "Check again",
     "i00.offline_get": "Get the offline installer",
+    "i00.offline_ask": "The download page is coming soon. Until then, ask us on WhatsApp for the offline installer.", /* R3 S-01: the page is gated (H24); the next step is WhatsApp (support is live) */
     "i00.save_report": "Save a report for support",
     "i00.report_note": "The report is saved on this computer without personal details. Nothing is sent unless you send it.",
     "i00.min": "{n}" + NB + "min",
@@ -54,6 +58,8 @@
     /* I-01 Welcome */
     "i01.eyebrow": "Version {version}",
     "i01.title": "Install WhyNot Cut", /* NEW inst.welcome.title */
+    "i01.title.update": "Update WhyNot Cut", /* R3 I-1: an earlier install was found */
+    "i01.update": "Update everything",
     "i01.text": "Everything WhyNot Cut needs, in one go (about {gb}).", /* NEW inst.welcome.text */
     "i01.fact.disk": "{free} free on {drive}",
     "i01.fact.user": "Just for you. No admin password and no developer tools.", /* R2 E-P2-17 */
@@ -65,7 +71,7 @@
     "i01.adds.hide": "Hide the list",
     "i01.install": "Install everything", /* NEW inst.welcome.install */
     "i01.customise": "Customise", /* NEW inst.welcome.customise */
-    "i01.offline": "Installs without internet. Claude and signing in need it later.", /* R2 D-P1-12 */
+    "i01.offline": "This is the offline installer, so Setup runs without internet. Claude and signing in need it later.", /* R2 D-P1-12; R3 I-2: an info notice that names the offline installer */
     "i01.upgrade": "{app} is installed. This updates it, and your clients and settings stay.", /* NEW inst.welcome.upgrade */
     "i01.internal": "This beta test build hasn't been checked by Apple or Microsoft. Use it for testing only; never send it to clients.", /* BETA ONLY (D-04) */
     "i01.noclaude": "Claude isn't on this computer yet. Setup installs it for you after the check.",
@@ -114,6 +120,7 @@
     "i02.install": "Install", /* NEW inst.custom.install */
     /* I-03 Preflight */
     "i03.title": "Checking this computer",
+    "i03.title.ready": "This computer is ready", "i03.title.notes": "Ready, with a few things to know", "i03.title.blocked": "Can't install yet", /* R3 I-1: the title follows the result */
     "i03.sub": "This check changes nothing on your computer.",
     "i03.sum.ok": "Ready: {n}", "i03.sum.note": "Good to know: {n}", "i03.sum.block": "Blocking the install: {n}",
     "i03.checking": "Checking…",
@@ -145,11 +152,12 @@
     "i03.auto.info": "macOS also asks once to let WhyNot Cut control Premiere Pro and After Effects. Choose OK.",
     "i03.gk": "macOS protection",
     "i03.gk.ok": "macOS protection is still on. Setup never asks you to turn it off.", /* R2 E-P2-17 */
+    "i03.gk.beta": "macOS warned once because this beta isn't notarized yet; protection stays on.", /* BETA ONLY (D-04), R3 I-8 (owner N-09) */
     "i03.sac": "Windows protection",
-    "i03.sac.amber": "Smart App Control may warn about this test build. We never turn it off.", /* MOCK from inst.pre sac */
+    "i03.sac.amber": "Smart App Control may warn about this beta test build. We never turn it off.", /* MOCK from inst.pre sac */
     "i03.net": "Internet",
     "i03.net.ok": "Connected",
-    "i03.net.off": "No internet. Only the full offline download can install. Nothing on your computer was changed.", /* MOCK from inst.pre offline note */
+    "i03.net.off": "No internet. Only the full offline installer can install. Nothing on your computer was changed.", /* MOCK from inst.pre offline note; R3 I-2: a blocking row */
     "i03.blocked": "Continue stays off until the red line is fixed.",
     "i03.again": "Check again",
     /* I-04 Progress checklist */
@@ -161,10 +169,10 @@
     "i04.step.preflight": "Check this computer", /* NEW inst.step.preflight */
     "i04.step.engine": "WhyNot Cut service", /* MOCK from inst.step.engine */
     "i04.step.claude": "WhyNot Cut inside Claude", /* NEW inst.step.claude */
-    "i04.step.gitbash": "Safety tools for Claude", /* NEW inst.step.gitbash (Windows only) */
+    "i04.step.gitbash": "Tools Claude needs on Windows (Git)", /* NEW inst.step.gitbash (Windows only); R3 I-5: Git is not a safety tool */
     "i04.step.adobe": "Premiere and After Effects panels", /* NEW inst.step.adobe */
     "i04.step.fonts": "Brand fonts", /* MOCK from inst.step.fonts */
-    "i04.step.always_on": "Keep WhyNot Cut ready", /* MOCK from inst.step.always_on */
+    "i04.step.always_on": "Start WhyNot Cut with your computer", /* MOCK from inst.step.always_on; R3 I-6 */
     "i04.step.models": "Speech model", /* MOCK from inst.step.models */
     "i04.step.client": "Your first client folder", /* NEW inst.step.client */
     "i04.step.doctor": "Final check", /* NEW inst.step.doctor */
@@ -172,6 +180,7 @@
     "i04.end.done": "Done", "i04.end.wait": "Waiting", "i04.end.already": "Already done",
     "i04.end.you": "Needs you", "i04.end.bg": "In the background", "i04.end.offline": "Waiting for internet",
     "i04.run.engine": "Downloading the video tools · {done} of {total}",
+    "i04.elapsed": "{time} elapsed", /* R3 I-6: a bare time under the bar read as a remaining time */
     "i04.run.models": "Downloading · {done} of {total}. You can start editing while it finishes.",
     "i04.msg.always_on": "Starts when you sign in. You'll see it in Login Items.",
     "i04.msg.always_on.win": "Starts when you sign in. You'll see it in Startup apps.",
@@ -263,6 +272,9 @@
     "i07.checksum.sub": "It was the video tools download. It was deleted before it ran. Nothing on your computer changed.", /* R2 D-P1-10: no file names here */
     "i07.manifest": "We couldn't confirm the list of files to install is the genuine one from The" + NB + "Why" + NB + "Not. Nothing was installed.", /* MOCK from I-07 Manifest not trusted */
     "i07.manifest.sub": "Get WhyNot Cut again from the official download page:", /* R2 D-P1-6: never a script address */
+    "i07.manifest.ask": "The download page is coming soon. Until then, ask us on WhatsApp for the installer.", /* R3 S-01: not live, support is */
+    "i07.soon.both": "The download page and the support chat are coming soon.", /* ?support=off: the download soon + support soon, folded into ONE line */
+    "i07.row.files": "Check the install files", /* R3 I-7: the stopped row of the manifest card (the rail says Check this computer is done) */
     "i07.manifest.btn": "Open download page", /* MOCK-VERIFY: the page address */
     "i07.address": "We stopped a download from an address that isn't on our list.", /* NEW I-07 Address not allowed */
     "i07.address.sub": "Address: {host}. Nothing from it was used.",
@@ -280,6 +292,7 @@
     "i08.eyebrow": "Update",
     "i08.title": "{app} is ready", /* NEW inst.update.title */
     "i08.title.error": "Update not installed",
+    "i08.title.busy": "Updating to {version}…", "i08.title.offline": "Update can't download", /* R3 I-1 */
     "i08.have": "You have {version}.",
     "i08.notes": "Faster captions, and Arabic titles fixed in After Effects.",
     "i08.signed": "Checked: this update is the genuine one from WhyNot Cut. It's checked again before anything is installed.",
@@ -300,6 +313,7 @@
     "i08.repair.run": "Repairing WhyNot Cut",
     /* I-09 Uninstall */
     "i09.title": "Remove WhyNot Cut", /* NEW inst.un.title */
+    "i09.title.error": "Not fully removed", /* R3 I-1 */
     "i09.sub": "This removes only what WhyNot Cut added:", /* MOCK from inst.un.list */
     "i09.r.link": "The WhyNot Cut link in your browser",
     "i09.models": "Also delete the speech models ({gb})", /* NEW inst.un.models */
@@ -324,10 +338,10 @@
     /* shell */
     "i00.setup": "التسطيب",
     "i00.wintitle": "تسطيب WhyNot Cut",
-    "i00.internal": "نسخة داخلية",
+    "i00.internal": "نسخة تجربة",
     "i00.version": "{app}",
     "i00.signed": "نسخة أصلية من The" + NB + "Why" + NB + "Not",
-    "i00.unsigned": "نسخة بيتا للتجربة بس.",
+    "i00.unsigned": "نسخة تجربة بس.",
     "i00.stage.welcome": "البداية", "i00.stage.custom": "اختياراتك", "i00.stage.check": "فحص الجهاز",
     "i00.stage.claude": "Claude", "i00.stage.install": "التسطيب", "i00.stage.finish": "النهاية",
     "i00.stage.update": "التحديث", "i00.stage.choose": "اللي هيتشال", "i00.stage.remove": "الإزالة", "i00.stage.done": "خلاص",
@@ -338,7 +352,8 @@
     "i00.next": "التالي",
     "i00.retry": "جرّب تاني",
     "i00.check_again": "افحص تاني",
-    "i00.offline_get": "حمّل نسخة التسطيب اللي من غير نت",
+    "i00.offline_get": "حمّل النسخة اللي من غير نت",
+    "i00.offline_ask": "صفحة التحميل هتنزل قريب. لحد ما تنزل، اطلب نسخة التسطيب اللي من غير نت مننا على واتساب.",
     "i00.save_report": "احفظ تقرير للدعم",
     "i00.report_note": "التقرير بيتحفظ على جهازك من غير بيانات شخصية، ومش بيتبعت لحد إلا لو إنت بعته.",
     "i00.min": "{n}" + NB + "دقيقة",
@@ -346,6 +361,8 @@
     /* I-01 Welcome */
     "i01.eyebrow": "الإصدار {version}",
     "i01.title": "سطّب WhyNot Cut",
+    "i01.title.update": "حدّث WhyNot Cut",
+    "i01.update": "حدّث كل حاجة",
     "i01.text": "كل اللي WhyNot Cut محتاجه، مرة واحدة (حوالي {gb}).",
     "i01.fact.disk": "فاضي {free} على {drive}",
     "i01.fact.user": "ليك إنت بس. من غير باسورد الأدمن ولا أدوات مطوّرين.",
@@ -357,9 +374,9 @@
     "i01.adds.hide": "خبّي القائمة",
     "i01.install": "سطّب كل حاجة",
     "i01.customise": "اختار بنفسك",
-    "i01.offline": "بيتسطّب من غير نت. Claude وتسجيل الدخول هيحتاجوا نت بعد كده.",
+    "i01.offline": "دي نسخة التسطيب الأوفلاين، فالتسطيب هيشتغل من غير نت. Claude وتسجيل الدخول هيحتاجوا نت بعد كده.",
     "i01.upgrade": "{app} متسطّب. هيتحدّث، وعملاءك وإعداداتك هيفضلوا زي ما هم.",
-    "i01.internal": "نسخة البيتا دي لسه Apple و Microsoft ما فحصوهاش. استخدمها للتجربة بس، وما تبعتهاش للعملاء.",
+    "i01.internal": "نسخة التجربة دي لسه Apple و Microsoft ما فحصوهاش. استخدمها للتجربة بس، وما تبعتهاش للعملاء.",
     "i01.noclaude": "Claude لسه مش موجود على الجهاز. التسطيب هيسطّبه لك بعد الفحص.",
     "i01.error": "التسطيب ما قدرش يبدأ الفحص، فما اتسطّبش حاجة.",
     "i01.error.why": "ده غالبًا معناه إن فيه شباك تسطيب تاني مفتوح. اقفله وجرّب تاني.",
@@ -406,6 +423,7 @@
     "i02.install": "سطّب",
     /* I-03 Preflight */
     "i03.title": "بنفحص الجهاز",
+    "i03.title.ready": "الجهاز جاهز", "i03.title.notes": "جاهز، وفيه حاجات تعرفها", "i03.title.blocked": "لسه مينفعش نسطّب",
     "i03.sub": "الفحص ده مش بيغيّر أي حاجة في جهازك.",
     "i03.sum.ok": "جاهز: {n}", "i03.sum.note": "حاجات تعرفها: {n}", "i03.sum.block": "واقف عليه التسطيب: {n}",
     "i03.checking": "بنفحص…",
@@ -427,8 +445,8 @@
     "i03.path": "فولدر المستخدم",
     "i03.path.ok": "فولدر المستخدم فيه حروف عربي أو مسافات. مفيش مشكلة، WhyNot Cut بيتعامل معاها.",
     "i03.cloud": "فولدر المستندات",
-    "i03.cloud.icloud": "المستندات على iCloud Drive. هنحط العملاء في فولدر مش متزامن.",
-    "i03.cloud.onedrive": "المستندات متزامنة مع OneDrive. هنحط العملاء في فولدر مش متزامن.",
+    "i03.cloud.icloud": "فولدر المستندات عليه سينك مع iCloud Drive، فهنحط العملاء في فولدر برّه السينك.",
+    "i03.cloud.onedrive": "فولدر المستندات عليه سينك مع OneDrive، فهنحط العملاء في فولدر برّه السينك.",
     "i03.existing": "تسطيب قديم",
     "i03.existing.info": "{app} متسطّب. هيتحدّث، وعملاءك وإعداداتك هيفضلوا زي ما هم.",
     "i03.access": "الملفات والفولدرات",
@@ -437,11 +455,12 @@
     "i03.auto.info": "macOS هيسألك كمان مرة تسمح إن WhyNot Cut يتحكم في Premiere Pro و After Effects. اختار «موافق».",
     "i03.gk": "حماية macOS",
     "i03.gk.ok": "حماية macOS فاضلة شغّالة. التسطيب عمره ما هيطلب منك تقفلها.",
+    "i03.gk.beta": "macOS نبّه مرة لأن نسخة التجربة لسه ما اتعملهاش notarization؛ الحماية فاضلة شغّالة.",
     "i03.sac": "حماية Windows",
     "i03.sac.amber": "حماية التطبيقات الذكية ممكن تطلع تحذير لنسخة التجربة دي. إحنا عمرنا ما بنقفلها.",
     "i03.net": "النت",
     "i03.net.ok": "متوصّل",
-    "i03.net.off": "لسه مفيش نت. التسطيب ينفع بس من التحميل الكامل اللي من غير نت. ما اتغيّرش حاجة في جهازك.",
+    "i03.net.off": "لسه مفيش نت. التسطيب ينفع بس من النسخة الكاملة اللي من غير نت. ما اتغيّرش حاجة في جهازك.",
     "i03.blocked": "زرار «كمّل» هيفضل مقفول لحد ما السطر الأحمر يتحل.",
     "i03.again": "افحص تاني",
     /* I-04 Progress checklist */
@@ -449,14 +468,14 @@
     "i04.title.done": "كل حاجة اتسطّبت",
     "i04.title.stopped": "التسطيب وقف",
     "i04.position": "خطوة {n} من {of} · فاضل حوالي {min}",
-    "i04.count": "خلصنا {n} من {of} خطوة",
+    "i04.count": "خلصنا {n} من {of} خطوات",
     "i04.step.preflight": "فحص الجهاز",
     "i04.step.engine": "خدمة WhyNot Cut",
     "i04.step.claude": "WhyNot Cut جوه Claude",
-    "i04.step.gitbash": "أدوات أمان Claude",
+    "i04.step.gitbash": "أدوات بيحتاجها Claude على Windows (Git)",
     "i04.step.adobe": "بانلز Premiere و After Effects",
     "i04.step.fonts": "خطوط البراند",
-    "i04.step.always_on": "خلّي WhyNot Cut جاهز",
+    "i04.step.always_on": "شغّل WhyNot Cut مع الجهاز",
     "i04.step.models": "نموذج الكلام",
     "i04.step.client": "فولدر أول عميل",
     "i04.step.doctor": "الفحص الأخير",
@@ -464,6 +483,7 @@
     "i04.end.done": "خلص", "i04.end.wait": "مستني", "i04.end.already": "خلص قبل كده",
     "i04.end.you": "محتاجينك", "i04.end.bg": "في الخلفية", "i04.end.offline": "مستني النت",
     "i04.run.engine": "بننزّل أدوات الفيديو · {done} من {total}",
+    "i04.elapsed": "عدّى {time}",
     "i04.run.models": "بينزل · {done} من {total}. تقدر تبدأ مونتاج قبل ما يخلص.",
     "i04.msg.always_on": "بيشتغل أول ما تدخل على الجهاز. هتلاقيه في عناصر تسجيل الدخول.",
     "i04.msg.always_on.win": "بيشتغل أول ما تدخل على الجهاز. هتلاقيه في تطبيقات بدء التشغيل.",
@@ -549,12 +569,15 @@
     "i06.nosignin.sub": "افتح Claude وسجّل دخول. WhyNot Cut هيبدأ أول ما تسجّل.",
     /* I-07 Failure cards */
     "i07.title": "التسطيب وقف",
-    "i07.done": "خلصنا {n} من {of} خطوة، وهيفضلوا متسطّبين.",
+    "i07.done": "خلصنا {n} من {of} خطوات، وهيفضلوا متسطّبين.",
     "i07.safety": "فحص الأمان",
     "i07.checksum": "ملف من اللي نزلوا ما كانش الملف الأصلي من WhyNot Cut، فما استخدمناهوش.",
     "i07.checksum.sub": "ده كان تحميل أدوات الفيديو. اتمسح قبل ما يشتغل. ما اتغيّرش حاجة في جهازك.",
     "i07.manifest": "ما قدرناش نتأكد إن قائمة الملفات أصلية من The" + NB + "Why" + NB + "Not. ما اتسطّبش حاجة.",
     "i07.manifest.sub": "نزّل WhyNot Cut تاني من صفحة التحميل الرسمية:",
+    "i07.manifest.ask": "صفحة التحميل هتنزل قريب. لحد ما تنزل، اطلب ملف التسطيب مننا على واتساب.",
+    "i07.soon.both": "صفحة التحميل وشات الدعم هيتفتحوا قريب.",
+    "i07.row.files": "فحص ملفات التسطيب",
     "i07.manifest.btn": "افتح صفحة التحميل",
     "i07.address": "وقّفنا تحميل من عنوان مش موجود في قائمتنا.",
     "i07.address.sub": "العنوان: {host}. ما استخدمناش منه حاجة.",
@@ -572,6 +595,7 @@
     "i08.eyebrow": "تحديث",
     "i08.title": "{app} جاهز",
     "i08.title.error": "التحديث ما اتسطّبش",
+    "i08.title.busy": "بنحدّث لإصدار {version}…", "i08.title.offline": "التحديث مش قادر ينزل",
     "i08.have": "عندك الإصدار {version}.",
     "i08.notes": "كابشن أسرع، وتصليح العناوين العربي في After Effects.",
     "i08.signed": "اتفحص: التحديث ده أصلي من WhyNot Cut، وهيتفحص تاني قبل ما يتسطّب أي حاجة.",
@@ -592,6 +616,7 @@
     "i08.repair.run": "بنصلّح WhyNot Cut",
     /* I-09 Uninstall */
     "i09.title": "شيل WhyNot Cut",
+    "i09.title.error": "ما اتشالش كله",
     "i09.sub": "هيتشال بس اللي WhyNot Cut ضافه:",
     "i09.r.link": "رابط WhyNot Cut في المتصفح",
     "i09.models": "امسح نماذج الكلام كمان ({gb})",
@@ -601,7 +626,7 @@
     "i09.backup.done": "اتاخدت نسخة من إعدادات Claude النهارده الساعة {time}.",
     "i09.confirm.title": "تشيل WhyNot Cut من الجهاز ده؟",
     "i09.confirm.text": "القائمة اللي تحت هتتشال. فولدرات عملاءك هتفضل.",
-    "i09.confirm.go": "شيل WhyNot Cut", "i09.confirm.keep": "خليه",
+    "i09.confirm.go": "شيل WhyNot Cut", "i09.confirm.keep": "لا، سيبه متسطّب",
     "i09.removing": "بنشيل WhyNot Cut",
     "i09.end.removed": "اتشال", "i09.end.kept": "فاضل",
     "i09.error": "البانلز ما اتشالتش لأن Premiere Pro بيستخدمها.",

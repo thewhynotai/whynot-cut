@@ -38,7 +38,10 @@
   }
   function choose(o) {
     o = o || {};
-    return I.title(t("i09.title"), t("i09.sub")) + I.adds("mt-3", { uninstall: true }) +
+    /* R3 I-4: in the confirm state the red card sits BELOW the title (it was above the H1); the sentence that introduces the list follows it */
+    var head = o.confirm ? I.title(t("i09.title")) + '<div class="mt-3">' + o.confirm + '</div><div class="t-body tx-muted mt-3">' + t("i09.sub") + "</div>"
+      : I.title(t("i09.title"), t("i09.sub"));
+    return head + I.adds("mt-3", { uninstall: true }) +
       '<div class="mt-4" id="models">' + M.checkbox(t("i09.models", { gb: I.gb(2.9) }), !!o.models, o.boxFocus) + I.sub(t("i09.models.sub")) + "</div>" + untouched();
   }
   function progressRows(o) {
@@ -60,16 +63,16 @@
     models: function () { return { body: choose({ models: true, boxFocus: true }), bar: { end: cancel() + go() }, scroll: "#models" }; },
     confirm: function () {
       return {
-        body: I.act("error", t("i09.confirm.title"), t("i09.confirm.text"), {
+        body: choose({ confirm: I.act("error", t("i09.confirm.title"), t("i09.confirm.text"), {
           btns: M.btn(t("i09.confirm.go"), { kind: "danger", icon: "trash-2" }) + '<div class="ms-2">' + I.btn(t("i09.confirm.keep"), { key: "enter", focus: true }) + "</div>"
-        }) + '<div class="mt-4"></div>' + choose(),
+        }) }),
         bar: { end: cancel(true) + go({ disabled: true }) }
       };
     },
     loading: function () { return { body: I.title(t("i09.removing")) + progressRows({ at: 2 }) + untouched(true), bar: { end: cancel(true) }, at: "remove", mark: "busy" }; },
     error: function () {
       return {
-        body: I.title(t("i09.removing")) + '<div class="mt-3">' + I.fail(t("i09.error"), { sub: t("i09.error.sub"), btn: I.btn(t("i00.retry"), { kind: "primary", icon: "refresh-cw", key: "enter" }) }) + "</div>" + progressRows({ err: true }) + untouched(true),
+        body: I.title(t(I.titleKey("I-09", I.state))) + '<div class="mt-3">' + I.fail(t("i09.error"), { sub: t("i09.error.sub"), btn: I.btn(t("i00.retry"), { kind: "primary", icon: "refresh-cw", key: "enter" }) }) + "</div>" + progressRows({ err: true }) + untouched(true),
         bar: { start: M.btn(t("i04.details"), { kind: "ghost", icon: "scroll-text", flush: true }), end: I.btn(t("i00.close"), { key: "esc" }) }, at: "remove", mark: "error"
       };
     },
@@ -82,7 +85,7 @@
     empty: function () {
       return {
         body: M.empty({ icon: "shield-check", title: t("i09.empty.title"), text: t("i09.empty.text") }),
-        bar: { end: I.btn(t("i00.close"), { key: "esc" }) }, at: "done", all: true
+        bar: { end: I.btn(t("i00.close"), { key: "esc" }) }, at: "done", none: true /* R3 I-4: nothing ran, so the rail is neutral, not all green */
       };
     },
     long: function () { return { body: choose({ models: true }), bar: { end: cancel() + go() }, scroll: "end" }; },
@@ -93,7 +96,7 @@
     states: ["normal", "focus", "models", "confirm", "loading", "error", "error-live", "success", "empty", "long", "win"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
-      v.rail = { flow: "uninstall", at: v.at || "choose", mark: v.mark, all: v.all };
+      v.rail = { flow: "uninstall", at: v.at || "choose", mark: v.mark, all: v.all, none: v.none };
       return v;
     }
   });

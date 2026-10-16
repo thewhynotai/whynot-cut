@@ -29,7 +29,9 @@
    - R2: offline / no-Claude / stale are the shell's M.offline / M.noClaude / M.stale. error: the request did not reach
      Claude (the internet dropped); the notice's Try again is the violet and Make my edit is OFF with the reason.
    - locked (backlog B-02): another editor works on the clip: who and since when, Open read-only (violet) / Take over.
-   - File names break only at "_" and keep their start and end (M.mid) in a row. */
+   - File names break only at "_" and keep their start and end (M.mid) in a row.
+   - R3 (fix list S-02, S-15): locked names its reason in the header ("Waiting for Mona", amber), not the generic "Waiting"; the
+     "Make all" secondary needs Premiere (m-needs-host), so a restart notice switches it off like the primary. */
 (function () {
   var t = M.t, D = M.D, P = PC.D;
   var NEWI = P.newItem;
@@ -71,7 +73,7 @@
     return differs + '<div class="t-meta tx-muted mt-1">' + t("p05.bar.one", { item: PC.code(NEWI) }) + "</div>" +
       '<div class="mt-1">' + M.trust(t("p05.trust")) + "</div>" +
       '<div class="m-col mt-2">' + PC.kbtn(t("p05.make"), "enter", { kind: "primary", block: true, icon: "clapperboard", disabled: o.disabled, focus: o.focus }) +
-      (o.all ? '<div class="mt-2"></div>' + M.btn(t("p05.make_all", { n: 2 }), { block: true, icon: "clapperboard", disabled: o.disabled }) : "") + "</div>" +
+      (o.all ? '<div class="mt-2"></div>' + M.btn(t("p05.make_all", { n: 2 }), { block: true, icon: "clapperboard", cls: "m-needs-host", disabled: o.disabled }) : "") + "</div>" +
       (o.hint ? '<div class="t-meta tx-muted mt-2">' + o.hint + "</div>" : "");
   }
   function slot(n) { return n + '<div class="mt-4"></div>'; }
@@ -107,7 +109,8 @@
     stale: function () { return { body: slot(M.stale()) + where() + clipList(ONE), bar: bar() }; },
     locked: function () {
       var set = [{ id: "C0241", state: "in_progress", dur: "1:42", when: "p04.demo.today" }, P.clips[2], P.clips[3]];
-      return { body: slot(M.notice("info", t("p05.locked", { who: "Mona", item: PC.code(NEWI), since: M.html(M.mono("14:10")) }), { sub: t("p05.locked.sub", { who: "Mona" }), dismiss: false,
+      return { status: { kind: "warn", text: t("p05.pill.locked", { who: "Mona" }) },
+        body: slot(M.notice("info", t("p05.locked", { who: "Mona", item: PC.code(NEWI), since: M.html(M.mono("14:10")) }), { sub: t("p05.locked.sub", { who: "Mona" }), dismiss: false,
           extra: PC.acts([M.btn(t("p05.lock.readonly"), { kind: "primary", icon: "eye", kbd: true }), M.btn(t("p05.lock.takeover"), { icon: "log-in" })], "mt-1") })) +
         where() + clipList(set, { none: true }), bar: bar({ disabled: true, hint: t("p05.lock.first") }) };
     },

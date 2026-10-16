@@ -27,7 +27,11 @@
    - Back + title first, then the notice slot (the same order as P-04).
    - Below: the four links (WhyNot Cut service, Premiere, Claude, this panel) as plain rows (M.stages) that agree with the pills.
    - no-internet (new): "No internet. Claude needs it to make the plan." + what keeps working; there is nothing to press.
-   - stacked: two problems; only the first card's fix is violet. offline: the service card hides the rest. */
+   - stacked: two problems; only the first card's fix is violet. offline: the service card hides the rest.
+   - R3 (fix list S-07, S-23): "restart Premiere once to finish installing" and "Premiere still runs the old panel" are ONE
+     condition (M.COND.restart_needed: amber, one Check again, the header says "Premiere needs a restart"), so restart-once is
+     the same amber card as stale, not a red unlinked card; engine-older's pill agrees with its noun: the service
+     (feminine) «محتاجة تحديث». */
 (function () {
   var t = M.t, D = M.D, P = PC.D;
   function item() { return PC.code(D.item); }
@@ -69,10 +73,11 @@
         body: top(M.notice("error", t("link.off"), { sub: t("retry.hint"), btn: RETRY, support: true })) + rows({ host: ["error", t("link.off")] }) };
     },
     "restart-once": function () {
-      /* the host is unlinked until Premiere is reopened: error, like every other unlinked host (M.COND) */
-      return { pills: { host: "unlinked" },
-        body: top(M.notice(M.COND.premiere_unlinked, t("p02.restart_once"), { sub: t("p02.restart_once.sub"), btn: { label: t("action.check_again"), icon: "refresh-cw", primary: true } })) +
-          rows({ host: ["error", t("p02.restart_once")] }) };
+      /* R3 (F-08): the panel is not loaded until Premiere is reopened. That is restart_needed (amber), the same condition and
+         card as stale: the shell derives "Premiere needs a restart" from m-notice-stale and turns the button violet */
+      return { body: top(M.notice(M.COND.restart_needed, t("p02.restart_once"), { sub: t("p02.restart_once.sub"), cls: "m-notice-stale", dismiss: false,
+          btn: { label: t("action.check_again"), icon: "refresh-cw", primary: true } })) +
+          rows({ host: [M.COND.restart_needed, t("p02.restart_once")] }) };
     },
     stale: function () {
       /* the links are up but Premiere still runs the old panel: the shell derives "Premiere needs a restart" */
@@ -82,7 +87,7 @@
       return { body: top(M.notice("info", t("p02.staged"))) + rows({ panel: ["info", t("p02.panel.staged", { version: "3.0.1" })] }) };
     },
     "engine-older": function () {
-      return { pillx: { engine: ["warn", t("p02.pill.update")] },
+      return { pillx: { engine: ["warn", t("p02.pill.update.engine")] },
         body: top(M.notice("warn", t("p02.older"), { sub: t("p02.older.sub"), btn: { label: t("p02.btn.update"), icon: "download", primary: true } })) +
           rows({ engine: ["warn", t("p02.older")], panel: ["warn", t("p02.panel.older", { version: P.version, old: "2.2.1" })] }) };
     },

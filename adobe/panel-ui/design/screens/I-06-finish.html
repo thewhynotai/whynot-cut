@@ -61,7 +61,7 @@
   /* R2 D-P0-2: the headline follows the state: ready / Almost ready (Claude not signed in) / One step needs you (a failed check) */
   function head(o) {
     o = o || {};
-    var key = o.title || "i06.title";
+    var key = o.title || I.titleKey("I-06", I.state); /* R3 I-1: the one table; amber / long / nosignin = "Almost ready", error = "One step needs you" */
     return '<div class="i-display">' + t(key) + "</div>" + (o.sub === false ? "" : '<div class="i-lead tx-muted mt-1">' + t("i06.sub") + "</div>");
   }
   function bar(o) {
@@ -78,7 +78,8 @@
     },
     normal: function () { return { body: head() + next() + rows(), bar: bar() }; },
     focus: function () { return { body: head() + next() + rows(), bar: bar({ focus: true }) }; },
-    amber: function () { return { body: head() + next() + rows({ amber: true }), bar: bar(), scroll: ".m-card" }; },
+    /* R3 I-1: an amber row = "Almost ready" and an amber Finish step in the rail (the rail was all green over the restart row) */
+    amber: function () { return { body: head() + next() + rows({ amber: true }), bar: bar(), scroll: ".m-card", mark: "warn" }; },
     fallback: function () {
       return {
         body: head({ sub: false }) + '<div class="mt-4">' + I.act("info", t("i06.nolink"), t("i06.paste"), { mono: "/whynot-cut:start", btns: I.btn(t("i06.copy"), { kind: "primary", icon: "copy", key: "enter" }) }) + "</div>" + next() + rows(),
@@ -87,17 +88,17 @@
     },
     nosignin: function () {
       return {
-        body: head({ title: "i06.title.almost", sub: false }) + '<div class="mt-4">' + I.act("waiting", t("i06.nosignin"), t("i06.nosignin.sub"), { icon: "log-in" }) + "</div>" + rows({ nosignin: true }),
-        bar: bar()
+        body: head({ sub: false }) + '<div class="mt-4">' + I.act("waiting", t("i06.nosignin"), t("i06.nosignin.sub"), { icon: "log-in" }) + "</div>" + rows({ nosignin: true }),
+        bar: bar(), mark: "waiting"
       };
     },
     error: function () {
       return {
-        body: head({ title: "i06.title.error", sub: false }) + '<div class="mt-4">' + I.fail(t("i07.panel"), { mono: D.ccx, btn: I.btn(t("i07.panel.btn"), { kind: "primary", icon: "file-search", key: "enter" }) }) + "</div>" + rows({ red: true }),
+        body: head({ sub: false }) + '<div class="mt-4">' + I.fail(t("i07.panel"), { mono: D.ccx, btn: I.btn(t("i07.panel.btn"), { kind: "primary", icon: "file-search", key: "enter" }) }) + "</div>" + rows({ red: true }),
         bar: bar(), mark: "error"
       };
     },
-    long: function () { return { body: head() + next() + rows({ amber: true }), bar: bar(), scroll: "end" }; },
+    long: function () { return { body: head() + next() + rows({ amber: true }), bar: bar(), scroll: "end", mark: "warn" }; },
     win: function () { return { body: head() + next() + rows(), bar: bar() }; }
   };
   I.mount({

@@ -27,6 +27,7 @@
     "p13.model_busy": "Captions pack downloading · {pct}%",                         /* NEW */
     "p13.flow.eyebrow": "All three in order",
     "p13.sequence": "Sequence: {name}",
+    "p13.keeps": "Tools work on a copy. The source sequence {name} is kept.", /* R3 S-19: the tools never touch the source sequence (not the new plan sequence) */
     "p13.tidy.sub": "Cleans the project and sorts it into bins. Syncs a podcast by sound.",
     "p13.hush.sub": "Cuts silences and filler words.",
     "p13.kalam.sub": "Captions timed to the voice: a track, a template or an SRT file.",
@@ -35,7 +36,7 @@
     "p13.chip.downloading": "Downloading",
     "p13.model_offer": "The captions pack is still downloading. You can start now with the smaller model: it's faster but less exact.",
     "p13.use_small": "Use the smaller model",
-    "p13.error": "Couldn't read the open project from Premiere.",
+    "p13.error": "WhyNot Cut can't read the open project: Premiere isn't linked.",
     "p13.error.hint": "Try again. If it fails again, save the project, close Premiere and open it again.",
     "p13.success": "Captions done: {n} captions placed in {seq}.",
     "p13.last": "Last: {text} · {ago}",
@@ -43,8 +44,8 @@
     "p13.none": "Nothing yet.",
     "p13.last.tidy": "214 files sorted", "p13.ago.tidy": "1" + NB + "d ago",
     "p13.last.hush": "24 pieces cut", "p13.ago.hush": "2" + NB + "h ago",
-    "p13.kalam.last": "64 captions placed",
-    "p13.week": "This week the tools saved about 1 h 10 min · estimate.",
+    "p13.kalam.last": "64 captions placed", "p13.ago.kalam": "3" + NB + "d ago",
+    "p13.week": "The tools saved about 1 h 10 min · estimate.",
     "p13.back": "Tools",
     "p13.elapsed": "Elapsed {t}",
     "p13.stop": "Stop",
@@ -147,7 +148,7 @@
     "p16.scan": "Scan",                                                             /* NEW */
     "p16.soft": "Soft", "p16.medium": "Medium", "p16.strong": "Strong",             /* NEW */
     "p16.strength": "Strength",                                                     /* NEW */
-    "p16.fillers": "Filler words",                                                  /* NEW */
+    "p16.fillers": "Filler words (um, uh, like)",                                                  /* NEW */
     "p16.counts": "{s} pauses + {f} filler words",                                  /* NEW */
     "p16.mode.cut": "Cut", "p16.mode.markers": "Markers only",                      /* NEW */
     "p16.go": "Cut", "p16.markers.go": "Add markers",                               /* NEW */
@@ -284,7 +285,7 @@
     "p20.value": "About 40 min of typing saved · estimate.",
     "p20.corrected": "Corrected with {client}'s rules and glossary.",
     "p20.reveal": "Show SRT file",
-    "p20.fix": "Fix captions with Claude",
+    "p20.fix": "Fix captions (Claude)",
     "p20.list": "Captions",
     "p20.show_all": "Show all {n}",
     "p20.undo": "Remove the placed captions",
@@ -293,7 +294,7 @@
     "p20.error.hint": "Try again runs it on the processor. It's slower, about 2" + NB + "min.",
     "p20.lost": "The connection to the WhyNot Cut service was lost while listening.",
     "p20.lost.hint": "Start it, then press Try again. Nothing was placed in your sequence.",
-    "p20.no_claude": "Claude isn't signed in, so Fix captions is off. Your captions are placed and saved.",
+    "p20.no_claude": "Claude isn't signed in, so Fix captions (Claude) is off. Your captions are placed and saved.",
 
     /* A-01 After Effects home and motion pipeline */
     "a01.pill.host": "After Effects",                                               /* NEW */
@@ -332,13 +333,14 @@
     "a02.claude_line": "Claude's words, not the speaker's",                        /* NEW */
     "a02.numbers": "Confirm these numbers",                                        /* NEW */
     "a02.animatic": "Watch the animatic",                                          /* NEW */
-    "a02.blocked": "Waiting for the claims review of this plan. Claude runs it, then Approve turns on.", /* NEW */
+    "a02.blocked": "Waiting for Claude to flag the sensitive lines of this plan. Then you sign each one off.", /* NEW */
     "a02.title": "Check the motion plan",
     "a02.animatic.sub": "Storyboard and a rough animated cut, {d}.",
     "a02.type.title": "Title", "a02.type.number": "Number", "a02.type.quote": "Quote", "a02.type.list": "Icon list", "a02.type.end": "Ending",
-    "a02.review": "Claims review",
-    "a02.review.ok": "Reviewed for this plan: {n} lines approved.",
-    "a02.review.note": "Scene 4 softened to “may help” instead of “treats”.",
+    "a02.review": "Sensitive lines review",
+    "a02.review.ok": "Claude flagged {n} lines and softened one. A person still signs them off.",
+    "a02.review.note": "Scene 4: Claude softened “treats” to “may help”.",
+    "a02.softened": "Softened by Claude", "a02.scene": "Scene {n}", "a02.at": "13 Oct 2026 · 14:32",
     "a02.numbers.hint": "Numbers appear only as the speaker said them.",
     "a02.assets": "Icons, music and style",
     "a02.icons": "6 free icons, we may use them",
@@ -361,7 +363,7 @@
     "a02.done": "Approved. Start the build from Home.",
     "a02.done_by": "Approved by {name} · {time}",
     "a02.go_home": "Go to Home",
-    "a02.no_claude": "Claude isn't signed in, so the claims review can't run and Approve stays off.",
+    "a02.no_claude": "Claude isn't signed in, so it can't flag the sensitive lines and Approve stays off.",
 
     /* A-03 After Effects gates and Needs-you cards */
     "a03.probe": "Checking Arabic text in After Effects {version}. This happens once per version.", /* NEW */
@@ -407,11 +409,11 @@
     "a04.not_done": "It isn't done until the quality check passes.",
     "a04.v.verified": "Verified", "a04.v.not": "Not verified", "a04.v.needs": "Needs you",
     "a04.v.verified.t": "The built project matches the plan · a test render passed",
-    "a04.v.not.t": "The quality check is still on 2 frames.",
+    "a04.v.not.t": "The quality check is still open on 3 frames.",
     "a04.v.needs.t": "Final look and export, music choice.",
-    "a04.v.not.fail": "Scene 5: the title touches the safe edge. Claude is fixing it.",
+    "a04.v.not.fail": "Scene 5: the title touches the safe edge.",
     "a04.rerender": "Re-render scenes",
-    "a04.f.pass": "Pass", "a04.f.fix": "Claude is fixing", "a04.f.pending": "Claude is checking",
+    "a04.f.pass": "Pass", "a04.f.fix": "Has a problem", "a04.f.pending": "Claude is checking",
     "a04.error": "The render failed at piece 3: the D: drive is full.",
     "a04.error.hint": "Free up about 4" + NB + "GB on D:, then try again.",
     "a04.done": "Quality check passed. {item} is done.",
@@ -424,12 +426,15 @@
     "p20.retry_wait": "Try again turns on once the service is running.",
     "a02.num.twice": "(twice in a row)",
     "a02.retry_first": "Try again first.",
-    "a04.f.editor": "Needs your editor",
+    "a04.f.editor": "Needs you", "a04.f.unchecked": "Not checked yet", "a04.fix": "Let Claude fix it",
+    "a04.v.not.fail.nc": "Scene 5: the title touches the safe edge. Sign in to Claude, then let it fix this.",
+    "a04.wait_qc.hint.nc": "Sign in to Claude: it runs the quality check.",
     "a04.f.stale": "Out of date",
-    "a04.open_anyway": "Open anyway",
+    "a04.open_anyway": "Open without the check",
     "a04.wait_qc": "Wait for QC",
     "a04.wait_qc.hint": "Open project turns on when the quality check passes.",
-    "p19.no_text.reason": "No editable text"
+    "p19.no_text.reason": "No editable text",
+    "p18.pill.model": "Model downloading"
   });
 
   Object.assign(window.MOCK_STRINGS.ar, {
@@ -441,6 +446,7 @@
     "p13.model_busy": "حزمة الكابشن بتنزل · {pct}%",
     "p13.flow.eyebrow": "التلاتة بالترتيب",
     "p13.sequence": "السيكوينس: {name}",
+    "p13.keeps": "الأدوات بتشتغل على نسخة. السيكوينس الأصلي {name} بيفضل زي ما هو.",
     "p13.tidy.sub": "بينضّف المشروع ويرتّبه في فولدرات. وبيعمل سينك للبودكاست بالصوت.",
     "p13.hush.sub": "بيشيل السكتات واللزمات.",
     "p13.kalam.sub": "كابشن مظبوط على الصوت: تراك أو قالب أو ملف SRT.",
@@ -449,7 +455,7 @@
     "p13.chip.downloading": "بتنزل",
     "p13.model_offer": "حزمة الكابشن لسه بتنزل. تقدر تبدأ دلوقتي بالنموذج الأصغر: أسرع بس أقل دقة.",
     "p13.use_small": "استخدم النموذج الأصغر",
-    "p13.error": "ما قدرناش نقرا المشروع المفتوح من Premiere.",
+    "p13.error": "WhyNot Cut مش قادر يقرا المشروع المفتوح: Premiere مش متوصّل.",
     "p13.error.hint": "جرّب تاني. لو فشلت تاني، احفظ المشروع واقفل Premiere وافتحه من جديد.",
     "p13.success": "الكابشن خلص: اتحط {n} كابشن في {seq}.",
     "p13.last": "آخر مرة: {text} · من" + NB + "{ago}",
@@ -457,8 +463,8 @@
     "p13.none": "لسه مفيش.",
     "p13.last.tidy": "اترتّب 214 ملف", "p13.ago.tidy": "يوم",
     "p13.last.hush": "اتقطّع 24 قطعة", "p13.ago.hush": "ساعتين",
-    "p13.kalam.last": "اتحط 64 كابشن",
-    "p13.week": "الأسبوع ده الأدوات وفّرت حوالي ساعة و10 دقايق · تقدير.",
+    "p13.kalam.last": "اتحط 64 كابشن", "p13.ago.kalam": "3" + NB + "أيام",
+    "p13.week": "الأدوات وفّرت حوالي ساعة و10 دقايق · تقدير.",
     "p13.back": "الأدوات",
     "p13.elapsed": "عدّى {t}",
     "p13.stop": "وقّف",
@@ -483,7 +489,7 @@
     "p14.scan": "افحص المشروع",
     "p14.sec.remove": "هيتشال من المشروع",
     "p14.sec.remove_note": "من المشروع بس. ملفاتك فاضلة على الهارد.",
-    "p14.sec.move": "هيتنقل للفولدرات",
+    "p14.sec.move": "هيتنقل لفولدرات جوه المشروع (Bins)",
     "p14.sec.nests": "أسامي جديدة للنستات",
     "p14.sec.offline": "ملفات مش موجودة (للعلم بس)",
     "p14.optin": "مش متعلّم عليها من الأول",
@@ -561,7 +567,7 @@
     "p16.scan": "افحص",
     "p16.soft": "خفيف", "p16.medium": "متوسط", "p16.strong": "قوي",
     "p16.strength": "القوة",
-    "p16.fillers": "اللزمات",
+    "p16.fillers": "اللزمات (إممم، آآ، يعني)",
     "p16.counts": "{s} سكتة + {f} لزمة",
     "p16.mode.cut": "قطّع", "p16.mode.markers": "ماركرز بس",
     "p16.go": "قطّع", "p16.markers.go": "حط ماركرز",
@@ -601,7 +607,7 @@
     "p16.bar.markers": "هيحط {n} ماركر. مفيش حاجة هتتقطّع.",
     "p16.dialog.title": "تقطّع {n} قطعة من {seq}؟",
     "p16.dialog.c1": "هيتشال {s} سكتة و{f} لزمة.",
-    "p16.dialog.c2": "الفراغات هتتقفل، فكل اللي بعد القطع هيقدّم.",
+    "p16.dialog.c2": "الفراغات هتتقفل، وكل اللي بعد القطع هيتسحب لقدّام.",
     "p16.dialog.c3": "التراكات اللي هتتحرك: {tracks}",
     "p16.dialog.backup": "السيكوينس هيتنسخ الأول باسم:",
     "p16.dialog.keep": "خلّي السيكوينس زي ما هو",
@@ -698,7 +704,7 @@
     "p20.value": "وفّرت حوالي 40 دقيقة كتابة · تقدير.",
     "p20.corrected": "اتصحّح بقواعد {client} وقاموسه.",
     "p20.reveal": "وريني ملف SRT",
-    "p20.fix": "صلّح الكابشن مع Claude",
+    "p20.fix": "صحّح الكابشن (Claude)",
     "p20.list": "الكابشن",
     "p20.show_all": "اعرض الكل ({n})",
     "p20.undo": "امسح الكابشن اللي اتحط",
@@ -707,7 +713,7 @@
     "p20.error.hint": "«جرّب تاني» هيشغّله على البروسيسور. أبطأ، حوالي دقيقتين.",
     "p20.lost": "الاتصال بخدمة WhyNot Cut اتقطع وإحنا بنسمع.",
     "p20.lost.hint": "شغّلها ودوس «جرّب تاني». مفيش حاجة اتحطت في السيكوينس.",
-    "p20.no_claude": "Claude مش مسجّل دخول، عشان كده «صلّح الكابشن» مقفول. الكابشن اتحط واتحفظ.",
+    "p20.no_claude": "Claude مش مسجّل دخول، عشان كده «صحّح الكابشن (Claude)» مقفول. الكابشن اتحط واتحفظ.",
 
     /* A-01 */
     "a01.pill.host": "After Effects",
@@ -746,13 +752,14 @@
     "a02.claude_line": "كلام Claude مش كلام المتكلم",
     "a02.numbers": "أكّد الأرقام دي",
     "a02.animatic": "اتفرّج على الأنيماتيك",
-    "a02.blocked": "مستنيين مراجعة الجمل الطبية للخطة دي. Claude بيعملها، وبعدها «وافق» هيشتغل.",
+    "a02.blocked": "مستنيين Claude يعلّم الجمل الحسّاسة في الخطة دي. وبعدها إنت اللي بتأكّد كل جملة.",
     "a02.title": "راجع خطة الموشن",
     "a02.animatic.sub": "ستوري بورد ونسخة متحركة أولية، {d}.",
     "a02.type.title": "عنوان", "a02.type.number": "رقم", "a02.type.quote": "اقتباس", "a02.type.list": "لستة بأيقونات", "a02.type.end": "نهاية",
-    "a02.review": "مراجعة الجمل الطبية",
-    "a02.review.ok": "اتراجعت للخطة دي: {n} سطور متوافق عليها.",
-    "a02.review.note": "مشهد 4 اتخفّف وبقى «ممكن يساعد» بدل «بيعالج».",
+    "a02.review": "مراجعة الجمل الحسّاسة",
+    "a02.review.ok": "Claude راجع {n} جمل وخفّف واحدة. لسه لازم تأكّدها مع الدكتور أو الشيخ.",
+    "a02.review.note": "مشهد 4: Claude خفّف الصياغة، «بيعالج» بقت «ممكن يساعد».",
+    "a02.softened": "Claude خفّفها", "a02.scene": "مشهد {n}", "a02.at": "13 أكتوبر 2026 · 14:32",
     "a02.numbers.hint": "الأرقام بتظهر زي ما المتكلم قالها بالظبط.",
     "a02.assets": "الأيقونات والمزيكا والستايل",
     "a02.icons": "6 أيقونات مجانية، مسموح نستخدمها",
@@ -775,7 +782,7 @@
     "a02.done": "اتوافق. ابدأ البناء من الرئيسية.",
     "a02.done_by": "وافق {name} · {time}",
     "a02.go_home": "روح للرئيسية",
-    "a02.no_claude": "Claude مش مسجّل دخول، فمراجعة الجمل الطبية مش هتتعمل و«وافق» هيفضل مقفول.",
+    "a02.no_claude": "Claude مش مسجّل دخول، فمش هيعلّم الجمل الحسّاسة و«وافق» هيفضل مقفول.",
 
     /* A-03 */
     "a03.probe": "بنراجع الكلام العربي في After Effects {version}. ده بيحصل مرة واحدة لكل نسخة.",
@@ -821,11 +828,11 @@
     "a04.not_done": "الشغل مش خالص غير لما فحص الجودة يعدّي.",
     "a04.v.verified": "اتراجع", "a04.v.not": "لسه ما اتراجعش", "a04.v.needs": "مطلوب منك",
     "a04.v.verified.t": "المشروع المبني مطابق للخطة · ريندر تجريبي عدّى",
-    "a04.v.not.t": "فحص الجودة لسه على صورتين.",
+    "a04.v.not.t": "فحص الجودة لسه مفتوح على 3 صور.",
     "a04.v.needs.t": "الشكل النهائي والتصدير، واختيار المزيكا.",
-    "a04.v.not.fail": "مشهد 5: العنوان لامس حافة الأمان. Claude بيصلّحه.",
+    "a04.v.not.fail": "مشهد 5: العنوان لامس حافة الأمان.",
     "a04.rerender": "ريندر تاني للمشاهد",
-    "a04.f.pass": "تمام", "a04.f.fix": "Claude بيصلّحها", "a04.f.pending": "Claude بيراجعها",
+    "a04.f.pass": "تمام", "a04.f.fix": "فيها مشكلة", "a04.f.pending": "Claude بيراجعها",
     "a04.error": "الريندر فشل عند الجزء 3: هارد D: مليان.",
     "a04.error.hint": "فضّي حوالي 4" + NB + "جيجا على D:، وجرّب تاني.",
     "a04.done": "فحص الجودة عدّى. {item} خلص.",
@@ -838,12 +845,15 @@
     "p20.retry_wait": "«جرّب تاني» هيشتغل أول ما الخدمة تشتغل.",
     "a02.num.twice": "(مرتين ورا بعض)",
     "a02.retry_first": "جرّب تاني الأول.",
-    "a04.f.editor": "محتاجة المونتير",
+    "a04.f.editor": "محتاجة تدخّل منك", "a04.f.unchecked": "لسه ما اتراجعتش", "a04.fix": "خلّي Claude يصلّحها",
+    "a04.v.not.fail.nc": "مشهد 5: العنوان لامس حافة الأمان. سجّل دخول Claude، وبعدها خلّيه يصلّحه.",
+    "a04.wait_qc.hint.nc": "سجّل دخول Claude: هو اللي بيعمل فحص الجودة.",
     "a04.f.stale": "قديمة",
-    "a04.open_anyway": "افتح المشروع برضه",
+    "a04.open_anyway": "افتح من غير الفحص",
     "a04.wait_qc": "استنى فحص الجودة",
     "a04.wait_qc.hint": "«افتح المشروع» هيشتغل أول ما فحص الجودة يعدّي.",
-    "p19.no_text.reason": "مفيهوش كلام يتعدّل"
+    "p19.no_text.reason": "مفيهوش كلام يتعدّل",
+    "p18.pill.model": "النموذج بينزل"
   });
 
   /* Data shown in this group's screens (not UI copy). Arabic lines are as said (Arabic in both UIs). File names only:
@@ -880,11 +890,11 @@
     ],
     longCaption: "والكلام ده مش معناه إنك توقف العلاج من نفسك، لكن معناه إنك تسأل دكتورك وتراجع الجرعة معاه كل شهر لحد ما القراية تستقر",
     scenes: [
-      { tc: "00:00–00:04", type: "title", text: "قياس السكر الصبح", claude: true },
-      { tc: "00:04–00:11", type: "quote", text: "قياس السكر الصايم الصبح بيقولك أكتر من أي قراية تانية في اليوم." },
-      { tc: "00:11–00:19", type: "number", text: "فوق 126 مرتين ورا بعض" },
-      { tc: "00:19–00:28", type: "list", text: "قبل الفطار · مية بس · نفس الميعاد كل يوم", claude: true },
-      { tc: "00:28–00:34", type: "end", text: "اسأل دكتورك قبل ما تغيّر علاجك" }
+      { tc: "00:00–00:04", type: "title", text: "قياس السكر الصبح", claude: true, kind: "medical" },
+      { tc: "00:04–00:11", type: "quote", text: "الصيام مش مبرر إنك توقف علاج السكر.", kind: "religious" },
+      { tc: "00:11–00:19", type: "number", text: "فوق 126 مرتين ورا بعض", kind: "medical" },
+      { tc: "00:19–00:28", type: "list", text: "قبل الفطار · مية بس · ممكن يساعد في ضبط السكر", claude: true, kind: "medical", softened: true },
+      { tc: "00:28–00:34", type: "end", text: "اسأل دكتورك قبل ما تغيّر علاجك", kind: "medical" }
     ],
     numbers: [["126", "mg/dL", "00:11", ""], ["2", "", "00:14", "a02.num.twice"]]
   };

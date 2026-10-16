@@ -57,3 +57,5 @@ type
 undo-2
 user
 x
+stethoscope
+book-open

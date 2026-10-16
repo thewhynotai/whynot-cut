@@ -127,7 +127,7 @@
   /* o.noScan: the notice above carries the one "Scan again" (stale, error): no second one in the project card */
   function plan(o) {
     o = o || {};
-    var scan = o.noScan ? "" : M.btn(t("p14.rescan"), { icon: "refresh-cw", disabled: o.disabled });
+    var scan = o.noScan ? "" : M.btn(t("p14.rescan"), { icon: "refresh-cw", disabled: o.disabled, cls: "m-needs-host" });
     return projectCard({ podcast: o.podcast, name: o.name, disabled: o.disabled, scanBtn: scan }) +
       stats() + removeCard(o) +
       (o.podcast || o.compact ? closed(t("p14.sec.move"), MOVE) + closed(t("p14.sec.nests"), 3) : moveCard() + nestsCard(o)) +

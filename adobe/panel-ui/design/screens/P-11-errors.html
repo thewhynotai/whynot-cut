@@ -37,7 +37,16 @@
    R2 D-P1-10: no developer words ("a message was too large" is "the connection closed unexpectedly").
    R2 D-P0-1: each state sets the header to match its cards (pills for one cause, else the shell derives the pill).
    R2 E-P2-01: one pack name «حزمة الكابشن» (Caption pack); the brand is only the grey sublabel.
-   no-Claude cards are the shell's M.noClaude (one sentence, one button, "What Claude sees"). */
+   no-Claude cards are the shell's M.noClaude (one sentence, one button, "What Claude sees").
+   R3 (fix list P-8, P-10, S-07, S-13):
+   - Claude group: a new card for the plan's usage limit (engine data claude.state "limited" + until): amber, "Claude's usage
+     limit is reached until {time}. That's your Claude plan's limit, not WhyNot Cut. The build carries on at {time}." with
+     See plans (support.claude.com, live). It is the same card P-06 shows over a paused build;
+   - Update group: the Premiere restart is ONE condition (M.COND.restart_needed), so ONE amber card with ONE Check again (the
+     shell turns it violet) and no red card or red header; the second copy ("Restart Premiere once to finish installing",
+     red, with its own Check again) is gone from this catalogue (P-02 restart-once keeps that wording, amber);
+   - the "Claude isn't installed" card points at Claude's own page (the guide is not published: H24);
+   - item codes in the sentences are one no-break run, with a middle ellipsis when long (PC.code). */
 (function () {
   var t = M.t, D = M.D, P = PC.D;
   function code(s) { return PC.code(s); }
@@ -111,6 +120,8 @@
       return group("p11.g.claude", [
         M.noClaude("missing", { primary: false, sub: t("p02.claude.missing.sub") }),
         M.noClaude("signed_out", { primary: false, sub: t("p02.claude.signed_out.sub") }),
+        M.notice("warn", t("p11.limit", { time: M.html(M.mono(P.limitUntil)) }), { sub: t("p11.limit.sub", { time: M.html(M.mono(P.limitUntil)) }),
+          btn: { label: t("plans.link"), icon: "external-link" }, dismiss: false }),
         e(t("p02.claude.old", { version: "2.2.1" }), t("p02.claude.old.sub"), { label: t("p02.btn.update_plugin"), icon: "download" }, "warn"),
         M.notice("info", t("p02.claude.waiting", { item: code(D.item) }), { btn: { label: t("p02.btn.needs"), icon: "list-checks" } })
       ]);
@@ -118,7 +129,6 @@
     update: function () {
       return group("p11.g.update", [
         M.stale(),
-        e(t("p02.restart_once"), t("p02.restart_once.sub"), { label: t("action.check_again"), icon: "refresh-cw" }, M.COND.premiere_unlinked),
         e(t("p02.older"), t("p02.older.sub"), UPDATE, "warn"),
         M.notice("info", t("p02.staged"))
       ]);

@@ -23,7 +23,8 @@
      decision while it runs, and direction §12 makes the progress action a quiet one (inventory P-20 names Stop the
      primary; changed here, see the report).
    - normal (captions track): "{n} captions placed", the SRT path in full, how to remove a captions track (Premiere has
-     no API for it), then every caption with its time and full text. No primary: the list is the result.
+     no API for it), then every caption with its time and full text. R3: the one violet is Done (back to Tools), after the
+     list; the Claude action is named "Fix captions (Claude)" as on P-10, P-12 and P-22.
    - mogrt: the template output adds "Remove the placed captions" (the MOGRT undo).
    - error: the stage that failed, why, and Try again (on the processor) as the primary.
    - offline: the connection was lost mid-run; Start WhyNot Cut takes the fill; nothing was placed.
@@ -55,7 +56,7 @@
       '<div class="mt-1">' + TA.name(o.srt || X.srt) + '</div>' +
       '<div class="ta-btnrow mt-3">' + M.btn(t("p20.reveal"), { icon: "folder-open", focus: o.focus }) + '</div>' +
       (o.mogrt
-        ? '<div class="t-meta tx-muted mt-3">' + t("p20.undo.hint", { n: 64 }) + '</div><div class="m-row mt-2">' + M.btn(t("p20.undo"), { icon: "undo-2" }) + '</div>'
+        ? '<div class="t-meta tx-muted mt-3">' + t("p20.undo.hint", { n: 64 }) + '</div><div class="m-row mt-2">' + M.btn(t("p20.undo"), { icon: "undo-2", cls: "m-needs-host" }) + '</div>'
         : TA.row(M.status("info"), t("p20.track_note"), "mt-3")) +
       '<div class="m-row mt-2">' + M.btn(t("p20.fix"), { kind: "ghost", icon: "pen-line", flush: true, disabled: o.noClaude }) + '</div>', "mt-4");
   }
@@ -69,16 +70,21 @@
       }).join("") + '</div>' +
       '<div class="m-row mt-1">' + M.btn(t("p20.show_all", { n: 64 }), { kind: "ghost", icon: "chevron-down", flush: true }) + '</div>', "mt-4");
   }
+  /* R3 (designer F-22): after success the screen has ONE violet, Done (back to Tools). When a notice above already carries
+     the violet (no-claude: Sign in), Done is a secondary. */
+  function done(o) {
+    return '<div class="ta-btnrow mt-4">' + M.btn(t("p13.done"), { kind: o && o.primary === false ? "secondary" : "primary" }) + '</div>';
+  }
   function ok(o) {
     return M.slot(M.notice("ok", t("p20.done", { n: 64, seq: TA.mono((o && o.seq) || X.seq) }), { sub: t("p20.corrected", { client: D.client }) }));
   }
 
   var STATES = {
     loading: function () { return { body: head() + running() }; },
-    normal: function () { return { body: ok() + head() + doneCard() + list() }; },
-    focus: function () { return { body: ok() + head() + doneCard({ focus: true }) + list() }; },
-    mogrt: function () { return { body: ok() + head() + doneCard({ mogrt: true }) + list() }; },
-    "no-claude": function () { return { pills: TA.pillsNoClaude, body: TA.noClaude("p20.no_claude") + head() + doneCard({ noClaude: true }) + list() }; },
+    normal: function () { return { body: ok() + head() + doneCard() + list() + done() }; },
+    focus: function () { return { body: ok() + head() + doneCard({ focus: true }) + list() + done() }; },
+    mogrt: function () { return { body: ok() + head() + doneCard({ mogrt: true }) + list() + done() }; },
+    "no-claude": function () { return { pills: TA.pillsNoClaude, body: TA.noClaude("p20.no_claude") + head() + doneCard({ noClaude: true }) + list() + done({ primary: false }) }; },
     error: function () {
       return {
         body: M.slot(M.notice("error", t("p20.error"), { sub: t("p20.error.hint"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } })) +
@@ -98,7 +104,7 @@
             '<div class="t-meta tx-muted mt-2">' + t("p20.retry_wait") + '</div>', "mt-4")
       };
     },
-    long: function () { return { body: ok({ seq: X.long.seq }) + head() + doneCard({ srt: X.long.srt }) + list({ long: true }) }; }
+    long: function () { return { body: ok({ seq: X.long.seq }) + head() + doneCard({ srt: X.long.srt }) + list({ long: true }) + done() }; }
   };
 
   TA.mount({
