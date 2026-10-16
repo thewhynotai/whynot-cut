@@ -6500,12 +6500,13 @@ class TestRound6(unittest.TestCase):
             self.assertEqual(sorted(os.listdir(eng / "models")),
                              sorted([".locks", "CACHEDIR.TAG", HF_STORE, LLAMA, small.name]), r.detail)
             self.assertIn(base.MODELS_UNSURE_AR, r.detail)
+            self.assertIn(small.name, r.detail)  # (round 9, R8-2: only the entry that caused it is named)
         else:
             self.assertEqual(sorted(os.listdir(eng / "models")), sorted([".locks", "CACHEDIR.TAG", LLAMA]), r.detail)
             self.assertIn(base.MODELS_KEPT_AR, r.detail)
+            self.assertIn(LLAMA, r.detail)
         self.assertEqual(mine.read_bytes(), b"mine")
         self.assertEqual(theirs.read_bytes(), b"theirs")  # never entered through the link
-        self.assertIn(LLAMA, r.detail)
         # with --remove-engine too, and nothing of the editor's in models/: models/ goes as well
         eng2 = h / "Engine2"
         touch(eng2 / "state.json", GENUINE_STATE)
