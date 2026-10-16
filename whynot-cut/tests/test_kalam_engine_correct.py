@@ -877,6 +877,77 @@ class TestCancelStopsCorrection(unittest.TestCase):
         self.assertTrue(out == FIXED and stats["error"] is None)
 
 
+class TestSubscriptionNeverInheritsApiKeys(unittest.TestCase):
+    """Task 10 review M4 (executor ruling): the subscription backend runs `claude -p` with an explicit environment that has
+    neither ANTHROPIC_API_KEY nor ANTHROPIC_AUTH_TOKEN, so it can never fall into API billing silently (nothing paid)."""
+
+    KEYS = {"ANTHROPIC_API_KEY": "sk-test-parent-key", "ANTHROPIC_AUTH_TOKEN": "tok-test-parent-token"}
+
+    def test_the_child_env_handed_to_popen_lacks_both_keys_while_the_parent_has_them(self):
+        seen = {}
+
+        class StubPopen:
+            def __init__(self, args, **kw):
+                seen.update(kw)
+                self.pid, self.returncode = 4242, 0
+
+            def communicate(self, *a, **k):
+                return "{}", ""
+
+            def poll(self):
+                return 0
+
+        with mock.patch.dict(os.environ, dict(self.KEYS, KEEP_ME="1")), \
+                mock.patch.object(subprocess, "Popen", StubPopen):
+            code, out = _run_cli(["/x/claude", "-p"], "{}", ".")
+            self.assertEqual((code, out), (0, "{}"))
+            env = seen.get("env")
+            self.assertIsInstance(env, dict, "the child gets an explicit environment")
+            for key in self.KEYS:
+                self.assertNotIn(key, env)
+            self.assertEqual(env.get("KEEP_ME"), "1")                      # everything else is inherited
+            self.assertEqual({k: os.environ.get(k) for k in self.KEYS}, self.KEYS)   # the parent is untouched
+
+    def test_a_real_child_process_does_not_see_the_keys(self):
+        code = "import os; print(os.environ.get('ANTHROPIC_API_KEY'), os.environ.get('ANTHROPIC_AUTH_TOKEN'), os.environ.get('KEEP_ME'))"
+        with mock.patch.dict(os.environ, dict(self.KEYS, KEEP_ME="1")):
+            rc, out = _run_cli([sys.executable, "-c", code], "", ".")
+            self.assertEqual(out.strip(), "None None 1")
+            self.assertEqual({k: os.environ.get(k) for k in self.KEYS}, self.KEYS)
+        self.assertEqual(rc, 0)
+
+    def test_client_default_runner_path_uses_it(self):
+        seen = {}
+
+        def fake_run_cli(args, stdin, cwd):
+            seen["env"] = _correct_module._child_env()
+            return 0, json.dumps({"is_error": False, "structured_output": {"lines": FIXED}})
+
+        with mock.patch.dict(os.environ, self.KEYS):
+            out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/x/claude", runner=fake_run_cli))
+        self.assertEqual(out, FIXED)
+        self.assertTrue(all(k not in seen["env"] for k in self.KEYS))
+
+    def test_child_env_matching_is_case_insensitive_on_windows_only(self):
+        base = {"anthropic_api_key": "a", "Anthropic_Auth_Token": "b", "ANTHROPIC_API_KEY": "c", "PATH": "p"}
+        self.assertEqual(_correct_module._child_env(base, windows=True), {"PATH": "p"})
+        self.assertEqual(_correct_module._child_env(base, windows=False),
+                         {"anthropic_api_key": "a", "Anthropic_Auth_Token": "b", "PATH": "p"})
+        self.assertEqual(base["ANTHROPIC_API_KEY"], "c")                     # the input mapping is not modified
+
+    def test_the_api_backend_keeps_its_key_and_never_builds_a_child_env(self):
+        with fake_api_modules() as (anthropic, _httpx2), \
+                mock.patch.object(_correct_module, "_child_env", wraps=_correct_module._child_env) as ce, \
+                mock.patch.object(subprocess, "Popen") as popen, mock.patch.dict(os.environ, self.KEYS):
+            out, stats = correct(SRC, "rules", {}, "sk-test-api-key")
+            made = list(anthropic.Anthropic.made)
+            self.assertEqual({k: os.environ.get(k) for k in self.KEYS}, self.KEYS)
+        self.assertEqual(out, FIXED)
+        self.assertEqual(made, [{"api_key": "sk-test-api-key", "max_retries": 3}])
+        ce.assert_not_called()
+        popen.assert_not_called()
+
+
 class TestCorrectProvenance(unittest.TestCase):
     def test_headers(self):
         pkg = HERE.parent / "engine" / "reel" / "lib" / "kalam"

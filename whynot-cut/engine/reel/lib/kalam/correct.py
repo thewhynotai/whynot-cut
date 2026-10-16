@@ -13,7 +13,10 @@
 #   * a cancelled run (lib/parallel) starts no further batch and ends with error "cancelled";
 #   * a refused `.cmd` shim is the error code "cmd_shim_refused" with the help text in stats["how"] (make_client: the
 #     notice of the same name, `notice_how` gives the text);
-#   * find_claude_code keeps only absolute paths: a CWD-relative claude.exe is never started (Task 10 review I1).
+#   * find_claude_code keeps only absolute paths: a CWD-relative claude.exe is never started (Task 10 review I1);
+#   * RULE (owner: nothing paid): the subscription backend runs `claude -p` with an explicit environment that lacks
+#     ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN (_child_env; matched case-insensitively on Windows), so it can never fall
+#     into API billing silently. os.environ itself is never modified; the API backend (the `anthropic` client) keeps its key.
 """Correct caption phrases with Claude by the user's rules. Timecodes never leave this machine: only text is sent,
 and the reply must have exactly one line per phrase or the source text is kept."""
 import importlib
@@ -73,6 +76,19 @@ class _Reply:
         self.content, self.stop_reason = [_Text(text)], "end_turn"
 
 
+API_BILLING_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+def _child_env(environ=None, windows=None) -> dict:
+    """a copy of the environment for the `claude -p` child WITHOUT the variables that would make the Claude Code CLI bill
+    the API instead of the user's subscription (case-insensitive on Windows, where variable names are); the input is not
+    modified"""
+    environ = os.environ if environ is None else environ
+    windows = _platform.is_windows() if windows is None else windows
+    drop = {k.upper() for k in API_BILLING_VARS} if windows else set(API_BILLING_VARS)
+    return {k: v for k, v in environ.items() if (k.upper() if windows else k) not in drop}
+
+
 def _spawn_kwargs(posix=None) -> dict:
     """POSIX: the CLI leads its own session / process group, so a cancel can kill the group (what it started too)"""
     posix = os.name == "posix" if posix is None else posix
@@ -98,7 +114,7 @@ def _run_cli(args, stdin, cwd):
     if _platform.is_batch(args[0]):             # never cmd.exe with the caption JSON on argv (BatBadBut)
         raise _platform.CmdShimRefused(_platform.CMD_REFUSED)
     p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                         encoding="utf-8", errors="replace", cwd=cwd, **_spawn_kwargs())
+                         encoding="utf-8", errors="replace", cwd=cwd, env=_child_env(), **_spawn_kwargs())
     track(p)                                    # a cancelled parallel_map kills it too
     try:
         out, _err = p.communicate(stdin, timeout=CLI_TIMEOUT)
