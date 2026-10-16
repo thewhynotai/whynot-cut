@@ -19,7 +19,8 @@ counts it) to one daemon writer thread, so the event loop never waits on the dis
 close() writes it and stops the thread (App.close, within its budget).
 Size: one file of at most MAX_BYTES; past it the file becomes perf.jsonl.1 (the older one is replaced) and a new one
 starts. When Windows refuses the rename (WinError 32: a reader or the antivirus holds the file), the line is appended
-anyway while the file stays under 2 x MAX_BYTES; past that it is skipped. A failing disk is logged once per failing
+anyway while the file stays under 2 x MAX_BYTES; past that it is skipped. A refused rename is tried again only after
+RENAME_RETRY_S (on the monotonic clock), never once per line. A failing disk is logged once per failing
 episode (a good write ends the episode) and never fails the caller. perf_report.py reads both files.
 """
 from __future__ import annotations
@@ -52,6 +53,7 @@ BATCH_MAX = 50                   # marks in one panel `perf` message (session.sc
 MS_MAX = 3_600_000               # an hour: anything longer is not a latency
 T_MAX = 10 ** 14                 # epoch ms (year 5138): session.schema.json perf_mark.t maximum
 QUEUE_MAX = 256                  # batches waiting for the writer thread
+RENAME_RETRY_S = 5.0             # a refused rotation is tried again after this
 RID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 SID_RE = re.compile(r"[0-9a-f]{6}-[0-9]{1,9}")
 FILE = "perf.jsonl"
@@ -98,10 +100,13 @@ def clean(entry, allowed=MARKS) -> dict | None:
 class PerfLog:
     """The daemon's perf file. mark() for the daemon's own marks, extend() for a panel batch; both return at once."""
 
-    def __init__(self, home, *, max_bytes: int = MAX_BYTES, clock=time.time, queue_max: int = QUEUE_MAX):
+    def __init__(self, home, *, max_bytes: int = MAX_BYTES, clock=time.time, queue_max: int = QUEUE_MAX,
+                 mono=time.monotonic):
         self.path = perf_path(home)
         self.max_bytes = max_bytes
         self.clock = clock
+        self.mono = mono                                  # the rename back-off and close()'s deadline
+        self._rename_after = None                         # mono time before which a refused rename is not retried
         self.dropped = 0                                  # marks lost to a full queue
         self._salt = secrets.token_bytes(16)              # this run's: a rid hash means nothing after a restart
         self._run = secrets.token_hex(3)
@@ -164,18 +169,21 @@ class PerfLog:
     def flush(self, timeout: float = 2.0) -> bool:
         """Wait until every line queued before this call is written (or dropped by a failing disk). False on timeout."""
         with self._lock:
-            if self._thread is None or not self._thread.is_alive():
-                return True
-            done = threading.Event()
-            try:
-                self._q.put(done, timeout=timeout)
-            except queue.Full:
-                return False
-        return done.wait(timeout)
+            thread = self._thread
+        if thread is None or not thread.is_alive():
+            return True
+        deadline = self.mono() + timeout
+        done = threading.Event()
+        try:
+            self._q.put(done, timeout=timeout)            # never under the lock: marks keep queueing (or dropping)
+        except queue.Full:
+            return False
+        return done.wait(max(0.0, deadline - self.mono()))
 
     def close(self, timeout: float = 0.5) -> None:
-        """Write what is queued and stop the writer (at most `timeout` seconds; the thread is a daemon either way).
-        Later marks are refused."""
+        """Write what is queued and stop the writer within ONE deadline of `timeout` seconds (queueing the stop and
+        the join share it; the thread is a daemon either way). Later marks are refused."""
+        deadline = self.mono() + timeout
         with self._lock:
             self._closed = True
             thread = self._thread
@@ -185,7 +193,7 @@ class PerfLog:
             self._q.put(_STOP, timeout=timeout)
         except queue.Full:
             return
-        thread.join(timeout)
+        thread.join(max(0.0, deadline - self.mono()))
 
     def _run_writer(self) -> None:
         while True:
@@ -223,16 +231,23 @@ class PerfLog:
             fh.write(raw)
 
     def _rotate(self, size: int, n: int) -> int | None:
-        """Make room for n more bytes: the new size (0 after a rotation), or None when the line must be skipped."""
-        try:
-            os.replace(self.path, self.path.with_name(FILE + ".1"))
-            return 0
-        except OSError as e:                              # WinError 32: a reader or the antivirus holds it
-            if size + n > 2 * self.max_bytes:
-                self._fail(e, "could not be rotated and is full")
-                return None
-            self._fail(e, "could not be rotated (appending meanwhile)")
-            return size
+        """Make room for n more bytes: the new size (0 after a rotation), or None when the line must be skipped. A
+        refused rename is not tried again before RENAME_RETRY_S has passed."""
+        err: OSError | None = None
+        if self._rename_after is None or self.mono() >= self._rename_after:
+            try:
+                os.replace(self.path, self.path.with_name(FILE + ".1"))
+                self._rename_after = None
+                return 0
+            except OSError as e:                          # WinError 32: a reader or the antivirus holds it
+                err = e
+                self._rename_after = self.mono() + RENAME_RETRY_S
+        if size + n > 2 * self.max_bytes:
+            self._fail(err or PermissionError("rename refused"), "could not be rotated and is full")
+            return None
+        if err is not None:
+            self._fail(err, "could not be rotated (appending meanwhile)")
+        return size
 
     def _write(self, lines: list[dict]) -> bool:
         """Append the lines, rotating whenever the next one would pass the cap (so a file never holds more than

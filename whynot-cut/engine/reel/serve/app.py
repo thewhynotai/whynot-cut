@@ -294,7 +294,9 @@ class App:
         if self._pusher_task is not None and not self._pusher_task.done():
             self._pusher_task.cancel()
             await asyncio.wait({self._pusher_task}, timeout=left(CLOSE_ROUND_S))
-        await asyncio.to_thread(self.perf.close, left(CLOSE_ROUND_S))   # the perf writer: what is queued is written
+        budget = left(CLOSE_ROUND_S)                    # the perf writer: what is queued is written, within one
+        with contextlib.suppress(TimeoutError):          # deadline (a dead disk leaves its daemon thread behind)
+            await asyncio.wait_for(asyncio.to_thread(self.perf.close, budget), budget)
         await self.router.close(timeout=left(CLOSE_ROUND_S))   # job tasks; a CEP job stays journaled as active
         self._state_worker.cancel_pending()
         for shared in [self._fields_shared, *(a for _, a in self._fields_abandoned)]:
@@ -677,10 +679,11 @@ class App:
         """(fields, stale, generation). The item part of the panel state: engine_state.PanelFields on the app's
         engine-state worker, bounded by fields_timeout. A snapshot that arrives while a read is running awaits that
         same read (asyncio.shield: one waiter going away never cancels it). Past the read's deadline the snapshot gets
-        the last good fields (else no item), stale. After FIELDS_RETIRE_AFTER consecutive timeouts the stuck worker is abandoned
-        and a fresh one reads again (at most FIELDS_ABANDONED_MAX stuck at once); otherwise a snapshot never queues
+        the last good fields (else no item), stale. After FIELDS_RETIRE_AFTER consecutive timeouts the stuck worker is
+        abandoned and a fresh one reads again (at most FIELDS_ABANDONED_MAX stuck at once); otherwise a snapshot never queues
         behind a stuck read. `timeout` (a session's first snapshot, G2 H3): this waiter gives up sooner, with the same
-        stale fallback, and the read goes on (it is not counted as stuck). (None, False, None) if the read failed.
+        stale fallback, and the read goes on (it is not counted as stuck). A read that failed is the same fallback,
+        stale, so a snapshot answer and the pusher build one state from it (no push per poll).
         generation: the PanelFields cache generation of these fields (None from a reader without one)."""
         loop = asyncio.get_running_loop()
         shared = self._fields_shared
@@ -710,7 +713,7 @@ class App:
         except Exception as e:
             self._fields_timeouts = 0
             log.warning("reel serve: engine state failed (%s)", type(e).__name__)
-            return None, False, None
+            return self._fields_fallback(), True, self._last_gen
         out, gen = out
         self._fields_timeouts = 0
         self._fields_timed_out = False
@@ -802,10 +805,8 @@ class App:
 
     async def _push_probe(self):
         """One look for the pusher: (fingerprint, payload, stale). A stuck or failed item read is the last good item
-        marked stale, so host and job changes still go through."""
+        marked stale (the same fallback a snapshot answer gets), so host and job changes still go through."""
         item, stale, gen = await self._item_fields_ex()
-        if item is None:                                    # the read failed: the last good item, stale
-            item, stale, gen = self._fields_fallback(), True, self._last_gen
         host, jobs = await self._host(), self._job_rows()
         return self._fingerprint(item, gen, stale, host, jobs), (item, host, jobs), stale
 

@@ -28,6 +28,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -221,8 +222,9 @@ class PerfLogTests(unittest.TestCase):
     def test_a_rotation_refused_by_windows_still_appends_up_to_twice_the_cap(self):
         """Review P2-6: os.replace fails with WinError 32 while a reader or the antivirus holds the file. The append
         goes on until the file is twice the cap; a failure is logged once per failing episode (a good write ends it)."""
-        log = self.make(max_bytes=600)
-        with mock.patch.object(perf.os, "replace", side_effect=PermissionError(32, "in use")), \
+        mono = Clock(100.0)
+        log = self.make(max_bytes=600, mono=mono)
+        with mock.patch.object(perf.os, "replace", side_effect=PermissionError(32, "in use")) as refused, \
                 self.assertLogs("serve.perf", "WARNING") as logs:
             for i in range(60):
                 log.mark("cmd.received", rid=f"r{i}")
@@ -232,7 +234,12 @@ class PerfLogTests(unittest.TestCase):
         self.assertLessEqual(size, 1200)
         self.assertFalse(log.path.with_name("perf.jsonl.1").exists())
         self.assertEqual(len(logs.output), 1, logs.output)
-        log.mark("cmd.result")                                            # the rotation works again
+        self.assertEqual(refused.call_count, 1, "re-review 3: one rename attempt per back-off window, not per line")
+        log.mark("cmd.result")                                            # within the window: not tried again
+        self.assertTrue(log.flush(T))
+        self.assertFalse(log.path.with_name("perf.jsonl.1").exists())
+        mono.t += perf.RENAME_RETRY_S                                     # the window is over: the rotation works
+        log.mark("cmd.result")
         self.assertTrue(log.flush(T))
         self.assertTrue(log.path.with_name("perf.jsonl.1").exists())
         with mock.patch.object(perf.os, "replace", side_effect=PermissionError(32, "in use")), \
@@ -241,6 +248,28 @@ class PerfLogTests(unittest.TestCase):
                 log.mark("cmd.received", rid=f"q{i}")
             self.assertTrue(log.flush(T))
         self.assertEqual(len(again.output), 1, "a new failing episode is logged again")
+
+    def test_close_keeps_to_one_deadline(self):
+        """Re-review 2: close(timeout) spends at most `timeout` in all: the wait to queue the stop and the join share
+        one deadline (it was the full timeout for each)."""
+        mono = Clock(0.0)
+        log = self.make(mono=mono)
+        log.mark("cmd.received")                                          # the writer thread is running
+        self.assertTrue(log.flush(T))
+        puts, joins = [], []
+
+        def slow_put(item, block=True, timeout=None):
+            puts.append(timeout)
+            mono.t += 0.15                                                # the queue was full for 0.15 s
+        try:
+            with mock.patch.object(log._q, "put", slow_put), \
+                    mock.patch.object(log._thread, "join", lambda timeout=None: joins.append(timeout)):
+                log.close(0.2)
+            self.assertEqual((len(puts), len(joins)), (1, 1))
+            self.assertAlmostEqual(puts[0], 0.2)
+            self.assertLessEqual(joins[0], 0.05 + 1e-9, "the join gets what is left of the one deadline")
+        finally:
+            log._q.put_nowait(perf._STOP)
 
     def test_read_since_and_bad_lines(self):
         self.log.mark("cmd.received", rid="a")
@@ -736,6 +765,7 @@ class FakeFields:
         self.value, self.generation, self.calls = dict(BLANK), 0, 0
         self.lock = threading.Lock()
         self.gate: threading.Event | None = None             # set: every read waits on it (a stuck share)
+        self.fail = False                                    # True: every read raises (a share that errors)
 
     def __call__(self, home):
         return self.with_generation(home)[0]
@@ -746,6 +776,8 @@ class FakeFields:
             gate.wait(T)
         with self.lock:
             self.calls += 1
+            if self.fail:
+                raise OSError("the share answers with an error")
             return dict(self.value), self.generation
 
     def set(self, **kw):
@@ -866,6 +898,39 @@ class AppPushTests(AppCase):
             self.assertEqual(first["type"], "welcome", first)
         finally:
             gate.set()
+
+    async def test_a_read_that_keeps_failing_gives_no_push_per_poll(self):
+        """Re-review 1: the snapshot answer and the pusher must build the same state from a failed read (the last
+        good item, stale); else each poll's answer differs from the pusher's and every poll costs one more push."""
+        self.fields.set(client="Dr Nour", item="C0239")
+        c = await self.panel_session()
+        self.fields.fail = True
+        with self.assertLogs("serve.app", "WARNING"):
+            st = await c.recv()                                       # the one push: the state became stale
+            self.assertEqual((st.get("id"), st["state"]["item"], st["state"].get("stale")), (None, "C0239", True))
+            for i in range(5):
+                calls = self.fields.calls
+                await self.until(lambda: self.fields.calls >= calls + 3)        # the pusher looked meanwhile
+                await c.send({"type": "snapshot", "id": f"poll-{i}"})
+                st = await c.recv()
+                self.assertEqual(st.get("id"), f"poll-{i}", f"poll {i}: a push came first ({st})")
+                self.assertEqual((st["state"]["item"], st["state"].get("stale")), ("C0239", True))
+
+    async def test_close_keeps_its_budget_with_a_perf_writer_stuck_on_the_disk(self):
+        """Re-review 2: App.close waits for the perf writer only within CLOSE_BUDGET (a dead disk costs no more)."""
+        gate = threading.Event()
+
+        def stuck_close(timeout=0.5):
+            gate.wait(T)
+        c = await self.panel_session()
+        try:
+            with mock.patch.object(self.app.perf, "close", stuck_close):
+                t0 = time.monotonic()
+                await self.app.close()
+                self.assertLess(time.monotonic() - t0, serve_app.CLOSE_BUDGET + 0.5)
+        finally:
+            gate.set()
+        await c.aclose()
 
     async def test_a_panel_without_a_state_yet_is_not_pushed(self):
         c = await self.panel_session(snapshot=False)
