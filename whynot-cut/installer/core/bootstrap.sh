@@ -667,7 +667,8 @@ is_engine_home() { # dir: status 0 when it is a GENUINE WhyNot Cut engine home (
 
 occupied_list() { # dir [pointer-ok] -> OCCUPIED (one per line): every entry except the write probe, the -Source cache (a
   # downloads folder holding only release-* folders) and, with pointer-ok (~/.whynot-cut), the pointer; names compare
-  # exactly (the core's base.occupied_entries)
+  # exactly; (fix round 7, M6-2) the OS folder-view files .DS_Store, Thumbs.db, desktop.ini do not count when they are real
+  # files (view_file) (the core's base.occupied_entries)
   local e n k only
   OCCUPIED=""
   [ -d "$1" ] || return 0
@@ -676,6 +677,7 @@ occupied_list() { # dir [pointer-ok] -> OCCUPIED (one per line): every entry exc
     n="${e##*/}"
     case "$n" in .wnc-write-test*) continue ;; esac
     if [ -n "${2:-}" ] && [ "$n" = "plugin-options.json" ]; then continue; fi
+    view_file "$e" && continue
     if [ "$n" = "downloads" ] && [ -d "$e" ] && [ ! -L "$e" ]; then
       only=1
       for k in "$e"/* "$e"/.[!.]* "$e"/..?*; do
@@ -761,16 +763,17 @@ model_entry_kind() { # models-dir name -> KIND: what one entry of <engine home>/
 
 our_models() { # dir: status 0 when <engine home>/models is WhyNot Cut's (fix round 6, R5-2; the core's base.is_our_models):
   # a real folder whose EVERY entry is a store of ours or Hugging Face's bookkeeping, at least one a store. One entry of
-  # the editor's (their own model beside ours) or any link inside makes the whole folder the editor's
-  local e store=""
+  # the editor's (their own model beside ours) or any link inside makes the whole folder the editor's. Fix round 7 (M6-1):
+  # an EMPTY real folder (or one holding only OS folder-view files) is ours too - nothing in it can be lost
+  local e store="" other=""
   { [ -d "$1" ] && [ ! -L "$1" ]; } || return 1
   for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
     [ -e "$e" ] || [ -L "$e" ] || continue
     model_entry_kind "$1" "${e##*/}"
     [ -n "$KIND" ] || return 1
-    [ "$KIND" = store ] && store=1
+    if [ "$KIND" = store ]; then store=1; elif ! view_file "$e"; then other=1; fi
   done
-  [ -n "$store" ]
+  [ -n "$store" ] || [ -z "$other" ]
 }
 
 view_file() { # path: status 0 for an OS folder-view file (.DS_Store, Thumbs.db, desktop.ini) that is a real file
@@ -946,8 +949,10 @@ keep_release() { # stage engine -> ROOT: --source (fix round 6, R5-5) - install.
   # a folder of this run under the OS temp dir and deletes it when the run ends. Only now (the engine home passed every
   # check) is it kept in <engine>/downloads/release-<sha8> (zip + x/), the plugin root of this run: the core and its
   # background model download read the plugin files after install.sh has deleted the stage. A complete cache of the same
-  # zip is reused. On a failure ROOT stays the stage (a warning)
-  local stage="$1" dl="$2/downloads" dest plugin z same=1 zips=""
+  # zip is reused. On a failure (fix round 7, M6-3; most likely a full disk) nothing it made stays (the partial copy, and
+  # downloads/ and the engine home when it made them) and the run stops with exit 3, before the log and the core - it
+  # never goes on from the stage install.sh deletes
+  local stage="$1" dl="$2/downloads" dest plugin z same=1 zips="" made_engine="" made_dl=""
   dest="$dl/${stage##*/}"
   plugin="$dest/x/whynot-cut-marketplace/whynot-cut"
   { [ -d "$dest" ] && [ ! -L "$dest" ] && [ -f "$plugin/installer/core/wnc_install.py" ]; } || same=""
@@ -959,11 +964,16 @@ keep_release() { # stage engine -> ROOT: --source (fix round 6, R5-5) - install.
   done
   [ -n "$zips" ] || same=""
   if [ -z "$same" ]; then
-    if ! { mkdir -p "$dl" && rm -rf "$dest.tmp" && cp -R "$stage" "$dest.tmp" && rm -rf "$dest" \
-           && mv "$dest.tmp" "$dest"; }; then
-      rm -rf "$dest.tmp"
-      say "WARNING: could not keep the release in $dest; this run uses $stage"
-      return 0
+    [ -d "$2" ] || made_engine=1
+    [ -d "$dl" ] || made_dl=1
+    if ! { mkdir -p "$dl" && rm -rf "$dest.tmp" && cp -R "$stage" "$dest.tmp" && [ -z "$TEST_CACHE_FAIL" ] \
+           && rm -rf "$dest" && mv "$dest.tmp" "$dest"; }; then
+      rm -rf "$dest.tmp"  # (rm never follows a link)
+      if [ -n "$made_dl" ]; then rmdir "$dl" 2>/dev/null; fi
+      if [ -n "$made_engine" ]; then rmdir "$2" 2>/dev/null; fi
+      printf 'ERROR: %s\n' "could not keep the release in $dest; most likely the disk is full. Nothing was installed: free some space, then run the installer again." >&2
+      printf '%s\n' "تعذّر حفظ ملفات WhyNot Cut في مجلد المحرك (غالبًا لأن القرص ممتلئ)، فلم يُثبَّت شيء. وفّر مساحة ثم شغّل المثبّت مرة أخرى." >&2
+      exit 3
     fi
   fi
   say "the release is kept in $dest"
@@ -1524,10 +1534,12 @@ if [ -n "$RELEASE_STAGE" ]; then
     "$RELEASE_STAGE"
 fi
 TEST_UV="" ANSWERS="" TEST_FREE="" TEST_KEYS="" TEST_KEYS_SET="" TEST_COUNTDOWN=10 ANSWER_AT=0 RUN_MODE="yes"
+TEST_CACHE_FAIL=""
 TEST_MOUNTS=""
 if [ -n "$HOME_OVR" ]; then
   TEST_MOUNTS="${WNC_TEST_MOUNTS:-}"
   TEST_UV="${WNC_TEST_UV:-}" ANSWERS="${WNC_TEST_ANSWERS:-}" TEST_FREE="${WNC_TEST_FREE_GB:-}"
+  [ "${WNC_TEST_CACHE_FAIL:-}" = 1 ] && TEST_CACHE_FAIL=1  # the --source cache copy fails
   if [ -n "${WNC_TEST_KEYS+x}" ]; then TEST_KEYS_SET=1 TEST_KEYS="$WNC_TEST_KEYS"; fi
   TEST_COUNTDOWN="${WNC_TEST_COUNTDOWN_S:-10}"
   case "$TEST_COUNTDOWN" in ''|*[!0-9]*) TEST_COUNTDOWN=10 ;; esac
@@ -1631,15 +1643,16 @@ CORE="$ROOT/installer/core/wnc_install.py"
 CMD="install"
 [ -n "$UNINSTALL" ] && CMD="uninstall"
 if [ -z "$DRY" ]; then
-  mkdir -p "$ENGINE/logs" || fail "cannot create $ENGINE/logs"
-  LOG="$ENGINE/logs/$CMD-$(date '+%Y%m%d-%H%M%S').log"
-  : > "$LOG" || fail "cannot write $LOG"
   if [ -n "$STAGE" ] && [ -z "$UNINSTALL" ]; then
     # --source: every check passed, so the release is kept in this engine home now (fix round 6, R5-5); an uninstall
-    # needs it only while it runs, so it is never written into the folder it empties
+    # needs it only while it runs, so it is never written into the folder it empties. A failed copy stops here, before
+    # the log and the core (fix round 7, M6-3)
     keep_release "$STAGE" "$ENGINE"
     CORE="$ROOT/installer/core/wnc_install.py"
   fi
+  mkdir -p "$ENGINE/logs" || fail "cannot create $ENGINE/logs"
+  LOG="$ENGINE/logs/$CMD-$(date '+%Y%m%d-%H%M%S').log"
+  : > "$LOG" || fail "cannot write $LOG"
 fi
 if [ -n "$CHOSEN" ]; then
   MODE=" (chosen)"

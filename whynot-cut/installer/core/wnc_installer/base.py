@@ -360,8 +360,10 @@ def model_entry_kind(models_dir, name: str) -> Optional[str]:
 
 def is_our_models(models_dir) -> bool:
     """<engine home>/models is WhyNot Cut's (fix round 6, R5-2): a real folder, EVERY entry of it is one of our stores
-    or Hugging Face's own bookkeeping (model_entry_kind), and at least one is a store. One entry of the editor's (their
-    own Hugging Face model beside ours, a note) or any link inside makes the whole folder the editor's."""
+    or Hugging Face's own bookkeeping (model_entry_kind), and at least one is a store - or (fix round 7, M6-1) it is
+    empty (models_empty: what `reel setup` makes before any model is downloaded; an empty folder cannot lose data). One
+    entry of the editor's (their own Hugging Face model beside ours, a note) or any link inside makes the whole folder
+    the editor's."""
     if not _real_dir(models_dir):
         return False
     try:
@@ -369,11 +371,157 @@ def is_our_models(models_dir) -> bool:
     except OSError:
         return False
     kinds = [model_entry_kind(models_dir, n) for n in names]
-    return None not in kinds and "store" in kinds
+    return None not in kinds and ("store" in kinds or all(is_view_file(Path(models_dir) / n) for n in names))
 
 
-def _view_file(p: Path) -> bool:
+def is_view_file(p) -> bool:
+    """An OS folder-view file (.DS_Store, Thumbs.db, desktop.ini) that is a real file (never a folder or a link)."""
+    p = Path(p)
     return p.name in VIEW_FILES and _real_file(p)
+
+
+_view_file = is_view_file
+
+
+def models_empty(models_dir) -> bool:
+    """<engine home>/models is a real folder holding nothing, or only OS folder-view files (fix round 7, M6-1: what
+    `reel setup` makes before any model is downloaded; an empty folder cannot lose data, so it counts as ours)."""
+    if not _real_dir(models_dir):
+        return False
+    try:
+        return all(is_view_file(Path(models_dir) / n) for n in os.listdir(models_dir))
+    except OSError:
+        return False
+
+
+_LINK_HOPS = 40
+
+
+def _inside(key: str, root_key: str) -> bool:
+    return key == root_key or key.startswith(root_key.rstrip("\\/") + os.sep)
+
+
+def resolve_inside(root, link) -> tuple:
+    """Where the link `link` (inside `root`) leads, resolved one path component at a time WITHOUT ever leaving `root`
+    (fix round 7, R6-1: nothing outside models/ is ever followed): (the final path, [every link passed]), or (None,
+    [the links so far]) when that is not known for sure - a link that cannot be read, a step out of `root`, a loop
+    (more than 40 links), or a final that does not exist."""
+    root_s = os.path.normpath(os.path.abspath(str(root)))
+    root_key = _fold(os.path.normcase(root_s))
+    passed: list = []
+    start = os.path.normpath(os.path.abspath(str(link)))
+    if not _inside(_fold(os.path.normcase(start)), root_key) or start == root_s:
+        return None, passed
+    parts = os.path.relpath(start, root_s).split(os.sep)
+    cur = root_s
+    while parts:
+        part = parts.pop(0)
+        if part in ("", "."):
+            continue
+        if part == "..":
+            if _fold(os.path.normcase(cur)) == root_key:
+                return None, passed  # out of root
+            cur = os.path.dirname(cur)
+            continue
+        nxt = os.path.join(cur, part)
+        if not is_link(nxt):
+            cur = nxt
+            continue
+        passed.append(nxt)
+        if len(passed) > _LINK_HOPS:
+            return None, passed  # a loop
+        try:
+            t = strip_long_prefix(os.readlink(nxt))
+        except (OSError, ValueError):
+            return None, passed
+        if not t:
+            return None, passed
+        drive, rest = os.path.splitdrive(t)
+        if drive or rest.startswith(("/", "\\")):  # absolute (a junction's target always is)
+            t = os.path.normpath(t if drive else os.path.splitdrive(nxt)[0] + t)
+            if not _inside(_fold(os.path.normcase(t)), root_key):
+                return None, passed
+            rel = os.path.relpath(t, root_s)
+            parts = ([] if rel == "." else rel.split(os.sep)) + parts
+            cur = root_s
+        else:
+            parts = t.replace("/", os.sep).split(os.sep) + parts  # relative to the link's own folder (cur)
+    if not os.path.lexists(cur) or is_link(cur):
+        return None, passed
+    return cur, passed
+
+
+_WALK_LIMIT = 200000
+
+
+def _links_below(top: str) -> tuple:
+    """([every link at or below `top`, never entered], complete?) - incomplete when a folder cannot be read or the
+    walk passes _WALK_LIMIT entries."""
+    if is_link(top):
+        return [top], True
+    out, seen, ok = [], 0, [True]
+
+    def err(_e):
+        ok[0] = False
+
+    for dirpath, dirs, files in os.walk(top, onerror=err):
+        seen += len(dirs) + len(files)
+        if seen > _WALK_LIMIT:
+            return out, False
+        for n in list(dirs):
+            q = os.path.join(dirpath, n)
+            if is_link(q):
+                out.append(q)
+                dirs.remove(n)  # never entered
+        out.extend(q for q in (os.path.join(dirpath, n) for n in files) if is_link(q))
+    return out, ok[0]
+
+
+def models_usage(models_dir, ours: Iterable, theirs: Iterable) -> dict:
+    """What the editor's own entries of <engine home>/models use of ours, and which files of Hugging Face's shared Xet
+    store (models/blobs/<2 hex>/<hash>, huggingface_hub 1.33 utils/_shared_blobs.py: the REAL bytes; a repo's
+    blobs/<etag> and snapshots/<file> are relative symlinks to them) only our stores use (fix round 7, R6-1). Every link
+    is resolved inside models/ only (resolve_inside); nothing outside it is ever followed.
+    {"blobs": [shared-store files that ONLY `ours` link to - empty when anything of the editor's is ambiguous],
+     "used": {our store names a link of the editor's leads into or through}, "ambiguous": bool}."""
+    models = os.path.normpath(os.path.abspath(str(models_dir)))
+    blobs = os.path.join(models, HF_BLOBS)
+    shared = model_entry_kind(models, HF_BLOBS) == "bookkeeping"
+    blobs_key = _fold(os.path.normcase(blobs))
+    ours = list(ours)
+    store_keys = {n: _fold(os.path.normcase(os.path.join(models, n))) for n in ours}
+
+    def in_blobs(p: str) -> bool:
+        k = _fold(os.path.normcase(p))
+        return shared and k != blobs_key and _inside(k, blobs_key)
+
+    their_blobs, used, ambiguous = set(), set(), False
+    for name in theirs:
+        links, complete = _links_below(os.path.join(models, name))
+        ambiguous = ambiguous or not complete
+        for q in links:
+            final, passed = resolve_inside(models, q)
+            for p in passed[1:] + ([final] if final else []):
+                k = _fold(os.path.normcase(p))
+                used.update(n for n, sk in store_keys.items() if _inside(k, sk))
+            if final is None:
+                ambiguous = True
+            elif os.path.isdir(final):  # a link to a folder: ambiguous when the shared store is, or is in, it
+                k = _fold(os.path.normcase(final))
+                ambiguous = ambiguous or (shared and (_inside(k, blobs_key) or _inside(blobs_key, k)))
+            elif in_blobs(final):
+                their_blobs.add(_fold(os.path.normcase(final)))
+    our_blobs = {}
+    for name in ours:
+        if name in used:
+            continue
+        links, _complete = _links_below(os.path.join(models, name))
+        for q in links:
+            final, _passed = resolve_inside(models, q)
+            if final and in_blobs(final) and os.path.isfile(final) and not is_link(final):
+                our_blobs.setdefault(_fold(os.path.normcase(final)), final)
+    out = [] if ambiguous else sorted(p for k, p in our_blobs.items() if k not in their_blobs)
+    return {"blobs": out, "used": used, "ambiguous": ambiguous}
 
 
 def library_state(lib) -> Optional[str]:
@@ -428,7 +576,8 @@ def occupied_entries(path, *, pointer_ok: bool = False) -> list:
     """What makes an existing folder the editor's for the placement rule (controller ruling, fix round 2): every entry
     except the bootstraps' write probe (.wnc-write-test*), the -Source cache (a `downloads` folder holding only
     `release-*` folders) and, at the pointer's own place (`pointer_ok`: ~/.whynot-cut), the pointer
-    plugin-options.json. Names compare exactly. [] when the folder is missing or empty of anything else."""
+    plugin-options.json, and (fix round 7, M6-2) the OS folder-view files .DS_Store / Thumbs.db / desktop.ini when they are
+    real files. Names compare exactly. [] when the folder is missing or empty of anything else."""
     try:
         names = os.listdir(path)
     except OSError:
@@ -436,6 +585,8 @@ def occupied_entries(path, *, pointer_ok: bool = False) -> list:
     out = []
     for n in names:
         if n.startswith(".wnc-write-test") or (pointer_ok and n == OPTIONS_FILE):
+            continue
+        if is_view_file(Path(path) / n):  # (fix round 7, M6-2) Finder's / Explorer's own file, a real file only
             continue
         if n == "downloads" and not is_link(Path(path) / n) and os.path.isdir(Path(path) / n):
             try:
@@ -645,6 +796,15 @@ UNINSTALL_SUBFOLDER_AR = ("هذا المجلد ليس مجلد WhyNot Cut، لك
 # fix round 6 (R5-2): --remove-models deleted only WhyNot Cut's own models; models/ stays for the editor's own files
 MODELS_KEPT_AR = ("حُذفت نماذج WhyNot Cut وحدها. بقي المجلد models لأن فيه ملفات ليست من WhyNot Cut (نماذجك أنت "
                   "مثلًا)، ولم يُلمس منها شيء.")
+# fix round 7 (R6-1): the editor's model beside ours uses Hugging Face's shared files (blobs/, .locks, CACHEDIR.TAG)
+MODELS_SHARED_KEPT_AR = ("بقيت ملفات Hugging Face المشتركة في المجلد models (مثل blobs و.locks وCACHEDIR.TAG) لأن "
+                         "نماذجك تستخدمها، ولم يُحذف منها إلا ما كانت تستخدمه نماذج WhyNot Cut وحدها.")
+MODELS_STORE_USED_AR = "وبقي أيضًا نموذج من نماذج WhyNot Cut لأن ملفًا من ملفاتك يشير إليه."
+# fix round 7 (M6-4): --remove-models on a models/ that is itself a link
+MODELS_LINK_AR = "كان المجلد models رابطًا: حُذف الرابط وحده، ولم يُلمس المجلد الذي يشير إليه."
+# fix round 7 (M6-3): the -Source release could not be kept in the engine home (the bootstraps print the same line)
+CACHE_FAIL_AR = ("تعذّر حفظ ملفات WhyNot Cut في مجلد المحرك (غالبًا لأن القرص ممتلئ)، فلم يُثبَّت شيء. وفّر مساحة ثم "
+                 "شغّل المثبّت مرة أخرى.")
 # fix round 5 (N6): ~/.whynot-cut was pointed elsewhere while the uninstall ran
 LINK_MOVED_AR = ("تغيّر المجلد الذي يشير إليه الرابط ~/.whynot-cut أثناء الإلغاء، لذلك لم يُحذف شيء آخر. تحقّق من "
                  "الرابط ثم شغّل الإلغاء مرة أخرى.")

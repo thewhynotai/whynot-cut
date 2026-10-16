@@ -4064,6 +4064,45 @@ class TestPowerShellOneLiner(TestPowerShellFrontEnd):
                 self.assertFalse((self.home / "nope").exists(), out)
                 self.assertEqual(os.listdir(ostmp), [], out)
 
+    def test_round7_a_failed_cache_copy_stops_before_the_core(self):
+        # M6-3: the stage is deleted when the run ends, so a run whose copy into the engine home failed (a full disk)
+        # must not go on from it: exit 3, English and Arabic, the engine home as it was, the OS temp dir empty
+        ostmp, env = self.os_temp_env()
+        fail = dict(env, WNC_TEST_CACHE_FAIL="1")
+        rel = self.paths.downloads_dir / f"release-{self.zip_sha[:8]}"
+        for label in ("fresh", "installed"):
+            with self.subTest(label):
+                if label == "installed":
+                    r = self.ps(self.lone, "-Home", self.home, "-Yes", "-Skip", "model,launch", "-Source", self.zip,
+                                "-SourceSha256", self.zip_sha, env=env)
+                    self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                    shutil.rmtree(rel)  # no cache of this zip yet: it is copied again
+                self.home.mkdir(exist_ok=True)
+                before = snapshot_tree(self.home)
+                r = self.ps(self.lone, "-Home", self.home, "-Yes", "-Skip", "model,launch", "-Source", self.zip,
+                            "-SourceSha256", self.zip_sha, env=fail)
+                out = r.stdout + r.stderr
+                self.assertEqual(r.returncode, 3, out)
+                self.assertIn("could not keep the release", out)
+                self.assertIn(base.CACHE_FAIL_AR, out)
+                self.assertNotIn("WhyNot Cut bootstrap: install", out)  # stopped before uv, Python and the core
+                after = snapshot_tree(self.home)
+                if label == "fresh":  # only the bootstrap's own claim, written when the folder was chosen (fix round 2)
+                    self.assertTrue(base.bootstrap_claim(self.paths.whynot), out)
+                    self.assertEqual(os.listdir(self.paths.whynot), ["state.json"], out)
+                    after = {k: v for k, v in after.items() if k not in (".whynot-cut", os.path.join(".whynot-cut",
+                                                                                                    "state.json"))}
+                self.assertEqual(after, before, out)  # nothing of the copy stays; no log: the core never ran
+                self.assertEqual(os.listdir(ostmp), [], out)
+
+    def test_round7_the_stage_is_deleted_in_a_finally_block(self):
+        # M6-3: the per-run stage goes in `finally`, which PowerShell 5.1 runs on Ctrl+C too (the pipeline stops)
+        text = (INSTALLER / "install.ps1").read_text(encoding="ascii")
+        m = re.search(r"(?ms)^    try \{\n(.*?)^    \} finally \{\n        Remove-WncStage\n", text)
+        self.assertIsNotNone(m)
+        self.assertIn("Get-WncRelease", m.group(1))
+        self.assertIn("& $block @bootArgs", m.group(1))
+
     def test_a_wrong_source_sha256_installs_nothing(self):
         r = self.ps(self.lone, "-Home", self.home, "-Yes", "-Source", self.zip, "-SourceSha256", "1" * 64)
         out = r.stdout + r.stderr
@@ -5403,6 +5442,66 @@ class TestBashEngineHome(TestBashFrontEnd):
                 self.assertFalse((self.home / "nope").exists(), out)
                 self.assertEqual(os.listdir(ostmp), [], out)
 
+    def test_round7_a_failed_piped_cache_copy_stops_before_the_core(self):
+        # M6-3: exit 3 with English and Arabic, the engine home as it was, the OS temp dir empty
+        zf = self.tmp / "WhyNotCut-3.0.0.zip"
+        zsha = release_zip(self.fx, zf)
+        ostmp, env = self.os_temp_env()
+        fail = dict(env, WNC_TEST_CACHE_FAIL="1")
+        rel = self.paths.downloads_dir / f"release-{zsha[:8]}"
+
+        def run(e):
+            return self.sh("-s", "--", "--home", self.home_arg(), "--yes", "--skip", "model,launch", "--source",
+                           zf.as_posix(), "--source-sha256", zsha, script=(INSTALLER / "install.sh").read_bytes(),
+                           env=e)
+
+        for label in ("fresh", "installed"):
+            with self.subTest(label):
+                if label == "installed":
+                    r = run(env)
+                    self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                    shutil.rmtree(rel)
+                self.home.mkdir(exist_ok=True)
+                before = snapshot_tree(self.home)
+                r = run(fail)
+                out = r.stdout + r.stderr
+                self.assertEqual(r.returncode, 3, out)
+                self.assertIn("could not keep the release", out)
+                self.assertIn(base.CACHE_FAIL_AR, out)
+                self.assertNotIn("WhyNot Cut bootstrap: install", out)
+                after = snapshot_tree(self.home)
+                if label == "fresh":  # only the bootstrap's own claim, written when the folder was chosen (fix round 2)
+                    self.assertTrue(base.bootstrap_claim(self.paths.whynot), out)
+                    self.assertEqual(os.listdir(self.paths.whynot), ["state.json"], out)
+                    after = {k: v for k, v in after.items() if k not in (".whynot-cut", os.path.join(".whynot-cut",
+                                                                                                    "state.json"))}
+                self.assertEqual(after, before, out)  # nothing of the copy stays; no log: the core never ran
+                self.assertEqual(os.listdir(ostmp), [], out)
+
+    def test_round7_an_interrupt_deletes_the_source_stage(self):
+        # M6-3 (b): Ctrl+C (INT) or TERM while install.sh runs: its trap deletes the per-run stage
+        zf = self.tmp / "WhyNotCut-3.0.0.zip"
+        zsha = release_zip(self.fx, zf)
+        ostmp, env = self.os_temp_env()
+        names = ["wnc_release", "wnc_drop_stage", "wnc_on_signal", "wnc_sha", "wnc_py", "wnc_unzip", "wnc_index_get",
+                 "wnc_engine_home"]
+        script = self.tmp / "interrupt.sh"
+        script.write_text("WNC_TEMP=''\nWNC_RELEASE_INDEX_URL='<release>'\n"
+                          + "".join(shell_function(INSTALLER / "install.sh", n, False) for n in names)
+                          + 'wnc_release "$1" "" "" "$2" "$3" "" || exit 9\n'
+                            'printf "%s\\n" "$WNC_TEMP" > "$4"\n'
+                            'kill -"$5" $$\nsleep 5\necho "still running"\n', encoding="utf-8", newline="\n")
+        for sig, code in (("INT", 130), ("TERM", 143)):
+            with self.subTest(sig):
+                marker = self.tmp / f"stage-{sig}.txt"
+                r = subprocess.run([find_bash(), script.as_posix(), self.home_arg(), zf.as_posix(), zsha,
+                                    marker.as_posix(), sig], capture_output=True, env=env, timeout=120)
+                out = (r.stdout + r.stderr).decode("utf-8", "replace")
+                self.assertEqual(r.returncode, code, out)
+                self.assertNotIn("still running", out)
+                self.assertTrue(marker.read_text(encoding="utf-8").strip(), out)  # a stage was made
+                self.assertEqual(os.listdir(ostmp), [], out)
+
     def test_another_folder_says_the_old_install_stays_behind(self):
         touch(self.home / ".whynot-cut" / "state.json", GENUINE_STATE)
         r = self.sh(self.front(), "--home", self.home_arg(), "--engine-home", (self.home / "Other").as_posix(),
@@ -6007,9 +6106,10 @@ class TestRound5(unittest.TestCase):
         (h / "empty").mkdir()
         self.assertTrue(base.is_kept_leftover(ours))
         self.assertTrue(base.is_kept_leftover(probe))
+        self.assertTrue(base.is_kept_leftover(empty_models))  # (round 7, M6-1: an empty models/ cannot lose data)
         self.assertTrue(base.is_our_home(ours))
         self.assertFalse(base.is_engine_home(ours))
-        for p in (mine, extra, other, empty_models, h / "empty", h / "missing"):
+        for p in (mine, extra, other, h / "empty", h / "missing"):
             with self.subTest(p.name):
                 self.assertFalse(base.is_kept_leftover(p))
                 self.assertFalse(base.is_our_home(p))
@@ -6326,8 +6426,9 @@ class TestRound6(unittest.TestCase):
         ctx = make_ctx(h, {"schema": 1}, SK, engine_home=eng, remove_engine=False, remove_models=True)
         r = uninstall_module().step_engine(ctx)
         self.assertEqual(r.status, "ok", r.detail)
-        self.assertEqual(sorted(os.listdir(eng / "models")), sorted([LLAMA] + ([small.name] if linked else [])),
-                         r.detail)
+        # (round 7, R6-1: with the editor's model there, Hugging Face's .locks / CACHEDIR.TAG stay as well)
+        self.assertEqual(sorted(os.listdir(eng / "models")),
+                         sorted([".locks", "CACHEDIR.TAG", LLAMA] + ([small.name] if linked else [])), r.detail)
         self.assertEqual(mine.read_bytes(), b"mine")
         self.assertEqual(theirs.read_bytes(), b"theirs")  # never entered through the link
         self.assertIn(LLAMA, r.detail)
@@ -6503,6 +6604,294 @@ class TestRound6LexPath(unittest.TestCase):
         pairs = [("C:/..", "c:"), ("C:/../Users/X", "c:/users/x"), ("C:/Users/x/../../..", "c:"), ("/c/../x", "c:/x"),
                  ("C:/a/b", "c:/a/b"), ("/..", "/")]
         self.assertEqual(self.run_lex("MINGW64_NT-10.0", "norm_path", [p for p, _w in pairs]), [w for _p, w in pairs])
+
+
+# --------------------------------------------------------------------------------------------- task 9 fix round 7
+def symlinks_work(where: Path) -> bool:
+    """os.symlink works here (macOS; Windows with Developer Mode): Hugging Face's shared Xet blob layout needs it."""
+    probe = where / ".wnc-symlink-probe"
+    try:
+        os.symlink("nowhere", probe)
+    except (OSError, NotImplementedError):
+        return False
+    os.unlink(probe)
+    return True
+
+
+def make_shared_blob(models: Path, data: bytes) -> Path:
+    """One file of Hugging Face's shared Xet blob store (huggingface_hub 1.33 utils/_shared_blobs.py): the REAL bytes
+    in models/blobs/<2 hex>/<hash>, beside the store's marker."""
+    h = hashlib.sha256(data).hexdigest()
+    touch(models / HF_BLOBS / ".huggingface-shared-blobs", b"1\n")
+    return touch(models / HF_BLOBS / h[:2] / h, data)
+
+
+def link_repo_file(models: Path, repo: str, rel: str, blob: Path, etag: str) -> Path:
+    """What huggingface_hub writes for one file of a repo when the shared store is on: <repo>/blobs/<etag> -> the shared
+    blob, <repo>/snapshots/<rel> -> ../../blobs/<etag>; both relative symlinks (file_download.py _create_symlink)."""
+    e = models / repo / "blobs" / etag
+    e.parent.mkdir(parents=True, exist_ok=True)
+    if not os.path.lexists(e):
+        os.symlink(os.path.relpath(blob, e.parent), e)
+    snap = models / repo / "snapshots" / rel
+    snap.parent.mkdir(parents=True, exist_ok=True)
+    os.symlink(os.path.relpath(e, snap.parent), snap)
+    return snap
+
+
+HF_BLOBS = "blobs"
+HF_TAG = b"Signature: 8a477f597d28d172789f06886806bc55\n"
+
+
+class TestRound7(unittest.TestCase):
+    """Task 9 fix round 7 (controller rulings on review round 6): R6-1, M6-1, M6-2 and M6-4 in the core."""
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.home = Path(self._td.name) / ARABIC_HOME
+        self.home.mkdir()
+
+    link = TestRound5.link
+
+    def need_symlinks(self) -> None:
+        if not symlinks_work(self.home):
+            self.skipTest("symlinks cannot be made here (Windows without Developer Mode)")
+
+    def engine(self, name: str) -> Path:
+        eng = self.home / name
+        touch(eng / "state.json", GENUINE_STATE)
+        make_model_leftover(eng)
+        return eng
+
+    def remove(self, eng: Path, **flags) -> base.StepResult:
+        flags = dict({"remove_engine": False, "remove_models": False}, **flags)
+        ctx = make_ctx(self.home, {"schema": 1}, SK, engine_home=eng, **flags)
+        return uninstall_module().step_engine(ctx)
+
+    def test_r6_1_remove_models_keeps_every_blob_the_editors_model_uses(self):
+        # the reviewer's scenario: the editor's own Llama, pulled with their own Hugging Face client (Xet shared store
+        # on), sits beside our store in models/; its real bytes live in models/blobs/
+        self.need_symlinks()
+        for i, flags in enumerate(({"remove_models": True}, {"remove_engine": True, "remove_models": True})):
+            with self.subTest(flags):
+                eng = self.engine(f"Engine {i}")
+                m = eng / "models"
+                ours_only = make_shared_blob(m, b"our turbo weights")
+                both = make_shared_blob(m, b"a tokenizer both models use")
+                theirs = make_shared_blob(m, b"the editor's Llama weights")
+                loose = make_shared_blob(m, b"nobody links to this one")
+                link_repo_file(m, HF_STORE, "abc/turbo.bin", ours_only, "e1")
+                link_repo_file(m, HF_STORE, "abc/tokenizer.json", both, "e2")
+                w = link_repo_file(m, LLAMA, "rev/model.safetensors", theirs, "l1")
+                tok = link_repo_file(m, LLAMA, "rev/tokenizer.json", both, "l2")
+                touch(m / ".locks" / LLAMA / "x.lock", b"")
+                touch(m / "CACHEDIR.TAG", HF_TAG)
+                r = self.remove(eng, **flags)
+                self.assertEqual(r.status, "ok", r.detail)
+                self.assertEqual(w.read_bytes(), b"the editor's Llama weights", r.detail)  # byte for byte
+                self.assertEqual(tok.read_bytes(), b"a tokenizer both models use", r.detail)
+                self.assertFalse(os.path.lexists(m / HF_STORE), r.detail)
+                self.assertFalse(os.path.lexists(ours_only), r.detail)  # only our store used it: gone
+                self.assertEqual(loose.read_bytes(), b"nobody links to this one")  # not ours for sure: kept
+                self.assertTrue((m / ".locks").is_dir(), r.detail)
+                self.assertEqual((m / "CACHEDIR.TAG").read_bytes(), HF_TAG)
+                self.assertTrue((m / HF_BLOBS / ".huggingface-shared-blobs").is_file())
+                self.assertEqual(sorted(os.listdir(m)), sorted([".locks", "CACHEDIR.TAG", HF_BLOBS, LLAMA]), r.detail)
+                self.assertIn(base.MODELS_KEPT_AR, r.detail)
+                self.assertIn(base.MODELS_SHARED_KEPT_AR, r.detail)  # what was kept, and why
+                self.assertIn("1 file of blobs", r.detail)  # what was removed of the shared store
+                if flags.get("remove_engine"):
+                    self.assertEqual(os.listdir(eng), ["models"], r.detail)
+
+    def test_r6_1_anything_ambiguous_keeps_the_shared_blobs(self):
+        self.need_symlinks()
+        outside = touch(self.home.parent / "editor elsewhere" / "w.bin", b"outside models")
+
+        def case(name: str, editor_link) -> tuple:
+            eng = self.engine(name)
+            m = eng / "models"
+            ours_only = make_shared_blob(m, b"our weights " + name.encode())
+            link_repo_file(m, HF_STORE, "abc/turbo.bin", ours_only, "e1")
+            touch(m / LLAMA / "snapshots" / "rev" / "config.json", b"mine")
+            editor_link(m / LLAMA / "snapshots" / "rev", m)
+            return eng, ours_only
+
+        cases = {
+            # a link of the editor's that points out of models/: where it leads is never followed, so not known
+            "out of models": lambda d, m: os.symlink(str(outside), d / "w.bin"),
+            # a loop: a -> b -> a
+            "loop": lambda d, m: (os.symlink("b", d / "a"), os.symlink("a", d / "b")),
+            # a link of the editor's to a whole folder of the shared store
+            "folder of blobs": lambda d, m: os.symlink(os.path.relpath(m / HF_BLOBS, d), d / "all",
+                                                       target_is_directory=True),
+        }
+        for name, editor_link in cases.items():
+            with self.subTest(name):
+                eng, ours_only = case(name, editor_link)
+                r = self.remove(eng, remove_models=True)
+                self.assertEqual(r.status, "ok", r.detail)
+                self.assertFalse(os.path.lexists(eng / "models" / HF_STORE), r.detail)
+                self.assertTrue(ours_only.is_file(), r.detail)  # ambiguous: the blob stays
+                self.assertIn(base.MODELS_SHARED_KEPT_AR, r.detail)
+                self.assertEqual(outside.read_bytes(), b"outside models")
+        # a link of OUR store that points out of models/: removed as a link, its target never entered
+        eng = self.engine("ours out")
+        m = eng / "models"
+        os.symlink(str(outside), m / HF_STORE / "snapshots" / "abc" / "extra.bin")
+        theirs = make_shared_blob(m, b"the editor's weights")
+        w = link_repo_file(m, LLAMA, "rev/w.bin", theirs, "l1")
+        r = self.remove(eng, remove_models=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertFalse(os.path.lexists(m / HF_STORE), r.detail)
+        self.assertEqual(outside.read_bytes(), b"outside models")
+        self.assertEqual(w.read_bytes(), b"the editor's weights")
+        # a link of the editor's INTO one of our stores: that store stays too (their file reads through it)
+        eng = self.engine("borrowed")
+        m = eng / "models"
+        d = m / LLAMA / "snapshots" / "rev"
+        d.mkdir(parents=True)
+        os.symlink(os.path.relpath(m / HF_STORE / "snapshots" / "abc" / "model.bin", d), d / "borrowed.bin")
+        r = self.remove(eng, remove_models=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual((d / "borrowed.bin").read_bytes(), b"weights", r.detail)
+        self.assertIn(HF_STORE, r.detail)
+
+    def test_r6_1_with_nothing_of_the_editors_everything_goes_as_before(self):
+        self.need_symlinks()
+        eng = self.engine("Engine")
+        m = eng / "models"
+        blob = make_shared_blob(m, b"our weights")
+        link_repo_file(m, HF_STORE, "abc/turbo.bin", blob, "e1")
+        touch(m / ".locks" / HF_STORE / "x.lock", b"")
+        touch(m / "CACHEDIR.TAG", HF_TAG)
+        r = self.remove(eng, remove_models=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertFalse(os.path.lexists(m), r.detail)
+        self.assertNotIn(base.MODELS_KEPT_AR, r.detail)
+        self.assertNotIn(base.MODELS_SHARED_KEPT_AR, r.detail)
+
+    def test_r6_1_the_copy_layout_keeps_the_shared_store_untouched(self):
+        # no symlinks (Windows without Developer Mode: huggingface_hub copies): the editor's files are real files; a
+        # shared store beside them is referenced by nothing of ours, so nothing of it is ours for sure
+        eng = self.engine("Engine")
+        m = eng / "models"
+        mine = touch(m / LLAMA / "snapshots" / "rev" / "model.safetensors", b"the editor's Llama weights")
+        make_shared_blob(m, b"some blob")
+        touch(m / ".locks" / LLAMA / "x.lock", b"")
+        touch(m / "CACHEDIR.TAG", HF_TAG)
+        blobs_before = snapshot_tree(m / HF_BLOBS)
+        r = self.remove(eng, remove_models=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(sorted(os.listdir(m)), sorted([".locks", "CACHEDIR.TAG", HF_BLOBS, LLAMA]), r.detail)
+        self.assertEqual(snapshot_tree(m / HF_BLOBS), blobs_before)
+        self.assertEqual(mine.read_bytes(), b"the editor's Llama weights")
+        self.assertIn(base.MODELS_SHARED_KEPT_AR, r.detail)
+
+    def test_m6_1_an_empty_models_folder_is_ours(self):
+        h = self.home
+        empty = h / "empty"
+        (empty / "models").mkdir(parents=True)
+        finder = h / "finder only"
+        touch(finder / "models" / ".DS_Store", b"x")
+        for p in (empty, finder):
+            with self.subTest(p.name):
+                self.assertTrue(base.is_kept_leftover(p))
+                self.assertTrue(base.is_our_home(p))
+                self.assertEqual(base.choose_engine_home(str(p), home=h, plugin_root=SK), (p, "", None))
+        theirs = []
+        target = h / "an empty folder"
+        target.mkdir()
+        linked = h / "models link"
+        linked.mkdir()
+        if make_dir_link(linked / "models", target):
+            self.addCleanup(drop_dir_link, linked / "models")
+            theirs.append(linked)  # a link is never ours, empty or not
+        folder = h / "a Thumbs.db folder"
+        (folder / "models" / "Thumbs.db").mkdir(parents=True)
+        theirs.append(folder)
+        for p in theirs:
+            with self.subTest(p.name):
+                self.assertFalse(base.is_kept_leftover(p))
+        # --remove-engine takes an empty models/ (nothing can be lost); one that holds our store stays
+        eng = h / "Engine"
+        touch(eng / "state.json", GENUINE_STATE)
+        (eng / "models").mkdir()
+        mine = touch(eng / "my notes.txt", b"mine")
+        r = self.remove(eng, remove_engine=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(os.listdir(eng), ["my notes.txt"], r.detail)
+        self.assertEqual(mine.read_bytes(), b"mine")
+        eng2 = self.engine("Engine2")
+        r = self.remove(eng2, remove_engine=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(os.listdir(eng2), ["models"], r.detail)
+        # the owner's linked home whose model was never downloaded: nothing is left behind the link
+        target = h.parent / "data drive" / "whynot-cut-home"
+        make_owner_genuine(target)
+        make_engine_extras(target)
+        (target / "models").mkdir()
+        link = self.link(target)
+        ctx = make_ctx(h, {"schema": 1}, SK, remove_engine=True, remove_models=False)
+        ctx.facts["link_target"] = os.path.realpath(target)
+        r = uninstall_module().step_engine(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(os.listdir(target), [], r.detail)
+        (target / "models").mkdir()  # and one left that way is still WhyNot Cut's old folder
+        for mode in ("install", "uninstall"):
+            self.assertIsNone(base.resolved_home_problem(link, home=h, mode=mode), mode)
+
+    def test_m6_2_view_files_at_the_top_are_not_the_editors(self):
+        h = self.home
+        for name in ("Thumbs.db", "desktop.ini", ".DS_Store"):
+            with self.subTest(name):
+                p = h / ("view " + name)
+                make_model_leftover(p)
+                touch(p / name, b"x")
+                self.assertEqual(base.occupied_entries(p), ["models"])
+                self.assertTrue(base.is_kept_leftover(p))
+        alone = h / "view only"
+        touch(alone / ".DS_Store", b"x")
+        self.assertEqual(base.occupied_entries(alone), [])
+        folder = h / "view folder"
+        make_model_leftover(folder)
+        (folder / ".DS_Store").mkdir()
+        self.assertEqual(base.occupied_entries(folder), [".DS_Store", "models"])
+        self.assertFalse(base.is_kept_leftover(folder))
+        linked = h / "view link"
+        make_model_leftover(linked)
+        if make_dir_link(linked / "Thumbs.db", folder / ".DS_Store"):
+            self.addCleanup(drop_dir_link, linked / "Thumbs.db")
+            self.assertEqual(base.occupied_entries(linked), ["Thumbs.db", "models"])
+            self.assertFalse(base.is_kept_leftover(linked))
+        # --remove-engine deletes them with the layout (real files only); a folder of that name is the editor's
+        eng = self.engine("Engine")
+        touch(eng / ".DS_Store", b"x")
+        touch(eng / "desktop.ini", b"x")
+        mine = touch(eng / "Thumbs.db" / "kept.txt", b"mine")
+        r = self.remove(eng, remove_engine=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(sorted(os.listdir(eng)), ["Thumbs.db", "models"], r.detail)
+        self.assertEqual(mine.read_bytes(), b"mine")
+        self.assertIn("Thumbs.db", r.detail)
+
+    def test_m6_4_a_models_link_says_what_happened(self):
+        eng = self.home / "Engine"
+        touch(eng / "state.json", GENUINE_STATE)
+        target = self.home.parent / "models elsewhere"
+        model = make_model_leftover(target)
+        if not make_dir_link(eng / "models", target / "models"):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, eng / "models")
+        before = snapshot_tree(target)
+        r = self.remove(eng, remove_models=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertFalse(os.path.lexists(eng / "models"), r.detail)
+        self.assertEqual(snapshot_tree(target), before)
+        self.assertEqual(model.read_bytes(), b"weights")
+        self.assertIn("was a link", r.detail)
+        self.assertIn("not touched", r.detail)
+        self.assertIn(base.MODELS_LINK_AR, r.detail)
 
 
 def _install_size_text(fx, plat: str, skip=("model", "launch"), git_missing=None) -> str:
@@ -7042,11 +7431,84 @@ class _CountdownCases:
         self.assertEqual(r.returncode, 0, out)
         self.wait_gone(eng / "bin")
         self.assertEqual(os.listdir(eng), ["models"], out)
-        self.assertEqual(os.listdir(eng / "models"), [LLAMA], out)
+        self.assertEqual(sorted(os.listdir(eng / "models")), sorted([".locks", "CACHEDIR.TAG", LLAMA]), out)  # (R6-1)
         self.assertEqual(mine.read_bytes(), b"mine too")
         self.assertIn(base.MODELS_KEPT_AR, out)
         self.assertEqual(snapshot_tree(ai / "models"), before_ai_models, out)
         self.assertEqual(llama.read_bytes(), b"mine")
+
+    def test_round7_remove_models_keeps_the_shared_blobs_of_the_editors_model(self):
+        # R6-1, the reviewer's probe: an installed home whose models/ also holds the editor's own Llama, its bytes in
+        # Hugging Face's shared Xet store models/blobs/; -RemoveModels leaves it readable byte for byte
+        h = self.home
+        h.mkdir()
+        if not symlinks_work(h):
+            self.skipTest("symlinks cannot be made here (Windows without Developer Mode)")
+        x = h / "AI2"
+        x.mkdir()
+        r = self.inst(h, "yes", "skip", extra=(self.ENGINE_FLAG, self.native(x)))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        m = x / "models"
+        make_model_leftover(x)
+        ours_only = make_shared_blob(m, b"our weights")
+        link_repo_file(m, HF_STORE, "abc/turbo.bin", ours_only, "e1")
+        theirs = make_shared_blob(m, b"the editor's Llama weights")
+        w = link_repo_file(m, LLAMA, "rev/w.safetensors", theirs, "l1")
+        r = self.inst(h, "uninstall", "remove-models", "yes", extra=(self.ENGINE_FLAG, self.native(x)))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertEqual(w.read_bytes(), b"the editor's Llama weights", out)
+        self.assertFalse(os.path.lexists(m / HF_STORE), out)
+        self.assertFalse(os.path.lexists(ours_only), out)
+        self.assertIn(base.MODELS_KEPT_AR, out)
+        self.assertIn(base.MODELS_SHARED_KEPT_AR, out)
+        self.assertTrue((x / "current").is_file(), out)  # -RemoveModels alone keeps the engine
+
+    def test_round7_an_empty_models_folder_behind_the_link_reinstalls(self):
+        # M6-1, the reviewer's probe: `reel setup` makes an empty models/ and the model was never downloaded
+        target = self.owner_target()
+        r = self.inst(self.home, "yes", "skip")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        shutil.rmtree(target / "models" / HF_STORE)
+        r = self.inst(self.home, "uninstall", "remove-engine", "yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.wait_gone(target / "bin")
+        self.assertEqual(os.listdir(target), [], out)  # the empty models/ went with the layout
+        (target / "models").mkdir()  # one left empty some other way is still WhyNot Cut's old folder
+        r = self.inst(self.home, "yes", "skip")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertTrue((target / "current").is_file(), out)
+        self.assertTrue(base.is_link(self.home / ".whynot-cut"))
+
+    def test_round7_a_view_file_at_the_top_does_not_make_the_folder_the_editors(self):
+        # M6-2: Finder's .DS_Store (Explorer's Thumbs.db / desktop.ini) at the top of the linked folder
+        target = self.owner_target()
+        r = self.inst(self.home, "yes", "skip")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        touch(target / ".DS_Store", b"x")
+        r = self.inst(self.home, "uninstall", "remove-engine", "yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.wait_gone(target / "bin")
+        self.assertEqual(os.listdir(target), ["models"], out)  # deleted with the layout
+        touch(target / ".DS_Store", b"x")
+        touch(target / "Thumbs.db", b"x")
+        r = self.inst(self.home, "yes", "skip")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertTrue((target / "current").is_file(), out)
+        r = self.inst(self.home, "uninstall", "remove-engine", "yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.wait_gone(target / "bin")
+        touch(target / ".DS_Store" / "mine.txt", b"mine")  # a FOLDER of that name is the editor's
+        before = snapshot_tree(target)
+        r = self.inst(self.home, "yes", "skip")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 2, out)
+        self.assertIn("already holds other files", out)
+        self.assertEqual(snapshot_tree(target), before, out)
 
     def test_a_bad_countdown_hook_value_is_ignored(self):
         r = self.inst(self.home, "dry", env=self.env(WNC_TEST_KEYS="x", WNC_TEST_COUNTDOWN_S="soon"))

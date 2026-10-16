@@ -435,41 +435,79 @@ def _delete_child(ctx: base.Ctx, p: Path, protected: list, removed: list, kept: 
 
 def _delete_models(ctx: base.Ctx, models: Path, protected: list, removed: list, kept: list, failed: list, notes: list,
                    root: Path) -> None:
-    """--remove-models (fix round 6, R5-2): only WhyNot Cut's own entries of models/ go - its model stores and Hugging
-    Face's own bookkeeping (base.model_entry_kind: exact names, real folders / files, never a link, never entered) -
-    and models/ itself only once it is then empty. Anything else in it is the editor's (their own model beside ours):
-    kept in place and named, in English and Arabic. A models/ that is itself a link is removed as a link only."""
+    """--remove-models (fix round 6, R5-2; round 7, R6-1): only WhyNot Cut's own entries of models/ go - never a link,
+    never entered. Every entry is classified FIRST (base.model_entry_kind). Nothing of the editor's there: our stores
+    and Hugging Face's own bookkeeping go, then models/ once empty. Entries of the editor's there: our stores go, and of
+    Hugging Face's shared store blobs/ only the files our stores alone link to (base.models_usage: resolved inside
+    models/ only; anything ambiguous keeps them all); blobs/, .locks and CACHEDIR.TAG stay (the editor's model uses
+    them), and so does a store of ours a link of the editor's leads into. What went and what stayed is said in English
+    and Arabic. A models/ that is itself a link is removed as a link only (round 7, M6-4: and said so)."""
     if base.is_link(models):
+        target = os.path.realpath(models)
+        n = len(removed)
         _delete_child(ctx, models, protected, removed, kept, failed, root)
+        if len(removed) > n:
+            notes.append(f"{models} was a link (to {target}); the link was removed, its target was not touched")
+            notes.append(base.MODELS_LINK_AR)
         return
     if not models.is_dir():
         kept.append("models (not a folder; not WhyNot Cut's)")
         return
-    theirs, before = [], len(kept) + len(failed)
-    for name in sorted(os.listdir(models)):
-        p = models / name
-        if base.model_entry_kind(models, name) is None:
-            theirs.append(name)
-            continue
+    names = sorted(os.listdir(models))
+    kinds = {n: base.model_entry_kind(models, n) for n in names}
+    theirs = [n for n in names if kinds[n] is None]
+    stores = [n for n in names if kinds[n] == "store"]
+    before = len(kept) + len(failed)
+
+    def rm(p: Path, label: str, within: Path) -> bool:
         try:
-            if not base.safe_rmtree(p, [models], protected):
-                kept.append(f"models/{name} (client data: never deleted)")
+            if base.safe_rmtree(p, [within], protected):
+                return True
+            kept.append(f"{label} (client data: never deleted)")
         except OSError as e:
-            failed.append(f"models/{name} ({e})")
-    if theirs:
-        notes.append(f"kept {models}: it also holds files that are not WhyNot Cut's ("
-                     + ", ".join(theirs[:5]) + (", ..." if len(theirs) > 5 else "")
-                     + "); only WhyNot Cut's own Whisper models were deleted")
-        notes.append(base.MODELS_KEPT_AR)
+            failed.append(f"{label} ({e})")
+        return False
+
+    if not theirs:
+        for name in names:
+            rm(models / name, f"models/{name}", models)
+        if len(kept) + len(failed) > before:
+            return
+        try:
+            os.rmdir(models)
+            removed.append("models")
+            notes.append(f"deleted {models}")
+        except OSError as e:
+            failed.append(f"models ({e})")
         return
-    if len(kept) + len(failed) > before:
-        return
-    try:
-        os.rmdir(models)
-        removed.append("models")
-        notes.append(f"deleted {models}")
-    except OSError as e:
-        failed.append(f"models ({e})")
+    usage = base.models_usage(models, stores, theirs)
+    gone = [n for n in stores if n not in usage["used"] and rm(models / n, f"models/{n}", models)]
+    blobs, n_blobs = models / base.HF_BLOBS, 0
+    for b in usage["blobs"]:
+        if rm(Path(b), f"models/{os.path.relpath(b, models)}", blobs):
+            n_blobs += 1
+            parent = os.path.dirname(b)
+            if base._norm(parent) != base._norm(blobs):
+                try:
+                    os.rmdir(parent)  # its <2 hex> folder, once empty
+                except OSError:
+                    pass
+    notes.append(f"kept {models}: it also holds files that are not WhyNot Cut's ("
+                 + ", ".join(theirs[:5]) + (", ..." if len(theirs) > 5 else "") + "); only WhyNot Cut's own Whisper "
+                 + "models were deleted" + (f" ({', '.join(gone)})" if gone else ""))
+    notes.append(base.MODELS_KEPT_AR)
+    if usage["used"]:
+        notes.append("kept " + ", ".join(f"models/{n}" for n in sorted(usage["used"])) + ": a file of yours links "
+                     "into it")
+        notes.append(base.MODELS_STORE_USED_AR)
+    hf = [n for n in names if kinds[n] == "bookkeeping" and not base.is_view_file(models / n)]
+    if hf:
+        why = ("a link of yours there could not be followed safely, so every file of it stayed"
+               if usage["ambiguous"] and base.HF_BLOBS in hf else "your models there use them")
+        notes.append(f"kept Hugging Face's own {', '.join(hf)} in {models}: {why}"
+                     + (f"; deleted {n_blobs} file{'' if n_blobs == 1 else 's'} of blobs/ that only WhyNot Cut's "
+                        "models used" if n_blobs else ""))
+        notes.append(base.MODELS_SHARED_KEPT_AR)
 
 
 def step_engine(ctx: base.Ctx) -> base.StepResult:
@@ -525,7 +563,7 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         p = root / name
         if name == DEFER_LIST or name in DEFERRED:
             continue
-        if name == "models" and keep_models:
+        if name == "models" and keep_models and not base.models_empty(p):
             kept.append("models (the Whisper models; --remove-models deletes them)")
             continue
         if name == KEPT:
@@ -535,7 +573,10 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
             continue
         if name == base.OPTIONS_FILE:  # the pointer: its own rules (claude.forget_engine_home, below)
             continue
-        if not (base.is_engine_entry(name) or name == "models"):  # not WhyNot Cut's: never deleted (fix round 1)
+        # (fix round 7) an empty models/ (M6-1: nothing to lose) and the OS folder-view files at the top (M6-2: real
+        # files only) go with the layout
+        view = base.is_view_file(p)
+        if not (base.is_engine_entry(name) or name == "models" or view):  # not WhyNot Cut's: never deleted (round 1)
             foreign.append(name)
             continue
         moved = _link_moved(ctx, pinned)

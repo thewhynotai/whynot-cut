@@ -122,7 +122,7 @@ param(
     $WncUninstallStepNames = @('plugin', 'adobe', 'fonts', 'marketplace', 'engine')
     $S = @{ Log = $null; Step = 'start'; Code = 0; Utf8 = (New-Object System.Text.UTF8Encoding $false);
         Answers = $null; AnswerAt = 0; FreeGb = $null; Mode = 'yes'; TestKeys = $null; CountdownS = 10;
-        TestMounts = $null; CompPath = $null; ModelStores = $null; Stage = $null }
+        TestMounts = $null; CompPath = $null; ModelStores = $null; Stage = $null; TestCacheFail = $false }
     $WncModels = @('large-v3', 'large-v3-turbo', 'medium', 'small')  # wnc_installer/system.py MODELS
     $WncNeedGb = 6  # free space for the engine; + $WncModelGb with the Whisper model (system.py RED_GB / AMBER_GB)
     $WncModelGb = 3
@@ -131,6 +131,9 @@ param(
     $WncModelSizes = @{ 'large-v3' = 2.9; 'large-v3-turbo' = 1.6; 'medium' = 1.5; 'small' = 0.5 }
     # the Arabic lines, UTF-8 in base64 (this file stays ASCII)
     $WncAr = @{
+        CacheFail = ('2KrYudiw2ZHYsSDYrdmB2Lgg2YXZhNmB2KfYqiBXaHlOb3QgQ3V0INmB2Yog2YXYrNmE2K8g2KfZhNmF2K3YsdmDICjYutin2YTYqNmL' +
+            '2Kcg2YTYo9mGINin2YTZgtix2LUg2YXZhdiq2YTYpinYjCDZgdmE2YUg2YrZj9ir2KjZjtmR2Kog2LTZitihLiDZiNmB2ZHYsSDZhdiz' +
+            '2KfYrdipINir2YUg2LTYutmR2YQg2KfZhNmF2KvYqNmR2Kog2YXYsdipINij2K7YsdmJLg==')
         Intro = ('2KPZitmGINmK2K3Zgdi4IFdoeU5vdCBDdXQg2YXZhNmB2KfYqiDYp9mE2KrYtNi62YrZhCAo2KjYp9mK2KvZiNmGINmIIGZmbXBlZyDZiNmG' +
             '2YXZiNiw2KwgV2hpc3BlcinYnyDYqtit2KrYp9isINit2YjYp9mE2YogNiDYrNmK2KzYp9io2KfZitiq2Iwg2Yg5INmF2Lkg2KfZhNmG2YXZiNiw' +
             '2KwuINin2LbYuti3IEVudGVyINmE2KfYrtiq2YrYp9ixINin2YTZhdis2YTYryDYqNmK2YYg2KfZhNmC2YjYs9mK2YYu')
@@ -680,13 +683,15 @@ param(
     function Get-WncOccupiedEntry([string]$Path, [bool]$PointerOk) {
         # what makes an existing folder the editor's (the core's base.occupied_entries): every entry except the write
         # probe (.wnc-write-test*), the -Source cache (a `downloads` folder holding only `release-*` folders) and, in
-        # ~\.whynot-cut, the pointer plugin-options.json. Names compare EXACTLY (case too).
+        # ~\.whynot-cut, the pointer plugin-options.json, and (fix round 7, M6-2) the OS folder-view files .DS_Store,
+        # Thumbs.db, desktop.ini when they are real files (Test-WncViewFile). Names compare EXACTLY (case too).
         $out = @()
         if (-not [IO.Directory]::Exists($Path)) { return ,$out }
         foreach ($e in [IO.Directory]::GetFileSystemEntries($Path)) {
             $n = [IO.Path]::GetFileName($e)
             if ($n.StartsWith('.wnc-write-test', [StringComparison]::Ordinal)) { continue }
             if ($PointerOk -and ($n -ceq 'plugin-options.json')) { continue }
+            if (Test-WncViewFile $e) { continue }
             if (($n -ceq 'downloads') -and [IO.Directory]::Exists($e) -and (-not (Test-WncReparse $e))) {
                 $kids = @([IO.Directory]::GetFileSystemEntries($e) | ForEach-Object { [IO.Path]::GetFileName($_) })
                 if (@($kids | Where-Object { -not $_.StartsWith('release-', [StringComparison]::Ordinal) }).Count -eq 0) {
@@ -763,19 +768,21 @@ param(
     function Test-WncOurModels([string]$Dir) {
         # <engine home>\models is WhyNot Cut's (fix round 6, R5-2; the core's base.is_our_models): a real folder whose
         # EVERY entry is a store of ours or Hugging Face's bookkeeping, at least one a store. One entry of the editor's
-        # (their own model beside ours) or any link inside makes the whole folder the editor's.
+        # (their own model beside ours) or any link inside makes the whole folder the editor's. Fix round 7 (M6-1): an
+        # EMPTY real folder (or one holding only OS folder-view files) is ours too - nothing in it can be lost.
         if ((-not [IO.Directory]::Exists($Dir)) -or (Test-WncReparse $Dir)) { return $false }
         $store = $false
+        $other = $false
         try {
             foreach ($e in [IO.Directory]::GetFileSystemEntries($Dir)) {
                 $kind = Get-WncModelEntryKind -Dir $Dir -Name ([IO.Path]::GetFileName($e))
                 if (-not $kind) { return $false }
-                if ($kind -ceq 'store') { $store = $true }
+                if ($kind -ceq 'store') { $store = $true } elseif (-not (Test-WncViewFile $e)) { $other = $true }
             }
         } catch {
             return $false
         }
-        return $store
+        return ($store -or (-not $other))
     }
 
     function Get-WncLibraryState([string]$Lib) {
@@ -1002,11 +1009,16 @@ param(
         # OS temp dir and deletes it when this run ends. Only now - the engine home passed every check - is it kept in
         # <engine>\downloads\release-<sha8> (zip + x\), the plugin root of this run: the core and its background model
         # download read the plugin files after install.ps1 has deleted the stage. A complete cache of the same zip is
-        # reused. Returns the plugin folder in the cache, or $null (a warning: this run then uses the stage).
+        # reused. Returns the plugin folder in the cache, or $null after a failure (fix round 7, M6-3; most likely a full
+        # disk): nothing it made stays (the partial copy, and downloads\ and the engine home when it made them), and the
+        # caller stops with exit 3 before the log and the core - never going on from the stage install.ps1 deletes.
         $name = Split-Path $Stage -Leaf
         $downloads = Join-Path $Engine 'downloads'
         $dest = Join-Path $downloads $name
         $plugin = Join-Path $dest 'x\whynot-cut-marketplace\whynot-cut'
+        $tmp = "$dest.tmp"
+        $madeEngine = -not [IO.Directory]::Exists($Engine)
+        $madeDownloads = -not [IO.Directory]::Exists($downloads)
         try {
             $zips = @([IO.Directory]::GetFiles($Stage))
             $same = ($zips.Count -gt 0) -and [IO.Directory]::Exists($dest) -and (-not (Test-WncReparse $dest)) -and
@@ -1019,16 +1031,30 @@ param(
             }
             if (-not $same) {
                 $null = New-Item -ItemType Directory -Force -Path $downloads
-                $tmp = "$dest.tmp"
                 if (Test-Path -LiteralPath $tmp) { Invoke-WncDeleteTree $tmp }
                 Copy-Item -LiteralPath $Stage -Destination $tmp -Recurse -Force
+                if ($S.TestCacheFail) { throw 'test hook WNC_TEST_CACHE_FAIL: the copy failed' }
                 if (Test-Path -LiteralPath $dest) { Invoke-WncDeleteTree $dest }
                 [IO.Directory]::Move($tmp, $dest)
             }
             Write-WncLine "the release is kept in $dest"
             return $plugin
         } catch {
-            Write-WncLine "WARNING: could not keep the release in $dest ($($_.Exception.Message)); this run uses $Stage"
+            $why = $_.Exception.Message
+            try {
+                if (Test-Path -LiteralPath $tmp) { Invoke-WncDeleteTree $tmp }
+                foreach ($d in @(@($madeDownloads, $downloads), @($madeEngine, $Engine))) {
+                    if ($d[0] -and [IO.Directory]::Exists($d[1]) -and (-not (Test-WncReparse $d[1])) -and
+                        (@([IO.Directory]::GetFileSystemEntries($d[1])).Count -eq 0)) {
+                        [IO.Directory]::Delete($d[1], $false)
+                    }
+                }
+            } catch {
+                Write-Host "WARNING: could not delete the partial copy $tmp ($($_.Exception.Message)); delete it yourself"
+            }
+            Write-Host ("ERROR: could not keep the release in $dest ($why); most likely the disk is full. Nothing was " +
+                'installed: free some space, then run the installer again.')
+            Write-Host (Get-WncArabic 'CacheFail')
             return $null
         }
     }
@@ -1597,6 +1623,7 @@ param(
             $pointer = Join-Path $h '.whynot-cut\plugin-options.json'
             if ($env:WNC_TEST_ANSWERS) { $S.Answers = @([IO.File]::ReadAllLines($env:WNC_TEST_ANSWERS, $S.Utf8)) }
             if ($env:WNC_TEST_FREE_GB) { $S.FreeGb = $env:WNC_TEST_FREE_GB }
+            if ($env:WNC_TEST_CACHE_FAIL -eq '1') { $S.TestCacheFail = $true }  # the -Source cache copy fails
             if ($null -ne $env:WNC_TEST_KEYS) { $S.TestKeys = $env:WNC_TEST_KEYS }
             if ($env:WNC_TEST_MOUNTS) { $S.TestMounts = @($env:WNC_TEST_MOUNTS -split ';' | Where-Object { $_ }) }
             $cd = 0
@@ -1735,19 +1762,19 @@ param(
         $command = 'install'
         if ($Uninstall) { $command = 'uninstall' }
         if (-not $DryRun) {
+            if ($S.Stage -and (-not $Uninstall)) {
+                # -Source: every check passed, so the release is kept in this engine home now (fix round 6, R5-5); an
+                # uninstall needs it only while it runs, so it is never written into the folder it empties. A failed
+                # copy stops here, before the log and the core (fix round 7, M6-3)
+                $cached = Copy-WncReleaseCache -Stage $S.Stage -Engine $engine
+                if (-not $cached) { return @{ Code = 3 } }
+                $root = $cached
+                $core = Join-Path $root 'installer\core\wnc_install.py'
+            }
             $logs = Join-Path $engine 'logs'
             $null = New-Item -ItemType Directory -Force -Path $logs
             $S.Log = Join-Path $logs ("{0}-{1}.log" -f $command, (Get-Date -Format 'yyyyMMdd-HHmmss'))
             [IO.File]::WriteAllText($S.Log, '', $S.Utf8)
-            if ($S.Stage -and (-not $Uninstall)) {
-                # -Source: every check passed, so the release is kept in this engine home now (fix round 6, R5-5); an
-                # uninstall needs it only while it runs, so it is never written into the folder it empties
-                $cached = Copy-WncReleaseCache -Stage $S.Stage -Engine $engine
-                if ($cached) {
-                    $root = $cached
-                    $core = Join-Path $root 'installer\core\wnc_install.py'
-                }
-            }
         }
         if ($chosen) {
             $mode = ' (chosen)'

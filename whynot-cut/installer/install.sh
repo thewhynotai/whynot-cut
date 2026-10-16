@@ -93,6 +93,12 @@ wnc_drop_stage() { # the per-run release stage (fix round 6, R5-5); rm -r remove
   return 0
 }
 
+wnc_on_signal() { # code: Ctrl+C (INT) or TERM while this runs - the per-run stage goes first (fix round 7, M6-3)
+  trap - INT TERM
+  wnc_drop_stage
+  exit "$1"
+}
+
 wnc_sha() {
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 < "$1" | awk '{print $1}'
   else sha256sum < "$1" | awk '{print $1}'; fi
@@ -231,6 +237,10 @@ wnc_release() { # home dry channel source sha engine-home -> RELEASE_ROOT (empty
   if [ -z "$WNC_TEMP" ] || [ ! -d "$WNC_TEMP" ]; then
     WNC_TEMP=""; echo "ERROR: cannot create a temporary folder in $tmp" >&2; return 3
   fi
+  # (fix round 7, M6-3) the stage goes however this run ends: normally, on an error, on Ctrl+C or a TERM
+  trap 'wnc_drop_stage' EXIT
+  trap 'wnc_on_signal 130' INT
+  trap 'wnc_on_signal 143' TERM
   dir="$WNC_TEMP/$rel"
   mkdir -p "$dir" || { echo "ERROR: cannot create $dir" >&2; return 3; }
   zip="$dir/$name"; x="$dir/x"; plugin="$x/whynot-cut-marketplace/whynot-cut"
