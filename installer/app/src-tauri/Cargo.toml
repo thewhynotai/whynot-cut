@@ -1,0 +1,39 @@
+[package]
+name = "whynot-cut-setup"
+version = "3.0.0"
+description = "WhyNot Cut Setup: the per-user installer app (thin Tauri 2 shell over the Python installer core)"
+edition = "2021"
+rust-version = "1.90"
+publish = false
+build = "build.rs"
+
+# ET1-17 scaffold. Every version is pinned with `=` (Addendum E2.1 #6) and Cargo.lock is committed.
+# Security shape (tests/test_scaffold.py + `cargo test` enforce it):
+# - no tauri-plugin-shell/http/fs/opener/updater/dialog, and no HTTP client crate on any desktop target;
+# - the only plugin is single-instance (named mutex on Windows, a Unix socket on macOS; no network code);
+# - `isolation` is required by `app.security.pattern = isolation` (without it codegen falls back to brownfield).
+
+[lib]
+name = "whynot_cut_setup_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.3", features = ["isolation"] }
+serde_json = { version = "=1.0.154" }   # build.rs reads ui/vendor.json
+
+[dependencies]
+tauri = { version = "=2.12.4", features = ["isolation"] }
+tauri-plugin-single-instance = { version = "=2.5.4" }
+serde = { version = "=1.0.229", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = { version = "=1.0.154" }
+sha2 = { version = "=0.10.9" }      # tests: re-derive the isolation style hash in the CSP
+base64 = { version = "=0.22.1" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

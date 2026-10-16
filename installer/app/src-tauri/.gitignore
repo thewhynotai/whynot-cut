@@ -1,0 +1,4 @@
+# ET1-17: build output and generated files stay out of git (the target dir lives on D:/ClaudeData anyway).
+/target/
+/gen/
+/ui-dist/

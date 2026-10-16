@@ -1,0 +1,7 @@
+{
+  "identifier": "main-window",
+  "description": "The installer window may call only our own commands. No core:* or plugin permission is granted: the window renders the bundled UI without any. ET1-18/19 add their commands here (and in tests/test_scaffold.py ALLOWED_COMMANDS first).",
+  "local": true,
+  "windows": ["main"],
+  "permissions": ["allow-app-info"]
+}
