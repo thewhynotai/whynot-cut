@@ -84,7 +84,15 @@ text arrive exactly as written.
 The keys are in reading order, so the first lines of the file are enough:
 - **First:** `headline`, one line (e.g. `FAILED: run 7 of 20 failed after 6 passes: rc 1: AssertionError ...
   [bridge-hunt, adobe; ran 9m40s]`), then `status` (`passed`, `failed`, `timeout`, `cancelled`, `stopped`, `error`,
-  `stranded`), `passed` and `summary`.
+  `stranded`), `passed`, `summary` and `pressure`.
+- **Memory pressure:** when system RAM peaked at 85% or more while a run was running, `pressure` is `true`,
+  `pressure_ram_peak_pct` holds that peak, and the headline says so first:
+  `FAILED (under memory pressure: RAM peak 89%; re-check before treating it as a code verdict): ...`. Treat such a
+  failure or timeout as a machine verdict until a re-run on a quieter machine agrees. A pass gets only a note
+  (`PASSED (note: RAM peak 88% during the run): ...`). A failure or timeout gets it only when **every** failed run
+  ran under pressure (the headline shows the lowest of their peaks), so a run that failed at 60% stays a code
+  verdict whatever the other runs saw. Cancelled, stopped, error and stranded jobs never get it. `status` marks such
+  a row `[RAM 89%: re-check]`. Set the threshold with `pressure_ram_pct` in `config.json` (a bad value means 85).
 - **Then:** `id`, `title`, `owner`, `finished_at`, `exit_code`, `iterations_run`, `passes`, `run_s`, `wait_s`, `log`
   and `peak`.
 - **Last:** the long details: timestamps, `events`, `tail` (the last output lines), `iterations` (each run: rc, wait
@@ -93,7 +101,8 @@ The keys are in reading order, so the first lines of the file are enough:
 `peak` holds:
 - `ram_mb` and `cpu_pct`: the job's own process tree (Windows Job Object). `ram_mb` is peak commit and also counts
   heavy.sh while it waits for a slot;
-- `sys_ram_pct`, `gpu_pct`, `vram_mb`: the whole machine while the job ran.
+- `sys_ram_pct`, `gpu_pct`, `vram_mb`: the whole machine while the job ran (sampled every 2 s, not while it waited
+  for its slot).
 
 ## Rules for the tracks
 

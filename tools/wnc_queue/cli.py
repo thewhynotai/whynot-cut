@@ -125,7 +125,7 @@ def cmd_list(a, paths):
 
 RECENT_H = 24
 SHOW_MAX = 5
-DELIBERATE = ("cancelled", "stopped")      # someone chose these: counted, never flagged
+DELIBERATE = core.DELIBERATE
 STUCK_S = 15 * 60                          # queued this long with no runner = the scheduler is not picking it up
 
 
@@ -204,7 +204,9 @@ def cmd_status(a, paths):
             "headline": head, "verdict": verdict, "problems": problems,
             "running_jobs": [{"id": j.get("id"), "owner": j.get("owner"), "run": (j.get("current") or {}).get("n"),
                               "title": j.get("title")} for j in running],
-            "failed_recent": [{"id": j.get("id"), "status": j.get("status"), "summary": j.get("summary")}
+            "failed_recent": [{"id": j.get("id"), "status": j.get("status"), "summary": j.get("summary"),
+                               "pressure": bool(j.get("pressure")),
+                               "pressure_ram_peak_pct": j.get("pressure_ram_peak_pct")}
                                   for j in bad],
             "home": str(paths.home), "runner_alive": alive, "runner": hb, "STOP": stop, "task_installed": installed,
             "queued": len(queued), "running": len(running), "done": len(done),
@@ -217,7 +219,9 @@ def cmd_status(a, paths):
         cur = j.get("current") or {}
         print(f"  running  {j.get('id')}  run {cur.get('n', '?')}, {_age(cur.get('since'))}  {_short(j.get('title'), 60)}")
     for j in bad[:SHOW_MAX]:
-        print(f"  {str(j.get('status')).upper():<9}{j.get('id')}  {_age(j.get('finished_at'))} ago  {_short(j.get('summary'))}")
+        pr = f"[RAM {j.get('pressure_ram_peak_pct')}%: re-check] " if j.get("pressure") else ""
+        print(f"  {str(j.get('status')).upper():<9}{j.get('id')}  {_age(j.get('finished_at'))} ago  "
+              f"{pr}{_short(j.get('summary'))}")
     hidden = max(0, len(running) - SHOW_MAX) + max(0, len(bad) - SHOW_MAX)
     if hidden:
         print(f"  ... {hidden} more: wnc-queue list")

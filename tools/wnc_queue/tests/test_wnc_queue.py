@@ -1277,6 +1277,138 @@ class GlanceTests(Base):
         self.assertNotIn("a1", out)
 
 
+class PressureTests(Base):
+    """A verdict reached while system RAM peaked at >= 85% during the run says so in its headline: a timing failure
+    under memory pressure is a machine verdict until it is re-checked, not a code verdict."""
+
+    def setUp(self):
+        super().setUp()
+        from unittest import mock
+        p = mock.patch.object(task, "installed", return_value=True)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def rec(self, status, rams, passed=None, **kw):
+        passed = passed if passed is not None else [status == "passed"] * len(rams)
+        runs = [{"n": i + 1, "rc": 0 if ok else 1, "passed": ok, "run_s": 10.0, "wait_s": 0.0,
+                 "peak_sys_ram_pct": r} for i, (r, ok) in enumerate(zip(rams, passed))]
+        return core.done_record({"id": "j1", "owner": "g3", "iterations": runs}, status, "rc 1: 2 timing tests",
+                                log="x.log", peak={"sys_ram_pct": max((r for r in rams if r is not None),
+                                                                      default=None)}, **kw)
+
+    def test_failure_under_pressure_says_so_first(self):
+        r = self.rec("failed", [89])
+        self.assertIs(r["pressure"], True)
+        self.assertEqual(r["pressure_ram_peak_pct"], 89)
+        self.assertTrue(r["headline"].startswith(
+            "FAILED (under memory pressure: RAM peak 89%; re-check before treating it as a code verdict): rc 1"),
+            r["headline"])
+        self.assertEqual(list(r)[:4], ["headline", "status", "passed", "summary"])
+
+    def test_timeout_under_pressure_too(self):
+        self.assertTrue(self.rec("timeout", [92])["headline"].startswith("TIMEOUT (under memory pressure: RAM peak 92%"))
+
+    def test_pass_under_pressure_is_a_note_only(self):
+        r = self.rec("passed", [70, 88])
+        self.assertIs(r["pressure"], True)
+        self.assertTrue(r["headline"].startswith("PASSED (note: RAM peak 88% during the run): "), r["headline"])
+
+    def test_below_the_threshold_nothing_changes(self):
+        r = self.rec("failed", [84])
+        self.assertIs(r["pressure"], False)
+        self.assertNotIn("pressure_ram_peak_pct", r)
+        self.assertTrue(r["headline"].startswith("FAILED: rc 1"), r["headline"])
+
+    def test_only_the_failed_runs_explain_a_failure(self):
+        """A flaky hunt whose failing run saw 60% is a code verdict, even if a passing run hit 90%."""
+        r = self.rec("failed", [90, 60], passed=[True, False])
+        self.assertIs(r["pressure"], False)
+        self.assertTrue(self.rec("failed", [60, 90], passed=[True, False])["pressure"])
+
+    def test_every_failed_run_must_have_run_under_pressure(self):
+        """Review P1: run 3 failed at 60% is a code failure even if run 7 failed at 90%."""
+        self.assertIs(self.rec("failed", [60, 90], passed=[False, False])["pressure"], False)
+        r = self.rec("failed", [91, 87, 70], passed=[False, False, True])
+        self.assertIs(r["pressure"], True)
+        self.assertEqual(r["pressure_ram_peak_pct"], 87)          # the lowest: every failed run was at least there
+        self.assertIs(self.rec("failed", [90, None], passed=[False, False])["pressure"], False)
+
+    def test_deliberate_and_unstarted_runs_get_no_pressure_note(self):
+        self.assertIs(self.rec("cancelled", [95])["pressure"], False)
+        self.assertIs(self.rec("stopped", [95])["pressure"], False)
+        self.assertIs(self.rec("error", [None])["pressure"], False)
+
+    def test_runner_problems_never_read_as_memory_pressure(self):
+        """error / stranded are about the runner or the job file; earlier runs' RAM doesn't explain them."""
+        for st in ("error", "stranded"):
+            with self.subTest(status=st):
+                self.assertIs(self.rec(st, [95, 95], passed=[False, False])["pressure"], False)
+        self.assertIs(self.rec("timeout", [95, None], passed=[False, False])["pressure"], False)  # slot wait
+
+    def test_threshold_is_configurable(self):
+        self.assertIs(self.rec("failed", [89], pressure_at=90)["pressure"], False)
+
+    def test_a_bad_threshold_in_config_falls_back_to_85(self):
+        for bad in ("85%", None, 0, 150, [1], True):
+            with self.subTest(value=bad):
+                self.paths.config.write_text(json.dumps({"pressure_ram_pct": bad}), encoding="utf-8")
+                self.assertEqual(core.load_config(self.paths)["pressure_ram_pct"], 85.0)
+                self.assertIs(self.rec("failed", [89], pressure_at=bad)["pressure"], True)
+        self.paths.config.write_text(json.dumps({"pressure_ram_pct": 92}), encoding="utf-8")
+        self.assertEqual(core.load_config(self.paths)["pressure_ram_pct"], 92.0)
+
+    def test_a_run_shorter_than_one_poll_still_gets_its_sample(self):
+        """A run that starts and ends between two samples still gets one (taken as it ends). The poll loop checks the
+        started file before it checks the exit, so only a microseconds-wide window needed the extra check (review P2):
+        this guards the behaviour, it can't force that window."""
+        from unittest import mock
+        self.cfg["sample_s"] = 1000                       # only the sample taken after the run ends can count
+        j = self.job(["python", "-c", "raise SystemExit(1)"])
+        started = self.paths.started(j["id"])
+        with mock.patch.object(procs, "system_ram_pct", side_effect=lambda: 91 if started.exists() else 30):
+            self.run_runner()
+        d = self.done(j["id"])
+        self.assertEqual(d["peak"]["sys_ram_pct"], 91)
+        self.assertIs(d["pressure"], True)
+
+    def test_status_row_marks_a_pressure_failure(self):
+        core.write_json(self.paths.done / "j1.json", self.rec("failed", [89]))
+        out = GlanceTests.cli(self, "status")[1]
+        row = next(line for line in out if "j1" in line)
+        self.assertIn("RAM 89%: re-check", row)
+        js = json.loads("\n".join(GlanceTests.cli(self, "status", "--json")[1]))["failed_recent"][0]
+        self.assertEqual((js["pressure"], js["pressure_ram_peak_pct"]), (True, 89))
+
+    def slow_heavy(self) -> str:
+        f = self.dir / "slow-heavy.sh"
+        f.write_text('sleep 2\nshift 3\n"$@"\n', encoding="utf-8", newline="\n")    # 2 s "waiting for a slot"
+        return str(f)
+
+    def run_with_ram(self, waiting_pct, running_pct):
+        from unittest import mock
+        self.cfg["heavy_sh"] = self.slow_heavy()
+        j = self.job(["python", "-c", "import time; time.sleep(1.5); raise SystemExit(1)"], heavy="cpu")
+        started = self.paths.started(j["id"])
+        with mock.patch.object(procs, "system_ram_pct",
+                               side_effect=lambda: running_pct if started.exists() else waiting_pct):
+            self.run_runner()
+        return self.done(j["id"])
+
+    def test_runner_flags_pressure_during_the_run(self):
+        d = self.run_with_ram(50, 91)
+        self.assertEqual(d["status"], "failed")
+        self.assertIs(d["pressure"], True)
+        self.assertEqual(d["peak"]["sys_ram_pct"], 91)
+        self.assertIn("under memory pressure: RAM peak 91%", d["headline"])
+
+    def test_ram_while_waiting_for_a_slot_is_not_the_runs(self):
+        """Another suite filling RAM while this job still waits for its heavy.sh slot says nothing about this run."""
+        d = self.run_with_ram(97, 40)
+        self.assertIs(d["pressure"], False)
+        self.assertEqual(d["peak"]["sys_ram_pct"], 40)
+        self.assertTrue(d["headline"].startswith("FAILED: "), d["headline"])
+
+
 class EndToEndTests(Base):
     """Through the real CLI, with the runner as its own process (as the scheduled task starts it)."""
 

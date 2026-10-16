@@ -398,11 +398,12 @@ class Worker(threading.Thread):
                     bump("cpu_pct", round(100 * (s["cpu_s"] - last["cpu"]) / dt_ / ncpu, 1))
                     last["t"], last["cpu"] = now_m, s["cpu_s"]
             bump("ram_mb", s.get("peak_mb"))
-            bump("sys_ram_pct", procs.system_ram_pct())
-            g = self.runner.gpu
-            if g and started_ts is not None:
-                bump("gpu_pct", g[0])
-                bump("vram_mb", g[1])
+            if started_ts is not None:           # machine-wide: only while THIS run runs (not its slot wait)
+                bump("sys_ram_pct", procs.system_ram_pct())
+                g = self.runner.gpu
+                if g:
+                    bump("gpu_pct", g[0])
+                    bump("vram_mb", g[1])
             last["sampled"] = now_m
 
         outcome = None
@@ -441,6 +442,8 @@ class Worker(threading.Thread):
             except Exception:
                 tree.kill()
                 rc = tree.proc.wait(timeout=30)
+            if started_ts is None and p.started(jid).exists():   # started between the loop's last check and its exit
+                started_ts = time.time()
             sample()
             rt.join(timeout=3)
             if rt.is_alive():                    # an orphan still holds the output pipe: kill the rest of the tree
@@ -514,7 +517,7 @@ class Worker(threading.Thread):
         lost = sum(i.get("log_lines_lost") or 0 for i in its)
         extra = {"log_lines_lost": lost} if lost else {}
         rec = core.done_record(job, status, summary, log=str(p.log(jid)), peak=peak, tail=list(self.tail)[-15:],
-                               **extra)
+                               pressure_at=self.cfg.get("pressure_ram_pct"), **extra)
         write_json(p.done / f"{jid}.json", rec)
         for f in (p.running / f"{jid}.json", p.spec(jid), p.started(jid), p.cancel(jid)):
             unlink(f)

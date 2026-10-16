@@ -154,6 +154,7 @@ def load_config(paths: Paths) -> dict:
         "extra_hosts": [],
         "locks_dir": "D:/ClaudeData/Temp/wnc-locks",   # heavy.sh slots (kept fresh while a job holds one)
         "slot_refresh_s": 600,                          # how often; heavy.sh takes over slots older than 3 h
+        "pressure_ram_pct": PRESSURE_RAM_PCT,           # system RAM peak during a run that makes its verdict suspect
     }
     try:
         user = json.loads(paths.config.read_text(encoding="utf-8-sig"))
@@ -161,6 +162,7 @@ def load_config(paths: Paths) -> dict:
             cfg.update({k: v for k, v in user.items() if k in cfg})
     except (OSError, ValueError):
         pass
+    cfg["pressure_ram_pct"] = pressure_threshold(cfg.get("pressure_ram_pct"))
     return cfg
 
 
@@ -563,20 +565,63 @@ def fmt_secs(s) -> str:
     return f"{h}h{m:02d}m" if h else f"{m}m{s:02d}s" if m else f"{s}s"
 
 
+PRESSURE_RAM_PCT = 85              # the machine's own brake: no new heavy job at >= 85% RAM
+DELIBERATE = ("cancelled", "stopped")      # someone chose these: counted, never flagged
+
+
+def pressure_threshold(v) -> float:
+    """config `pressure_ram_pct`: a number in (0, 100], else the default (a bad value never breaks a verdict)."""
+    if isinstance(v, bool):                  # JSON true is not 1%
+        return float(PRESSURE_RAM_PCT)
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return float(PRESSURE_RAM_PCT)
+    return f if 0 < f <= 100 else float(PRESSURE_RAM_PCT)
+
+
+def pressure_peak(status: str, iterations: list, at=PRESSURE_RAM_PCT) -> int | None:
+    """The system-RAM peak (sampled while a run was running) that makes this verdict suspect, else None.
+    - failed / timeout: only when EVERY failed run ran under pressure (the lowest of their peaks is returned). A
+      failed run at 60% is a code verdict, whatever other runs saw; a run with no sample (it never started) too.
+    - passed: the highest peak of any run (a note only).
+    - anything else (cancelled, stopped, error, stranded) is a choice or a runner problem, never a machine verdict."""
+    at = pressure_threshold(at)
+    num = lambda i: (i.get("peak_sys_ram_pct") if isinstance(i.get("peak_sys_ram_pct"), (int, float))  # noqa: E731
+                     and not isinstance(i.get("peak_sys_ram_pct"), bool) else None)
+    if status == "passed":
+        vals = [v for v in map(num, iterations) if v is not None]
+        return max(vals) if vals and max(vals) >= at else None
+    if status not in ("failed", "timeout"):
+        return None
+    vals = [num(i) for i in iterations if not i.get("passed")]
+    if not vals or None in vals:
+        return None
+    return min(vals) if min(vals) >= at else None
+
+
 def headline(rec: dict) -> str:
-    """One line a resuming session can stop at: the result first, then which job and how long."""
+    """One line a resuming session can stop at: the result first, then which job and how long. Under memory
+    pressure the verdict says so before anything else."""
     who = f"{rec.get('id')}" + (f", {rec['owner']}" if rec.get("owner") else "")
-    return f"{str(rec.get('status')).upper()}: {rec.get('summary')}  [{who}; ran {fmt_secs(rec.get('run_s'))}]"
+    verdict = str(rec.get("status")).upper()
+    if rec.get("pressure"):
+        pk = rec.get("pressure_ram_peak_pct")
+        verdict += (f" (note: RAM peak {pk}% during the run)" if rec.get("status") == "passed" else
+                    f" (under memory pressure: RAM peak {pk}%; re-check before treating it as a code verdict)")
+    return f"{verdict}: {rec.get('summary')}  [{who}; ran {fmt_secs(rec.get('run_s'))}]"
 
 
 def done_record(job: dict, status: str, summary: str, log: str | None, **extra) -> dict:
     """The done\\<id>.json record. Keys are ordered for reading at a glance: the result first (headline, status,
     summary), then counts and peaks, then the long details (events, tail, every run, the job spec) last."""
     its = job.get("iterations", [])
+    pk = pressure_peak(status, its, extra.pop("pressure_at", PRESSURE_RAM_PCT))
     spec = {k: job.get(k) for k in ("argv", "cwd", "env", "heavy", "timeout_s", "max_wait_s", "stop", "pass_regex",
                                     "fail_regex", "priority", "max_attempts")}
     rec = {
         "headline": None, "status": status, "passed": status == "passed", "summary": summary,
+        "pressure": pk is not None, **({"pressure_ram_peak_pct": pk} if pk is not None else {}),
         "id": job.get("id"), "title": job.get("title"), "owner": job.get("owner"), "finished_at": now_iso(),
         "exit_code": its[-1].get("rc") if its else None, "iterations_run": len(its),
         "passes": sum(1 for i in its if i.get("passed")),
