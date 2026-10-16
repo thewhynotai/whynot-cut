@@ -140,6 +140,27 @@ class TestEveryModuleIsSandboxed(unittest.TestCase):
     def test_the_real_engine_home_is_a_live_root(self):
         self.assertTrue(any(_under(_isolation.REAL_ENGINE_HOME, r) for r in plat.live_roots()))
 
+    def test_child_text_is_utf8_even_on_a_bare_unittest_run(self):
+        """Phase 4 hygiene: `python -m unittest` on Windows (no PYTHONUTF8, ANSI code page cp1252) decoded the CLI's
+        Arabic UTF-8 output as cp1252 (TestPre30Approval, test_e2_*). tools/test.sh sets PYTHONUTF8=1; _isolation now
+        gives every run the same: text-mode child pipes are UTF-8 both ways. Run in a child WITHOUT UTF-8 mode."""
+        import subprocess
+        code = ("import sys, subprocess; sys.path.insert(0, %r); import _isolation\n"
+                "r = subprocess.run([sys.executable, '-c', 'print(\"\\u0645\\u0631\\u062d\\u0628\\u0627 \\u2014 ok\")'],"
+                " capture_output=True, text=True)\n"
+                "print(ascii(r.stdout.strip()) + '|' + ascii(r.stderr.strip()[-200:]))\n") % str(TESTS)
+        env = {k: v for k, v in os.environ.items() if k not in ("PYTHONUTF8", "PYTHONIOENCODING")}
+        r = subprocess.run([sys.executable, "-X", "utf8=0", "-c", code], capture_output=True, env=env, timeout=120)
+        out = r.stdout.decode("ascii", "replace").strip()
+        self.assertEqual(out.split("|", 1)[0], ascii("مرحبا — ok"),
+                         out + r.stderr.decode("utf-8", "replace")[-400:])
+
+    def test_an_explicit_encoding_still_wins(self):
+        import subprocess
+        r = subprocess.run([sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'\\xe9')"], capture_output=True,
+                           text=True, encoding="latin-1")
+        self.assertEqual(r.stdout, "é")
+
 
 class LiveRootCase(unittest.TestCase):
     """A temp folder plays the real machine: it is the only live root."""

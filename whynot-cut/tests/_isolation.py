@@ -159,8 +159,30 @@ def _sandbox() -> None:
         os.environ["NH_FFMPEG"] = str(pinned)
 
 
+def _utf8_child_text() -> None:
+    """Every run decodes child output like tools/test.sh does (PYTHONUTF8=1): a bare `python -m unittest` on Windows
+    is not in UTF-8 mode, so text-mode pipes used the ANSI code page (cp1252) and the CLI's Arabic UTF-8 output broke
+    (Phase 4 hygiene). Children get PYTHONUTF8=1 (Python writes UTF-8 to pipes); text-mode Popen without an explicit
+    encoding/errors decodes UTF-8. An explicit encoding= still wins. No-op in UTF-8 mode (tools/test.sh, macOS CI)."""
+    if sys.flags.utf8_mode:
+        return
+    os.environ.setdefault("PYTHONUTF8", "1")
+    import subprocess
+    init = subprocess.Popen.__init__
+    if getattr(init, "_whynot_utf8", False):
+        return
+
+    def utf8_init(self, *a, **kw):
+        if (kw.get("text") or kw.get("universal_newlines")) and kw.get("encoding") is None and kw.get("errors") is None:
+            kw["encoding"] = "utf-8"
+        init(self, *a, **kw)
+    utf8_init._whynot_utf8 = True
+    subprocess.Popen.__init__ = utf8_init
+
+
 _sandbox()
-tempfile.tempdir = None                 # re-read TMP/TEMP/TMPDIR: this process's temp folders land in the sandbox too
+_utf8_child_text()
+tempfile.tempdir = None                # re-read TMP/TEMP/TMPDIR: this process's temp folders land in the sandbox too
 if sys.version_info >= (3, 10) and not issubclass(tempfile.TemporaryDirectory, _TemporaryDirectory):
     tempfile.TemporaryDirectory = _TemporaryDirectory
 REAL_ENGINE_HOME = Path(os.environ["WHYNOT_TEST_REAL_ENGINE_HOME"])
