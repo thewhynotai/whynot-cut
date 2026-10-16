@@ -22,4 +22,5 @@ The Windows executor updates this list at every phase boundary. `tools/release.p
 - `adobe/**`: Adobe track
 - `whynot-cut/engine/reel/serve/**`: Adobe track
 - `whynot-cut/installer/**`: installer track
+- `installer/app/**`: installer track (E-T1, Tauri app + UI bundle)
 - `guide-ar/**`: guide track
