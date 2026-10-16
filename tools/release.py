@@ -32,7 +32,9 @@ Python stdlib only (no third-party package), so it runs on any Python 3.9+.
           root      WHAT-WORKS-NOW-AR.md (from tools/handoff/what-works.json + PROGRESS.md's passed phases) and
                     LABEL.txt.
         The templates live in tools/handoff/. Every generated text file is scanned for the real-client words of
-        tests/test_plugin.py; a hit refuses the hand-off.
+        tests/test_plugin.py; a hit refuses the hand-off. The Mac clone and the zip's files also go through
+        tools/identity_scan.py (Addendum H R-T6): an identity finding refuses the hand-off (a release, not a PREVIEW,
+        also needs the key: WNC_IDENTITY_KEY_FILE); its secret scan is report-only for now.
 
 Scope. The full release pipeline is T7.6 (master plan) and its steps 1-10 belong to the executor; this stub covers
 the installer's parts only. NOT done here: (1) tests; (2) validate --strict; (3) locks compile
@@ -294,6 +296,44 @@ def zxp_signed(path: Path) -> bool:
             return SIGNATURES in z.namelist()
     except (zipfile.BadZipFile, OSError):
         return False
+
+
+IDENTITY_SCAN = [sys.executable, "-I", str(Path(__file__).resolve().parent / "identity_scan.py")]
+
+
+def identity_gate(root: Path, require_key: bool, log=print, cmd=None, hashes=None) -> str:
+    """Addendum H R-T6 (Task 19): the keyed identity scan over a release tree. A finding (exit 1), an error (2), or no
+    key when `require_key` (a real release) raises HandoffError; its output is already redacted. A PREVIEW without a
+    key is scanned when a key is set, else logged as skipped. A subprocess on purpose: the scan's worker processes
+    need their own __main__. Returns the line it logged."""
+    argv = (list(cmd or IDENTITY_SCAN) + ["scan", "--json", "--root", str(root)]
+            + (["--hashes", str(hashes)] if hashes else []) + (["--require-key"] if require_key else []))
+    r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if r.returncode != 0:
+        raise HandoffError(f"identity scan ({root.name}): exit {r.returncode}: " + (r.stdout + r.stderr).strip()[-2000:])
+    try:
+        doc = json.loads(r.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        raise HandoffError(f"identity scan ({root.name}): unreadable output: " + (r.stdout + r.stderr).strip()[-500:])
+    line = (f"  identity scan ({root.name}): skipped, no key (a PREVIEW only; a release needs it)" if doc.get("skipped")
+            else f"  identity scan ({root.name}): 0 findings in {doc.get('files', 0)} paths")
+    log(line)
+    return line
+
+
+def secret_report(root: Path, log=print, cmd=None) -> int:
+    """The identity tool's secret scan over a release tree, REPORT-ONLY for now: the committed tree still holds real
+    home paths owned by several tracks (looks note LOOKS-RELEASE-GATE-DIFF.md); it turns hard once they are fixed or
+    allowlisted in tools/secret_allowlist.json. Returns the number of findings (-1 when the scan itself failed)."""
+    argv = list(cmd or IDENTITY_SCAN) + ["secrets", "--json", "--root", str(root)]
+    r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    try:
+        n = len(json.loads(r.stdout.strip().splitlines()[-1])["hits"])
+    except (ValueError, IndexError, KeyError, TypeError):
+        log(f"  secret scan ({root.name}): could not run (report-only): exit {r.returncode}")
+        return -1
+    log(f"  secret scan ({root.name}): {n} finding(s), report-only until fixed or allowlisted")
+    return n
 
 
 def scan_secrets(root: Path) -> list:
@@ -976,6 +1016,9 @@ def _build(repo, new, ctx, ship, locked, zip_name, sample_maker, summary, log):
         rc = cmd_fill(argparse.Namespace(plugin=str(stage / "whynot-cut"), components=None))
     if rc != 0:
         raise HandoffError("pinning the Adobe artefacts in components.json failed: " + buf.getvalue().strip())
+    for root in (clone, stage):         # the Mac clone and the plugin zip's files: identity hard, secrets report-only
+        identity_gate(root, require_key=not ctx["preview"], log=log)
+        summary.setdefault("secret_findings", {})[root.name] = secret_report(root, log=log)
     n = build_plugin_zip(stage, win / zip_name)
     log(f"  {zip_name}: {n} files")
     inst = stage / "whynot-cut" / "installer"
