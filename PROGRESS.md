@@ -40,7 +40,8 @@ Machine-read by `tools/release.py handoff` (PREVIEW banner of Mac/START-HERE.md 
 gate tag; the latest row of a passed phase with a macOS CI result is the Mac line. Strict vocabulary (anything else
 stops the handoff): Windows `full green` | `full red`; macOS CI `full green` | `full red` | `smoke green` |
 `smoke red` | `not run` (empty = not run); Live Mac `Verified` | `Partly verified` | `Not verified`. Detail may follow
-the form, e.g. `full red (45 F + 6 E); smoke green`.
+the form, e.g. `full red (45 F + 6 E); smoke green`. The phase table's State cell counts as passed only when it starts
+with `**passed**` or `**Gate <N> passed on Windows, Mac Not verified**` (else the gate tag decides).
 
 | Gate | Tag | Windows | macOS CI | Live Mac |
 |---|---|---|---|---|

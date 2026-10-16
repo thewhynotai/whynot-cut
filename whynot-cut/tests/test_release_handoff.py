@@ -571,7 +571,7 @@ class TestGateState(unittest.TestCase):
         en = rel.gate_lines_en(st)
         self.assertIn("Phases passed: 0, 3 (latest gate tag `v9.9.9-p3.1`).", en)
         self.assertIn("In progress: phase 4 (Editor features).", en)
-        self.assertIn("macOS: CI full suite green at `v9.9.9-p3.1`: full green (run 7).", en)
+        self.assertIn("macOS: CI full suite green at `v9.9.9-p3.1` (run 7).", en)
         self.assertIn("Live Mac checks: Not verified (Phase 12).", en)
 
     def test_mac_ci_is_the_leading_form_only(self):
@@ -616,28 +616,47 @@ class TestGateState(unittest.TestCase):
     def test_lines_per_kind(self):
         for cell, want_en, want_ar in (
                 ("smoke green", "macOS: CI smoke job green at `v1-p0` (not the full suite).", "سريع"),
-                ("full green; 3 errors ignored", "macOS: CI full suite green at `v1-p0`: full green; 3 errors ignored.",
+                ("full green; 3 errors ignored", "macOS: CI full suite green at `v1-p0`; 3 errors ignored.",
                  "full suite"),
-                ("smoke red (2 F)", "macOS: CI smoke job red at `v1-p0`: smoke red (2 F).", "فشل"),
-                ("full red (3 F)", "macOS: CI full suite red at `v1-p0`: full red (3 F).", "فشل"),
+                ("smoke red (2 F)", "macOS: CI smoke job red at `v1-p0` (2 F).", "فشل"),
+                ("full red (3 F)", "macOS: CI full suite red at `v1-p0` (3 F).", "فشل"),
                 ("not run", "macOS: never run yet (no gate in PROGRESS.md has a macOS CI result).", "لسه ما اتجرّبش")):
             st = self._st(cell)
             self.assertIn(want_en, rel.gate_lines_en(st), cell)
             self.assertIn(want_ar, "\n".join(rel.gate_lines_ar(st)), cell)
 
-    def test_only_a_passed_first_bold_state_counts(self):
-        """Review 6ced7db P1 + cd98af8 P2: "**not passed**", text between two bold runs, "failed"; but "✅ **passed**",
-        "Gate 4 **passed**" and "**passed (failover fixed)**" do count."""
+    def test_only_an_exact_passed_state_counts(self):
+        """Four reviews (6ced7db … 181a3a6) kept finding negations that read as passed. The phase state has a strict
+        vocabulary too: it starts with "**passed**" or "**Gate <N> passed on Windows, Mac Not verified**" (N = the
+        phase). Anything else is not passed by its state (it fails closed: a gate tag still counts)."""
         for state in ("**not passed** (review FAIL)", "**in progress** (Gate 3 passed earlier; **executor**)",
                       "**failed** — passed nothing", "in progress, passed T4.1", "**Gate 4 failed**", "****",
-                      # 93afc65 re-review P1: words before the bold run
-                      "Not **passed**", "not yet **passed**", "never **passed**", "❌ **passed**?"):
-            table = f"| P | S | T | V |\n|---|---|---|---|\n| 4 Editor | {state} | | |\n"
+                      "Not **passed**", "not yet **passed**", "never **passed**", "❌ **passed**?",
+                      # 181a3a6 re-review P1: negation inside the bold run, contractions, other marks
+                      "**not yet passed**", "**never passed**", "**NOT  passed**", "**not passed**",
+                      "**hasn't passed**", "**passed? no**", "**passed: no**", "Hasn't **passed**", "✖ **passed**",
+                      "⛔ **passed**", "🔴 **passed**", "✅ **passed**", "Gate 4 **passed**", "**passed (failover)**",
+                      "**Gate 4 passed on Windows, Mac Not verified**", "**Gate 3 passed? no**"):
+            table = f"| P | S | T | V |\n|---|---|---|---|\n| 3 Editor | {state} | | |\n"
             self.assertEqual(rel.passed_phases(table)[0], [], state)
-        for state in ("**passed**", "**Gate 3 passed on Windows, Mac Not verified** (2026-10-16)", "✅ **passed**",
-                      "Gate 4 **passed**", "**passed (failover fixed)**"):
+        for state in ("**passed**", "**passed** (2026-10-16)", "**Gate 3 passed on Windows, Mac Not verified** (2026-10-16)"):
             passed, _ = rel.passed_phases(f"| P | S | T | V |\n|---|---|---|---|\n| 3 X | {state} | v1-p3 | |\n")
             self.assertEqual([n for n, _x, _t in passed], ["3"], state)
+        # a gate tag still counts when the state is not in the vocabulary
+        passed, _ = rel.passed_phases("| P | S | T | V |\n|---|---|---|---|\n| 3 X | ✅ **passed** | | |\n",
+                                      tags=["v1-p3"], version="1")
+        self.assertEqual([n for n, _x, _t in passed], ["3"])
+
+    def test_the_gate_table_needs_its_header_and_separator(self):
+        """181a3a6 re-review P2: a short separator, none, or a row without a leading pipe dropped the table silently."""
+        rows = rel.gate_record("## Gate record\n\n| Gate | Tag | Windows | macOS CI | Live Mac |\n|-|-|-|-|-|\n"
+                               "| 0 | v1-p0 | full green | not run | Not verified |\n")
+        self.assertEqual(len(rows), 1)
+        for text in ("| Gate | Tag | Windows | macOS CI | Live Mac |\n| 0 | v1-p0 | full green | not run | Not verified |\n",
+                     "| Gate | Tag | Windows | macOS CI | Live Mac |\n|---|---|---|---|---|\n"
+                     "0 | v1-p0 | full green | not run | Not verified |\n"):
+            with self.assertRaises(ValueError, msg=text):
+                rel.gate_record("## Gate record\n\n" + text)
 
     def test_a_passed_phase_shows_its_newest_gate_tag(self):
         passed, _ = rel.passed_phases(self.PROGRESS)

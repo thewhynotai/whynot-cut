@@ -443,11 +443,16 @@ def _tag_key(tag: str) -> tuple:
     return (int(m.group(1)), int(m.group(2) or 0)) if m else (-1, -1)
 
 
+# A phase's state cell says "passed" in exactly one of these forms (the executor is PROGRESS.md's only writer); anything
+# else, however it is worded, is not a pass by its state. Four reviews found negations a word parser read as passed.
+PASSED_STATE = re.compile(r"\*\*(?:passed|Gate (\d+) passed on Windows, Mac Not verified)\*\*(?=\s|$)")
+
+
 def passed_phases(progress: str, tags=(), version: str = "", *, rows=None) -> tuple:
     """([(number, name, tag)] passed, [(number, name)] in progress) from PROGRESS.md's phase table. A phase passed when
-    the FIRST bold run of its state says "passed" (and not "not passed" / "failed"), or a gate tag `v<version>-p<N>`
-    exists (the committed PROGRESS.md can lag behind the tag of a passed gate). Its tag is the newest gate-record tag
-    of that phase, else the first vX-pN(.M) token of the tag cell."""
+    its state STARTS with one of the PASSED_STATE forms (the gate number, if named, is the phase's), or a gate tag
+    `v<version>-p<N>` exists (the committed PROGRESS.md can lag behind the tag of a passed gate). Its tag is the newest
+    gate-record tag of that phase, else the first vX-pN(.M) token of the tag cell."""
     gate = {m.group(1): t for t in tags if version and (m := re.fullmatch(rf"v{re.escape(version)}-p(\d+)", t))}
     newest = {}
     for r in (gate_record(progress) if rows is None else rows):
@@ -459,12 +464,8 @@ def passed_phases(progress: str, tags=(), version: str = "", *, rows=None) -> tu
             continue
         num, name = cells[0].split(None, 1)
         state = cells[1]
-        bold = re.search(r"\*\*([^*]+)\*\*", state)
-        said = bold.group(1).lower() if bold else ""
-        before = state[:bold.start()].lower() if bold else ""
-        negated = re.search(r"\b(?:not|never|no|yet to|un\w*)\b|[\u274c\u2717\u2718]", before)
-        if re.search(r"\bpassed\b", said) and not negated and \
-                not re.search(r"\bnot passed\b|\bfail(?:ed|s|ure)?\b", said):
+        ok = PASSED_STATE.match(state)
+        if ok and (ok.group(1) is None or ok.group(1) == num):
             tag = TAG_RE.match(cells[2])
             passed.append((num, name, newest.get(num) or (tag.group(0) if tag else (cells[2] or gate.get(num, "")))))
         elif num in gate:
@@ -496,13 +497,19 @@ def gate_record(progress: str, version: str = "") -> list:
     Every data row must parse: a gate number, that gate's tag (`v<version>-p<gate>[.<M>]`, the plugin's version when
     given), and cells in the strict vocabulary; anything else raises ValueError (never skipped, never guessed)."""
     m = re.search(r"^## Gate record\s*$(.*?)(?=^## |\Z)", progress, re.M | re.S)
-    rows, header = [], True
+    rows, seen = [], 0                                 # seen: 0 nothing yet, 1 the header row, 2 its separator too
     for ln in (m.group(1) if m else "").splitlines():
+        if not ln.strip():
+            continue
         if not ln.strip().startswith("|"):
+            if seen and "|" in ln:                     # inside the table (the prose above it may name forms with |)
+                raise ValueError(f"PROGRESS.md gate record: the row {ln.strip()[:80]!r} must start with '|'")
             continue
         cells = _cells(ln)
-        if header:                                     # the column names row, then the |---| separator row
-            header = not all(re.fullmatch(r":?-{3,}:?", c) for c in cells)
+        if seen < 2:
+            if seen == 1 and not all(re.fullmatch(r":?-+:?", c) for c in cells):
+                raise ValueError("PROGRESS.md gate record: the header row must be followed by a |---| separator row")
+            seen += 1
             continue
         if len(cells) != 5 or not re.fullmatch(r"\d+", cells[0]):
             raise ValueError(f"PROGRESS.md gate record: the row {ln.strip()[:80]!r} must be "
@@ -551,11 +558,12 @@ def gate_lines_en(st: dict) -> list:
     if not mac:
         L.append("macOS: never run yet (no gate in PROGRESS.md has a macOS CI result).")
         return L
-    more = f": {mac['detail']}" if mac["detail"] not in ("", mac["kind"]) else ""
+    rest = mac["detail"][len(mac["kind"]):].strip() if mac["detail"].startswith(mac["kind"]) else ""
+    more = ("" if rest.startswith(";") else " ") + rest if rest else ""
     line = {"full green": f"macOS: CI full suite green at `{mac['tag']}`{more}.",
             "smoke green": f"macOS: CI smoke job green at `{mac['tag']}` (not the full suite){more}.",
-            "full red": f"macOS: CI full suite red at `{mac['tag']}`: {mac['detail']}.",
-            "smoke red": f"macOS: CI smoke job red at `{mac['tag']}`: {mac['detail']}."}[mac["kind"]]
+            "full red": f"macOS: CI full suite red at `{mac['tag']}`{more}.",
+            "smoke red": f"macOS: CI smoke job red at `{mac['tag']}`{more}."}[mac["kind"]]
     if st["latest_tag"] and mac["tag"] != st["latest_tag"]:
         line += f" The Mac CI was not run at `{st['latest_tag']}` (the latest gate) yet."
     L += [line, f"Live Mac checks: {mac['live']}."]
