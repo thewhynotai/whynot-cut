@@ -23,6 +23,16 @@ every scene's complete words in the `On-screen text (full)` section of `01_analy
 Return a table: graphic id | on-screen text | transcript evidence | verdict (ok / reword-to-match / needs-doctor-approval / remove) | reason.
 The story-editor applies changes. The lead editor puts approvals in "Needs you".
 
+The lead turns your table into `review-flags.json` with `reel review-flags` (you never run it: you are read-only). Each column
+becomes a field, so write the cells to fit:
+- **graphic id** → `event_id`: the plan's own id, the `event_id` in `01_analysis/timeline-spec.json` (a motion video: the scene id
+  in `motion-plan.md`). A made-up or shortened id is refused.
+- **verdict** → `verdict`, spelled exactly as above. Mark each line `medical` or `religious` too (`flag`), by the check that applies to it.
+- **reason** → `reason`, in the speaker's language where you can.
+- **on-screen text** and **transcript evidence** stay in your report for the editor: the file takes the words and the times from the
+  compiled plan, never from your table.
+- List **every** line you checked, one row each, the `ok` ones included: the lead sends your whole table the first time, and the command refuses until every graphic with words on screen is in it.
+
 Rules: no invented claims, evidence or statistics; no fabricated patient or before/after images; warnings are never altered;
 uncertain facts are flagged, not "fixed". Details: `${CLAUDE_SKILL_DIR}/references/medical-accuracy.md`.
 

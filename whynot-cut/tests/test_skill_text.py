@@ -194,6 +194,43 @@ class TestMotionAndReligiousRoutes(unittest.TestCase):
         self.assertIn("motion-director", row)
         self.assertIn("reel motion-plan", row)
 
+    def test_the_claims_stage_records_the_review_with_review_flags(self):
+        """T4.13: the medical-reviewer is read-only, so the lead puts its table through `reel review-flags --from -`
+        (the claims stage of edit; the motion video's claims row names it too, with the scene id)."""
+        edit = " ".join(text("edit").split())
+        self.assertRegex(edit, r"\| 7 Claims .{0,200}review-flags")
+        self.assertRegex(edit, r"reel review-flags .{0,80}--from -")
+        motion = " ".join(text("motion").split())
+        self.assertRegex(motion, r"reel review-flags .{0,120}--from -")
+        self.assertRegex(motion, r"(?i)keyed by the \*\*scene id\*\*")
+        agent = " ".join((SK / "agents" / "medical-reviewer.md").read_text(encoding="utf-8").split())
+        self.assertRegex(agent, r"scene id")
+        self.assertRegex(agent, r"the lead runs `reel review-flags`")
+        self.assertIn("`event_id`", text("medical-accuracy"))
+        self.assertIn("The medical-reviewer runs on every motion video, whatever the client's `domain`", motion)
+        revise = " ".join(text("revise").split())
+        self.assertRegex(revise, r"changed items only\..{0,400}reel review-flags .{0,120}--from -")
+        self.assertRegex(revise, r"(?i)stays covered by itself")
+        for name in ("edit", "motion"):                       # the first review is the reviewer's FULL table (coverage model)
+            flat = " ".join(text(name).split())
+            self.assertRegex(flat, r"FULL table")
+            self.assertRegex(flat, r"reported as `dropped`")
+            self.assertRegex(flat, r"(?i)have not been reviewed")
+            self.assertRegex(flat, r"`cleared`")                # a flag passed as ok on the same words: the editor is told
+        for name in ("edit", "motion", "revise"):   # an open flag: every new or changed line is reviewed for that flag
+            flat = " ".join(text(name).split())
+            self.assertRegex(flat, r"[GS]\d is new or changed since [GS]\d's medical flag: review [GS]\d for medical")
+            self.assertRegex(flat, r"(?i)every new or changed (graphic|scene|line)")
+            self.assertRegex(flat, r"(?i)left its (graphic|scene|line)")          # the exact rule: off its line ...
+            self.assertRegex(flat, r"(?i)an exact copy of its words")              # ... or still on it (in place)
+            self.assertRegex(flat, r"only the flags the client's domain checks")   # medical; religious client: both
+            self.assertRegex(flat, r"(?i)no words on screen .{0,40}left out")
+        self.assertRegex(revise, r"keep graphic ids stable")
+        self.assertRegex(revise, r"keep scene ids\s+stable")
+        for name in ("story-editor", "motion-director"):
+            agent = " ".join((SK / "agents" / f"{name}.md").read_text(encoding="utf-8").split())
+            self.assertRegex(agent, r"(?i)keep every (graphic's and decision's|scene's) id stable")
+
     def test_autopilot_lists_medical_and_religious_approvals(self):
         s = " ".join(text("autopilot").split())
         self.assertRegex(s, r"medical and religious approvals needed")

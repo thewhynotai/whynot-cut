@@ -80,12 +80,34 @@ Agents don't see this conversation, so give them what they need. Start every Age
 | 4 Transcript ∥ references | `whynot-cut:transcript-editor` ∥ (you, or `whynot-cut:client-researcher` when the client style is missing/stale) | transcribe, transcript-correct ∥ ref-analyze, ref-style | flagged-words list returned; `reel ref-style` current and `01_analysis/editing-style.json` copied from it |
 | 5 Audio clean + pauses | `whynot-cut:audio-engineer` (after the transcript: needs word times) | audio-clean | speech-to-noise improved, 0 missing words |
 | 6 Meaning + decisions | `whynot-cut:story-editor` | plan (until no errors) | 6 analysis files + `edit-decisions.json` compile |
-| 7 Claims ∥ graphics | `whynot-cut:medical-reviewer` ∥ `whynot-cut:motion-designer` | ∥ previews, sfx | approval list; previews checked |
+| 7 Claims ∥ graphics | `whynot-cut:medical-reviewer` ∥ `whynot-cut:motion-designer` | review-flags (you, from the reviewer's table) ∥ previews, sfx | approval list; `review-flags.json` written; previews checked |
 | 8 Preview video | (you) | preview-video (if preferences `preview_video`) | MP4 rendered, path known |
 | **9 Approve the plan** | **you + the editor** | approve-plan | the editor approved this plan (or `approval: auto`) |
 | 10 Build | `whynot-cut:premiere-builder` | ppro-status, ppro-build (or `premiere` fallback) | PRPROJ_BUILT, all read-back checks true |
 | 11 Verify | `whynot-cut:qc-reviewer` (independent, fresh context) | ppro-frames, qc | per-frame verdicts returned |
 | 12 Record + hand off | **you** | `verify --record --verdict pass\|fail --note "…"`, qc, handoff | you viewed the evidence; qc ok **in this message** |
+
+Stage 7, the claims: `whynot-cut:medical-reviewer` is read-only, so you record what it reports. When its table comes back,
+put it through `reel review-flags --root "<CLIENT>" --video-id <ID> --from -` with the table as JSON on standard input:
+`{"items": [{"event_id": "<the graphic id from its table>", "flag": "medical" or "religious", "verdict": "ok",
+"needs-doctor-approval", "reword-to-match" or "remove", "reason": "<its reason>"}]}`. It takes only the flags the client's
+domain checks: `medical` (a client whose profile `domain` is `religious`: `religious` and `medical`).
+**The first review sends the reviewer's FULL table**: one row for every graphic with words on screen, the `ok` ones too;
+a graphic with no words on screen is left out (a row for it is refused).
+The command writes `output/projects/<ID>/review-flags.json` with each line's words and times taken from the compiled plan
+(never from the reviewer), so the panel (a later release) can mark the flagged lines for the editor. It refuses, and
+writes nothing, until every graphic with on-screen words is covered, and it names what is missing ("G5, G6 have not been
+reviewed: list them"): send those rows (`ok` or a flag) and run it again. Later reviews send only the changed lines: a
+line reviewed before with the same graphic id and the same words stays covered by itself, and an earlier flag carries
+over by itself. A graphic whose words changed, was renumbered, split or merged counts as new until the table lists it
+(the command says so). When an earlier flag left its graphic (its words changed, or its id was reused or removed),
+every new or changed graphic must be reviewed for that same flag, whatever its words ("G6 is new or changed since G2's
+medical flag: review G6 for medical"); while the flag stays on its graphic, every new graphic with an exact copy of its
+words must be. Ask the reviewer for those rows. A graphic whose words were all removed counts as gone. A flagged
+graphic that is gone is reported as `dropped`, and an earlier flag the table now passes as ok on the same words, under
+its old or a new id, as `cleared`: mention both to the editor. A graphic id that is not in the plan is refused with the ids the plan has. A
+re-plan makes the old file stale until you run the command again after the medical-reviewer has re-reviewed the new plan.
+In bash pipe the JSON in; in PowerShell a pipe garbles Arabic, so save the JSON as a UTF-8 file and give its path to `--from`.
 
 Stage 4 is **client-level**: the reference style is written once per client in `output/client_database/reference_style/`
 (`editing-style-analysis.md`, `editing-style.json`, `editing-rules.json`) and recorded with `reel ref-style --record`.

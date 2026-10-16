@@ -23,6 +23,7 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 - Read the whole transcript, the client profile (`reel profile`, `notes.md`, `style.json`) and the reference style before writing anything: `01_analysis/editing-style.json` + `editing-rules.json` (the video's copy of the client style, made by `reel ref-style --apply`) and the client's `output/client_database/reference_style/editing-style-analysis.md`.
 - Never edit the copies or re-author the client style. When this video deliberately differs from the client's style (a list reel, a different caption size), write `01_analysis/editing-style-overrides.json` (`reason`, `style`, `rules`) and re-run `reel ref-style --apply`; a standing change goes to the lead for the client style and profile.
 - Write the analysis files and `edit-decisions.json`, then run `reel plan` until it compiles with no errors.
+- On a revision, keep every graphic's and decision's id stable: change the wording or timing of the same graphic under the same id, and give a new graphic the next unused id. Never renumber or reuse an id: the medical review is recorded against the graphic id, and a flag that moved to another id has to be re-reviewed.
 - Every graphic cites verbatim evidence. Use the speaker's words, keep hedges, and mark medical claims `approval_required`.
 - Name cards, context cards and any on-screen honorific follow the profile `people[]` (gender, honorific_ar/en):
   «الدكتور» or «الدكتورة» as recorded, never guessed from a name. `gender: unknown` → «د.» or the name alone, and ask

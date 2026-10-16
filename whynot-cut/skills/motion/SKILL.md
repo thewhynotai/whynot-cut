@@ -40,7 +40,7 @@ Windows are 15–180 s; longer topics are refused ("split it"). The project is `
 |---|---|---|---|
 | Audio | `whynot-cut:audio-engineer` | `audio-clean` | pauses removed, cut proof ok |
 | Script | `whynot-cut:motion-director` | `motion-icons`, `motion-library`, `music --list`, write `motion-script.json` (check a draft: `reel validate 01_analysis/motion-script.json --root "<CLIENT>" --video-id <EP>_<ID>_MO`), `motion-plan` | plan compiles, no errors |
-| Claims (every motion video) | `whynot-cut:medical-reviewer` (read-only) | reads every on-screen word in `01_analysis/motion-plan.md`: the `On-screen text (full)` section, not the shortened table column (editorial lines too) | approval list for the current plan |
+| Claims (every motion video) | `whynot-cut:medical-reviewer` (read-only), then **you** | reads every on-screen word in `01_analysis/motion-plan.md`: the `On-screen text (full)` section, not the shortened table column (editorial lines too); you record its table with `review-flags` | approval list for the current plan; `review-flags.json` written |
 | Animatic | `whynot-cut:motion-director` | `motion-animatic`; VIEW `_storyboard.jpg` | storyboard + MP4 |
 | **Approve the plan** | **you + the editor** | `approve-plan --by editor` | the editor approved |
 | Probe (once per AE version) | `whynot-cut:ae-builder` runs, **you** view and record | `ae-probe`, then `ae-probe --record ok\|fail --word-order logical\|visual --notes "…"` | ok verdict for this AE version |
@@ -54,7 +54,23 @@ Windows are 15–180 s; longer topics are refused ("split it"). The project is `
 Speak the editor's `language` (plugin option: `${user_config.language}`; a client or machine file overrides it,
 `reel settings --root "<CLIENT>"` shows the one in effect); the on-screen words stay in the speaker's language.
 Never ask for approval of the plan before the medical-reviewer has reviewed the current `motion-plan.md` (a re-plan
-needs a new review). It runs on every motion video, whatever the client's `domain` (it returns quickly when nothing
+needs a new review). The reviewer is read-only, so you record its table: `reel review-flags --root "<CLIENT>" --video-id <EP>_<ID>_MO --from -`
+with the table as JSON on standard input, each line keyed by the **scene id** (`{"items": [{"event_id": "S2",
+"flag": "medical" or "religious", "verdict": "ok", "needs-doctor-approval", "reword-to-match" or "remove", "reason": "…"}]}`).
+It takes only the flags the client's domain checks: `medical` (a client whose profile `domain` is `religious`:
+`religious` and `medical`). **The first review sends the reviewer's FULL table**: a row for every scene with words on
+screen, the `ok` ones too; a scene with no words on screen is left out (a row for it is refused). The
+command takes each scene's words and times from `motion-plan.json`, refuses a scene id the plan does not have, and writes
+nothing until every scene with words is covered; it names what is missing ("S4, S5 have not been reviewed: list them").
+After a re-plan send only the changed scenes: a scene reviewed before with the same id and the same words stays covered by
+itself, and its earlier flag carries over. A scene whose words changed, or that was renumbered, split or merged, counts as
+new until the table lists it. When an earlier flag left its scene (its words changed, or its id was reused or removed),
+every new or changed scene must be reviewed for that same flag, whatever its words ("S3 is new or changed since S2's
+medical flag: review S3 for medical"); while the flag stays on its scene, every new scene with an exact copy of its words
+must be. A scene whose words were all removed counts as gone. A flagged scene that is gone is reported as `dropped`, and an earlier flag the table now passes as ok on the same words, under its
+old or a new id, as `cleared`: mention both to the editor. After a re-plan the old file is stale, so send the new
+review again. In PowerShell save the JSON as a UTF-8 file and pass its path to `--from` (a pipe garbles Arabic).
+The medical-reviewer runs on every motion video, whatever the client's `domain` (it returns quickly when nothing
 sensitive is on screen): health claims, and for a client whose profile `domain` is `religious` every verse, hadith,
 attributed story or ruling on screen, checked against
 `${CLAUDE_PLUGIN_ROOT}/skills/medical-accuracy/references/religious-content.md`.

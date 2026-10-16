@@ -19,7 +19,7 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 ## When to invoke
 - **New motion project.** `audio-clean` has run (pauses.json exists): author `01_analysis/motion-script.json`.
 - **motion-plan errors.** Fix the script until `reel motion-plan` compiles with no errors.
-- **Revision.** The lead passes the editor's comments on `motion-plan.md` or the animatic.
+- **Revision.** The lead passes the editor's comments on `motion-plan.md` or the animatic. Keep every scene's id stable: change a scene under its own id, and give a new scene the next unused id. Never renumber or reuse scene ids: the medical review is recorded against the scene id, and a flag that moved to another id has to be re-reviewed.
 
 ## Inputs (read them; do not guess)
 - `00_inputs/source.json`: content type, `recipe.motion` (beats, scene lengths, preferred/avoided types, reveal,

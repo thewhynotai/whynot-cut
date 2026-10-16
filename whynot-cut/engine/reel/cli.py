@@ -504,6 +504,53 @@ def cmd_approve_plan(a):
     out(rec)
 
 
+def read_findings(src: str):
+    """The medical-reviewer's table as the lead passes it: JSON from a file, or from stdin for `-`. UTF-8 (a BOM from
+    PowerShell 5.1 is accepted), read as bytes so the console's code page never touches Arabic. A missing, empty or
+    unreadable source is guidance (exit 1), never a traceback."""
+    from lib.errors import Guidance
+    how = 'Pass the table as JSON: `reel review-flags --from <file.json>`, or `--from -` with the JSON on stdin'
+    if src == "-":
+        stream = sys.stdin
+        data = stream.buffer.read() if hasattr(stream, "buffer") else stream.read()
+        where = "standard input"
+    else:
+        from lib.plat import native_path
+        f = Path(native_path(src)).expanduser()
+        try:
+            data = f.read_bytes()
+        except OSError as e:
+            raise Guidance(f"cannot read the review table {f}: {e.strerror or e}", how, where=str(f)) from None
+        where = str(f)
+    try:
+        text = data if isinstance(data, str) else data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise Guidance(f"the review table ({where}) is not UTF-8 text", "Save the JSON as UTF-8 and send it again",
+                       where=where) from None
+    if not text.strip():
+        raise Guidance(f"the review table ({where}) is empty", how, where=where)
+    try:
+        return json.loads(text.lstrip("\ufeff"))
+    except json.JSONDecodeError as e:
+        raise Guidance(f"the review table ({where}) is not valid JSON: {e.msg} (line {e.lineno}, column {e.colno})",
+                       how, where=where) from None
+
+
+def cmd_review_flags(a):
+    """T4.13: the lead sends the medical-reviewer's table; the engine writes <item>/review-flags.json keyed by the plan's
+    event id (docs/adobe/eng-data-contract.md §7.6). Words and times come from the compiled plan."""
+    from lib import review_flags
+    p = P(a)
+    doc = review_flags.write(p, read_findings(a.findings_from))
+    counts: dict = {}
+    for it in doc["items"]:
+        counts[it["verdict"]] = counts.get(it["verdict"], 0) + 1
+    out({"ok": True, "file": str(review_flags.path(p)), "plan_kind": doc["plan_kind"], "checked": doc["checked"],
+         "lines_total": doc["lines_total"], "flagged": len(doc["items"]),
+         "carried": sum(1 for it in doc["items"] if it.get("carried")), "dropped": doc["dropped"],
+         "cleared": doc["cleared"], "verdicts": counts, "domain": doc["domain"], "plan_fingerprint": doc["plan_fingerprint"]})
+
+
 def cmd_verify(a):
     from lib import verify
     from lib.motion_config import is_motion
@@ -885,7 +932,7 @@ OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (
 # scaffold creates a new folder: there is nothing to lock yet (it runs before the lock is taken).
 CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze", "preflight", "transcribe",
                "transcript-correct", "transcript-verify", "transcript-relisten", "audio-clean", "plan",
-               "approve-plan", "previews", "sfx", "preview-video", "ppro-build", "ppro-frames", "premiere", "verify",
+               "review-flags", "approve-plan", "previews", "sfx", "preview-video", "ppro-build", "ppro-frames", "premiere", "verify",
                "qc", "handoff", "mogrt-build", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build"}
 # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
 # and works while another session holds the client (gate G2).
@@ -1402,6 +1449,8 @@ CORE_COMMANDS: dict[str, str] = {
     "audio-clean": "clean the dialogue and remove pauses, with before/after measurements",
     "plan": "validate and compile edit-decisions.json into the build plan",
     "validate": "check an authored JSON file (edit-decisions, reels-plan, motion-script, publish...) against its schema",
+    "review-flags": "write the medical/religious review (--from <file|->) as review-flags.json, keyed by the plan's "
+                    "event ids (the lead runs it with the medical-reviewer's table)",
     "approve-plan": "record the approval of the compiled plan (editor or delegated)",
     "previews": "render PNG previews of the graphics and captions, with QC composites",
     "sfx": "prepare the sound effects the plan needs: the client's mapped library files (06_audio/sfx-map.json) "
@@ -1537,6 +1586,15 @@ def main(argv: list[str] | None = None):
         if name == "approve-plan":
             sp.add_argument("--by", required=True, choices=["editor", "delegated"])
             sp.add_argument("--note", "--notes", dest="note")
+        if name == "review-flags":
+            sp.add_argument("--from", dest="findings_from", required=True, metavar="FILE|-",
+                            help='the review table as JSON: {"items": [{"event_id", "flag": medical (a religious '
+                                 'client: also religious), "verdict": ok|needs-doctor-approval|reword-to-match|remove, '
+                                 '"reason"}]}, one row '
+                                 'for every line reviewed (the first review lists every line with on-screen text, later ones '
+                                 'only the changed lines); `-` reads it from standard input (UTF-8). Each line is keyed by the '
+                                 'event id of the plan '
+                                 '(a motion video: the scene id); its text and times come from that plan')
         if name == "verify":
             sp.add_argument("--record", action="store_true")
             sp.add_argument("--verdict", choices=["pass", "fail"], help="with --record")

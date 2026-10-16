@@ -35,6 +35,18 @@ agent: never guess an option name.
    topic) gets a `whynot-cut:medical-reviewer` re-review of the changed items (it re-reads the changed elements of
    `01_analysis/timeline-spec.json` against the transcript) after `reel plan` compiles and **before** step 4 shows the
    changed plan for approval; it re-reviews the changed items only. Its approval list goes into what you show the editor.
+   Then record its new rows: `reel review-flags --root "<CLIENT>" --video-id <ID> --from -` with only the rows it reviewed this
+   time as JSON on standard input, with only the flags the client's domain checks (`medical`; a religious client:
+   `religious` and `medical`; a graphic with no words on screen is left out). The engine does the bookkeeping: a graphic
+   reviewed before with the same id and the same words stays covered by itself, and its earlier flag carries over. It
+   refuses, and writes nothing, until every graphic with words on screen is covered; when an earlier flag left its
+   graphic (its words changed, or its id was reused or removed), until every new or changed graphic is reviewed for
+   that same flag; and while a flag stays on its graphic, until every new graphic with an exact copy of its words is. It
+   names what is missing ("G5, G6 have not been reviewed"; "G6 is new or changed since G2's medical flag: review G6 for
+   medical"), so an edited, renumbered, split or merged graphic can never show clean: send those rows back to the
+   reviewer, then run the command again. Tell the story-editor to **keep graphic ids stable**: an edited graphic keeps its id, a new one gets the
+   next unused id, nothing is renumbered. A graphic that is truly gone is reported by the command as `dropped`, and an
+   earlier flag now passed as ok on the same words as `cleared`: mention both to the editor.
 3. If the comment is a **standing preference** ("always glass only at the end"), record it in the client's
    `output/client_database/reel-profile/style.json` and `notes.md`, so the next video follows it.
 4. `reel plan` must compile, then previews, then `reel preview-video` (preferences `preview_video`) so the editor can
@@ -70,7 +82,13 @@ a scene id.
 
 1. After every re-plan, `whynot-cut:medical-reviewer` reviews the new `motion-plan.md`, reading the `On-screen text (full)` section (every motion video, whatever
    the client's `domain`; the religious checks when the profile `domain` is `religious`). Approval waits for its review;
-   its approval list goes into what you show the editor.
+   its approval list goes into what you show the editor. Record its table with `reel review-flags --root "<CLIENT>" --video-id <EP>_<ID>_MO --from -`
+   (keyed by scene id; send only the changed scenes: a scene reviewed before with the same id and the same words stays
+   covered by itself and keeps its earlier flag, and the command refuses, naming them, any scene whose words changed or
+   that was renumbered, split or merged until the table lists it; when an earlier flag left its scene, until every new or
+   changed scene is reviewed for that same flag, and while it stays on its scene, every new scene with an exact copy of
+   its words, for example "S3 is new or changed since S2's medical flag: review S3 for medical"). Tell the
+   motion-director to **keep scene ids stable** on a revision; a scene that is truly gone is reported as `dropped`.
 2. VIEW the new `_storyboard.jpg` yourself; then show the editor the changed scenes (time, words, editorial lines
    marked as such) and the animatic path, for them to approve. Record `reel approve-plan --by editor` only with their
    words (a standing `approval: auto` or a "just do it" in chat → `--by delegated --note "…"`, as in step 4 of
