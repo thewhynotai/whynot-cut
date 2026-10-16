@@ -1,0 +1,19 @@
+{
+  "_comment": "Files the UI needs that have ONE source elsewhere in the repo. They are copied to <dist>/<to> at build time (ET1-17) and test time (tests/_harness.py stage()); ui/vendor/ is never committed. Fonts: the panel's OFL static files (switch the source to whynot-cut/installer/fonts/ when Task 11 adds it). Monogram: the plugin's dark icon.",
+  "files": [
+    {"to": "vendor/brand/tokens.css", "from": "brand/tokens.css"},
+    {"to": "vendor/brand/icon-48.png", "from": "adobe/premiere-uxp/icons/dark/icon-48.png"},
+    {"to": "vendor/brand/icon-24.png", "from": "adobe/premiere-uxp/icons/dark/icon-24.png"},
+    {"to": "vendor/fonts/syne/Syne-Bold.ttf", "from": "adobe/panel-ui/fonts/syne/Syne-Bold.ttf"},
+    {"to": "vendor/fonts/syne/OFL.txt", "from": "adobe/panel-ui/fonts/syne/OFL.txt"},
+    {"to": "vendor/fonts/inter/Inter-Regular.ttf", "from": "adobe/panel-ui/fonts/inter/Inter-Regular.ttf"},
+    {"to": "vendor/fonts/inter/Inter-SemiBold.ttf", "from": "adobe/panel-ui/fonts/inter/Inter-SemiBold.ttf"},
+    {"to": "vendor/fonts/inter/OFL.txt", "from": "adobe/panel-ui/fonts/inter/OFL.txt"},
+    {"to": "vendor/fonts/ibmplexsansarabic/IBMPlexSansArabic-Light.ttf", "from": "adobe/panel-ui/fonts/ibmplexsansarabic/IBMPlexSansArabic-Light.ttf"},
+    {"to": "vendor/fonts/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf", "from": "adobe/panel-ui/fonts/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf"},
+    {"to": "vendor/fonts/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf", "from": "adobe/panel-ui/fonts/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf"},
+    {"to": "vendor/fonts/ibmplexsansarabic/OFL.txt", "from": "adobe/panel-ui/fonts/ibmplexsansarabic/OFL.txt"},
+    {"to": "vendor/fonts/ibmplexmono/IBMPlexMono-Regular.ttf", "from": "adobe/panel-ui/fonts/ibmplexmono/IBMPlexMono-Regular.ttf"},
+    {"to": "vendor/fonts/ibmplexmono/OFL.txt", "from": "adobe/panel-ui/fonts/ibmplexmono/OFL.txt"}
+  ]
+}

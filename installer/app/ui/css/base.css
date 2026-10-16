@@ -1,0 +1,211 @@
+/* The shared foundation of the installer UI: the part of the mockups' adobe/panel-ui/design/mockup.css that the window
+   shell and its shared components use (ET1-07), with the proposed --mk-* tokens renamed --twn-* (tokens-additive.css).
+   Screens (ET1-10..12) port the rest of the components they need into this file, rule for rule.
+   Same limits as the mockups, so the installer looks like the plugin (direction §14 #17): flexbox only, an explicit
+   display on every element, <div role="button"> controls with a 2 px rest border equal to the fill, radius 8 on
+   controls, 16 on cards, 999 on <span> only, physical margins swapped under .m-rtl, no shadows or opacity, colour by
+   class (no attribute selectors). CSP: no inline styles anywhere; the few run-time sizes (a progress fill, the scroll
+   indicator) are set through the CSSOM, which style-src 'self' allows. */
+
+/* ---- page: the window is the whole viewport ---- */
+html, body { margin: 0; padding: 0; height: 100%; background: var(--twn-bg); overflow: hidden; }
+body { display: flex; flex-direction: column; direction: ltr; } /* the page stays LTR; the window carries dir */
+
+/* ---- window root ---- */
+.m-panel, .m-panel * { box-sizing: border-box; }
+.m-panel {
+  display: flex; flex-direction: column; flex: 0 0 auto;
+  background: var(--twn-bg); color: var(--twn-text);
+  font: 400 var(--twn-type-body) var(--twn-font-ui);
+  text-align: left;
+}
+.m-panel.m-rtl { direction: rtl; unicode-bidi: isolate; text-align: right; font: 400 var(--twn-type-ar-body) var(--twn-font-ar); }
+/* Latin runs inside Arabic are LTR isolates (js/text.js): stated here too, so a renderer that does not give <bdi> the
+   isolate by default still keeps the run, its quotes and its brackets out of the Arabic line's ordering */
+.m-panel bdi { display: inline; unicode-bidi: isolate; }
+.m-col { display: flex; flex-direction: column; }
+.m-row { display: flex; flex-direction: row; align-items: center; }
+.m-row-top { display: flex; flex-direction: row; align-items: flex-start; }
+.m-grow { flex: 1 1 auto; min-width: 0; }
+.m-spacer { display: block; flex: 1 1 auto; min-width: 8px; }
+.m-block { display: block; }
+.m-wrap { flex-wrap: wrap; }
+
+/* spacing helpers: vertical margins, and START / END margins that are physical and swap under .m-rtl */
+.mt-1 { margin-top: 4px; } .mt-2 { margin-top: 8px; } .mt-3 { margin-top: 12px; } .mt-4 { margin-top: 16px; } .mt-5 { margin-top: 24px; } .mt-6 { margin-top: 32px; }
+.ms-1 { margin-left: 4px; } .ms-2 { margin-left: 8px; } .ms-3 { margin-left: 12px; } .ms-4 { margin-left: 16px; }
+.me-1 { margin-right: 4px; } .me-2 { margin-right: 8px; } .me-3 { margin-right: 12px; }
+.m-rtl .ms-1 { margin-left: 0; margin-right: 4px; } .m-rtl .ms-2 { margin-left: 0; margin-right: 8px; }
+.m-rtl .ms-3 { margin-left: 0; margin-right: 12px; } .m-rtl .ms-4 { margin-left: 0; margin-right: 16px; }
+.m-rtl .me-1 { margin-right: 0; margin-left: 4px; } .m-rtl .me-2 { margin-right: 0; margin-left: 8px; } .m-rtl .me-3 { margin-right: 0; margin-left: 12px; }
+
+/* ---- type roles (direction §4): Latin, then the Arabic override ---- */
+.t-display, .t-title, .t-verb, .t-label, .t-body, .t-meta, .t-caption, .t-eyebrow, .t-mono { display: block; }
+.t-display { font: 700 var(--twn-type-display) var(--twn-font-display); }
+.t-title { font: 600 var(--twn-type-title) var(--twn-font-display); }
+.t-verb { font: 600 var(--twn-type-verb) var(--twn-font-display); }
+.t-label { font: 600 var(--twn-type-label) var(--twn-font-ui); }
+.t-body { font: 400 var(--twn-type-body) var(--twn-font-ui); }
+.t-meta { font: 400 var(--twn-type-meta) var(--twn-font-ui); }
+.t-caption { font: 600 var(--twn-type-caption) var(--twn-font-ui); }
+.t-eyebrow { font: 600 var(--twn-type-eyebrow) var(--twn-font-display); letter-spacing: var(--twn-tracking-eyebrow); text-transform: uppercase; color: var(--twn-accent); }
+.t-mono, .m-panel .mono { font: 400 var(--twn-type-mono) var(--twn-font-mono); font-variant-numeric: tabular-nums; direction: ltr; }
+/* a time in a monospace face: the colon is a full cell, so it is pulled in ("6:40", never "6 :40") */
+.m-panel .mo-c { display: inline; margin-left: -2px; margin-right: -2px; }
+/* a path or file name: an LTR isolate that wraps after a separator and never reverses its drive letter */
+.m-panel .m-path { unicode-bidi: isolate; direction: ltr; overflow-wrap: anywhere; }
+/* a bidi control character found in data (a path, a name) is shown as its code, never applied (js/text.js) */
+.m-panel .m-ctl { display: inline; color: var(--twn-warn); }
+.m-rtl .t-display { font: 600 var(--twn-type-ar-display) var(--twn-font-ar); }
+.m-rtl .t-title { font: 600 var(--twn-type-ar-title) var(--twn-font-ar); }
+.m-rtl .t-verb { font: 600 var(--twn-type-ar-verb) var(--twn-font-ar); }
+.m-rtl .t-label { font: 600 var(--twn-type-ar-label) var(--twn-font-ar); }
+.m-rtl .t-body { font: 400 var(--twn-type-ar-body) var(--twn-font-ar); }
+.m-rtl .t-meta { font: 400 var(--twn-type-ar-meta) var(--twn-font-ar); }
+.m-rtl .t-caption { font: 600 var(--twn-type-ar-caption) var(--twn-font-ar); }
+.m-rtl .t-eyebrow { font: 600 var(--twn-type-ar-eyebrow) var(--twn-font-ar); letter-spacing: 0; text-transform: none; }
+/* a Latin run inside Arabic keeps the Latin role font at the Arabic size (<bdi dir="ltr" class="lat">) */
+.m-rtl .lat { font-family: var(--twn-font-ui); }
+/* E-D3 r1 #13: Latin inside Arabic titles uses Inter 600, not Syne (Syne overpowered the Arabic) */
+.m-rtl .t-display .lat, .m-rtl .t-title .lat, .m-rtl .t-verb .lat, .m-rtl .t-eyebrow .lat { font-family: var(--twn-font-ui); font-weight: 600; }
+.m-rtl .t-label .lat, .m-rtl .t-caption .lat { font-weight: 600; }
+.m-rtl .mono, .m-rtl .t-mono { font-family: var(--twn-font-mono); }
+.tx-muted { color: var(--twn-text-muted); }
+.tx-text { color: var(--twn-text); }
+.tx-ok { color: var(--twn-ok); } .tx-warn { color: var(--twn-warn); } .tx-error { color: var(--twn-error); }
+.tx-link { color: var(--twn-primary-text); }
+.tx-disabled { color: var(--twn-text-disabled); }
+.nowrap { white-space: nowrap; }
+.m-trunc { display: block; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-trunc bdi { display: inline; }
+/* a short Latin run inside Arabic (32 characters or fewer, class nb) never breaks across lines */
+.m-rtl .nb { white-space: nowrap; }
+
+/* ---- icons: Lucide outlined to fills (js/icons.gen.js); colour by fill class only ---- */
+.m-ico { display: block; flex: 0 0 auto; }
+.m-ico path { fill-rule: evenodd; }
+.m-ico-12 { width: 12px; height: 12px; }
+.m-ico-16 { width: 16px; height: 16px; }
+.m-ico-20 { width: 20px; height: 20px; }
+.ink-text { fill: var(--twn-text); }
+.ink-muted { fill: var(--twn-text-muted); }
+.ink-ok { fill: var(--twn-ok); }
+.ink-warn { fill: var(--twn-warn); }
+.ink-error { fill: var(--twn-error); }
+.ink-info { fill: var(--twn-primary-text); }
+.ink-accent { fill: var(--twn-accent); }
+.ink-on-primary { fill: var(--twn-on-primary); }
+.ink-on-error { fill: var(--twn-on-error); }
+.ink-disabled { fill: var(--twn-text-disabled); }
+.ink-on-accent { fill: var(--twn-on-accent); }
+.ink-on-light { fill: var(--twn-bg); }
+.m-spin { animation: m-spin 900ms linear infinite; }
+@keyframes m-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .m-spin { animation: none; } }
+
+/* ---- logo lockup (one fixed LTR unit: monogram, 8 px, wordmark; it never mirrors, direction §9) ---- */
+.m-mono { display: block; flex: 0 0 20px; width: 20px; height: 20px; }
+.m-lockup { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; direction: ltr; }
+.m-lockup-wm { margin-left: 8px; }
+.m-wordmark { display: block; flex: 0 0 auto; white-space: nowrap; font: 700 15px/20px var(--twn-font-display); letter-spacing: .01em; }
+.m-hairline { display: block; flex: 0 0 2px; height: 2px; background: var(--twn-gradient); } /* never mirrors (brand mark) */
+
+/* ---- language switch ---- */
+.m-lang { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; height: 32px; background: var(--twn-control); border-radius: 8px; }
+.m-seg {
+  display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  border: 2px solid var(--twn-control); border-radius: 8px; background: var(--twn-control); color: var(--twn-text-muted);
+  font: 600 12px/16px var(--twn-font-ui); cursor: pointer;
+  transition: background-color var(--twn-dur-fast) var(--twn-ease), border-color var(--twn-dur-fast) var(--twn-ease);
+}
+.m-seg-ar { font: 600 15px/20px var(--twn-font-ar); }
+/* E-D3 r1 #1: the selected language is #383838, so the screen keeps one violet fill */
+.m-seg-on { background: var(--twn-control-pressed); border-color: var(--twn-control-pressed); color: var(--twn-text); }
+
+/* ---- footer ---- */
+.m-footer { display: flex; flex-direction: row; align-items: center; justify-content: center; flex: 0 0 32px; height: 32px; }
+.m-footer-txt { display: block; font: 400 var(--twn-type-caption) var(--twn-font-ui); color: var(--twn-text-muted); }
+.m-rtl .m-footer-txt { font: 400 var(--twn-type-ar-caption) var(--twn-font-ar); } /* R3: the Arabic footer is an Arabic line */
+
+/* ---- card ---- */
+/* paddings count the border: 1 px border + 15 px = 16 */
+.m-card { display: flex; flex-direction: column; background: var(--twn-glass); border: 1px solid var(--twn-border); border-radius: 16px; padding: 15px; }
+.m-card-flush { padding-top: 3px; padding-bottom: 3px; }
+.m-inset { display: flex; flex-direction: column; background: var(--twn-frame-bg); border-radius: 8px; padding: 8px 12px; }
+
+/* ---- buttons (direction §8, §12) ---- */
+.m-btn {
+  display: flex; flex-direction: row; align-items: center; justify-content: center; flex: 0 0 auto;
+  height: 32px; padding: 0 10px; border: 2px solid var(--twn-control); border-radius: 8px;
+  background: var(--twn-control); color: var(--twn-text); white-space: nowrap; cursor: pointer;
+  font: 600 var(--twn-type-label) var(--twn-font-ui);
+  transition: background-color var(--twn-dur-fast) var(--twn-ease), border-color var(--twn-dur-fast) var(--twn-ease), color var(--twn-dur-fast) var(--twn-ease);
+}
+.m-rtl .m-btn { font: 600 var(--twn-type-ar-label) var(--twn-font-ar); }
+.m-btn .m-ico { margin-right: 8px; fill: var(--twn-text); }
+.m-rtl .m-btn .m-ico { margin-right: 0; margin-left: 8px; }
+.m-btn-block { height: 40px; padding: 0 14px; align-self: stretch; }
+/* E-D3 r1 #7: a start-aligned ghost button lines its label up with the text above (padding 10 + border 2) */
+.m-btn-flush { margin-left: -12px; }
+.m-rtl .m-btn-flush { margin-left: 0; margin-right: -12px; }
+.m-btn-start { align-self: flex-start; }
+/* a button whose label may wrap (the support action) */
+.m-btn-wrap { height: auto; min-height: 32px; padding-top: 3px; padding-bottom: 3px; flex: 0 1 auto; min-width: 0; white-space: normal; text-align: left; }
+.m-rtl .m-btn-wrap { text-align: right; }
+/* R3 (designer F-03): the ONE "coming soon" line, always under the button row, a 12 px info icon and meta text */
+.m-soonline { display: flex; }
+.m-btn-primary { background: var(--twn-primary); border-color: var(--twn-primary); color: var(--twn-on-primary); }
+.m-btn-primary .m-ico { fill: var(--twn-on-primary); }
+.m-btn-secondary { background: var(--twn-control); border-color: var(--twn-control); }
+.m-btn-ghost { background: transparent; border-color: transparent; color: var(--twn-text-muted); }
+.m-btn-ghost .m-ico { fill: var(--twn-text-muted); }
+.m-btn-danger { background: var(--twn-error); border-color: var(--twn-error); color: var(--twn-on-error); }
+.m-btn-danger .m-ico { fill: var(--twn-on-error); }
+.m-btn-disabled, .m-btn-primary.m-btn-disabled { background: var(--twn-control-disabled); border-color: var(--twn-control-disabled); color: var(--twn-text-disabled); cursor: default; }
+.m-btn-disabled .m-ico { fill: var(--twn-text-disabled); }
+.m-btn-focus { border-color: var(--twn-focus-border); }
+.m-btn-primary.m-btn-focus, .m-btn-danger.m-btn-focus { border-color: var(--twn-focus-border-strong); }
+
+/* shortcut keycap (Return on the primary, Esc on cancel/back/close): 20 px, 1 px #383838 border, radius 4, Inter 11/16 */
+.m-kbd { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; height: 20px; padding: 0 3px; margin-left: 8px; border: 1px solid var(--twn-control-pressed); border-radius: 4px; color: var(--twn-text-muted); white-space: nowrap; direction: ltr; font: 400 11px/16px var(--twn-font-ui); }
+.m-rtl .m-kbd { margin-left: 0; margin-right: 8px; font: 400 11px/16px var(--twn-font-ui); } /* Inter, not mono: a mono "O" reads as zero */
+.m-btn-danger .m-kbd { border-color: var(--twn-on-error); color: var(--twn-on-error); }
+.m-btn-primary .m-kbd { border-color: var(--twn-on-primary-muted); color: var(--twn-on-primary-muted); }
+.m-btn-disabled .m-kbd { border-color: var(--twn-control); color: var(--twn-text-disabled); }
+
+/* ---- chips (<span>, never act) ---- */
+.m-chip {
+  display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; height: 24px; padding: 0 8px; border-radius: 999px;
+  white-space: nowrap; font: 600 var(--twn-type-caption) var(--twn-font-ui);
+}
+.m-rtl .m-chip { font: 600 var(--twn-type-ar-caption) var(--twn-font-ar); }
+.m-chip .m-ico { margin-right: 4px; }
+.m-rtl .m-chip .m-ico { margin-right: 0; margin-left: 4px; }
+.m-chip-ok { background: var(--twn-ok-tint); color: var(--twn-ok); }
+.m-chip-warn { background: var(--twn-warn-tint); color: var(--twn-warn); }
+.m-chip-error { background: var(--twn-error-tint); color: var(--twn-error); }
+.m-chip-info { background: var(--twn-info-tint); color: var(--twn-primary-text); }
+.m-chip-neutral { background: var(--twn-control); color: var(--twn-text-muted); }
+.m-chip-neutral .m-ico { fill: var(--twn-text-muted); }
+
+/* ---- notice / card with a status (G5) ---- */
+.m-notice { display: flex; flex-direction: row; align-items: flex-start; padding: 11px; border: 1px solid; border-radius: 16px; }
+.m-notice > .m-ico { margin-top: 2px; }
+.m-rtl .m-notice > .m-ico { margin-top: 4px; }
+.m-notice-ok { background: var(--twn-ok-tint); border-color: var(--twn-ok-line); }
+.m-notice-warn { background: var(--twn-warn-tint); border-color: var(--twn-warn-line); }
+.m-notice-error { background: var(--twn-error-tint); border-color: var(--twn-error-line); }
+.m-notice-info { background: var(--twn-info-tint); border-color: var(--twn-info-line); }
+.m-notice-body { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; margin-left: 8px; }
+.m-rtl .m-notice-body { margin-left: 0; margin-right: 8px; }
+.m-last-ico { display: flex; flex: 0 0 auto; margin-top: 2px; } /* centres the 12 px icon on the 16 px meta line */
+.m-rtl .m-last-ico { margin-top: 4px; } /* Arabic meta line is 20 px */
+
+/* ---- progress ---- */
+.m-track { display: flex; flex-direction: row; height: 4px; border-radius: 2px; background: var(--twn-track); }
+.m-fill { display: block; width: 0; height: 4px; border-radius: 2px; background: var(--twn-gradient); transition: width var(--twn-dur-slow) var(--twn-ease); }
+.m-rtl .m-track { direction: ltr; justify-content: flex-end; }
+.m-rtl .m-fill { background: var(--twn-gradient-rtl); margin-left: auto; }
+/* paused by a problem: solid amber, never the running gradient (out-ranks .m-fill and .m-rtl .m-fill) */
+.m-track .m-fill-paused { background: var(--twn-warn); }
+.m-rtl .m-track .m-fill-paused { background: var(--twn-warn); }

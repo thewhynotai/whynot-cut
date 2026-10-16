@@ -1,0 +1,161 @@
+/* The installer window ("WhyNot Cut Setup"), ported from the mockups' adobe/panel-ui/design/css/installer.css (ET1-07):
+   the window shell and the shared installer rows. Screen-only rules (the macOS prompt picture, the I-01 chips, the I-06
+   numbered steps, the I-03 summary chips, the I-04 log drawer) move in with their screens (ET1-10..12).
+   Differences from the mockup, on purpose:
+   - the window is the viewport (760 x 540, minimum 640 x 480): the compact metrics of the mockup's .i-w640 class apply
+     by a width media query below 760 px, not by a class;
+   - the content column scrolls natively (overflow-y auto, the WebView's own scrollbar hidden) and js/shell.js keeps the
+     drawn 4 px indicator in step; the mockup clipped the column and drew the indicator for a still picture. */
+
+/* ---- window ---- */
+.m-panel.i-win { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; min-width: var(--twn-i-win-min-w); min-height: 0; overflow: hidden; }
+.i-app { display: flex; flex-direction: column; flex: 1 1 auto; min-height: var(--twn-i-win-min-h); }
+
+/* ---- OS chrome (drawn only where the copy differs per OS; these colours are the OS's, not tokens) ---- */
+.i-os { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; direction: ltr; overflow: hidden; }
+.i-os-win { height: 32px; background: #202020; padding-left: 12px; }
+.i-os-mac { height: 28px; background: #2B2B2B; padding: 0 8px; border-bottom: 1px solid #111111; }
+.i-os-title { display: block; white-space: nowrap; font: 400 12px/16px "Segoe UI", -apple-system, sans-serif; color: #FFFFFF; }
+.i-os-mac .i-os-title { font: 600 13px/16px -apple-system, "Helvetica Neue", "Segoe UI", sans-serif; color: #DDDDDD; }
+.i-os-ar { font-family: "Segoe UI", Tahoma, "Geeza Pro", sans-serif; }
+.i-os-icon { display: block; flex: 0 0 16px; width: 16px; height: 16px; margin-right: 8px; }
+.i-os-btn { display: flex; align-items: center; justify-content: center; flex: 0 0 46px; width: 46px; height: 32px; }
+.i-os-btn .m-ico { fill: #FFFFFF; }
+.i-os-light { display: block; flex: 0 0 12px; width: 12px; height: 12px; border-radius: 999px; margin-right: 8px; }
+.i-os-red { background: #FF5F57; } .i-os-yellow { background: #FEBC2E; } .i-os-green { background: #28C840; }
+.i-os-mid { display: flex; flex: 1 1 auto; justify-content: center; min-width: 0; margin-right: 60px; }
+
+/* ---- header: monogram, wordmark, "Setup", the beta chip, language switch ---- */
+.i-hdr { display: flex; flex-direction: row; align-items: center; flex: 0 0 var(--twn-i-hdr-h); height: var(--twn-i-hdr-h); padding: 0 16px; }
+.i-hdr .m-chip { margin-right: 8px; }
+.m-rtl .i-hdr .m-chip { margin-right: 0; margin-left: 8px; }
+.i-setup { display: block; white-space: nowrap; color: var(--twn-text-muted); font: 400 15px/20px var(--twn-font-ui); }
+.m-rtl .i-setup { font: 400 16px/24px var(--twn-font-ar); }
+
+/* ---- body: rail + content column ---- */
+.i-body { display: flex; flex-direction: row; flex: 1 1 auto; min-height: 0; }
+.i-rail { display: flex; flex-direction: column; flex: 0 0 var(--twn-i-rail-w); width: var(--twn-i-rail-w); padding: 16px 8px 0 8px; border-right: 1px solid var(--twn-divider); background: var(--twn-bg); }
+.m-rtl .i-rail { border-right: 0; border-left: 1px solid var(--twn-divider); }
+.i-rstep { display: flex; flex-direction: row; align-items: center; min-height: 32px; padding: 4px 8px 4px 6px; border-left: 2px solid transparent; color: var(--twn-text-muted); }
+.m-rtl .i-rstep { border-left: 0; border-right: 2px solid transparent; padding: 4px 6px 4px 8px; }
+.i-rstep + .i-rstep { margin-top: 4px; }
+.i-rstep-on { border-left-color: var(--twn-accent); color: var(--twn-text); } /* like the active tab: pink indicator, same weight */
+.m-rtl .i-rstep-on { border-right-color: var(--twn-accent); }
+.i-rstep-sub { margin-left: 24px; }
+.m-rtl .i-rstep-sub { margin-left: 0; margin-right: 24px; }
+.i-rail-end { display: flex; flex-direction: column; flex: 0 0 auto; padding: 0 8px; }
+.i-rail-trust { display: flex; flex-direction: row; align-items: flex-start; }
+.i-rail-trust .m-ico { margin-top: 2px; }
+.m-rtl .i-rail-trust .m-ico { margin-top: 4px; }
+.i-rail .m-footer { margin: 8px -8px 0 -8px; }
+
+.i-main { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; min-height: 0; }
+.i-scrollrow { display: flex; flex-direction: row; flex: 1 1 auto; min-height: 0; }
+/* the column scrolls natively; the WebView's own scrollbar is hidden and the 4 px indicator beside it follows it */
+.i-scroll { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: none; padding: 24px; }
+.i-scroll::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.i-scroll-in { display: flex; flex-direction: column; flex: 0 0 auto; }
+.i-sbar { display: flex; flex-direction: column; flex: 0 0 4px; width: 4px; margin: 8px 4px 8px 0; }
+.m-rtl .i-sbar { margin: 8px 0 8px 4px; }
+.i-sbar-gap { display: block; flex: 0 0 auto; height: 0; }
+.i-sbar-thumb { display: block; flex: 0 0 auto; height: 0; border-radius: 2px; background: var(--twn-i-scroll-thumb); }
+
+/* pinned action bar: the screen's buttons; the primary sits at the end (right in EN, left in AR) */
+.i-bar { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; padding: 11px 24px 12px 24px; border-top: 1px solid var(--twn-divider); background: var(--twn-bg); } /* 11 + the 1 px divider = 12 (R2 D-P2-1) */
+.i-bar .m-btn + .m-btn { margin-left: 8px; }
+.m-rtl .i-bar .m-btn + .m-btn { margin-left: 0; margin-right: 8px; }
+.i-bar .m-btn { height: 40px; padding: 0 14px; }
+.i-bar-meta { display: flex; flex-direction: row; align-items: center; flex: 1 1 auto; min-width: 0; margin-right: 12px; }
+.m-rtl .i-bar-meta { margin-right: 0; margin-left: 12px; }
+
+/* the minimum width (640 x 480): a 192 px rail and 16 px padding (direction §3 "Installer") */
+@media (max-width: 759.98px) {
+  .i-rail { flex-basis: var(--twn-i-rail-w-min); width: var(--twn-i-rail-w-min); }
+  .i-scroll { padding: 16px; }
+  .i-bar { padding: 11px 16px 12px 16px; }
+}
+
+/* ---- installer type roles (direction §4 "installer only") ---- */
+.i-display, .i-title, .i-lead { display: block; }
+.i-display { font: 700 var(--twn-type-i-display) var(--twn-font-display); }
+.i-title { font: 600 var(--twn-type-i-title) var(--twn-font-display); }
+.i-lead { font: 400 var(--twn-type-i-body) var(--twn-font-ui); }
+.m-rtl .i-display { font: 600 var(--twn-type-ar-i-display) var(--twn-font-ar); }
+.m-rtl .i-title { font: 600 var(--twn-type-ar-i-title) var(--twn-font-ar); }
+.m-rtl .i-lead { font: 400 var(--twn-type-ar-i-body) var(--twn-font-ar); }
+/* digits in a Syne role (version numbers): Syne's round zero reads as "o", so they keep the UI face */
+.i-ver { font-family: var(--twn-font-ui); letter-spacing: 0; }
+.i-display .i-ver { font-weight: 700; }
+.i-title .i-ver { font-weight: 600; }
+.m-rtl .i-display .lat, .m-rtl .i-title .lat { font-family: var(--twn-font-ui); font-weight: 600; }
+
+/* ---- fact rows (Welcome, Claude "what happens"): icon + one line ---- */
+.i-fact { display: flex; flex-direction: row; align-items: flex-start; padding: 4px 0; }
+.i-fact > .m-ico { margin-top: 2px; }
+.m-rtl .i-fact > .m-ico { margin-top: 4px; }
+.i-fact-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; margin-left: 12px; }
+.m-rtl .i-fact-text { margin-left: 0; margin-right: 12px; }
+
+/* ---- checklist rows (I-03, I-04, I-06, I-09): status icon, name, one line, end status ---- */
+.i-step { display: flex; flex-direction: row; align-items: flex-start; padding: 6px 0; }
+.i-step + .i-step { border-top: 1px solid var(--twn-divider); padding-top: 5px; } /* 5 + the 1 px divider = 6 (R2 D-P2-1) */
+.i-step > .m-ico { margin-top: 2px; }
+.m-rtl .i-step > .m-ico { margin-top: 4px; }
+.i-step-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; margin-left: 8px; }
+.m-rtl .i-step-text { margin-left: 0; margin-right: 8px; }
+.i-step-head { display: flex; flex-direction: row; align-items: flex-start; }
+.i-step-name { overflow-wrap: anywhere; }
+.i-step-end { display: block; flex: 0 0 auto; margin-left: 12px; white-space: nowrap; color: var(--twn-text-muted); }
+.m-rtl .i-step-end { margin-left: 0; margin-right: 12px; }
+.i-step-pend .i-step-name { color: var(--twn-text-muted); }
+.i-step-run { padding-bottom: 8px; }
+.i-step-prog { display: flex; flex-direction: column; margin-top: 8px; }
+
+/* ---- path field (I-02): a recessed mono value + a Change button. A long path is cut at its end, as in the mockup
+   (a middle cut that keeps the last folder is ET1-10's to decide); the whole path is the field's title ---- */
+.i-pathrow { display: flex; flex-direction: row; align-items: center; }
+.i-path { display: flex; flex-direction: row; align-items: center; flex: 1 1 auto; min-width: 0; height: 32px; padding: 0 12px; border: 1px solid var(--twn-border-input); border-radius: 8px; background: var(--twn-frame-bg); overflow: hidden; direction: ltr; text-align: left; } /* R3 S-08: a path is LTR and starts at the left edge in Arabic too */
+.i-path-warn { border-color: var(--twn-warn); }
+.i-path-error { border-color: var(--twn-error); }
+.i-path .mono { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.i-pathrow .m-btn { margin-left: 8px; }
+.m-rtl .i-pathrow .m-btn { margin-left: 0; margin-right: 8px; }
+.i-field-msg { display: flex; flex-direction: row; align-items: flex-start; margin-top: 8px; }
+.i-field-msg .m-ico { margin-top: 2px; }
+.m-rtl .i-field-msg .m-ico { margin-top: 4px; }
+
+/* ---- radio rows (I-02 speech model): a control row, 2 px rest border, a 20 px ring ---- */
+.i-radiorow { display: flex; flex-direction: row; align-items: center; min-height: 40px; padding: 0 6px; margin: 0 -8px; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
+.i-radio { display: flex; align-items: center; justify-content: center; flex: 0 0 20px; width: 20px; height: 20px; border: 2px solid var(--twn-border-input); border-radius: 999px; }
+.i-radio-on { border-color: var(--twn-text); }
+.i-radio-dot { display: block; width: 8px; height: 8px; border-radius: 999px; background: var(--twn-text); }
+.i-radio-disabled .i-radio { border-color: var(--twn-text-disabled); }
+.i-radio-disabled .t-label { color: var(--twn-text-disabled); }
+.i-radiorow .m-chip { margin-left: 8px; }
+.m-rtl .i-radiorow .m-chip { margin-left: 0; margin-right: 8px; }
+.i-radiorow.m-btn-focus { border-color: var(--twn-focus-border); }
+.i-size { display: block; flex: 0 0 auto; margin-left: 12px; white-space: nowrap; color: var(--twn-text-muted); }
+.m-rtl .i-size { margin-left: 0; margin-right: 12px; }
+
+/* ---- interstitial "action needed" card (I-04) and confirm dialog: a notice with a title ---- */
+.i-act-title { display: block; }
+
+/* ---- small layout helpers ---- */
+.i-sec { display: flex; flex-direction: column; margin-top: 24px; }
+.i-sec-first { margin-top: 0; }
+.i-inset { display: flex; flex-direction: column; padding: 12px; border-radius: 8px; background: var(--twn-frame-bg); }
+.i-clip { overflow: hidden; }
+.i-mt-6 { margin-top: 24px; }
+.i-wrap { white-space: normal; overflow-wrap: anywhere; word-break: break-all; }
+
+/* a file name / link the editor must read whole (long .ccx names, the official install link): mono, wraps anywhere */
+.i-monobox { display: block; flex: 0 1 auto; min-width: 0; padding: 4px 8px; border-radius: 4px; background: var(--twn-frame-bg); color: var(--twn-text); direction: ltr; text-align: left; }
+.i-monobox .mono { display: block; overflow-wrap: anywhere; word-break: break-all; }
+.i-support .m-btn { height: 32px; }
+.i-support .m-btn.m-btn-wrap { height: auto; }
+
+/* ---- motion (direction §10): colour and border-colour only, 150-250 ms; every state is drawn finished ---- */
+.i-rstep { transition: color var(--twn-dur-base) var(--twn-ease), border-color var(--twn-dur-base) var(--twn-ease); }
+.i-step .t-label, .i-step .t-meta { transition: color var(--twn-dur-base) var(--twn-ease); }
+.i-radiorow, .i-path { transition: border-color var(--twn-dur-fast) var(--twn-ease); }
+.i-radio { transition: border-color var(--twn-dur-fast) var(--twn-ease); }

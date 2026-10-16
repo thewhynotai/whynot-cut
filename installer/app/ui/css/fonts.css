@@ -1,0 +1,11 @@
+/* The brand faces, from the files staged at vendor/fonts/ (see ../vendor.json; OFL texts travel with them). Local
+   files only (font-src 'self'): the installer runs before the fonts pack is installed, so it cannot count on the
+   system having them. Every stack in brand/tokens.css keeps its system fallbacks. Only Syne Bold is vendored, so
+   Syne 600 renders with the Bold file (as in the mockups). */
+@font-face { font-family: "Syne"; src: url("../vendor/fonts/syne/Syne-Bold.ttf") format("truetype"); font-weight: 600 800; font-style: normal; }
+@font-face { font-family: "Inter"; src: url("../vendor/fonts/inter/Inter-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "Inter"; src: url("../vendor/fonts/inter/Inter-SemiBold.ttf") format("truetype"); font-weight: 600; font-style: normal; }
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("../vendor/fonts/ibmplexsansarabic/IBMPlexSansArabic-Light.ttf") format("truetype"); font-weight: 300; font-style: normal; }
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("../vendor/fonts/ibmplexsansarabic/IBMPlexSansArabic-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; }
+@font-face { font-family: "IBM Plex Sans Arabic"; src: url("../vendor/fonts/ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf") format("truetype"); font-weight: 600 700; font-style: normal; }
+@font-face { font-family: "IBM Plex Mono"; src: url("../vendor/fonts/ibmplexmono/IBMPlexMono-Regular.ttf") format("truetype"); font-weight: 400; font-style: normal; }

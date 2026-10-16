@@ -1,0 +1,38 @@
+/* Additive tokens for the installer UI. brand/tokens.css (staged at vendor/brand/tokens.css) stays the ONE place that
+   defines the brand --twn-* tokens; nothing here redefines one of them (tests/test_ui_static.py checks it).
+   Block 1 is docs/design/direction.md §15 verbatim (63 tokens; the mockups carry them as --mk-<name>, proposed as
+   --twn-<name>). Block 2 holds the proposed tokens the mockups add beyond §15 (mockup.css and css/installer.css),
+   under the same --mk- -> --twn- rename. When brand/tokens.css takes them in, delete them here. */
+:root {
+/* §15 begin */
+--twn-space-1:4px; --twn-space-2:8px; --twn-space-3:12px; --twn-space-4:16px; --twn-space-5:24px; --twn-space-6:32px; --twn-space-7:48px;
+--twn-radius-bar:2px; --twn-radius-s:4px;
+--twn-h-control:32px; --twn-h-control-lg:40px; --twn-h-row:40px; --twn-h-verb:56px; --twn-h-chip:24px; --twn-h-tabs:36px;
+--twn-control:#242424; --twn-control-hover:#2E2E2E; --twn-control-pressed:#383838;
+--twn-control-disabled:#1A1A1A; --twn-text-disabled:#6E6E6E;
+--twn-primary-pressed:#4800D8; --twn-on-primary-muted:#E8E0FF; --twn-danger-hover:#FF7A7A;
+--twn-divider:rgba(255,255,255,.08); --twn-border-input:#7A7A7A;
+--twn-focus-border:#9D6BFF; --twn-focus-border-strong:#FFFFFF; --twn-focus-width:2px;
+--twn-ok-tint:#06150E; --twn-warn-tint:#1A1203; --twn-error-tint:#1A0909; --twn-info-tint:#100B1A; --twn-accent-tint:#160910;
+--twn-ok-line:#154B31; --twn-warn-line:#593E0B; --twn-error-line:#592020; --twn-info-line:#372559;
+--twn-skeleton:#242424; --twn-skeleton-shine:#2E2E2E;
+--twn-gradient-rtl:linear-gradient(270deg,#D95C9B,#5400FB);
+--twn-dur-fast:150ms; --twn-dur-base:200ms; --twn-dur-slow:250ms; --twn-dur-shimmer:1200ms; --twn-ease:cubic-bezier(.2,0,0,1);
+/* type: size/line per role, Latin then Arabic (weights and families per §4) */
+--twn-type-display:22px/28px; --twn-type-title:17px/24px; --twn-type-verb:15px/20px; --twn-type-label:13px/20px;
+--twn-type-body:13px/20px; --twn-type-meta:12px/16px; --twn-type-caption:11px/16px; --twn-type-eyebrow:11px/16px; --twn-type-mono:12px/16px;
+--twn-type-ar-display:24px/36px; --twn-type-ar-title:18px/28px; --twn-type-ar-verb:16px/24px; --twn-type-ar-label:14px/24px;
+--twn-type-ar-body:14px/24px; --twn-type-ar-meta:13px/20px; --twn-type-ar-caption:12px/20px; --twn-type-ar-eyebrow:12px/20px;
+--twn-tracking-eyebrow:.08em;
+/* §15 end */
+
+/* beyond §15 (proposed by the mockups; same rename) */
+/* mockup.css: the solid equivalent of glass over black (E-D3 r1 designer #3) */
+--twn-card-solid:#141414;
+/* css/installer.css: the window (screen-inventory §5) and the installer-only type roles (direction §4) */
+--twn-i-win-w:760px; --twn-i-win-h:540px; --twn-i-win-min-w:640px; --twn-i-win-min-h:480px;
+--twn-i-rail-w:232px; --twn-i-rail-w-min:192px; --twn-i-hdr-h:48px;
+--twn-type-i-display:32px/40px; --twn-type-i-title:22px/28px; --twn-type-i-body:15px/24px;
+--twn-type-ar-i-display:32px/48px; --twn-type-ar-i-title:22px/36px; --twn-type-ar-i-body:16px/28px;
+--twn-i-scroll-thumb:#383838;
+}
