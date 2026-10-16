@@ -537,6 +537,11 @@ class TestSecrets(Fixture):
                          'rx = r"(?:/Users/)([^\\\\/]+)"\n')
         self.assertEqual(ids.scan_secrets(self.tree), [])
 
+    def test_prose_naming_a_home_folder_without_a_user_is_not_a_home_path(self):
+        self.put("a.md", "a macOS home (/Users/, capitalised) or a Linux home (/home/), any case: c:\\users\\…\n"
+                         "under C:\\Users\\, then /home/.cache and /Users/-x\n")
+        self.assertEqual(ids.scan_secrets(self.tree), [])
+
     def test_file_urls_and_linux_homes_found_all_users_not(self):
         self.put("a.xml", f'<a href="file:///Users/{self.PERSON}/x.mov"/>\n/home/{self.PERSON}/y\n'
                           "C:\\Users\\All Users\\z\n")

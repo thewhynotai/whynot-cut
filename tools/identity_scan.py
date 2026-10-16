@@ -571,9 +571,10 @@ SECRET_PATTERNS = {
     "gitlab_token": re.compile(r"\bglpat-[A-Za-z0-9_\-]{20,}"),
 }
 # A Windows home (any case: c:\users\…), a macOS home (/Users/, capitalised; lowercase /users/ is a URL path) or a
-# Linux home (/home/), also inside file:// URLs. The name may not start with a placeholder or regex character.
+# Linux home (/home/), also inside file:// URLs. The name starts with a letter or digit, so a placeholder, a regex
+# character or prose punctuation after the folder is not a name.
 _HOME = re.compile(r"(?:\b[A-Za-z]:[\\/]{1,2}(?i:users)[\\/]{1,2}|(?:(?<=file://)|(?<![\w.:/]))/(?:Users|home)/)"
-                   r"(?!(?i:all users)[\\/])(?![<$%{(\[])([^\\/\s\"'`<>|*?:()\[\]{}]+)")
+                   r"(?!(?i:all users)[\\/])(?=[^\W_])([^\\/\s\"'`<>|*?:()\[\]{}]+)")
 PLACEHOLDER_USERS = {"you", "user", "username", "name", "runner", "public", "default", "shared", "...", "…", "x", "me"}
 BOM_FREE_EXT = {".ps1", ".psm1", ".psd1"}     # Windows PowerShell 5.1 needs a BOM for non-ASCII scripts
 
