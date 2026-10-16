@@ -14,7 +14,9 @@
 #     filter and hide the real CLI further down PATH, so find_claude_code and claude_command search every ABSOLUTE PATH
 #     folder themselves (PATHEXT order on Windows; relative and empty PATH entries skipped). The candidate RULES are the
 #     installer's (claude_install_candidates is unchanged); only the `which` function it calls is replaced
-#     (`which=` parameter), and for absolute PATH entries the walk returns what shutil.which returns (tested).
+#     (`which=` parameter). For clean absolute PATH entries the walk returns what shutil.which returns (tested). It is more
+#     lenient than which in exactly three cases: it strips quotes around an entry ("D:\dir", as cmd.exe does), it strips
+#     spaces around an entry, and it strips spaces inside PATHEXT items (".COM; .EXE"); which skips those entries or items.
 """What differs between macOS and Windows: which speech backend runs, and where Claude Code lives."""
 import importlib.util
 import os

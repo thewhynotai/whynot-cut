@@ -658,16 +658,16 @@ class TestCwdRelativeIsNeverTrusted(unittest.TestCase):
         self.assertEqual(P.absolute_only([absolute, "claude.exe", ".\\claude.EXE", "bin/claude", "", None]), [absolute])
         self.assertEqual(P.absolute_only([Path(absolute), Path("claude.exe")]), [Path(absolute)])
 
-    def test_find_claude_code_drops_a_relative_which_result_everywhere(self):
+    def test_find_claude_code_ignores_relative_and_empty_path_entries_everywhere(self):
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
             planted = touch(d / "cwd" / "claude.exe")
+            touch(d / "cwd" / "sub" / "claude.exe")
             home = d / "home"
-            env = {"PATH": str(d / "emptybin"), "APPDATA": str(home / "AppData" / "Roaming")}
-            for relative in ("claude.exe", ".\\claude.EXE", "./claude.exe"):
-                with self._cwd(planted.parent), mock.patch.object(P.shutil, "which", return_value=relative):
-                    # (the candidate list itself keeps what which() said: parity with the installer) the finder never starts it
-                    self.assertIsNone(_correct_module.find_claude_code(env, home, True), relative)
+            for path in ("", ".", os.pathsep.join(["", "."]), "sub", os.pathsep.join([".", "sub"])):
+                env = {"PATH": path, "APPDATA": str(home / "AppData" / "Roaming")}
+                with self._cwd(planted.parent):
+                    self.assertIsNone(_correct_module.find_claude_code(env, home, True), path)
 
     def test_find_claude_code_still_finds_the_real_install_next_to_a_planted_one(self):
         with tempfile.TemporaryDirectory() as d:
@@ -675,8 +675,8 @@ class TestCwdRelativeIsNeverTrusted(unittest.TestCase):
             touch(d / "cwd" / "claude.exe")
             home = d / "home"
             real = touch(home / ".local" / "bin" / "claude.exe")
-            env = {"PATH": str(d / "emptybin"), "APPDATA": str(home / "AppData" / "Roaming")}
-            with self._cwd(d / "cwd"), mock.patch.object(P.shutil, "which", return_value="claude.exe"):
+            env = {"PATH": ".", "APPDATA": str(home / "AppData" / "Roaming")}
+            with self._cwd(d / "cwd"):
                 self.assertEqual(_correct_module.find_claude_code(env, home, True), str(real))
 
     def test_node_must_be_absolute_and_not_a_batch_file(self):
@@ -1155,6 +1155,63 @@ class TestPathSearchSkipsPlantedFiles(unittest.TestCase):
             env = {"PATH": "", "APPDATA": str(home / "AppData" / "Roaming")}
             got = P.claude_install_candidates(env, home, True, False, which=lambda name, path=None: str(real))
             self.assertEqual(got, [real, local])                   # which() is 2nd after $CLAUDE_CLI, then the fixed paths
+
+
+class TestPathWalkOnPosixRules(unittest.TestCase):
+    """Task 10 re-review 2 R3-N1: macOS / Linux discovery goes through iter_on_path(windows=False); the Windows-flavoured
+    tests above never reach that branch (the name is searched as given: no PATHEXT, execute bit decides)."""
+
+    def test_windows_false_walks_absolute_folders_in_order_and_skips_the_rest(self):
+        nc = os.path.normcase
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            a, b = touch(d / "a" / "claude"), touch(d / "b" / "claude")
+            for f in (a, b, touch(d / "e" / "claude.exe")):
+                os.chmod(f, 0o755)
+            (d / "c" / "claude").mkdir(parents=True)                  # a FOLDER named claude is not a program
+            touch(d / "cwd" / "claude")
+            os.chmod(d / "cwd" / "claude", 0o755)
+            path = os.pathsep.join(["", ".", "cwd", str(d / "c"), str(a.parent), '"%s"' % b.parent, str(d / "e")])
+            old = os.getcwd()
+            os.chdir(d)
+            try:
+                every = [nc(x) for x in P.iter_on_path("claude", path, windows=False, env={})]
+                first = P.find_on_path("claude", path, windows=False, env={})
+                none = P.find_on_path("claude", os.pathsep.join(["", ".", "cwd"]), windows=False, env={})
+                only_exe_dir = P.find_on_path("claude", str(d / "e"), windows=False, env={})
+            finally:
+                os.chdir(old)
+        self.assertEqual(every, [nc(str(a)), nc(str(b))])               # folder order; no PATHEXT lookup (claude.exe is not "claude")
+        self.assertEqual(nc(first), nc(str(a)))
+        self.assertIsNone(none)
+        self.assertIsNone(only_exe_dir)
+
+    @unittest.skipIf(os.name == "nt", "the execute bit only means something on POSIX")
+    def test_posix_the_execute_bit_decides(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            plain = touch(d / "first" / "claude")
+            os.chmod(plain, 0o644)
+            runnable = touch(d / "second" / "claude")
+            os.chmod(runnable, 0o755)
+            path = os.pathsep.join([str(plain.parent), str(runnable.parent)])
+            self.assertEqual(P.find_on_path("claude", path, windows=False, env={}), str(runnable))
+            self.assertEqual(list(P.iter_on_path("claude", str(plain.parent), windows=False, env={})), [])
+
+    def test_find_claude_code_uses_the_posix_walk_for_a_mac_layout(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            real = touch(d / "bin" / "claude")
+            os.chmod(real, 0o755)
+            home = d / "home"
+            env = {"PATH": os.pathsep.join([".", str(d / "bin")])}
+            old = os.getcwd()
+            os.chdir(d)
+            try:
+                got = _correct_module.find_claude_code(env, home, False)
+            finally:
+                os.chdir(old)
+            self.assertEqual(os.path.normcase(got), os.path.normcase(str(real)))
 
 
 class TestCancelBetweenRetries(unittest.TestCase):
