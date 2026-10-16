@@ -31,6 +31,39 @@ pub struct VendorFile {
 /// Names in the top level of `ui/` that are never shipped: build metadata and a stray local vendor copy.
 pub const SKIP_TOP: &[&str] = &["vendor.json", "stage.json", "vendor"];
 
+/// Where vendor files may come from (ui/vendor.json `from`). An entry ending in `/` is a folder prefix, which also
+/// needs an extension from VENDOR_EXTENSIONS; any other entry is one exact file. Anything else is a build error, so
+/// vendor.json cannot copy an arbitrary repo file (a secret, a config) into the shipped app.
+pub const VENDOR_SOURCES: &[&str] = &[
+    "brand/",
+    "adobe/panel-ui/fonts/",
+    "adobe/premiere-uxp/icons/",
+    "whynot-cut/installer/fonts/", // Task 11 moves the fonts here
+    "whynot-cut/templates/motion/icons/lucide/LICENSE",
+];
+
+/// Extensions a vendor file under a VENDOR_SOURCES folder may have.
+pub const VENDOR_EXTENSIONS: &[&str] = &["css", "png", "ttf", "otf", "woff2", "txt"];
+
+/// Is `from` (a safe_rel path) allowed as a vendor source?
+pub fn vendor_source_allowed(from: &str) -> bool {
+    VENDOR_SOURCES.iter().any(|s| {
+        if let Some(dir) = s.strip_suffix('/') {
+            from.starts_with(&format!("{dir}/"))
+                && from
+                    .rsplit_once('.')
+                    .is_some_and(|(stem, ext)| !stem.ends_with('/') && VENDOR_EXTENSIONS.contains(&ext))
+        } else {
+            from == *s
+        }
+    })
+}
+
+/// Files that never ship whatever a list says: the demo body and anything in a fixtures/ or tests/ folder.
+pub fn never_ships(path: &str) -> bool {
+    path == "js/demo.js" || path.split('/').any(|c| c == "fixtures" || c == "tests")
+}
+
 /// A plain relative path: only normal components, at least one, `/` separators only.
 pub fn safe_rel(raw: &str) -> Result<PathBuf, String> {
     let bad = |why: &str| Err(format!("unsafe path {raw:?}: {why}"));
@@ -228,8 +261,12 @@ fn copy_file(from: &Path, to: &Path, header_csp: &str) -> Result<(), String> {
 
 /// Validate `ui/stage.json` against the ui/ tree; returns the files to ship.
 fn check_list(ui: &Path, list: &StageList) -> Result<Vec<String>, String> {
+    let present = list_files(ui)?; // first: a link anywhere in ui/ is refused before anything else
     for x in list.files.iter().chain(&list.dev_only) {
         safe_rel(x)?;
+    }
+    if let Some(f) = list.files.iter().find(|f| never_ships(f)) {
+        return Err(format!("ui/stage.json lists {f:?}, which never ships (the demo body or a test file)"));
     }
     if let Some(x) = list.files.iter().find(|f| under(f, &list.dev_only)) {
         return Err(format!("ui/stage.json lists {x:?} in both files and dev_only"));
@@ -248,7 +285,7 @@ fn check_list(ui: &Path, list: &StageList) -> Result<Vec<String>, String> {
             return Err(format!("ui/stage.json dev_only names {x:?}, which is not in ui/ (stale list?)"));
         }
     }
-    for f in list_files(ui)? {
+    for f in present {
         if !list.files.contains(&f) && !under(&f, &list.dev_only) {
             return Err(format!("ui/{f} is in neither files nor dev_only of ui/stage.json"));
         }
@@ -261,25 +298,42 @@ fn check_list(ui: &Path, list: &StageList) -> Result<Vec<String>, String> {
 /// its CSP meta after csp::strip_meta checks the header is not looser than it, and every local reference in the staged
 /// pages and modules must resolve inside the bundle. Returns the vendor sources (absolute) so build.rs can emit
 /// `rerun-if-changed` for each.
-pub fn stage(ui: &Path, repo: &Path, vendor: &[VendorFile], list: Option<&StageList>, dest: &Path, header_csp: &str)
+/// Read `ui/stage.json`; a missing or unreadable file is an error (the build fails closed).
+pub fn read_stage_file(ui: &Path) -> Result<String, String> {
+    let path = ui.join("stage.json");
+    fs::read_to_string(&path).map_err(|e| {
+        format!("{} is required (the production staging list; the build never ships ui/ wholesale): {e}", path.display())
+    })
+}
+
+pub fn stage(ui: &Path, repo: &Path, vendor: &[VendorFile], list: &StageList, dest: &Path, header_csp: &str)
     -> Result<Vec<PathBuf>, String> {
     if !ui.join("index.html").is_file() {
         return Err(format!("the UI bundle has no index.html: {}", ui.display()));
     }
     // Validate everything before touching dest.
-    let ship = match list {
-        Some(l) => check_list(ui, l)?,
-        None => list_files(ui)?,
-    };
+    let ship = check_list(ui, list)?;
     let mut plan = Vec::with_capacity(vendor.len());
     for f in vendor {
         let to = safe_rel(&f.to)?;
         if !f.to.starts_with("vendor/") {
             return Err(format!("vendor destination {:?} must be under vendor/", f.to));
         }
-        let from = repo.join(safe_rel(&f.from)?);
-        if !from.is_file() || is_link(&from)? {
+        let rel = safe_rel(&f.from)?;
+        if !vendor_source_allowed(&f.from) {
+            return Err(format!("vendor source {:?} is outside the vendor allowlist (VENDOR_SOURCES)", f.from));
+        }
+        let from = repo.join(&rel);
+        if !from.is_file() {
             return Err(format!("vendor source {:?} is missing or not a regular file", f.from));
+        }
+        // no link on ANY component of the source path, not only the file itself
+        let mut at = repo.to_path_buf();
+        for part in rel.components() {
+            at.push(part);
+            if is_link(&at)? {
+                return Err(format!("vendor source {:?} goes through a link at {}", f.from, at.display()));
+            }
         }
         plan.push((from, to));
     }
@@ -300,7 +354,7 @@ pub fn stage(ui: &Path, repo: &Path, vendor: &[VendorFile], list: Option<&StageL
         copy_file(&from, &dest.join(&to), header_csp)?;
         sources.push(from);
     }
-    check_references(dest, list.map(|l| l.dev_only.as_slice()).unwrap_or(&[]))?;
+    check_references(dest, &list.dev_only)?;
     Ok(sources)
 }
 
@@ -334,13 +388,13 @@ mod tests {
         VendorFile { to: to.into(), from: from.into() }
     }
 
-    /// repo/{brand/tokens.css, fonts/a.ttf} and repo/installer/app/ui/{index.html, js/main.js, vendor.json, vendor/x}
+    /// repo/{brand/tokens.css, adobe/panel-ui/fonts/a.ttf} and repo/installer/app/ui/{index.html, js/main.js, vendor.json, vendor/x}
     fn fixture() -> (PathBuf, PathBuf, PathBuf) {
         let root = scratch();
         let repo = root.join("repo");
         let ui = repo.join("installer/app/ui");
         write(&repo.join("brand/tokens.css"), ":root{}");
-        write(&repo.join("fonts/a.ttf"), "font");
+        write(&repo.join("adobe/panel-ui/fonts/a.ttf"), "font");
         write(&ui.join("index.html"), "<!doctype html>");
         write(&ui.join("js/main.js"), "export {}");
         write(&ui.join("vendor.json"), "{}");
@@ -365,6 +419,11 @@ mod tests {
         out
     }
 
+    /// A list that ships every file in ui/ (what a complete stage.json would say); empty when ui/ cannot be read.
+    fn all(ui: &Path) -> StageList {
+        StageList { files: list_files(ui).unwrap_or_default(), dev_only: Vec::new() }
+    }
+
     fn sl(files: &[&str], dev_only: &[&str]) -> StageList {
         StageList {
             files: files.iter().map(|p| p.to_string()).collect(),
@@ -373,12 +432,74 @@ mod tests {
     }
 
     #[test]
+    fn a_missing_or_unreadable_stage_list_is_an_error() {
+        let (_repo, ui, _dest) = fixture();
+        assert!(read_stage_file(&ui).unwrap_err().contains("stage.json"));
+        fs::create_dir_all(ui.join("stage.json")).unwrap(); // a folder: present but unreadable as a file
+        assert!(read_stage_file(&ui).unwrap_err().contains("stage.json"));
+        fs::remove_dir(ui.join("stage.json")).unwrap();
+        write(&ui.join("stage.json"), "{\"files\": []}");
+        assert_eq!(read_stage_file(&ui).unwrap(), "{\"files\": []}");
+    }
+
+    #[test]
+    fn dev_and_test_files_never_ship_even_when_listed() {
+        let (repo, ui, dest) = fixture();
+        for (path, body) in [("js/demo.js", "export {};"), ("fixtures/a.js", "x"), ("tests/b.js", "y"),
+                             ("js/fixtures/c.js", "z")] {
+            write(&ui.join(path), body);
+            let err = stage(&ui, &repo, &[], &sl(&["index.html", "js/main.js", path], &[]), &dest, H).unwrap_err();
+            assert!(err.contains(path) && err.contains("never ships"), "{path}: {err}");
+            fs::remove_file(ui.join(path)).unwrap();
+        }
+    }
+
+    #[test]
+    fn vendor_sources_come_only_from_the_allowlist() {
+        let (repo, ui, dest) = fixture();
+        write(&repo.join("secrets/key.txt"), "k");
+        write(&repo.join("brand/.env"), "e");
+        write(&repo.join("brand/notes.md"), "n");
+        write(&repo.join("whynot-cut/templates/motion/icons/lucide/LICENSE"), "ISC");
+        write(&repo.join("whynot-cut/templates/motion/icons/lucide/x.svg"), "<svg/>");
+        for bad in ["secrets/key.txt", "brand/.env", "brand/notes.md", "whynot-cut/templates/motion/icons/lucide/x.svg"] {
+            let err = stage(&ui, &repo, &[vf("vendor/x", bad)], &all(&ui), &dest, H).unwrap_err();
+            assert!(err.contains(bad) && err.contains("allowlist"), "{bad}: {err}");
+        }
+        for good in ["brand/tokens.css", "adobe/panel-ui/fonts/a.ttf", "whynot-cut/templates/motion/icons/lucide/LICENSE"] {
+            stage(&ui, &repo, &[vf("vendor/x", good)], &all(&ui), &dest, H).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_anywhere_on_a_vendor_source_path_is_refused() {
+        let (repo, ui, dest) = fixture();
+        std::os::unix::fs::symlink(repo.join("adobe/panel-ui/fonts"), repo.join("brand/fonts")).unwrap();
+        let err = stage(&ui, &repo, &[vf("vendor/a.ttf", "brand/fonts/a.ttf")], &all(&ui), &dest, H).unwrap_err();
+        assert!(err.contains("link"), "{err}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_link_anywhere_on_a_vendor_source_path_is_refused() {
+        let (repo, ui, dest) = fixture();
+        if std::os::windows::fs::symlink_dir(repo.join("adobe/panel-ui/fonts"), repo.join("brand/fonts")).is_err() {
+            eprintln!("symlink creation not permitted on this machine; case covered on unix");
+            return;
+        }
+        let err = stage(&ui, &repo, &[vf("vendor/a.ttf", "brand/fonts/a.ttf")], &all(&ui), &dest, H).unwrap_err();
+        assert!(err.contains("link"), "{err}");
+        fs::remove_dir(repo.join("brand/fonts")).unwrap(); // the link only
+    }
+
+    #[test]
     fn a_stage_list_ships_exactly_its_files_plus_vendor() {
         let (repo, ui, dest) = fixture();
         write(&ui.join("js/demo.js"), "export const demo = 1;");
         write(&ui.join("stage.json"), "{}");
         let list = sl(&["index.html", "js/main.js"], &["js/demo.js"]);
-        stage(&ui, &repo, &[vf("vendor/brand/tokens.css", "brand/tokens.css")], Some(&list), &dest, H).unwrap();
+        stage(&ui, &repo, &[vf("vendor/brand/tokens.css", "brand/tokens.css")], &list, &dest, H).unwrap();
         assert_eq!(listing(&dest), ["index.html", "js/main.js", "vendor/brand/tokens.css"]);
     }
 
@@ -386,14 +507,14 @@ mod tests {
     fn a_ui_file_in_neither_list_is_refused() {
         let (repo, ui, dest) = fixture();
         write(&ui.join("js/new.js"), "export {};");
-        let err = stage(&ui, &repo, &[], Some(&sl(&["index.html", "js/main.js"], &[])), &dest, H).unwrap_err();
+        let err = stage(&ui, &repo, &[], &sl(&["index.html", "js/main.js"], &[]), &dest, H).unwrap_err();
         assert!(err.contains("js/new.js"), "{err}");
     }
 
     #[test]
     fn a_listed_file_that_is_missing_is_refused() {
         let (repo, ui, dest) = fixture();
-        let err = stage(&ui, &repo, &[], Some(&sl(&["index.html", "js/main.js", "js/gone.js"], &[])), &dest, H)
+        let err = stage(&ui, &repo, &[], &sl(&["index.html", "js/main.js", "js/gone.js"], &[]), &dest, H)
             .unwrap_err();
         assert!(err.contains("js/gone.js"), "{err}");
     }
@@ -401,10 +522,10 @@ mod tests {
     #[test]
     fn a_file_in_both_lists_or_an_unsafe_path_is_refused() {
         let (repo, ui, dest) = fixture();
-        assert!(stage(&ui, &repo, &[], Some(&sl(&["index.html", "js/main.js"], &["js/main.js"])), &dest, H)
+        assert!(stage(&ui, &repo, &[], &sl(&["index.html", "js/main.js"], &["js/main.js"]), &dest, H)
             .unwrap_err()
             .contains("js/main.js"));
-        assert!(stage(&ui, &repo, &[], Some(&sl(&["index.html", "../ui/js/main.js"], &[])), &dest, H).is_err());
+        assert!(stage(&ui, &repo, &[], &sl(&["index.html", "../ui/js/main.js"], &[]), &dest, H).is_err());
     }
 
     #[test]
@@ -412,7 +533,7 @@ mod tests {
         let (repo, ui, dest) = fixture();
         write(&ui.join("js/demo.js"), "export const demo = 1;");
         write(&ui.join("js/main.js"), "import { demo } from \"./demo.js\";\nexport {};\n");
-        let err = stage(&ui, &repo, &[], Some(&sl(&["index.html", "js/main.js"], &["js/demo.js"])), &dest, H)
+        let err = stage(&ui, &repo, &[], &sl(&["index.html", "js/main.js"], &["js/demo.js"]), &dest, H)
             .unwrap_err();
         assert!(err.contains("demo.js"), "{err}");
     }
@@ -423,9 +544,9 @@ mod tests {
         write(&ui.join("js/demo.js"), "export const demo = 1;");
         write(&ui.join("js/main.js"), "if (q) { const d = await import(\"./demo.js\"); }\nexport {};\n");
         let list = sl(&["index.html", "js/main.js"], &["js/demo.js"]);
-        stage(&ui, &repo, &[], Some(&list), &dest, H).unwrap();
+        stage(&ui, &repo, &[], &list, &dest, H).unwrap();
         write(&ui.join("js/main.js"), "const d = await import(\"./gone.js\");\nexport {};\n");
-        assert!(stage(&ui, &repo, &[], Some(&list), &dest, H).unwrap_err().contains("gone.js"));
+        assert!(stage(&ui, &repo, &[], &list, &dest, H).unwrap_err().contains("gone.js"));
     }
 
     #[test]
@@ -433,7 +554,7 @@ mod tests {
         let (repo, ui, dest) = fixture();
         write(&ui.join("index.html"),
               "<head>\n<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; connect-src 'none'\">\n</head>");
-        stage(&ui, &repo, &[], Some(&sl(&["index.html", "js/main.js"], &[])), &dest, H).unwrap();
+        stage(&ui, &repo, &[], &sl(&["index.html", "js/main.js"], &[]), &dest, H).unwrap();
         assert_eq!(fs::read_to_string(dest.join("index.html")).unwrap(), "<head>\n</head>");
     }
 
@@ -448,7 +569,7 @@ mod tests {
     fn a_page_referring_to_a_missing_file_is_refused() {
         let (repo, ui, dest) = fixture();
         write(&ui.join("index.html"), "<script src=\"js/gone.js\"></script><link rel=\"stylesheet\" href=\"css/a.css\">");
-        let err = stage(&ui, &repo, &[], None, &dest, H).unwrap_err();
+        let err = stage(&ui, &repo, &[], &all(&ui), &dest, H).unwrap_err();
         assert!(err.contains("js/gone.js"), "{err}");
     }
 
@@ -459,7 +580,7 @@ mod tests {
               "<link rel=\"stylesheet\" href=\"vendor/brand/tokens.css\"><script type=\"module\" src=\"js/main.js\"></script>");
         write(&ui.join("js/main.js"), "import \"./b.js\";\nexport * from './b.js';\nconst m = import(\"./b.js\");\n");
         write(&ui.join("js/b.js"), "export {};");
-        stage(&ui, &repo, &[vf("vendor/brand/tokens.css", "brand/tokens.css")], None, &dest, H).unwrap();
+        stage(&ui, &repo, &[vf("vendor/brand/tokens.css", "brand/tokens.css")], &all(&ui), &dest, H).unwrap();
     }
 
     #[test]
@@ -480,10 +601,10 @@ mod tests {
     fn stages_the_ui_plus_vendor_files_and_skips_metadata() {
         let (repo, ui, dest) = fixture();
         let sources = stage(&ui, &repo, &[vf("vendor/brand/tokens.css", "brand/tokens.css"),
-                                          vf("vendor/fonts/a.ttf", "fonts/a.ttf")], None, &dest, H).unwrap();
+                                          vf("vendor/fonts/a.ttf", "adobe/panel-ui/fonts/a.ttf")], &all(&ui), &dest, H).unwrap();
         assert_eq!(listing(&dest), ["index.html", "js/main.js", "vendor/brand/tokens.css", "vendor/fonts/a.ttf"]);
         assert_eq!(fs::read_to_string(dest.join("vendor/brand/tokens.css")).unwrap(), ":root{}");
-        assert_eq!(sources, [repo.join("brand/tokens.css"), repo.join("fonts/a.ttf")]);
+        assert_eq!(sources, [repo.join("brand/tokens.css"), repo.join("adobe/panel-ui/fonts/a.ttf")]);
     }
 
     #[test]
@@ -493,7 +614,7 @@ mod tests {
 <meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; connect-src 'none'\">
 </head>";
         write(&ui.join("index.html"), page);
-        stage(&ui, &repo, &[], None, &dest, H).unwrap();
+        stage(&ui, &repo, &[], &all(&ui), &dest, H).unwrap();
         assert_eq!(fs::read_to_string(dest.join("index.html")).unwrap(), "<head>
 </head>");
         assert_eq!(fs::read_to_string(ui.join("index.html")).unwrap(), page);
@@ -504,35 +625,35 @@ mod tests {
         let (repo, ui, dest) = fixture();
         write(&ui.join("index.html"),
               "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; connect-src 'none'\">");
-        assert!(stage(&ui, &repo, &[], None, &dest, H).unwrap_err().contains("default-src"));
+        assert!(stage(&ui, &repo, &[], &all(&ui), &dest, H).unwrap_err().contains("default-src"));
     }
 
     #[test]
     fn restaging_removes_stale_files() {
         let (repo, ui, dest) = fixture();
         write(&dest.join("old/left-over.js"), "x");
-        stage(&ui, &repo, &[], None, &dest, H).unwrap();
+        stage(&ui, &repo, &[], &all(&ui), &dest, H).unwrap();
         assert_eq!(listing(&dest), ["index.html", "js/main.js"]);
     }
 
     #[test]
     fn refuses_a_destination_outside_vendor() {
         let (repo, ui, dest) = fixture();
-        let err = stage(&ui, &repo, &[vf("js/main.js", "brand/tokens.css")], None, &dest, H).unwrap_err();
+        let err = stage(&ui, &repo, &[vf("js/main.js", "brand/tokens.css")], &all(&ui), &dest, H).unwrap_err();
         assert!(err.contains("vendor/"), "{err}");
     }
 
     #[test]
     fn refuses_traversal_in_either_path() {
         let (repo, ui, dest) = fixture();
-        assert!(stage(&ui, &repo, &[vf("vendor/../x.css", "brand/tokens.css")], None, &dest, H).is_err());
-        assert!(stage(&ui, &repo, &[vf("vendor/x.css", "../outside.css")], None, &dest, H).is_err());
+        assert!(stage(&ui, &repo, &[vf("vendor/../x.css", "brand/tokens.css")], &all(&ui), &dest, H).is_err());
+        assert!(stage(&ui, &repo, &[vf("vendor/x.css", "../outside.css")], &all(&ui), &dest, H).is_err());
     }
 
     #[test]
     fn refuses_a_missing_vendor_source() {
         let (repo, ui, dest) = fixture();
-        let err = stage(&ui, &repo, &[vf("vendor/x.css", "brand/missing.css")], None, &dest, H).unwrap_err();
+        let err = stage(&ui, &repo, &[vf("vendor/x.css", "brand/missing.css")], &all(&ui), &dest, H).unwrap_err();
         assert!(err.contains("brand/missing.css"), "{err}");
     }
 
@@ -540,7 +661,7 @@ mod tests {
     fn refuses_a_ui_without_index_html() {
         let (repo, ui, dest) = fixture();
         fs::remove_file(ui.join("index.html")).unwrap();
-        assert!(stage(&ui, &repo, &[], None, &dest, H).is_err());
+        assert!(stage(&ui, &repo, &[], &all(&ui), &dest, H).is_err());
     }
 
     #[cfg(unix)]
@@ -548,7 +669,7 @@ mod tests {
     fn refuses_a_symlink_in_the_ui_tree() {
         let (repo, ui, dest) = fixture();
         std::os::unix::fs::symlink(repo.join("brand"), ui.join("js/link")).unwrap();
-        let err = stage(&ui, &repo, &[], None, &dest, H).unwrap_err();
+        let err = stage(&ui, &repo, &[], &all(&ui), &dest, H).unwrap_err();
         assert!(err.contains("link"), "{err}");
     }
 
@@ -562,7 +683,7 @@ mod tests {
             eprintln!("symlink creation not permitted on this machine; case covered on unix");
             return;
         }
-        let err = stage(&ui, &repo, &[], None, &dest, H).unwrap_err();
+        let err = stage(&ui, &repo, &[], &all(&ui), &dest, H).unwrap_err();
         assert!(err.contains("link"), "{err}");
     }
 }

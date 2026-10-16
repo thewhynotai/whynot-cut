@@ -10,7 +10,7 @@ build = "build.rs"
 # ET1-17 scaffold. Every version is pinned with `=` (Addendum E2.1 #6) and Cargo.lock is committed.
 # Security shape (tests/test_scaffold.py + `cargo test` enforce it):
 # - no tauri-plugin-shell/http/fs/opener/updater/dialog, and no HTTP client crate on any desktop target;
-# - the only plugin is single-instance (named mutex on Windows, a Unix socket on macOS; no network code);
+# - the only plugin is single-instance, on Windows only (a named mutex; no network code);
 # - `isolation` is required by `app.security.pattern = isolation` (without it codegen falls back to brownfield).
 
 [lib]
@@ -23,10 +23,14 @@ serde_json = { version = "=1.0.154" }   # build.rs reads ui/vendor.json
 
 [dependencies]
 tauri = { version = "=2.12.4", features = ["isolation"] }
-tauri-plugin-single-instance = { version = "=2.5.4" }
 serde = { version = "=1.0.229", features = ["derive"] }
 
+# Windows only (review M1): a session-local named mutex. On macOS the plugin would bind a fixed socket in /tmp.
+[target.'cfg(windows)'.dependencies]
+tauri-plugin-single-instance = { version = "=2.5.4" }
+
 [dev-dependencies]
+tauri = { version = "=2.12.4", features = ["isolation", "test"] }   # tests: the mock runtime (ACL end to end)
 serde_json = { version = "=1.0.154" }
 sha2 = { version = "=0.10.9" }      # tests: re-derive the isolation style hash in the CSP
 base64 = { version = "=0.22.1" }

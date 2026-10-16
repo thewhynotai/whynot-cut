@@ -1,14 +1,29 @@
 //! WhyNot Cut Setup: the thin, network-free Tauri 2 shell over the Python installer core (ET1-17 scaffold).
 //!
-//! The UI may call only the commands registered in `run()` AND granted in `capabilities/main-window.json`
-//! (build.rs declares them in the app manifest, so an ungranted command is refused by the ACL). Today that is one
-//! stub, `app_info`. The bridge to the core is ET1-18, the id-based OS actions are ET1-19.
+//! # The security boundary
+//! The UI may call only the commands registered in `run()` AND granted in `capabilities/main-window.json`. build.rs
+//! declares them in the app manifest, so the ACL refuses any registered command that is not granted. That ACL, plus
+//! argument validation inside every command, IS the boundary. The isolation hook (isolation/index.js) is not one:
+//! page script can skip it (review I1), so it only forwards messages.
+//!
+//! # The rule for every `#[tauri::command]` (ET1-18/19 follow it; tests/test_scaffold.py enforces it)
+//! Every argument the page sends is a type of ours that validates itself while it is deserialised
+//! (`#[serde(try_from = "...")]`: typed, bounded, ids from a fixed set), never a raw `String`, number, `Value`, path
+//! or collection. Never trust anything because "the UI or the hook already checked it".
+//!
+//! Today there is one command, the `app_info` stub. The bridge to the core is ET1-18, the id-based OS actions ET1-19.
 
 use serde::Serialize;
+#[cfg(any(windows, target_os = "macos"))]
 use tauri::Manager;
 
-/// D-04: true only in a signed build. build.rs refuses `WNC_BUILD_SIGNED=true` in 3.0, so this is false here.
-pub const BUILD_SIGNED: bool = cfg!(wnc_build_signed);
+/// D-04: 3.0 builds are always unsigned "internal" builds. A literal, not a cfg or an env var: build.rs refuses
+/// `WNC_BUILD_SIGNED` set to anything, and `--cfg wnc_build_signed` stops the compile below. Phase 2 (real signing)
+/// replaces this with a checked value.
+pub const BUILD_SIGNED: bool = false;
+
+#[cfg(wnc_build_signed)]
+compile_error!("--cfg wnc_build_signed is refused: 3.0 builds are always unsigned internal builds (D-04); signing is phase 2");
 
 /// What the UI learns about this build: the version and whether to show the "internal build" chip.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -23,13 +38,21 @@ pub fn app_info_for(signed: bool) -> AppInfo {
     AppInfo { version: env!("CARGO_PKG_VERSION"), signed, internal_build: !signed }
 }
 
-#[tauri::command]
-fn app_info() -> AppInfo {
-    app_info_for(BUILD_SIGNED)
+/// The commands the UI may call (each also needs its grant in capabilities/main-window.json and its name in build.rs).
+/// A module, not the crate root: `pub` command functions there clash with the names tauri's macro exports.
+pub mod commands {
+    use super::{app_info_for, AppInfo, BUILD_SIGNED};
+
+    /// Takes no arguments (nothing from the page to validate).
+    #[tauri::command]
+    pub fn app_info() -> AppInfo {
+        app_info_for(BUILD_SIGNED)
+    }
 }
 
-/// A second launch hands over to the first instance and exits; the first one only comes to the front.
-/// The second instance's argv and cwd are ignored on purpose: no input crosses that boundary.
+/// Bring the one window to the front: a second launch on Windows (single-instance plugin) or a reopen on macOS
+/// (LaunchServices). Whatever the second launch carried (argv, cwd) is ignored on purpose.
+#[cfg(any(windows, target_os = "macos"))]
 fn focus_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.unminimize();
@@ -40,7 +63,9 @@ fn focus_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 
 /// The app's own origin, the only place the window may navigate to: `http://tauri.localhost` on Windows (Tauri's
 /// custom protocol over WebView2), `tauri://localhost` on macOS/Linux. CSP does not govern navigation, so this does.
-/// (Tauri itself always lets its isolation iframe load; that check runs before ours.)
+/// Tauri itself always lets its isolation iframe load (`isolation-<uuid>`), and that check runs before ours; on
+/// macOS that pre-allowance may also cover a top-level navigation to that scheme (review L6, a UI-only DoS; the
+/// ET1-22 Mac selftest checks it).
 pub fn is_app_url(url: &tauri::Url) -> bool {
     is_app_url_on(url, cfg!(windows))
 }
@@ -55,15 +80,26 @@ pub fn is_app_url_on(url: &tauri::Url, windows: bool) -> bool {
         && url.password().is_none()
 }
 
+/// The navigation guard the main window gets: the function itself, no wrapper (unit-tested here, wiring checked by
+/// tests/test_scaffold.py, behaviour proven live by tests/test_live.py).
+pub const NAVIGATION_GUARD: fn(&tauri::Url) -> bool = is_app_url;
+
 /// Start the app.
 pub fn run() {
-    tauri::Builder::default()
-        // single-instance must be the first plugin (upstream rule): the second process exits before anything else.
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| focus_main_window(app)))
-        .invoke_handler(tauri::generate_handler![app_info])
+    let builder = tauri::Builder::default();
+    // Windows: one instance per session: the plugin's named mutex `<identifier>-sim` has no `Global\` prefix, so it
+    // lives in the session-local namespace. It must be the first plugin (upstream rule).
+    // macOS: no plugin (its fixed socket in the shared /tmp could be squatted, review M1). LaunchServices keeps one
+    // instance of the .app, and a second open arrives as RunEvent::Reopen below.
+    #[cfg(windows)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| focus_main_window(app)));
+    let app = builder
+        .invoke_handler(tauri::generate_handler![commands::app_info])
         .setup(|app| {
             // The window is declared in tauri.conf.json with create:false and built here, so it gets the guards:
-            // navigation only within the bundle, and no new windows at all (window.open, target=_blank).
+            // navigation only within the bundle, no new windows (window.open, target=_blank), no downloads, and
+            // every web permission request (camera, microphone, location, clipboard read, notifications, repeated
+            // automatic downloads, ...) denied without a prompt: the installer UI needs none of them.
             let conf = app
                 .config()
                 .app
@@ -73,13 +109,21 @@ pub fn run() {
                 .cloned()
                 .ok_or("tauri.conf.json has no main window")?;
             tauri::WebviewWindowBuilder::from_config(app.handle(), &conf)?
-                .on_navigation(|url| is_app_url(url))
+                .on_navigation(NAVIGATION_GUARD)
                 .on_new_window(|_url, _features| tauri::webview::NewWindowResponse::Deny)
+                .on_download(|_webview, _event| false)
+                .on_permission_request(|_webview, _kind| tauri::webview::PermissionResponse::Deny)
                 .build()?;
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("WhyNot Cut Setup could not start");
+    app.run(|_app, _event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = _event {
+            focus_main_window(_app);
+        }
+    });
 }
 
 #[cfg(test)]
@@ -92,6 +136,7 @@ mod stage;
 
 #[cfg(test)]
 mod tests {
+    use super::commands::app_info;
     use super::*;
     use tauri::ipc::Origin;
 
@@ -270,6 +315,41 @@ mod tests {
         }
     }
 
+
+    // --- what is embedded: never the demo body or a test file, whatever the lists say -------------------------
+
+    #[test]
+    fn no_demo_or_test_file_is_embedded() {
+        let ctx = context();
+        let keys: Vec<String> = ctx.assets().iter().map(|(k, _)| k.into_owned()).collect();
+        assert!(keys.iter().any(|k| k.ends_with("index.html")), "{keys:?}");
+        for k in &keys {
+            let k = k.trim_start_matches('/');
+            assert!(!stage::never_ships(k), "{k} is embedded");
+            assert!(!k.ends_with("demo.js") && !k.ends_with("stage.json") && !k.ends_with("vendor.json"), "{k}");
+        }
+    }
+
+    // --- D-04 -------------------------------------------------------------------------------------------------
+
+    #[test]
+    fn build_signed_is_a_literal_false_in_3_0() {
+        // `--cfg wnc_build_signed` cannot flip it: that cfg is a compile_error! (tests/test_scaffold.py builds it).
+        const { assert!(!BUILD_SIGNED) };
+        assert!(!cfg!(wnc_build_signed));
+    }
+
+    // --- the navigation guard is the function the builder gets ----------------------------------------------
+
+    #[test]
+    fn the_navigation_guard_given_to_the_builder_refuses_other_origins() {
+        let guard: fn(&tauri::Url) -> bool = NAVIGATION_GUARD;
+        assert!(guard(&u(if cfg!(windows) { "http://tauri.localhost/index.html" } else { "tauri://localhost/" })));
+        for bad in ["https://example.com/", "http://127.0.0.1:9/", "file:///C:/x", "about:blank", "data:text/html,x"] {
+            assert!(!guard(&u(bad)), "{bad}");
+        }
+    }
+
     #[test]
     fn the_main_window_is_built_in_code_with_the_guards() {
         // create:false in the config, so run() builds it with on_navigation + on_new_window (Deny).
@@ -305,7 +385,6 @@ mod tests {
         let auth = ctx.runtime_authority_mut();
         for cmd in [
             "secret_command",
-            "__wnc_isolation_refused__",
             "plugin:event|listen",
             "plugin:event|emit",
             "plugin:window|close",
