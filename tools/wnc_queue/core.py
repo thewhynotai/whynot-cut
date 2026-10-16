@@ -580,48 +580,102 @@ def pressure_threshold(v) -> float:
     return f if 0 < f <= 100 else float(PRESSURE_RAM_PCT)
 
 
-def pressure_peak(status: str, iterations: list, at=PRESSURE_RAM_PCT) -> int | None:
-    """The system-RAM peak (sampled while a run was running) that makes this verdict suspect, else None.
-    - failed / timeout: only when EVERY failed run ran under pressure (the lowest of their peaks is returned). A
-      failed run at 60% is a code verdict, whatever other runs saw; a run with no sample (it never started) too.
-    - passed: the highest peak of any run (a note only).
-    - anything else (cancelled, stopped, error, stranded) is a choice or a runner problem, never a machine verdict."""
+JOB_SHARE = 0.5                    # the job's own peak is at least half the RAM in use: its own memory, a code verdict
+
+
+def fmt_mb(mb) -> str:
+    return f"{round(mb)} MB" if round(mb) < 1024 else f"{mb / 1024:.1f} GB"
+
+
+def _num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _job_mb(run: dict):
+    """The job's own memory at the machine's RAM peak (its Job Object commit sampled with that peak); else its peak
+    over the whole run (an over-estimate: memory it had freed by then still counts); else None (POSIX)."""
+    at = _num(run.get("job_mb_at_ram_peak"))
+    return at if at is not None else _num(run.get("peak_ram_mb"))
+
+
+def _job_filled_it(run: dict) -> bool:
+    """The job's own memory is at least JOB_SHARE of the RAM in use at the machine's peak. Commit, not resident
+    pages, so still an estimate; unknown figures (POSIX, old records) never say "job"."""
+    mb, total, pct = _job_mb(run), _num(run.get("ram_total_mb")), _num(run.get("peak_sys_ram_pct"))
+    return bool(mb and total and pct and mb >= JOB_SHARE * pct / 100 * total)
+
+
+def memory_pressure(status: str, iterations: list, at=PRESSURE_RAM_PCT) -> dict | None:
+    """Why the system RAM sampled while runs were running makes this verdict worth a note, else None:
+    {"ram_peak_pct", "job_mb", "total_mb", "cause"}. cause "machine": other programs filled RAM (re-check before
+    trusting a failure); "job": the job's own memory filled it (a code verdict).
+    - failed / timeout: only when EVERY failed run ran at >= `at` (a failed run at 60% is a code verdict, a run with
+      no sample never started); "job" if any failed run filled RAM itself, else "machine" with the lowest peak.
+    - passed: the run with the highest peak (a note only).
+    - anything else (cancelled, stopped, error, stranded) is a choice or a runner problem: None."""
     at = pressure_threshold(at)
-    num = lambda i: (i.get("peak_sys_ram_pct") if isinstance(i.get("peak_sys_ram_pct"), (int, float))  # noqa: E731
-                     and not isinstance(i.get("peak_sys_ram_pct"), bool) else None)
     if status == "passed":
-        vals = [v for v in map(num, iterations) if v is not None]
-        return max(vals) if vals and max(vals) >= at else None
-    if status not in ("failed", "timeout"):
+        runs = [i for i in iterations if _num(i.get("peak_sys_ram_pct")) is not None]
+        if not runs:
+            return None
+        pick = max(runs, key=lambda i: i["peak_sys_ram_pct"])
+        if pick["peak_sys_ram_pct"] < at:
+            return None
+        cause = "job" if _job_filled_it(pick) else "machine"
+    elif status in ("failed", "timeout"):
+        runs = [i for i in iterations if not i.get("passed")]
+        if not runs or any(_num(i.get("peak_sys_ram_pct")) is None for i in runs):
+            return None
+        if min(i["peak_sys_ram_pct"] for i in runs) < at:
+            return None
+        own = [i for i in runs if _job_filled_it(i)]
+        if own:
+            cause, pick = "job", max(own, key=_job_mb)
+        else:
+            cause, pick = "machine", min(runs, key=lambda i: i["peak_sys_ram_pct"])
+    else:
         return None
-    vals = [num(i) for i in iterations if not i.get("passed")]
-    if not vals or None in vals:
-        return None
-    return min(vals) if min(vals) >= at else None
+    return {"ram_peak_pct": pick["peak_sys_ram_pct"], "job_mb": _job_mb(pick),
+            "total_mb": _num(pick.get("ram_total_mb")), "cause": cause}
+
+
+def _pressure_note(rec: dict) -> str:
+    pk = rec.get("pressure_ram_peak_pct")
+    if pk is None:
+        return ""
+    job, total = _num(rec.get("pressure_job_mb")), _num(rec.get("pressure_ram_total_mb"))
+    of = f" of {fmt_mb(total)}" if total else ""
+    mine = rec.get("pressure_cause") == "job" and job
+    if rec.get("status") == "passed":
+        who = f", mostly this job: {fmt_mb(job)}" if mine else f", this job {fmt_mb(job)}" if job else ""
+        return f" (note: RAM peak {pk}% during the run{who})"
+    if mine:
+        return f" (RAM peak {pk}%, mostly this job: {fmt_mb(job)}{of}; a code verdict)"
+    who = f", this job {fmt_mb(job)}{of}" if job else ""
+    return f" (under memory pressure: RAM peak {pk}%{who}; re-check before treating it as a code verdict)"
 
 
 def headline(rec: dict) -> str:
-    """One line a resuming session can stop at: the result first, then which job and how long. Under memory
-    pressure the verdict says so before anything else."""
+    """One line a resuming session can stop at: the result first, then which job and how long. A verdict reached
+    while RAM was nearly full says so before anything else, and whose memory it was."""
     who = f"{rec.get('id')}" + (f", {rec['owner']}" if rec.get("owner") else "")
-    verdict = str(rec.get("status")).upper()
-    if rec.get("pressure"):
-        pk = rec.get("pressure_ram_peak_pct")
-        verdict += (f" (note: RAM peak {pk}% during the run)" if rec.get("status") == "passed" else
-                    f" (under memory pressure: RAM peak {pk}%; re-check before treating it as a code verdict)")
-    return f"{verdict}: {rec.get('summary')}  [{who}; ran {fmt_secs(rec.get('run_s'))}]"
+    return (f"{str(rec.get('status')).upper()}{_pressure_note(rec)}: {rec.get('summary')}  "
+            f"[{who}; ran {fmt_secs(rec.get('run_s'))}]")
 
 
 def done_record(job: dict, status: str, summary: str, log: str | None, **extra) -> dict:
     """The done\\<id>.json record. Keys are ordered for reading at a glance: the result first (headline, status,
     summary), then counts and peaks, then the long details (events, tail, every run, the job spec) last."""
     its = job.get("iterations", [])
-    pk = pressure_peak(status, its, extra.pop("pressure_at", PRESSURE_RAM_PCT))
+    mp = memory_pressure(status, its, extra.pop("pressure_at", PRESSURE_RAM_PCT))
+    note = {} if mp is None else {k: v for k, v in (
+        ("pressure_ram_peak_pct", mp["ram_peak_pct"]), ("pressure_cause", mp["cause"]),
+        ("pressure_job_mb", mp["job_mb"]), ("pressure_ram_total_mb", mp["total_mb"])) if v is not None}
     spec = {k: job.get(k) for k in ("argv", "cwd", "env", "heavy", "timeout_s", "max_wait_s", "stop", "pass_regex",
                                     "fail_regex", "priority", "max_attempts")}
     rec = {
         "headline": None, "status": status, "passed": status == "passed", "summary": summary,
-        "pressure": pk is not None, **({"pressure_ram_peak_pct": pk} if pk is not None else {}),
+        "pressure": mp is not None and mp["cause"] == "machine", **note,
         "id": job.get("id"), "title": job.get("title"), "owner": job.get("owner"), "finished_at": now_iso(),
         "exit_code": its[-1].get("rc") if its else None, "iterations_run": len(its),
         "passes": sum(1 for i in its if i.get("passed")),

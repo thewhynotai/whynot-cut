@@ -85,14 +85,25 @@ The keys are in reading order, so the first lines of the file are enough:
 - **First:** `headline`, one line (e.g. `FAILED: run 7 of 20 failed after 6 passes: rc 1: AssertionError ...
   [bridge-hunt, adobe; ran 9m40s]`), then `status` (`passed`, `failed`, `timeout`, `cancelled`, `stopped`, `error`,
   `stranded`), `passed`, `summary` and `pressure`.
-- **Memory pressure:** when system RAM peaked at 85% or more while a run was running, `pressure` is `true`,
-  `pressure_ram_peak_pct` holds that peak, and the headline says so first:
-  `FAILED (under memory pressure: RAM peak 89%; re-check before treating it as a code verdict): ...`. Treat such a
-  failure or timeout as a machine verdict until a re-run on a quieter machine agrees. A pass gets only a note
-  (`PASSED (note: RAM peak 88% during the run): ...`). A failure or timeout gets it only when **every** failed run
-  ran under pressure (the headline shows the lowest of their peaks), so a run that failed at 60% stays a code
-  verdict whatever the other runs saw. Cancelled, stopped, error and stranded jobs never get it. `status` marks such
-  a row `[RAM 89%: re-check]`. Set the threshold with `pressure_ram_pct` in `config.json` (a bad value means 85).
+- **Memory pressure:** when system RAM peaked at 85% or more while a run was running, the record holds
+  `pressure_ram_peak_pct`, `pressure_cause` and, where known, `pressure_job_mb` (the job's own memory when RAM
+  peaked) and the machine's `pressure_ram_total_mb`. The headline says it first, and whose memory it was:
+  - other programs filled RAM (`pressure: true`, cause `machine`):
+    `FAILED (under memory pressure: RAM peak 89%, this job 1.3 GB of 31.7 GB; re-check before treating it as a code
+    verdict): ...`. Treat such a failure or timeout as a machine verdict until a re-run on a quieter machine agrees.
+  - the job filled it itself (`pressure: false`, cause `job`): its own peak is at least half the RAM in use, so it
+    is a code verdict (a leak, or a job too big for the machine):
+    `FAILED (RAM peak 89%, mostly this job: 18.0 GB of 31.7 GB; a code verdict): ...`. The job's figure is its Job
+    Object commit sampled together with the machine's RAM peak, so memory it had already freed doesn't count (for a
+    run too short for any sample during it, its whole-run peak stands in). Commit is not resident RAM, so it is an
+    estimate. Without the job's figure (POSIX, old records) the wording stays the machine one.
+  - a pass gets a note only (`PASSED (note: RAM peak 88% during the run, this job 830 MB): ...`).
+
+  A failure or timeout gets a note only when **every** failed run ran at 85% or more (the headline shows the lowest
+  of their peaks), so a run that failed at 60% stays a plain code verdict. If any failed run filled RAM itself, the
+  cause is `job`. Cancelled, stopped, error and stranded jobs never get a note. `status` marks such a row
+  `[RAM 89%: re-check]` or `[RAM 89%, mostly this job]`. Set the threshold with `pressure_ram_pct` in
+  `config.json` (a bad value means 85).
 - **Then:** `id`, `title`, `owner`, `finished_at`, `exit_code`, `iterations_run`, `passes`, `run_s`, `wait_s`, `log`
   and `peak`.
 - **Last:** the long details: timestamps, `events`, `tail` (the last output lines), `iterations` (each run: rc, wait

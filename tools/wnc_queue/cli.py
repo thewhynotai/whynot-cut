@@ -206,7 +206,8 @@ def cmd_status(a, paths):
                               "title": j.get("title")} for j in running],
             "failed_recent": [{"id": j.get("id"), "status": j.get("status"), "summary": j.get("summary"),
                                "pressure": bool(j.get("pressure")),
-                               "pressure_ram_peak_pct": j.get("pressure_ram_peak_pct")}
+                               "pressure_ram_peak_pct": j.get("pressure_ram_peak_pct"),
+                               "pressure_cause": j.get("pressure_cause"), "pressure_job_mb": j.get("pressure_job_mb")}
                                   for j in bad],
             "home": str(paths.home), "runner_alive": alive, "runner": hb, "STOP": stop, "task_installed": installed,
             "queued": len(queued), "running": len(running), "done": len(done),
@@ -219,7 +220,9 @@ def cmd_status(a, paths):
         cur = j.get("current") or {}
         print(f"  running  {j.get('id')}  run {cur.get('n', '?')}, {_age(cur.get('since'))}  {_short(j.get('title'), 60)}")
     for j in bad[:SHOW_MAX]:
-        pr = f"[RAM {j.get('pressure_ram_peak_pct')}%: re-check] " if j.get("pressure") else ""
+        pk = j.get("pressure_ram_peak_pct")
+        pr = "" if pk is None else f"[RAM {pk}%, mostly this job] " if j.get("pressure_cause") == "job" \
+            else f"[RAM {pk}%: re-check] "
         print(f"  {str(j.get('status')).upper():<9}{j.get('id')}  {_age(j.get('finished_at'))} ago  "
               f"{pr}{_short(j.get('summary'))}")
     hidden = max(0, len(running) - SHOW_MAX) + max(0, len(bad) - SHOW_MAX)

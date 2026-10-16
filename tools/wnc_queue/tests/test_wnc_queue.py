@@ -338,13 +338,16 @@ pathlib.Path(r"{pidf}").write_text(str(p.pid))
 print("spawned", p.pid, flush=True)
 time.sleep(120)
 """)
-        j = self.job(["python", s], timeout_s=3)
+        # 10 s, not 3: two Python start-ups under a busy machine and the virus scanner took > 3 s in a queued
+        # suite run (2026-10-16), so the timeout fired before the grandchild existed
+        j = self.job(["python", s], timeout_s=10)
         t0 = time.monotonic()
         self.run_runner()
-        self.assertLess(time.monotonic() - t0, 40)
+        self.assertLess(time.monotonic() - t0, 50)
         d = self.done(j["id"])
         self.assertEqual(d["status"], "timeout")
         self.assertTrue(d["iterations"][0]["timed_out"])
+        self.assertTrue(pidf.exists(), "the job timed out before it spawned its grandchild (machine too slow?)")
         gpid = int(pidf.read_text())
         wait_for(lambda: not pid_alive(gpid), "the grandchild is killed with the tree", 15)
 
@@ -1370,6 +1373,7 @@ class PressureTests(Base):
         d = self.done(j["id"])
         self.assertEqual(d["peak"]["sys_ram_pct"], 91)
         self.assertIs(d["pressure"], True)
+        self.assertIsNone(d["iterations"][0]["job_mb_at_ram_peak"])    # taken after exit: unknown, not ~0
 
     def test_status_row_marks_a_pressure_failure(self):
         core.write_json(self.paths.done / "j1.json", self.rec("failed", [89]))
@@ -1400,6 +1404,147 @@ class PressureTests(Base):
         self.assertIs(d["pressure"], True)
         self.assertEqual(d["peak"]["sys_ram_pct"], 91)
         self.assertIn("under memory pressure: RAM peak 91%", d["headline"])
+        if core.IS_WIN:                         # the Job Object gives the job's own RAM; the machine's total too
+            self.assertEqual(d["pressure_cause"], "machine")
+            self.assertIsInstance(d["pressure_job_mb"], (int, float))
+            self.assertRegex(d["headline"], r"RAM peak 91%, this job [\d.]+ (MB|GB) of [\d.]+ GB; re-check")
+
+    # -- the job's own RAM next to the machine's (ledger P2 #8) ---------------------------------------------------
+    def jrec(self, status, runs, **kw):
+        """runs: (sys %, job's whole-run peak MB, passed[, job MB at the machine's peak]) per run; 32 GB machine."""
+        its = [{"n": i + 1, "rc": 0 if r[2] else 1, "passed": r[2], "run_s": 10.0, "wait_s": 0.0,
+                "peak_sys_ram_pct": r[0], "peak_ram_mb": r[1], "ram_total_mb": 32768,
+                "job_mb_at_ram_peak": r[3] if len(r) > 3 else None} for i, r in enumerate(runs)]
+        return core.done_record({"id": "j1", "owner": "g3", "iterations": its}, status, "rc 1: 2 timing tests",
+                                log="x.log", peak={}, **kw)
+
+    def test_other_programs_filled_ram_the_job_figure_is_shown(self):
+        r = self.jrec("failed", [(89, 1300, False)])
+        self.assertIs(r["pressure"], True)
+        self.assertEqual((r["pressure_cause"], r["pressure_job_mb"]), ("machine", 1300))
+        self.assertTrue(r["headline"].startswith("FAILED (under memory pressure: RAM peak 89%, this job 1.3 GB of "
+                                                 "32.0 GB; re-check before treating it as a code verdict): rc 1"),
+                        r["headline"])
+
+    def test_the_job_itself_filled_ram_is_a_code_verdict(self):
+        """18 GB of the ~29 GB in use is the job's own: no "re-check", the failure is the job's."""
+        r = self.jrec("failed", [(89, 18 * 1024, False)])
+        self.assertIs(r["pressure"], False)
+        self.assertEqual(r["pressure_cause"], "job")
+        self.assertTrue(r["headline"].startswith("FAILED (RAM peak 89%, mostly this job: 18.0 GB of 32.0 GB; a code "
+                                                 "verdict): rc 1"), r["headline"])
+        self.assertNotIn("re-check", r["headline"])
+
+    def test_one_failed_run_filling_ram_itself_makes_it_a_code_verdict(self):
+        r = self.jrec("failed", [(90, 900, False), (91, 20 * 1024, False)])
+        self.assertIs(r["pressure"], False)
+        self.assertEqual(r["pressure_cause"], "job")
+
+    def test_half_of_the_ram_in_use_is_the_line(self):
+        used = 0.89 * 32768
+        self.assertEqual(self.jrec("failed", [(89, used * 0.49, False)])["pressure_cause"], "machine")
+        self.assertEqual(self.jrec("failed", [(89, used * 0.51, False)])["pressure_cause"], "job")
+
+    def test_a_pass_note_names_the_job_too(self):
+        r = self.jrec("passed", [(70, 400, True), (88, 830, True)])
+        self.assertTrue(r["headline"].startswith("PASSED (note: RAM peak 88% during the run, this job 830 MB): "),
+                        r["headline"])
+        r = self.jrec("passed", [(88, 20 * 1024, True)])
+        self.assertTrue(r["headline"].startswith("PASSED (note: RAM peak 88% during the run, mostly this job: "
+                                                 "20.0 GB): "), r["headline"])
+
+    def test_unknown_job_ram_keeps_the_machine_wording(self):
+        """POSIX (no Job Object) or an old record: no job figure, the verdict stays a machine one."""
+        r = self.jrec("failed", [(89, None, False)])
+        self.assertEqual((r["pressure"], r["pressure_cause"], r.get("pressure_job_mb")), (True, "machine", None))
+        self.assertTrue(r["headline"].startswith("FAILED (under memory pressure: RAM peak 89%; re-check"),
+                        r["headline"])
+
+    def test_memory_the_job_had_freed_is_not_counted(self):
+        """Review P2: a suite that committed 15 GB early, freed it, then failed while another program filled RAM is
+        a machine verdict: the job's memory AT the machine's peak decides, not its peak over the whole run."""
+        r = self.jrec("failed", [(90, 15 * 1024, False, 1024)])
+        self.assertEqual((r["pressure"], r["pressure_cause"], r["pressure_job_mb"]), (True, "machine", 1024))
+        self.assertIn("this job 1.0 GB of 32.0 GB; re-check", r["headline"])
+        self.assertEqual(self.jrec("failed", [(90, 15 * 1024, False, 15 * 1024)])["pressure_cause"], "job")
+
+    def test_a_passing_hog_does_not_excuse_a_small_failed_run(self):
+        r = self.jrec("failed", [(90, 20 * 1024, True), (89, 900, False)])
+        self.assertEqual((r["pressure"], r["pressure_cause"], r["pressure_ram_peak_pct"]), (True, "machine", 89))
+
+    def test_timeout_names_the_job_too(self):
+        r = self.jrec("timeout", [(92, 20 * 1024, False)])
+        self.assertTrue(r["headline"].startswith("TIMEOUT (RAM peak 92%, mostly this job: 20.0 GB of 32.0 GB; a code "
+                                                 "verdict)"), r["headline"])
+
+    def test_a_record_from_before_the_cause_keeps_the_machine_wording(self):
+        """6cfe9fa wrote `pressure: true` + `pressure_ram_peak_pct` only."""
+        old = {"id": "o1", "status": "failed", "summary": "rc 1", "run_s": 5, "pressure": True,
+               "pressure_ram_peak_pct": 89, "finished_at": core.now_iso()}
+        self.assertTrue(core.headline(old).startswith("FAILED (under memory pressure: RAM peak 89%; re-check"))
+        core.write_json(self.paths.done / "o1.json", old)
+        out = GlanceTests.cli(self, "status")[1]
+        self.assertIn("[RAM 89%: re-check]", next(line for line in out if "o1" in line))
+
+    def test_mb_and_gb(self):
+        self.assertEqual([core.fmt_mb(v) for v in (12.3, 1023.4, 1023.6, 1300, 32475.9)],
+                         ["12 MB", "1023 MB", "1.0 GB", "1.3 GB", "31.7 GB"])
+
+    @unittest.skipUnless(core.IS_WIN, "the job's own memory comes from the Windows Job Object")
+    def test_runner_takes_the_jobs_memory_at_the_machines_peak(self):
+        """The job holds 600 MB, frees it, and only then does RAM peak: the job's figure is what it held then."""
+        from unittest import mock
+        freed = self.dir / "freed"
+        j = self.job(["python", "-c", "import pathlib, sys, time; a = bytearray(600 * 2**20); time.sleep(1.2); "
+                      "del a; pathlib.Path(sys.argv[1]).write_text('x'); time.sleep(1.5); raise SystemExit(1)",
+                      str(freed)])
+        started = self.paths.started(j["id"])
+        with mock.patch.object(procs, "system_ram_pct",
+                               side_effect=lambda: 91 if freed.exists() else 80 if started.exists() else 30):
+            self.run_runner()
+        d = self.done(j["id"])
+        run = d["iterations"][0]
+        self.assertGreaterEqual(run["peak_ram_mb"], 600)
+        self.assertLess(run["job_mb_at_ram_peak"], 100)
+        self.assertEqual((d["pressure"], d["pressure_cause"]), (True, "machine"))
+        self.assertLess(d["pressure_job_mb"], 100)
+
+    @unittest.skipUnless(core.IS_WIN, "the job's own memory comes from the Windows Job Object")
+    def test_the_sample_after_exit_keeps_what_the_run_held(self):
+        """Re-review P2: the job peaks at 1200 MB, frees half and holds 600 MB while RAM climbs; RAM is highest at
+        the sample taken after it exited. The figure is the 600 MB it held at the last in-run peak, not unknown (which
+        would fall back to the 1200 MB whole-run peak), and not 0 (a field that never reads)."""
+        from unittest import mock
+        held = self.dir / "held"
+        j = self.job(["python", "-c", "import pathlib, sys, time; a = bytearray(1200 * 2**20); time.sleep(0.5); "
+                      "a = None; b = bytearray(600 * 2**20); pathlib.Path(sys.argv[1]).write_text('x'); "
+                      "time.sleep(1.5); raise SystemExit(1)", str(held)])
+        started = self.paths.started(j["id"])
+        calls = []
+
+        def pct():
+            if not held.exists():
+                return 50 if started.exists() else 30
+            calls.append(1)
+            return min(88 + len(calls), 99)                 # every sample is a new peak, the after-exit one too
+        with mock.patch.object(procs, "system_ram_pct", side_effect=pct):
+            self.run_runner()
+        d = self.done(j["id"])
+        run = d["iterations"][0]
+        self.assertGreaterEqual(run["peak_ram_mb"], 1200)
+        self.assertGreaterEqual(run["job_mb_at_ram_peak"], 500)
+        self.assertLess(run["job_mb_at_ram_peak"], 1000)
+        self.assertEqual(d["pressure_job_mb"], run["job_mb_at_ram_peak"])
+
+    def test_status_row_says_which(self):
+        core.write_json(self.paths.done / "m1.json", dict(self.jrec("failed", [(89, 900, False)]), id="m1"))
+        core.write_json(self.paths.done / "j2.json", dict(self.jrec("failed", [(89, 20000, False)]), id="j2"))
+        out = GlanceTests.cli(self, "status")[1]
+        self.assertIn("[RAM 89%: re-check]", next(line for line in out if "m1" in line))
+        self.assertIn("[RAM 89%, mostly this job]", next(line for line in out if "j2" in line))
+        js = {j["id"]: j for j in json.loads("\n".join(GlanceTests.cli(self, "status", "--json")[1]))["failed_recent"]}
+        self.assertEqual((js["j2"]["pressure"], js["j2"]["pressure_cause"], js["j2"]["pressure_job_mb"]),
+                         (False, "job", 20000))
 
     def test_ram_while_waiting_for_a_slot_is_not_the_runs(self):
         """Another suite filling RAM while this job still waits for its heavy.sh slot says nothing about this run."""

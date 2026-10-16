@@ -38,6 +38,9 @@ if IS_WIN:
                     ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t),
                     ("PeakJobMemoryUsed", ctypes.c_size_t)]
 
+    class _MEMUSE(ctypes.Structure):          # JOBOBJECT_MEMORY_USAGE_INFORMATION (class 28, Windows 10+)
+        _fields_ = [("JobMemory", ctypes.c_ulonglong), ("PeakJobMemoryUsed", ctypes.c_ulonglong)]
+
     class _ACCT(ctypes.Structure):
         _fields_ = [("TotalUserTime", ctypes.c_longlong), ("TotalKernelTime", ctypes.c_longlong),
                     ("ThisPeriodTotalUserTime", ctypes.c_longlong), ("ThisPeriodTotalKernelTime", ctypes.c_longlong),
@@ -76,6 +79,24 @@ def system_ram_pct() -> int | None:
         return int(100 - 100 * info["MemAvailable"] / info["MemTotal"])
     except (OSError, KeyError, ValueError):
         return None
+
+
+def system_ram_total_mb() -> float | None:
+    """Physical RAM of the machine in MB (the job's share of it decides whose memory pressure it was)."""
+    if IS_WIN:
+        m = _MEMSTAT()
+        m.dwLength = ctypes.sizeof(_MEMSTAT)
+        if _k32.GlobalMemoryStatusEx(ctypes.byref(m)):
+            return round(m.t / 2 ** 20, 1)
+        return None
+    try:
+        with open("/proc/meminfo", encoding="ascii") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    return round(int(line.split()[1]) / 1024, 1)
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
 
 
 def gpu_sample() -> tuple[int, int] | None:
@@ -148,7 +169,8 @@ class Tree:
             pass
 
     def stats(self) -> dict:
-        """{"cpu_s": total CPU seconds, "peak_mb": peak commit of the tree, "active": live processes} or {}."""
+        """{"cpu_s": total CPU seconds, "peak_mb": peak commit of the tree, "mem_mb": its commit right now,
+        "active": live processes} or {} (each key only when Windows answered)."""
         if not (IS_WIN and self.in_job):
             return {}
         a, e = _ACCT(), _EXT()
@@ -160,6 +182,9 @@ class Tree:
             out["active"] = int(a.ActiveProcesses)
         if ok2:
             out["peak_mb"] = round(e.PeakJobMemoryUsed / 2 ** 20, 1)
+        m = _MEMUSE()
+        if _k32.QueryInformationJobObject(self.job, 28, ctypes.byref(m), ctypes.sizeof(m), None):
+            out["mem_mb"] = round(m.JobMemory / 2 ** 20, 1)
         return out
 
     def close(self) -> None:

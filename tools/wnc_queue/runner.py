@@ -383,13 +383,14 @@ class Worker(threading.Thread):
         started_ts = None
         peak = {"ram_mb": None, "cpu_pct": None, "sys_ram_pct": None, "gpu_pct": None, "vram_mb": None}
         last = {"t": time.monotonic(), "cpu": 0.0, "sampled": 0.0}
+        at_peak = {"mb": None}
         ncpu = os.cpu_count() or 1
 
         def bump(k, v):
             if v is not None and (peak[k] is None or v > peak[k]):
                 peak[k] = v
 
-        def sample():
+        def sample(ended: bool = False):
             s = tree.stats()
             now_m = time.monotonic()
             if "cpu_s" in s:
@@ -399,7 +400,14 @@ class Worker(threading.Thread):
                     last["t"], last["cpu"] = now_m, s["cpu_s"]
             bump("ram_mb", s.get("peak_mb"))
             if started_ts is not None:           # machine-wide: only while THIS run runs (not its slot wait)
-                bump("sys_ram_pct", procs.system_ram_pct())
+                pct = procs.system_ram_pct()
+                if pct is not None and (peak["sys_ram_pct"] is None or pct > peak["sys_ram_pct"]):
+                    # the job's own memory at the machine's peak (not its peak over the whole run): whose RAM it was.
+                    # After the command exited it says nothing (~0): keep what the run held at its last in-run peak,
+                    # or unknown (its whole-run peak stands in) when no sample fell inside the run.
+                    if not ended:
+                        at_peak["mb"] = s.get("mem_mb")
+                bump("sys_ram_pct", pct)
                 g = self.runner.gpu
                 if g:
                     bump("gpu_pct", g[0])
@@ -444,7 +452,7 @@ class Worker(threading.Thread):
                 rc = tree.proc.wait(timeout=30)
             if started_ts is None and p.started(jid).exists():   # started between the loop's last check and its exit
                 started_ts = time.time()
-            sample()
+            sample(ended=True)
             rt.join(timeout=3)
             if rt.is_alive():                    # an orphan still holds the output pipe: kill the rest of the tree
                 tree.kill()
@@ -476,6 +484,8 @@ class Worker(threading.Thread):
         it.update(rc=rc, outcome=outcome, ended_at=now_iso(), matched=st["matched"], fail_line=st["fail_line"],
                   timed_out=outcome == "timed_out")
         it.update({f"peak_{k}": v for k, v in peak.items()})
+        it["ram_total_mb"] = procs.system_ram_total_mb()
+        it["job_mb_at_ram_peak"] = at_peak["mb"]
         if outcome == "matched":
             it["passed"] = True
         elif outcome == "exited":
