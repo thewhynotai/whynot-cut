@@ -571,7 +571,7 @@ class TestGateState(unittest.TestCase):
         en = rel.gate_lines_en(st)
         self.assertIn("Phases passed: 0, 3 (latest gate tag `v9.9.9-p3.1`).", en)
         self.assertIn("In progress: phase 4 (Editor features).", en)
-        self.assertIn("macOS: CI full suite green at `v9.9.9-p3.1`.", en)
+        self.assertIn("macOS: CI full suite green at `v9.9.9-p3.1`: full green (run 7).", en)
         self.assertIn("Live Mac checks: Not verified (Phase 12).", en)
 
     def test_mac_ci_is_the_leading_form_only(self):
@@ -585,19 +585,28 @@ class TestGateState(unittest.TestCase):
     def test_free_text_is_an_error_never_a_guess(self):
         """cd98af8 re-review P1: "smoke green; full suite not run", "not green", "passed 2 of 3", "green except 3
         errors" all read as a green full suite."""
-        for cell in ("Smoke green", "not green", "passed 2 of 3",
-                     "green except 3 errors", "full suite green", "red", "green", "queued"):
+        for cell in ("Smoke green", "not green", "passed 2 of 3", "green except 3 errors", "full suite green", "red",
+                     "green", "queued",
+                     # 93afc65 re-review P2: any non-letter after the form let these read as green
+                     "full green-ish", "full green? no", "full green/red", "full green_x", "full green: NOT RUN",
+                     "smoke green? actually full red", "full green (run 7) extra"):
             with self.assertRaises(ValueError, msg=cell):
                 rel.gate_record(self.HEAD + f"| 0 | v1-p0 | full green | {cell} | Not verified |\n")
-        for live in ("verified on M1, Intel pending", "", "todo"):
+        for live in ("verified on M1, Intel pending", "", "todo", "Verified? no", "Verified-ish", "Verified_partly"):
             with self.assertRaises(ValueError, msg=live):
                 rel.gate_record(self.HEAD + f"| 0 | v1-p0 | full green | not run | {live} |\n")
         for win in ("green", "3374 OK"):
             with self.assertRaises(ValueError, msg=win):
                 rel.gate_record(self.HEAD + f"| 0 | v1-p0 | {win} | not run | Not verified |\n")
-        for tag in ("", "p4", "(re-gate) v1-p4"):
+        for tag in ("", "p4", "(re-gate) v1-p4", "v1-p9"):          # v1-p9 on gate 0: the tag must be that gate's
             with self.assertRaises(ValueError, msg=tag):
                 rel.gate_record(self.HEAD + f"| 0 | {tag} | full green | not run | Not verified |\n")
+        with self.assertRaises(ValueError):                             # another version than the plugin's
+            rel.gate_record(self.HEAD + "| 0 | v9.9-p0 | full green | not run | Not verified |\n", version="1")
+        for row in ("| G4 | v1-p4 | full green | not run | Not verified |", "| 4.1 | v1-p4 | full green | not run | x |",
+                    "| **4** | v1-p4 | full green | not run | Not verified |", "| 4 | v1-p4 | full green |"):
+            with self.assertRaises(ValueError, msg=row):               # a row that does not parse never vanishes
+                rel.gate_record(self.HEAD + row + "\n")
 
     def test_tag_cell_may_carry_a_note(self):
         rows = rel.gate_record(self.HEAD + "| 4 | `v1-p4.1` (re-gate) | full green | not run | Not verified |\n"
@@ -607,6 +616,8 @@ class TestGateState(unittest.TestCase):
     def test_lines_per_kind(self):
         for cell, want_en, want_ar in (
                 ("smoke green", "macOS: CI smoke job green at `v1-p0` (not the full suite).", "سريع"),
+                ("full green; 3 errors ignored", "macOS: CI full suite green at `v1-p0`: full green; 3 errors ignored.",
+                 "full suite"),
                 ("smoke red (2 F)", "macOS: CI smoke job red at `v1-p0`: smoke red (2 F).", "فشل"),
                 ("full red (3 F)", "macOS: CI full suite red at `v1-p0`: full red (3 F).", "فشل"),
                 ("not run", "macOS: never run yet (no gate in PROGRESS.md has a macOS CI result).", "لسه ما اتجرّبش")):
@@ -618,7 +629,9 @@ class TestGateState(unittest.TestCase):
         """Review 6ced7db P1 + cd98af8 P2: "**not passed**", text between two bold runs, "failed"; but "✅ **passed**",
         "Gate 4 **passed**" and "**passed (failover fixed)**" do count."""
         for state in ("**not passed** (review FAIL)", "**in progress** (Gate 3 passed earlier; **executor**)",
-                      "**failed** — passed nothing", "in progress, passed T4.1", "**Gate 4 failed**", "****"):
+                      "**failed** — passed nothing", "in progress, passed T4.1", "**Gate 4 failed**", "****",
+                      # 93afc65 re-review P1: words before the bold run
+                      "Not **passed**", "not yet **passed**", "never **passed**", "❌ **passed**?"):
             table = f"| P | S | T | V |\n|---|---|---|---|\n| 4 Editor | {state} | | |\n"
             self.assertEqual(rel.passed_phases(table)[0], [], state)
         for state in ("**passed**", "**Gate 3 passed on Windows, Mac Not verified** (2026-10-16)", "✅ **passed**",
@@ -766,11 +779,15 @@ class TestRepoCoordinationFiles(unittest.TestCase):
     def test_locked_areas_owner_forms(self):
         """Review 6ced7db P2: a heading with a backtick kept the previous owner; children of a single-path bullet and a
         top-level multi-path bullet were dropped. Each now has an owner, and a path with none is an error."""
-        text = ("## Locked now\n\n- tools track:\n  - `t/**`\n- installer (`inst/`):\n  - `i/**`\n"
+        text = ("## Locked now\n\n- tools track:\n  - `t/**`\n- installer (E-T1):\n  - `i/**`\n"
                 "- `a/**`, `b/**`: guide track\n- `c/**`: Adobe track\n  - `c/x/**`\n")
         self.assertEqual(rel.parse_locked_areas(text), [
-            ("t/**", "tools track"), ("i/**", "installer (`inst/`)"), ("a/**", "guide track"), ("b/**", "guide track"),
+            ("t/**", "tools track"), ("i/**", "installer (E-T1)"), ("a/**", "guide track"), ("b/**", "guide track"),
             ("c/**", "Adobe track"), ("c/x/**", "Adobe track")])
+        # 93afc65 re-review P2: a path inside an owner heading became owner text and was lost
+        for heading in ("- installer (`inst/`):\n  - `i/**`\n", "- Adobe track: `adobe/**`\n"):
+            with self.assertRaises(ValueError, msg=heading):
+                rel.parse_locked_areas("## Locked now\n\n- `ok/**`: x\n" + heading)
         with self.assertRaises(ValueError):
             rel.parse_locked_areas("## Locked now\n\n  - `orphan/**`\n- `a/**`: x\n")
         # cd98af8 re-review P1: a top-level path bullet without an owner vanished instead of failing

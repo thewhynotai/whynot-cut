@@ -375,7 +375,7 @@ def parse_locked_areas(text: str) -> list:
             owner = own.group(2).strip()
             areas += [(g.strip(), owner) for g in re.findall(r"`([^`]+)`", own.group(1))]
         elif top:
-            if body.startswith("`") or not body.rstrip(":").strip():
+            if "`" in body or not body.rstrip(":").strip():
                 raise ValueError(f"LOCKED-AREAS.md: {body[:80]!r} has no owner (write \"- `path`: owner\")")
             owner = body.rstrip(":").strip()
         else:
@@ -461,7 +461,10 @@ def passed_phases(progress: str, tags=(), version: str = "", *, rows=None) -> tu
         state = cells[1]
         bold = re.search(r"\*\*([^*]+)\*\*", state)
         said = bold.group(1).lower() if bold else ""
-        if re.search(r"\bpassed\b", said) and not re.search(r"\bnot passed\b|\bfail(?:ed|s|ure)?\b", said):
+        before = state[:bold.start()].lower() if bold else ""
+        negated = re.search(r"\b(?:not|never|no|yet to|un\w*)\b|[\u274c\u2717\u2718]", before)
+        if re.search(r"\bpassed\b", said) and not negated and \
+                not re.search(r"\bnot passed\b|\bfail(?:ed|s|ure)?\b", said):
             tag = TAG_RE.match(cells[2])
             passed.append((num, name, newest.get(num) or (tag.group(0) if tag else (cells[2] or gate.get(num, "")))))
         elif num in gate:
@@ -479,28 +482,40 @@ LIVE_FORMS = ("Verified", "Partly verified", "Not verified")
 
 
 def _form(cell: str, forms, what: str, tag: str) -> str:
+    """The cell's form: exactly one of `forms`, then optionally " (detail)" and/or "; more detail". Nothing else."""
     for f in sorted(forms, key=len, reverse=True):
-        if cell == f or (cell.startswith(f) and not cell[len(f)].isalnum()):
+        if re.fullmatch(re.escape(f) + r"(?:\s*\([^()]*\))?(?:\s*;.*)?", cell):
             return f
-    raise ValueError(f"PROGRESS.md gate record {tag or '(no tag)'}: the {what} cell {cell[:60]!r} must start with one "
-                     f"of: {', '.join(forms)}")
+    raise ValueError(f"PROGRESS.md gate record {tag or '(no tag)'}: the {what} cell {cell[:60]!r} must be one of: "
+                     f"{', '.join(forms)} (then optional ' (detail)' and/or '; detail')")
 
 
-def gate_record(progress: str) -> list:
+def gate_record(progress: str, version: str = "") -> list:
     """Rows of PROGRESS.md's '## Gate record' table (one per gate tag): [{gate, tag, windows, mac_ci, mac_kind,
     live_mac}], sorted oldest first by gate number then tag (whatever order they were written in). No table = [].
-    A cell outside the strict vocabulary raises ValueError."""
+    Every data row must parse: a gate number, that gate's tag (`v<version>-p<gate>[.<M>]`, the plugin's version when
+    given), and cells in the strict vocabulary; anything else raises ValueError (never skipped, never guessed)."""
     m = re.search(r"^## Gate record\s*$(.*?)(?=^## |\Z)", progress, re.M | re.S)
-    rows = []
+    rows, header = [], True
     for ln in (m.group(1) if m else "").splitlines():
-        cells = _cells(ln)
-        if len(cells) < 5 or not re.fullmatch(r"\d+", cells[0]):
+        if not ln.strip().startswith("|"):
             continue
+        cells = _cells(ln)
+        if header:                                     # the column names row, then the |---| separator row
+            header = not all(re.fullmatch(r":?-{3,}:?", c) for c in cells)
+            continue
+        if len(cells) != 5 or not re.fullmatch(r"\d+", cells[0]):
+            raise ValueError(f"PROGRESS.md gate record: the row {ln.strip()[:80]!r} must be "
+                             "| <gate number> | <tag> | <Windows> | <macOS CI> | <Live Mac> |")
         tag = re.match(r"`?(" + TAG_RE.pattern + r")`?(?:\s|$)", cells[1])
         if not tag:
             raise ValueError(f"PROGRESS.md gate record, gate {cells[0]}: the tag cell {cells[1][:40]!r} must start "
                              "with a gate tag (v<version>-p<N>[.<M>])")
         t = tag.group(1)
+        tm = re.fullmatch(r"v(.+)-p(\d+)(?:\.\d+)?", t)
+        if int(tm.group(2)) != int(cells[0]) or (version and tm.group(1) != version):
+            raise ValueError(f"PROGRESS.md gate record, gate {cells[0]}: the tag {t} is not this gate's"
+                             + (f" (expected v{version}-p{cells[0]}[.<M>])" if version else f" (expected -p{cells[0]})"))
         _form(cells[2], WIN_FORMS, "Windows", t)
         mac = cells[3] or "not run"
         rows.append({"gate": cells[0], "tag": t, "windows": cells[2], "mac_ci": cells[3],
@@ -512,7 +527,7 @@ def gate_record(progress: str) -> list:
 def gate_state(progress: str, tags=(), version: str = "") -> dict:
     """What PROGRESS.md records about the gates: passed phase numbers, phases in progress, the latest gate tag of a
     passed phase, and the latest such gate row with a macOS CI result (the Mac line of the banner and WHAT-WORKS)."""
-    rows = gate_record(progress)
+    rows = gate_record(progress, version)
     passed, active = passed_phases(progress, tags, version, rows=rows)
     done = {n for n, _name, _tag in passed}
     rows = [r for r in rows if r["gate"] in done]       # a gate row of a phase that did not pass never counts
@@ -536,8 +551,9 @@ def gate_lines_en(st: dict) -> list:
     if not mac:
         L.append("macOS: never run yet (no gate in PROGRESS.md has a macOS CI result).")
         return L
-    line = {"full green": f"macOS: CI full suite green at `{mac['tag']}`.",
-            "smoke green": f"macOS: CI smoke job green at `{mac['tag']}` (not the full suite).",
+    more = f": {mac['detail']}" if mac["detail"] not in ("", mac["kind"]) else ""
+    line = {"full green": f"macOS: CI full suite green at `{mac['tag']}`{more}.",
+            "smoke green": f"macOS: CI smoke job green at `{mac['tag']}` (not the full suite){more}.",
             "full red": f"macOS: CI full suite red at `{mac['tag']}`: {mac['detail']}.",
             "smoke red": f"macOS: CI smoke job red at `{mac['tag']}`: {mac['detail']}."}[mac["kind"]]
     if st["latest_tag"] and mac["tag"] != st["latest_tag"]:
@@ -829,7 +845,7 @@ def handoff(repo, out, label=None, preview=False, dry_run=False, sample_maker=No
         raise HandoffError(f"at {head[:8]}: {e} (plugin.json, LOCKED-AREAS.md and MAC-INBOX.md must be committed)")
     progress = blobs["PROGRESS.md"] or ""
     try:
-        gate_record(progress)               # strict vocabulary: a free-text cell stops here, before anything is written
+        gate_record(progress, version)      # strict vocabulary: a free-text cell stops here, before anything is written
     except ValueError as e:
         raise HandoffError(f"at {head[:8]}: {e}")
     dirty =len(_git(repo, "status", "--porcelain", "--untracked-files=no").splitlines())
