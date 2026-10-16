@@ -10,7 +10,11 @@
 #   * a `.cmd` CLI is never run through cmd.exe with JSON on argv (platform.claude_command resolves it or refuses);
 #   * cancel / timeout kills the CLI and what it started: the tree on Windows (lib/parallel.kill_tree, taskkill /T), the
 #     CLI's own process group on POSIX (it is started in a new session and the group is killed);
-#   * a cancelled run (lib/parallel) starts no further batch and ends with error "cancelled";
+#   * what lib/parallel tracks is a handle (_CliHandle) whose kill() also kills the CLI's process group on POSIX, so a
+#     grandchild holding the pipes cannot keep a cancelled run waiting for CLI_TIMEOUT;
+#   * a cancelled run (lib/parallel) starts no further batch or retry and ends with error "cancelled";
+#   * find_claude_code searches every absolute PATH folder itself (platform.find_on_path): a planted claude.exe in the
+#     current folder neither runs nor hides the real CLI (Task 10 re-review);
 #   * a refused `.cmd` shim is the error code "cmd_shim_refused" with the help text in stats["how"] (make_client: the
 #     notice of the same name, `notice_how` gives the text);
 #   * find_claude_code keeps only absolute paths: a CWD-relative claude.exe is never started (Task 10 review I1);
@@ -89,14 +93,18 @@ def _child_env(environ=None, windows=None) -> dict:
     return {k: v for k, v in environ.items() if (k.upper() if windows else k) not in drop}
 
 
+def _is_posix() -> bool:
+    return os.name == "posix"
+
+
 def _spawn_kwargs(posix=None) -> dict:
     """POSIX: the CLI leads its own session / process group, so a cancel can kill the group (what it started too)"""
-    posix = os.name == "posix" if posix is None else posix
+    posix = _is_posix() if posix is None else posix
     return {"start_new_session": True} if posix else {}
 
 
 def _kill_group(p, posix=None) -> None:
-    posix = os.name == "posix" if posix is None else posix
+    posix = _is_posix() if posix is None else posix
     if posix:
         try:
             os.killpg(p.pid, getattr(signal, "SIGKILL", 9))
@@ -110,16 +118,31 @@ def _kill_cli(p, posix=None) -> None:
     kill_tree(p)
 
 
+class _CliHandle:
+    """what lib/parallel tracks for a running CLI: kill_tree(handle) polls it, and kills it with `.kill()`. On POSIX
+    that must also reach the CLI's process group: a grandchild that inherited our pipes would otherwise keep
+    communicate() waiting for the whole CLI_TIMEOUT after a cancel. (Windows: kill_tree uses `.pid` for taskkill /T.)"""
+
+    def __init__(self, p):
+        self.p = p
+        self.pid = p.pid
+
+    def poll(self):
+        return self.p.poll()
+
+    def kill(self):
+        _kill_group(self.p)
+        self.p.kill()
+
+
 def _run_cli(args, stdin, cwd):
     if _platform.is_batch(args[0]):             # never cmd.exe with the caption JSON on argv (BatBadBut)
         raise _platform.CmdShimRefused(_platform.CMD_REFUSED)
     p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                          encoding="utf-8", errors="replace", cwd=cwd, env=_child_env(), **_spawn_kwargs())
-    track(p)                                    # a cancelled parallel_map kills it too
+    handle = track(_CliHandle(p))               # a cancelled parallel_map kills it (and, on POSIX, its group) too
     try:
         out, _err = p.communicate(stdin, timeout=CLI_TIMEOUT)
-        if cancelled():                         # killed by the cancel (POSIX: kill_tree only reached the CLI itself)
-            _kill_group(p)
     except BaseException:                       # timeout, Ctrl+C, anything: the CLI and what it started die with us
         _kill_cli(p)
         try:
@@ -128,7 +151,7 @@ def _run_cli(args, stdin, cwd):
             pass
         raise
     finally:
-        untrack(p)
+        untrack(handle)
     return p.returncode, out
 
 
@@ -140,9 +163,11 @@ def find_claude_code(env=None, home=None, windows=None):
     windows = _platform.is_windows() if windows is None else windows
     home = Path.home() if home is None else Path(home)
     # absolute_only: shutil.which() also finds a claude.exe planted in the current folder on Windows (review I1)
-    found = [c for c in _platform.absolute_only(_platform.claude_install_candidates(env, home, windows,
-                                                                                    _platform.in_sandbox(env)))
-             if _platform.runnable(c, env, windows)]
+    def path_which(name, path=None):             # not shutil.which: it searches the cwd first on Windows (planted files)
+        return _platform.find_on_path(name, path, windows, env)
+
+    found = [c for c in _platform.absolute_only(_platform.claude_install_candidates(
+        env, home, windows, _platform.in_sandbox(env), which=path_which)) if _platform.runnable(c, env, windows)]
     found.sort(key=_platform.is_batch)           # stable: exe first, .cmd last
     return str(found[0]) if found else None
 
@@ -297,7 +322,9 @@ def correct(phrases: list, rules: str, glossary: dict, api_key: str, client=None
         before, after = phrases[max(0, i - CONTEXT):i], phrases[i + BATCH:i + BATCH + CONTEXT]
         reply = None
         try:
-            for _ in range(2):   # one retry when the count is wrong
+            for attempt in range(2):   # one retry when the count is wrong
+                if attempt and cancelled():      # a cancel between the attempts: no second request / process
+                    break
                 reply = _ask(client, system, before, lines, after, effort)
                 if len(reply) == len(lines):
                     break
@@ -309,6 +336,8 @@ def correct(phrases: list, rules: str, glossary: dict, api_key: str, client=None
             else:
                 stats["error"] = str(e) if isinstance(e, RuntimeError) else type(e).__name__
             reply = None
+        if cancelled() and (reply is None or len(reply) != len(lines)):
+            stats["error"] = "cancelled"
         if reply is None or len(reply) != len(lines):
             stats["kept_source"].extend(range(i, i + len(lines)))
             out.extend(lines)

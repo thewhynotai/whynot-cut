@@ -567,13 +567,14 @@ class TestTempFolderAndCancel(unittest.TestCase):
                     _run_cli(self._sleeper(pidfile), "", d)
             self.assertIsNotNone(procs[0].poll())
             grandchild = int(pidfile.read_text(encoding="utf-8"))
-            if sys.platform == "win32":                   # kill_tree walks the tree with taskkill /T on Windows only
-                deadline = time.time() + 30
-                while self._alive(grandchild) and time.time() < deadline:
-                    time.sleep(0.2)
-                self.assertFalse(self._alive(grandchild), "the CLI's child survived the cancel")
-            elif self._alive(grandchild):                 # POSIX: only the CLI itself is killed (lib/parallel.kill_tree)
-                os.kill(grandchild, 9)
+            # Windows: kill_tree walks the tree with taskkill /T; POSIX: the CLI's process group is killed (_kill_cli)
+            deadline = time.time() + 30
+            while self._alive(grandchild) and time.time() < deadline:
+                time.sleep(0.2)
+            gone = not self._alive(grandchild)
+            if not gone:
+                os.kill(grandchild, 9)                    # never leave it behind, then fail
+            self.assertTrue(gone, "the CLI's child survived the cancel")
 
     def test_a_cancelled_parallel_run_kills_the_tracked_cli(self):
         import contextvars
@@ -684,17 +685,17 @@ class TestCwdRelativeIsNeverTrusted(unittest.TestCase):
             shim = touch(d / "npm" / "claude.cmd")
             touch(d / "npm" / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js")
             planted = touch(d / "cwd" / "node.exe")
-            for found in ("node.exe", ".\\node.EXE"):
-                with self._cwd(planted.parent), mock.patch.object(P.shutil, "which", return_value=found):
-                    with self.assertRaises(P.CmdShimRefused, msg=found):
-                        P.claude_command(shim, {"PATH": ""})
-            batch = touch(d / "bin" / "node.cmd")
-            with mock.patch.object(P.shutil, "which", return_value=str(batch)):
-                with self.assertRaises(P.CmdShimRefused):
-                    P.claude_command(shim, {"PATH": ""})
-            real = touch(d / "bin" / "node.exe")
-            with mock.patch.object(P.shutil, "which", return_value=str(real)):
-                self.assertEqual(P.claude_command(shim, {"PATH": ""})[0], str(real))
+            for path in ("", ".", "cwd", os.pathsep.join(["", ".", "cwd"])):          # relative / empty PATH entries only
+                with self._cwd(d):
+                    with self.assertRaises(P.CmdShimRefused, msg=path):
+                        P.claude_command(shim, {"PATH": path}, windows=True)
+            touch(d / "bin" / "node.cmd")                                           # a batch node is never used
+            with self.assertRaises(P.CmdShimRefused):
+                P.claude_command(shim, {"PATH": str(d / "bin")}, windows=True)
+            real = touch(d / "bin2" / "node.exe")
+            self.assertEqual(os.path.normcase(P.claude_command(shim, {"PATH": str(d / "bin2")}, windows=True)[0]),
+                             os.path.normcase(str(real)))
+            self.assertTrue(planted.is_file())
 
     @unittest.skipUnless(sys.platform == "win32", "shutil.which searches the current folder on Windows only")
     def test_windows_planted_claude_exe_and_node_exe_in_the_cwd_are_not_used(self):
@@ -754,7 +755,7 @@ class TestShimRefusalIsACodeWithAHow(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             shim = self._shim(d, cli_js=True)
             node_cmd = touch(Path(d) / "bin" / "node.cmd")
-            with mock.patch.object(P.shutil, "which", return_value=str(node_cmd)):
+            with mock.patch.dict(os.environ, {"PATH": str(node_cmd.parent)}):
                 with self.assertRaises(P.CmdShimRefused) as cm:
                     P.claude_command(shim, {"PATH": str(node_cmd.parent)})
                 client = ClaudeCodeClient(str(shim), runner=lambda *a: (0, "{}"))
@@ -917,16 +918,30 @@ class TestSubscriptionNeverInheritsApiKeys(unittest.TestCase):
         self.assertEqual(rc, 0)
 
     def test_client_default_runner_path_uses_it(self):
+        """the REAL default runner (no runner= given), driven through the Popen seam: the env it hands over lacks the keys"""
         seen = {}
 
-        def fake_run_cli(args, stdin, cwd):
-            seen["env"] = _correct_module._child_env()
-            return 0, json.dumps({"is_error": False, "structured_output": {"lines": FIXED}})
+        class StubPopen:
+            def __init__(self, args, **kw):
+                seen.update(args=args, kw=kw)
+                self.pid, self.returncode = 4242, 0
 
-        with mock.patch.dict(os.environ, self.KEYS):
-            out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/x/claude", runner=fake_run_cli))
-        self.assertEqual(out, FIXED)
-        self.assertTrue(all(k not in seen["env"] for k in self.KEYS))
+            def communicate(self, *a, **k):
+                return json.dumps({"is_error": False, "structured_output": {"lines": FIXED}}), ""
+
+            def poll(self):
+                return 0
+
+        client = ClaudeCodeClient("/x/claude")
+        self.assertIs(client.runner, _run_cli)
+        with mock.patch.dict(os.environ, dict(self.KEYS, KEEP_ME="1")), mock.patch.object(subprocess, "Popen", StubPopen):
+            out, stats = correct(SRC, "rules", {}, "", client=client)
+            self.assertEqual({k: os.environ.get(k) for k in self.KEYS}, self.KEYS)
+        self.assertTrue(out == FIXED and stats["error"] is None)
+        env = seen["kw"].get("env")
+        self.assertIsInstance(env, dict)
+        self.assertTrue(all(k not in env for k in self.KEYS))
+        self.assertEqual(env.get("KEEP_ME"), "1")
 
     def test_child_env_matching_is_case_insensitive_on_windows_only(self):
         base = {"anthropic_api_key": "a", "Anthropic_Auth_Token": "b", "ANTHROPIC_API_KEY": "c", "PATH": "p"}
@@ -946,6 +961,239 @@ class TestSubscriptionNeverInheritsApiKeys(unittest.TestCase):
         self.assertEqual(made, [{"api_key": "sk-test-api-key", "max_retries": 3}])
         ce.assert_not_called()
         popen.assert_not_called()
+
+
+class TestCancelReachesTheProcessGroup(unittest.TestCase):
+    """Task 10 re-review M3a: a cancel goes through lib/parallel (kill_tree = the CLI only off Windows). A grandchild that
+    holds the pipes would keep communicate() waiting for CLI_TIMEOUT, so what is tracked is a handle whose kill() also
+    kills the process group."""
+
+    def _stub(self, dead):
+        class StubPopen:
+            made = []
+
+            def __init__(self, args, **kw):
+                self.args, self.kw, self.pid, self.returncode = args, kw, 987654, None
+                StubPopen.made.append(self)
+
+            def communicate(self, *a, **k):
+                dead.wait(30)                        # blocked on the pipes until the CLI is killed
+                self.returncode = -9
+                return "", ""
+
+            def poll(self):
+                return -9 if dead.is_set() else None
+
+            def kill(self):
+                dead.set()
+
+        return StubPopen
+
+    def test_a_cancelled_run_kills_the_group_through_the_tracked_handle(self):
+        import contextvars
+        import threading
+        from lib import parallel
+        dead, killed = threading.Event(), []
+        stub = self._stub(dead)
+        run = parallel._Run()
+        token = parallel._RUN.set(run)
+        try:
+            ctx = contextvars.copy_context()
+        finally:
+            parallel._RUN.reset(token)
+
+        def off_windows_kill_tree(proc):             # what lib/parallel.kill_tree does off Windows: the process itself
+            if proc.poll() is None:
+                proc.kill()
+
+        with mock.patch.object(_correct_module, "_is_posix", lambda: True), \
+                mock.patch.object(os, "killpg", lambda pgid, sig: killed.append((pgid, sig)), create=True), \
+                mock.patch.object(subprocess, "Popen", stub), \
+                mock.patch.object(parallel, "kill_tree", off_windows_kill_tree):
+            result = []
+            t = threading.Thread(target=lambda: result.append(ctx.run(_run_cli, ["/x/claude", "-p"], "{}", ".")))
+            t.start()
+            deadline = time.time() + 30
+            while not run.procs and time.time() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(run.procs, "the CLI was not registered with the parallel run")
+            run.cancel()
+            t.join(timeout=30)
+        self.assertFalse(t.is_alive(), "communicate() was still waiting after the cancel")
+        self.assertTrue(dead.is_set())
+        self.assertTrue(killed, "the cancel never reached killpg")
+        self.assertEqual({pgid for pgid, _sig in killed}, {987654})
+        self.assertTrue(stub.made[0].kw.get("start_new_session"))
+        self.assertFalse(run.procs)
+
+    def test_is_posix_follows_the_os(self):
+        self.assertEqual(_correct_module._is_posix(), os.name == "posix")
+
+
+class TestPathSearchSkipsPlantedFiles(unittest.TestCase):
+    """Task 10 re-review R1-N1: a planted claude.exe in the cwd must not hide the real CLI further down PATH. The port
+    searches each ABSOLUTE PATH folder itself (PATHEXT order on Windows); relative and empty entries are skipped."""
+
+    def test_find_on_path_walks_absolute_folders_in_pathext_order_and_skips_the_rest(self):
+        nc = os.path.normcase
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            first, second = d / "first", d / "second"
+            touch(first / "claude.cmd")
+            touch(second / "claude.exe")
+            touch(d / "cwd" / "claude.exe")
+            path = os.pathsep.join(["", ".", "cwd", str(first), '"%s"' % second])
+            old = os.getcwd()
+            os.chdir(d)
+            try:
+                got = P.find_on_path("claude", path, windows=True, env={})
+                every = [nc(x) for x in P.iter_on_path("claude", path, windows=True, env={})]
+                only_exe = P.find_on_path("claude", path, windows=True, env={"PATHEXT": ".EXE"})
+                nothing = P.find_on_path("claude", os.pathsep.join(["", ".", "cwd"]), windows=True, env={})
+            finally:
+                os.chdir(old)
+        self.assertEqual(nc(got), nc(str(first / "claude.cmd")))                 # folder by folder, then PATHEXT
+        self.assertEqual(every, [nc(str(first / "claude.cmd")), nc(str(second / "claude.exe"))])
+        self.assertEqual(nc(only_exe), nc(str(second / "claude.exe")))
+        self.assertIsNone(nothing)
+
+    def test_find_claude_code_finds_the_real_cli_behind_a_planted_one(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            touch(d / "cwd" / "claude.exe")
+            real = touch(d / "realbin" / "claude.exe")
+            home = d / "home"
+            env = {"PATH": os.pathsep.join(["", ".", str(d / "realbin")]), "APPDATA": str(home / "AppData" / "Roaming")}
+            old = os.getcwd()
+            os.chdir(d / "cwd")
+            try:
+                got = _correct_module.find_claude_code(env, home, True)
+            finally:
+                os.chdir(old)
+            self.assertEqual(os.path.normcase(got), os.path.normcase(str(real)))
+
+    @unittest.skipUnless(sys.platform == "win32", "shutil.which searches the current folder on Windows only")
+    def test_windows_real_which_would_have_hidden_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            touch(d / "cwd" / "claude.exe", "")
+            real = touch(d / "realbin" / "claude.exe", "")
+            home = d / "home"
+            env = {"PATH": str(d / "realbin"), "APPDATA": str(home / "AppData" / "Roaming")}
+            with mock.patch.dict(os.environ):
+                os.environ.pop("NoDefaultCurrentDirectoryInExePath", None)
+                old = os.getcwd()
+                os.chdir(d / "cwd")
+                try:
+                    self.assertFalse(os.path.isabs(str(P.shutil.which("claude", path=env["PATH"]))),
+                                     "the premise: which() returns the planted, relative file")
+                    self.assertEqual(os.path.normcase(_correct_module.find_claude_code(env, home, True)),
+                                     os.path.normcase(str(real)))
+                finally:
+                    os.chdir(old)
+
+    def test_node_behind_a_planted_or_batch_node_is_found(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            shim = touch(d / "npm" / "claude.cmd")
+            touch(d / "npm" / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js")
+            touch(d / "cwd" / "node.exe")
+            touch(d / "nvm" / "node.cmd")
+            real = touch(d / "real" / "node.exe")
+            env = {"PATH": os.pathsep.join(["", ".", str(d / "nvm"), str(d / "real")])}
+            old = os.getcwd()
+            os.chdir(d / "cwd")
+            try:
+                cmd = P.claude_command(shim, env, windows=True)
+            finally:
+                os.chdir(old)
+            self.assertEqual(os.path.normcase(cmd[0]), os.path.normcase(str(real)))
+
+    @unittest.skipUnless(sys.platform == "win32", "compares with the Windows behaviour of shutil.which")
+    def test_the_walk_agrees_with_shutil_which_when_every_entry_is_absolute(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            touch(d / "a" / "claude.com")
+            touch(d / "b" / "claude.exe")
+            touch(d / "c" / "claude.cmd")
+            path = os.pathsep.join(str(d / x) for x in "abc")
+            with mock.patch.dict(os.environ, {"PATHEXT": ".COM;.EXE;.BAT;.CMD", "NoDefaultCurrentDirectoryInExePath": "1"}):
+                want = P.shutil.which("claude", path=path)
+            got = P.find_on_path("claude", path, windows=True, env={})
+            self.assertEqual(os.path.normcase(got), os.path.normcase(want))
+
+    def test_a_relative_claude_cli_variable_is_dropped_and_the_real_one_found(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            touch(d / "cwd" / "claude.exe")
+            real = touch(d / "realbin" / "claude.exe")
+            home = d / "home"
+            env = {"CLAUDE_CLI": "claude.exe", "PATH": str(d / "realbin"), "APPDATA": str(home / "AppData" / "Roaming")}
+            old_cwd = os.getcwd()
+            os.chdir(d / "cwd")
+            try:
+                got = _correct_module.find_claude_code(env, home, True)
+            finally:
+                os.chdir(old_cwd)
+            self.assertEqual(os.path.normcase(got), os.path.normcase(str(real)))
+
+    def test_claude_install_candidates_takes_an_injected_which_and_keeps_the_rest(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            home = d / "home"
+            real = touch(d / "realbin" / "claude.exe")
+            local = touch(home / ".local" / "bin" / "claude.exe")
+            env = {"PATH": "", "APPDATA": str(home / "AppData" / "Roaming")}
+            got = P.claude_install_candidates(env, home, True, False, which=lambda name, path=None: str(real))
+            self.assertEqual(got, [real, local])                   # which() is 2nd after $CLAUDE_CLI, then the fixed paths
+
+
+class TestCancelBetweenRetries(unittest.TestCase):
+    """Task 10 re-review M5 nit: a cancel between the two attempts of one batch starts no second request or process."""
+
+    def test_no_second_request_after_a_cancel(self):
+        from lib import parallel
+        run = parallel._Run()
+        token = parallel._RUN.set(run)
+
+        class CancellingClient(FakeClient):
+            def create(self, **kw):
+                resp = FakeClient.create(self, **kw)
+                run.cancel()
+                return resp
+
+        c = CancellingClient(FIXED[:2], FIXED)           # a wrong count: the retry would normally run
+        try:
+            out, stats = correct(SRC, "rules", {}, "key", client=c)
+        finally:
+            parallel._RUN.reset(token)
+        self.assertEqual(len(c.requests), 1)
+        self.assertEqual(out, SRC)
+        self.assertEqual(stats["error"], "cancelled")
+        self.assertEqual(stats["kept_source"], [0, 1, 2])
+
+    def test_no_second_cli_process_after_a_cancel(self):
+        from lib import parallel
+        run = parallel._Run()
+        token = parallel._RUN.set(run)
+        calls = []
+
+        def runner(args, stdin, cwd):
+            calls.append(1)
+            run.cancel()
+            return 0, json.dumps({"is_error": False, "structured_output": {"lines": FIXED[:2]}})   # wrong count
+
+        try:
+            out, stats = correct(SRC, "rules", {}, "", client=ClaudeCodeClient("/x/claude", runner=runner))
+        finally:
+            parallel._RUN.reset(token)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(stats["error"], "cancelled")
+
+    def test_without_a_cancel_the_retry_still_runs(self):
+        c = FakeClient(FIXED[:2], FIXED)
+        out, stats = correct(SRC, "rules", {}, "key", client=c)
+        self.assertEqual((out, len(c.requests)), (FIXED, 2))
 
 
 class TestCorrectProvenance(unittest.TestCase):
