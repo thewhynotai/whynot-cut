@@ -499,21 +499,60 @@ to the item or client folder, no links, cached by mtime and inode. "NEW file" me
 4. **Week:** starts on Sunday.
 5. **Plan versions:** they live with `reel plan` / `reel motion-plan`. `plan.diff` is always against the last APPROVED plan.
 6. **Flags:** `reel review-flags` (Phase 4, T4.13) writes `<item>/review-flags.json` (item folder root, next to `poster.jpg`).
-   - Shape: `{"schema": 1, "plan_kind": "timeline"|"motion", "plan_fingerprint", "written_at", "by", "checked", "items": [...]}`.
-   - Each item: `{"event_id", "flag": "medical"|"religious", "verdict": "needs-doctor-approval"|"reword-to-match"|"remove",
-     "text", "start_s", "end_s", "reason", "carried"?}`. `event_id` is the plan event id (a clip: `events[].event_id` of
-     `timeline-spec.json`; a motion video: the scene id of `motion-plan.json`). `text`, `start_s` and `end_s` come from the
-     compiled plan (never from the reviewer), seconds with 3 decimals, `reason` at most 1024 characters. `ok` lines are not
-     listed. A `(event_id, flag)` pair appears at most once; one graphic may carry both flags.
-   - `checked` is the number of lines with on-screen text the review covered (the `ok` ones included), never more than the
-     plan has. A partial re-review keeps the other flags: a flagged row of the previous file whose `event_id` is still in the
-     plan with the SAME text is carried forward with `"carried": true` and counted in `checked`. A flagged row whose text
-     changed is never carried: the engine refuses the write until the new review lists it again.
+   - Shape: `{"schema": 1, "plan_kind": "timeline"|"motion", "plan_fingerprint", "domain": "medical"|"religious"|"general",
+     "written_at", "by", "checked", "lines_total", "items": [...], "ok": [{"event_id", "text"}]}`. `domain` is the client's
+     profile domain the review was done for.
+   - The file stores EVERY reviewed line. `items` are the flagged lines: `{"event_id", "flag", "verdict":
+     "needs-doctor-approval"|"reword-to-match"|"remove", "text", "start_s", "end_s", "reason", "carried"?}`. `flag` is one the
+     client's domain checks: `medical` for a medical or general client, `religious` or `medical` for a religious client (a
+     later domain adds its own entry). `ok` lists the lines reviewed and found fine (`event_id` and the plan's `text`); a line
+     that has a flag is not repeated there. `event_id` is the plan event id (a clip: `events[].event_id` of
+     `timeline-spec.json`; a motion video: the scene id of `motion-plan.json`), always a line WITH on-screen text. `text`,
+     `start_s` and `end_s` come from the compiled plan (never from the reviewer), seconds with 3 decimals, `reason` at most
+     1024 characters. A `(event_id, flag)` pair appears at most once; one graphic may carry both flags.
+   - `lines_total` is the number of plan lines with on-screen text: the M of "N of M checked". `checked` is the N and is
+     computed by the engine: the covered lines, which equals `lines_total` on every file the engine writes (the engine refuses
+     to write a file with an uncovered line). A graphic with no on-screen text is neither counted nor listed.
+   - Coverage: a line is covered when the latest review listed it, or an earlier review had it with the SAME id and the SAME
+     text (a flagged row is then carried with `"carried": true`). An earlier flag stays until the new review lists that id for
+     that flag. An edited, renumbered, split or merged graphic is new until it is listed, and the engine refuses the write
+     until it is, so a file never shows such a line as reviewed. A flag cannot be lost by moving, and the engine never guesses
+     where its words went. A "new or changed" line is one no earlier row has with the same id and the same words.
+     - A flag that left its line (its words changed and were re-reviewed, or its id was reused or removed): every new or
+       changed line must be reviewed for that SAME flag, or the write is refused ("G6 is new or changed since G2's medical
+       flag: review G6 for medical").
+     - In-place exception: a flag still on its line (carried, or re-reviewed in place with the same id and words) only holds
+       new or changed lines that carry an exact copy of its words to that flag ("G2's flagged wording (medical) is now on
+       G7; review G7 for medical").
+     - Listing the line under the other flag does not count, so a split, merge, extension or invisible change (zero-width
+       space, tatweel) cannot clear a flag silently. A line unchanged since the earlier review needs no re-listing.
+     - A line whose words were all removed counts as gone: its flag is dropped, and no review of an empty line is asked.
+     - Carrying matches id + words only, not the span or the speaker's evidence (accepted: the reviewer checks every line
+       against the full transcript).
+   - A previous file that cannot be used carries nothing and needs a full review: unreadable, another schema or plan kind,
+     any damaged row, or a `domain` other than the client's current profile domain (or none).
+   - The command's output (not the file) also reports:
+     - `dropped`: earlier flagged rows whose line is gone and whose words were not re-reviewed for that flag anywhere;
+     - `cleared` (`{"event_id", "from_event_id", "flag", "verdict", "text"}`): earlier flagged rows the new review marked `ok`
+       for the same flag on the same words, under the old id or the new id the words moved to, so the editor is told.
+     A flag whose words were re-flagged on a new id is in neither (the new item shows it). Neither list is stored in the
+     file; the panel does not need them.
+   - The engine itself serves a file (`load()`) only when it is consistent with the plan:
+     - every row is valid, and no item has verdict `ok`;
+     - every flag is one the domain checks;
+     - every row's id is a plan line with words, and its `text` is that line's current words;
+     - the `ok` list is present;
+     - `checked` = `lines_total` = the plan's count of lines with text (integers);
+     - every such line is in `items` or `ok`.
+     The panel should apply the same checks. They catch a wiped or carelessly edited file. They cannot catch a deliberate
+     edit: a flag moved into `ok` by hand with the right words looks like a real `ok`, and only a signature (not in 3.0)
+     could tell them apart.
    - **Panel use:** read the file only when `plan_fingerprint` equals the current plan's fingerprint (`plan_fingerprint` of the
-     timeline spec, or the motion plan's fingerprint). A stale or unreadable file means "no review recorded": show no flags and
-     never an all-clear (an absent file never reads as "reviewed and clean"). A line is `flagged` (the span replaces its
-     `statement` span) when it has an item here; the approval count is `checked` against the items. `carried` rows are shown
-     like any other.
+     timeline spec, or the motion plan's fingerprint) and `domain` equals the client's current profile domain. A stale,
+     other-domain, inconsistent or unreadable file means "no review recorded": show no flags and never an all-clear (an
+     absent file never reads as "reviewed and clean"). A line is `flagged` (the span replaces its `statement` span) when it
+     has an item here; the approval count is "`checked` of `lines_total`" (always complete when the file is current).
+     `carried` rows are shown like any other.
    - Absent file: the panel shows no flags (rule 1); `flag` stays absent on spans.
 7. **Edit map:** `reel plan` writes `edit-map.json`, and `reel motion-plan` writes the motion equivalent (Phase 6 engine).
 8. **Weekly log**
