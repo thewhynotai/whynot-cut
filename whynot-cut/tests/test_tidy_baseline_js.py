@@ -8,18 +8,25 @@ supplies those globals; each upstream file is one test method here and must exit
 `FAIL ` line and print exactly the recorded number of `PASS ` lines (110 in all), so a silently skipped check is caught.
 
 * `TidyUpstreamJsMixin.ROOT` is the tool root (cwd of the run: tests read `js/...`, `jsx/host.jsx`). The port's test
-  class (Task 4) subclasses the mixin with ROOT = adobe/tools/tidy/src, VERIFY_SHA = False and, where a renamed
-  expectation needs it, its own COUNTS; nothing below hard-codes the upstream path inside a test method.
+  class (`TestTidyPortJs`, N3-tidy) subclasses the mixin with ROOT = adobe/tools/tidy/src, VERIFY_SHA = False, TOTAL
+  and COUNTS of its own; nothing below hard-codes the upstream path inside a test method.
+* The port has no jsx/host.jsx (B3 adds wnc_tidy.jsx later), so the port runs test_lint.js as an R3 copy: the
+  upstream file with ONE change, the file list `js/media.js js/classify.js js/plan.js` (the copy is written to a temp
+  dir, its header comment states the change). The other four suites run unchanged against the port.
 * `test_upstream_files_unchanged` pins the upstream files these suites run (test files, the js/jsx they load or read)
-  to adobe/tools/UPSTREAM-SHA256.txt, so a green run is a run of the owner's bytes.
+  to adobe/tools/UPSTREAM-SHA256.txt, so a green run is a run of the owner's bytes, and the set of files under the
+  root must be exactly the listed ones. After every run the set of files under ROOT must be unchanged (the shim
+  writes nothing).
 Run:  bash tools/test.sh -p test_tidy_baseline_js.py
 """
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import hashlib  # noqa: E402
+import os  # noqa: E402
 import shutil  # noqa: E402
 import subprocess  # noqa: E402
+import tempfile  # noqa: E402
 import unittest  # noqa: E402
 from pathlib import Path  # noqa: E402
 
@@ -33,17 +40,32 @@ HAVE_TOOLS = ADOBE_TOOLS.is_dir()   # the shipped plugin zip has no repo-root ad
 SKIP_REASON = "node is not installed" if not NODE else "adobe/tools is not part of this layout (the plugin zip ships without the repo-root adobe/)"
 
 
-def run_suite(tc, root, test_file):
-    """Run one jsc test file through jsc_shim.js with cwd = root; return (rc, stdout lines, stderr)."""
+def run_suite(root, test_file):
+    """Run one jsc test file through jsc_shim.js with cwd = root; return (rc, stdout lines, stderr).
+    Lines are split on LF only (str.splitlines also splits on VT, FF, U+2028 ... inside a message)."""
     p = subprocess.run([NODE, str(SHIM), str(root), test_file], capture_output=True, text=True, encoding="utf-8",
                        timeout=120, cwd=str(root))
-    return p.returncode, p.stdout.splitlines(), p.stderr
+    lines = p.stdout.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    return p.returncode, lines, p.stderr
+
+
+def tree(root):
+    """Every file under root, as sorted posix paths relative to it."""
+    out = []
+    for d, _dirs, files in os.walk(str(root)):
+        for f in files:
+            out.append(Path(d, f).relative_to(root).as_posix())
+    return sorted(out)
 
 
 @unittest.skipUnless(NODE and HAVE_TOOLS, SKIP_REASON)
 class TidyUpstreamJsMixin:
     ROOT = ADOBE_TOOLS / "tidy" / "_upstream"
+    TEST_ROOT = None   # where the test files live when not under ROOT (the port runs the upstream test files)
     VERIFY_SHA = True
+    TOTAL = 110   # portability audit 2.2: Tidy 5 files, 110 checks
     # test file (relative to ROOT) -> exact number of `PASS ` lines of a green run
     COUNTS = {
         "tests/test_classify.js": 25,
@@ -55,15 +77,19 @@ class TidyUpstreamJsMixin:
     # files (relative to ROOT) the suites load or read besides the test files; hashed when VERIFY_SHA
     DEPENDS = ["js/classify.js", "js/media.js", "js/plan.js", "js/sync.js", "jsx/host.jsx"]
 
-    def check(self, test_file):
-        rc, lines, err = run_suite(self, self.ROOT, test_file)
+    def check(self, test_file, counts_key=None):
+        """Run test_file (relative to ROOT, or absolute); its PASS count is COUNTS[counts_key or test_file]."""
+        before = tree(self.ROOT)
+        tests = Path(test_file) if Path(test_file).is_absolute() or not self.TEST_ROOT else self.TEST_ROOT / test_file
+        rc, lines, err = run_suite(self.ROOT, str(tests))
+        self.assertEqual(tree(self.ROOT), before, "the run added or removed files under the tool root")
         fails = [ln for ln in lines if ln.startswith("FAIL ")]
         self.assertEqual(fails, [], "failing checks in %s:\n%s\n%s" % (test_file, "\n".join(fails), err))
         self.assertEqual(rc, 0, "exit %s for %s\n%s\n%s" % (rc, test_file, "\n".join(lines[-5:]), err))
         self.assertTrue(lines, "%s printed nothing: %s" % (test_file, err))
         self.assertEqual(lines[-1], "ALL PASS", "%s last line: %r" % (test_file, lines[-1]))
         passed = [ln for ln in lines if ln.startswith("PASS ")]
-        self.assertEqual(len(passed), self.COUNTS[test_file], "PASS count of %s" % test_file)
+        self.assertEqual(len(passed), self.COUNTS[counts_key or test_file], "PASS count of %s" % test_file)
 
     def test_classify(self):
         self.check("tests/test_classify.js")
@@ -81,28 +107,63 @@ class TidyUpstreamJsMixin:
         self.check("tests/test_sync.js")
 
     def test_counts_sum_to_the_audited_total(self):
-        # portability audit 2.2: Tidy 5 files, 110 checks
         self.assertEqual(sorted(self.COUNTS), ["tests/test_%s.js" % n for n in ("classify", "lint", "media", "plan", "sync")])
-        self.assertEqual(sum(self.COUNTS.values()), 110)
+        self.assertEqual(sum(self.COUNTS.values()), self.TOTAL)
 
     def test_upstream_files_unchanged(self):
-        if not self.VERIFY_SHA:
-            self.skipTest("not an upstream root")
+        """The upstream files a green run depends on: always the test files (under TEST_ROOT or ROOT); the js/jsx
+        and the exact file list only for the upstream root itself (VERIFY_SHA)."""
         want = {}
         for line in SHA_FILE.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 digest, rel = line.split(None, 1)
                 want[rel.strip()] = digest
-        base = self.ROOT.relative_to(ADOBE_TOOLS).as_posix()
-        for rel in list(self.COUNTS) + self.DEPENDS:
+        up_root = self.TEST_ROOT or self.ROOT
+        base = up_root.relative_to(ADOBE_TOOLS).as_posix()
+        files = list(self.COUNTS)
+        if self.VERIFY_SHA:
+            listed = sorted(k[len(base) + 1:] for k in want if k.startswith(base + "/"))
+            self.assertEqual(tree(self.ROOT), listed, "files under the upstream root differ from UPSTREAM-SHA256.txt")
+            files += self.DEPENDS
+        for rel in files:
             key = base + "/" + rel
             self.assertIn(key, want, key + " is not listed in UPSTREAM-SHA256.txt")
-            got = hashlib.sha256((self.ROOT / rel).read_bytes()).hexdigest()
+            got = hashlib.sha256((up_root / rel).read_bytes()).hexdigest()
             self.assertEqual(got, want[key], key + " differs from UPSTREAM-SHA256.txt")
 
 
 class TestTidyUpstreamJs(TidyUpstreamJsMixin, unittest.TestCase):
     pass
+
+
+LINT_LIST_UPSTREAM = "['js/media.js', 'js/classify.js', 'js/plan.js', 'jsx/host.jsx']"
+LINT_LIST_PORT = "['js/media.js', 'js/classify.js', 'js/plan.js']"
+LINT_COPY_HEADER = (
+    "// R3 copy of tidy/_upstream/tests/test_lint.js, written by test_tidy_baseline_js.py. ONE change: the file list is\n"
+    "// js/media.js js/classify.js js/plan.js (the port has no jsx/host.jsx yet; B3 adds wnc_tidy.jsx). Everything else\n"
+    "// is the owner's file, byte for byte.\n")
+
+
+class TestTidyPortJs(TidyUpstreamJsMixin, unittest.TestCase):
+    """The same suites against the port (adobe/tools/tidy/src): classify, media, plan, sync unchanged; lint as R3 copy."""
+    ROOT = ADOBE_TOOLS / "tidy" / "src"
+    TEST_ROOT = ADOBE_TOOLS / "tidy" / "_upstream"   # the owner's test files, run with cwd = the port root
+    VERIFY_SHA = False
+    TOTAL = 109   # 110 minus the host.jsx line of test_lint (the port has no jsx/host.jsx)
+    COUNTS = dict(TidyUpstreamJsMixin.COUNTS, **{"tests/test_lint.js": 3})
+
+    def test_lint(self):
+        up = (ADOBE_TOOLS / "tidy" / "_upstream" / "tests" / "test_lint.js").read_bytes().decode("utf-8")
+        self.assertEqual(up.count(LINT_LIST_UPSTREAM), 1)
+        copy = LINT_COPY_HEADER + up.replace(LINT_LIST_UPSTREAM, LINT_LIST_PORT)
+        with tempfile.TemporaryDirectory() as td:
+            f = Path(td) / "test_lint_port.js"
+            f.write_bytes(copy.encode("utf-8"))
+            self.check(str(f), counts_key="tests/test_lint.js")
+
+    def test_port_has_the_four_modules(self):
+        self.assertEqual([p for p in tree(self.ROOT) if p.startswith("js/")],
+                         ["js/classify.js", "js/media.js", "js/plan.js", "js/sync.js"])
 
 
 if __name__ == "__main__":
