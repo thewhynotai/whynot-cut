@@ -4,18 +4,26 @@ The real controls are the browser's: the CSP (script-src 'self' with no 'unsafe-
 base-uri, form-action) and Trusted Types (require-trusted-types-for 'script'; trusted-types 'none'), under which every
 HTML or script sink (innerHTML, outerHTML, insertAdjacentHTML, document.write, srcdoc, createContextualFragment,
 DOMParser, setHTMLUnsafe, script.src/text, eval-like timers) throws, however it is spelled; tests/test_ui_shell.py
-proves it with a computed property name. Navigation and new windows are not governed by CSP: the app host denies
-them (ET1-17).
+proves it with a computed property name. Navigation and new windows are not governed by CSP: the app host denies them
+with ET1-17's on_navigation lock and its new-window refusal.
 
 This scan stops the patterns before they reach a page: inline <script> and <style>, style="" and on*="" attributes,
 javascript: URLs (also with a tab or newline inside), HTML string sinks and HTML parsers, computed "inner"+"HTML",
 Reflect.set, eval and Function (also through .constructor), string timers, on* property handlers (also computed),
-setAttribute("style"/"on…"), iframes and srcdoc, script elements, <use> references, CSS url() and cssText built in
-script, navigation (location =, .href =, .assign, .replace) and window.open, dynamic import of anything but a relative
-path, and any remote URL (http, https, ws, protocol-relative) in any file.
-Known misses (text cannot tell them apart; Trusted Types and the CSP stop what they would do): a computed property
-write `el[k] = s`, a timer given a variable `setTimeout(fnOrString)`, and `el.setAttribute(k, v)` with a computed name
-(text.js h() refuses on*, style and formaction names at run time).
+setAttribute("style"/"on…") and setAttributeNS, document.execCommand, iframes and srcdoc, script elements, <use>
+references, an http-equiv meta, CSS url() and cssText built in script, navigation (location =, location[…], .href =,
+.assign, .replace) and window.open, dynamic import of anything but a relative path, and any remote URL (http, https,
+ws, protocol-relative) in any file.
+
+Known misses: examples, not exhaustive. Text cannot tell these apart from harmless code, so the scan does not try:
+- a computed property write: `el[k] = s`, a template key (el[`inner${…}`]), a built key `el[k + "HTML"]`;
+- an indirect global: `globalThis[name](s)`, `window[...]`, and a wrapped constructor `new (Function)(s)`;
+- a timer given a variable `setTimeout(fnOrString)`, and `el.setAttribute(k, v)` with a computed name (text.js h()
+  refuses on*, style and formaction names at run time);
+- elements built through h() that the CSP governs: form (form-action 'none'), base (base-uri 'none'), object and
+  embed (object-src 'none').
+The backstop for every one of them is the browser: Trusted Types plus the CSP (script, HTML sinks, eval, forms, base,
+plugins). The ones that navigate (location[...], a meta refresh made in script) are ET1-17's on_navigation lock.
 """
 from __future__ import annotations
 
@@ -65,6 +73,10 @@ RULES_JS = [
     ("CSS url() in script", re.compile(r"""["'`]\s*url\(""")),
     ("cssText", re.compile(r"\bcssText\b")),
     ("script element", re.compile(r"""createElement(?:NS)?\s*\([^)]*["'`]script["'`]""")),
+    ("navigation (computed)", re.compile(r"\blocation\s*\[")),
+    ("setAttributeNS", re.compile(r"\bsetAttributeNS\b")),
+    ("execCommand", re.compile(r"\bexecCommand\b")),
+    ("http-equiv", re.compile(r"http-equiv", re.I)),
 ]
 RULES_CSS = [
     ("CSS expression()", re.compile(r"expression\s*\(", re.I)),

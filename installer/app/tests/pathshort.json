@@ -1,0 +1,47 @@
+{
+ "_comment": "I.pathShort cases; expected outputs produced by the Adobe mockup's own I.pathShort (adobe/panel-ui/design/js/installer.js at 01b7afe) run under node; test_ui_shell checks the port against them and, when node is on PATH, re-derives them from the mockup.",
+ "cases": [
+  "/Users/sara/Documents/Clients/2026/Acme Corp/Raw footage",
+  "D:\\WhyNot Cut\\clients\\2026\\October\\Acme\\Raw",
+  "/Volumes/Samsung T7 Shield/Clients/2026/Acme/Raw footage",
+  "/Users/editor/WhyNot Clients",
+  "/a/b",
+  "/Users/a-very-long-account-name-here/Clients/x/y/Final",
+  "C:\\Users\\editor\\AppData\\Local\\a-very-very-long-folder-name-that-is-longer-than-the-budget",
+  "/Library/Application Support/WhyNot Cut/models/whisper/large-v3",
+  "/Users/sara/Clients/",
+  "~/Movies/WhyNot Clients/Acme Productions International/Raw footage",
+  "D:\\Clients\\Acme\\",
+  "\\\\server\\share\\Clients\\2026\\October\\Acme Productions\\Raw"
+ ],
+ "expected": {
+  "38": [
+   "/Users/sara/…/Acme Corp/Raw footage",
+   "D:\\…\\clients\\2026\\October\\Acme\\Raw",
+   "/Volumes/…/2026/Acme/Raw footage",
+   "/Users/editor/WhyNot Clients",
+   "/a/b",
+   "/Users/…/Clients/x/y/Final",
+   "C:\\…\\a-very-very-long-folder-name-that-is-longer-than-the-budget",
+   "/Library/…/models/whisper/large-v3",
+   "/Users/sara/Clients/",
+   "~/…/Raw footage",
+   "D:\\Clients\\Acme\\",
+   "\\\\…\\2026\\October\\Acme Productions\\Raw"
+  ],
+  "46": [
+   "/Users/sara/…/2026/Acme Corp/Raw footage",
+   "D:\\WhyNot Cut\\clients\\2026\\October\\Acme\\Raw",
+   "/Volumes/Samsung T7 Shield/…/Acme/Raw footage",
+   "/Users/editor/WhyNot Clients",
+   "/a/b",
+   "/Users/a-very-long-account-name-here/…/y/Final",
+   "C:\\…\\a-very-very-long-folder-name-that-is-longer-than-the-budget",
+   "/Library/…/WhyNot Cut/models/whisper/large-v3",
+   "/Users/sara/Clients/",
+   "~/…/Acme Productions International/Raw footage",
+   "D:\\Clients\\Acme\\",
+   "\\\\…\\Clients\\2026\\October\\Acme Productions\\Raw"
+  ]
+ }
+}

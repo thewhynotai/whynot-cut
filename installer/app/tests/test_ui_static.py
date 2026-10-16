@@ -58,7 +58,13 @@ class ScannerDetects(unittest.TestCase):
     ]
     # known misses, documented in _scan.py: a computed key or a function-valued variable cannot be told apart by text;
     # Trusted Types and the CSP (no 'unsafe-eval') stop what they would do
-    KNOWN_MISSES = ['el[k] = s;', 'setTimeout(fnOrString, 10);', 'el.setAttribute(k, v);']
+    KNOWN_MISSES = {'el[k] = s;': "el[k] = s", 'el[`inner${"HTML"}`] = s;': "template", 'el[k + "HTML"] = s;': "el[k + ",
+                    'globalThis[name](s);': "globalThis[", 'new (Function)(s);': "new (Function)",
+                    'setTimeout(fnOrString, 10);': "setTimeout(fnOrString)", 'el.setAttribute(k, v);': "setAttribute(k, v)",
+                    'h("form", { action: u });': "form", 'h("base", { href: u });': "base",
+                    'h("object", { data: u });': "object"}
+    MORE_BYPASS = ['location["href"] = u;', 'el.setAttributeNS(null, "onclick", s);',
+                   'document.execCommand("insertHTML", false, s);', 'h("meta", { "http-equiv": "refresh", content: s });']
 
     def test_review_bypass_samples_are_caught(self):
         for s in self.BYPASS:
@@ -68,10 +74,17 @@ class ScannerDetects(unittest.TestCase):
     def test_known_misses_are_named_in_the_scanner_doc(self):
         doc = _scan.__doc__ or ""
         self.assertIn("Trusted Types", doc)
-        for s in self.KNOWN_MISSES:
+        self.assertIn("examples, not exhaustive", doc)
+        self.assertIn("on_navigation", doc)
+        for s, phrase in self.KNOWN_MISSES.items():
             with self.subTest(sample=s):
                 self.assertEqual(_scan.scan_text("a.js", s), [], "now caught: move it to BYPASS")
-                self.assertIn(s.split("(")[0].split("[")[0].strip(), doc)
+                self.assertIn(phrase, doc)
+
+    def test_round2_bypass_samples_are_caught(self):
+        for s in self.MORE_BYPASS:
+            with self.subTest(sample=s):
+                self.assertTrue(_scan.scan_text("a.js", s), f"not caught: {s}")
 
     def test_relative_dynamic_import_and_location_reads_pass(self):
         ok = 'const m = await import("../fixtures/" + name + ".js"); const q = new URLSearchParams(location.search);' \
@@ -244,6 +257,14 @@ class StringsStub(unittest.TestCase):
         self.assertEqual(sorted(used - keys), [])
 
 
+    def test_arabic_base_equals_other(self):
+        ar = self.load()["ar"]
+        others = [k for k in ar if k.endswith(".other")]
+        self.assertTrue(others)
+        for k in others:
+            with self.subTest(k=k):
+                self.assertEqual(ar[k[:-len(".other")]], ar[k])
+
     def test_no_claude_code_in_any_string(self):
         # the acquired tool is only ever "Source-R" (HANDOFF; ADD-H); ET1-08 keeps this scan on the synced file
         d = self.load()
@@ -285,6 +306,19 @@ class Staging(unittest.TestCase):
                 self.assertEqual(p.parts[0], "vendor")
                 self.assertNotIn("..", p.parts)
                 self.assertNotIn(".", p.parts)
+
+    def test_stage_entries_stay_inside_ui(self):
+        st = self.stage_list()
+        for f in st["files"] + st["dev_only"]:
+            with self.subTest(f=f):
+                self.assertEqual(H.check_stage_entry(f), f)
+
+    def test_harness_refuses_a_bad_stage_entry(self):
+        for bad in ("../tests/_scan.py", "js/../../x", "/etc/x", "C:/x", "c:x", "js\\main.js", "//server/x", "./index.html",
+                    "", "vendor/brand/tokens.css"):
+            with self.subTest(bad=bad):
+                with self.assertRaises(ValueError):
+                    H.check_stage_entry(bad)
 
     def test_harness_refuses_a_bad_vendor_target(self):
         for bad in ("../js/main.js", "vendor/../js/main.js", "/etc/x", "C:/x", "js/main.js"):

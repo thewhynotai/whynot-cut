@@ -22,11 +22,11 @@
    machine is ET1-09.
 
    Differences from the mockup (see the ET1-07 report): DOM nodes instead of HTML strings; no state switcher beside the
-   window; the window is the viewport; the content column scrolls natively; the rail has no hard-coded English
-   aria-label (string request i00.rail.aria); data (paths, names) shows bidi controls as their code. */
+   window; the window is the viewport; the content column scrolls natively; the rail's accessible name is the string
+   i00.rail.aria (Adobe 01b7afe); data (paths, names) shows bidi controls as their code. */
 import { C } from "./ctx.js";
 import { btn, card, chip, ico, kbd, progress, status, supportParts, soonLine } from "./components.js";
-import { T, Tos, add, data, fmt, frag, h, ltr, mono, name, path, raw, safe } from "./text.js";
+import { T, TITLE_MAX, Tos, add, data, fmt, frag, h, ltr, mono, name, path, raw, safe } from "./text.js";
 import { selfCheck } from "./selfcheck.js";
 
 export const I = {};
@@ -37,9 +37,12 @@ I.ico = ico;
 /* the string form for a count: the CLDR category of this language (Intl.PluralRules: zero, one, two, few, many,
    other) picks key.<category> when the table has it, else the base key (review F5). A count from host JSON may be a
    string ("2"): it is read as a number. */
+/* the plural convention (Adobe 01b7afe, header of the mockup strings): the BASE key always exists; AR count keys carry
+   .zero .one .two .few .many .other (base == .other), EN the base plus .one where the wording changes */
+const PR = {};
 I.pluralKey = function (key, n) {
   let cat = "other";
-  try { cat = new Intl.PluralRules(C.lang).select(Number(n)); } catch (e) { cat = "other"; }
+  try { cat = (PR[C.lang] = PR[C.lang] || new Intl.PluralRules(C.lang)).select(Number(n)); } catch (e) { cat = "other"; }
   return C.S[key + "." + cat] !== undefined ? key + "." + cat : key;
 };
 I.plural = function (key, n, vars) {
@@ -154,14 +157,64 @@ I.radio = function (label, o) {
     h("span", { class: "i-size t-meta" }, o.size || ""));
 };
 
+/* SHARED: the path shown in a path field, cut in the MIDDLE so it stays on ONE line (Adobe 01b7afe; the mockup's rule,
+   copied exactly). For a path longer than the budget (characters, "…" counted as 1):
+     1. keep the FIRST segment plus its separator: the drive "D:\", or the root "/" with its first folder ("/Volumes/"); on
+        macOS under /Users and /Volumes the account or the volume name is the identity, so it is kept too ("/Users/sara/",
+        "/Volumes/Samsung T7 Shield/") when head + "…" + separator + the last segment still fits the budget, else only
+        the first folder;
+     2. keep the LAST segment whole (the folder the person chose); it is never cut by this rule;
+     3. fill from the END backwards with whole segments (each with its separator) while head + "…" + separator + the
+        kept tail stays within the budget; the first segment that does not fit stops the fill (the tail is contiguous);
+     4. put "…" plus the separator between the two parts: head + "…" + sep + tail.
+   A path within the budget is shown whole. The separator is the path's own ("\" if it has one, else "/"). The budget is
+   characters per width: 46 at 760 px, 38 at 640 px (below 760). If the last segment alone is longer than the budget the
+   field's CSS cuts it at its end, the only case it can. (A UNC path "\\server\share\..." loses its server name under
+   this rule: the mockup's behaviour, reported to the Adobe track.) */
+I.PATH_BUDGET = { 760: 46, 640: 38 };
+I.pathBudget = function () { return window.innerWidth >= 760 ? I.PATH_BUDGET[760] : I.PATH_BUDGET[640]; };
+I.pathShort = function (p, budget) {
+  if (p.length <= budget) return p;
+  const sep = p.indexOf("\\") >= 0 ? "\\" : "/";
+  const parts = p.replace(/[\\/]+$/, "").split(sep); /* "/Users/a/b" -> ["", "Users", "a", "b"]; "D:\x\y" -> ["D:", "x", "y"] */
+  let keep = parts[0] === "" ? 2 : 1;
+  const last = parts[parts.length - 1];
+  if (parts[0] === "" && (parts[1] === "Users" || parts[1] === "Volumes") && parts.length > 4 &&
+      parts.slice(0, 3).join(sep).length + 1 + 2 + last.length <= budget) keep = 3;
+  if (parts.length - 1 <= keep) return p; /* nothing in the middle to cut */
+  const head = parts.slice(0, keep).join(sep) + sep;
+  let tail = last;
+  for (let i = parts.length - 2; i >= keep; i--) {
+    const cand = parts[i] + sep + tail;
+    if (head.length + 2 + cand.length > budget) break;
+    tail = cand;
+  }
+  return head + "…" + sep + tail;
+};
+/* the fields on screen, re-cut when the window crosses 760 px */
+const PATH_FIELDS = [];
+let pathBudgetNow = 0;
+function recutPaths() {
+  const b = I.pathBudget();
+  if (b === pathBudgetNow) return;
+  pathBudgetNow = b;
+  for (const f of PATH_FIELDS) if (f.el.isConnected) f.el.replaceChildren(path(I.pathShort(f.p, b), true));
+}
+window.addEventListener("resize", recutPaths);
 /* SHARED: path field; o = {btn (label), btnKind, kind: warn|error, msg, msgKind, focus, sub}. The path is data: one LTR
-   isolate, left-aligned in both languages (R3 S-08); the whole path is the field's title */
+   isolate, left-aligned in both languages (R3 S-08), cut in the middle (I.pathShort); the whole path is the field's
+   title (neutralised, capped at TITLE_MAX) */
 I.pathField = function (label, p, o) {
   o = o || {};
+  p = String(p);
+  pathBudgetNow = I.pathBudget();
+  const field = h("div", { class: "i-path i-clip" + (o.kind ? " i-path-" + o.kind : ""), title: safe(p, TITLE_MAX) },
+    path(I.pathShort(p, pathBudgetNow), true));
+  PATH_FIELDS.push({ el: field, p });
   return frag(
     h("div", { class: "t-label" }, label),
     h("div", { class: "i-pathrow mt-1" },
-      h("div", { class: "i-path i-clip" + (o.kind ? " i-path-" + o.kind : ""), title: safe(p) }, path(p, true)),
+      field,
       btn(o.btn || T("i02.change"), { icon: "folder", focus: o.focus, kind: o.btnKind })),
     o.msg ? h("div", { class: "i-field-msg" }, status(o.msgKind || "info", 16),
       h("div", { class: "t-meta ms-2 m-grow " + (o.msgKind === "warn" || o.msgKind === "error" ? "tx-text" : "tx-muted") }, o.msg)) : null,
@@ -262,7 +315,7 @@ export function mount(view) {
         langSwitch()),
       h("div", { class: "m-hairline", "aria-hidden": "true" }),
       h("div", { class: "i-body" },
-        h("nav", { class: "i-rail" }, rail(view.rail), h("span", { class: "m-spacer" }),
+        h("nav", { class: "i-rail", "aria-label": raw("i00.rail.aria") }, rail(view.rail), h("span", { class: "m-spacer" }),
           h("div", { class: "i-rail-end" },
             view.version ? h("div", { class: "t-meta tx-muted" }, T("i00.version", { app: I.app(view.version) })) : null,
             h("div", { class: "mt-1" }, trust)),

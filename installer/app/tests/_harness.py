@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.parse
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -90,6 +91,21 @@ def check_vendor_target(to: str) -> str:
     return to
 
 
+def check_stage_entry(rel: str) -> str:
+    """A ui/stage.json entry must be a relative POSIX path that stays inside ui/ (no .., no ., no drive, no backslash,
+    no UNC, not empty) and is not a vendored target (those come from vendor.json)."""
+    p = pathlib.PurePosixPath(rel)
+    bad = (not rel or "\\" in rel or re.match(r"^[A-Za-z]:", rel) or rel.startswith("/") or p.is_absolute()
+           or any(x in ("..", ".", "") for x in rel.split("/")) or (p.parts and p.parts[0] == "vendor"))
+    if not bad:
+        root = UI.resolve()
+        if not (root / rel).resolve().is_relative_to(root):
+            bad = True
+    if bad:
+        raise ValueError(f"bad stage entry: {rel!r}")
+    return rel
+
+
 def stage(dest: pathlib.Path, *, skip_fonts: bool = False, fixtures: bool = True, production: bool = False) -> pathlib.Path:
     """Copy the UI bundle + its vendored files (+ the test fixtures) into dest; returns dest.
     production=True stages exactly what ships: the files listed in ui/stage.json + vendor.json, never the demo or the
@@ -97,7 +113,7 @@ def stage(dest: pathlib.Path, *, skip_fonts: bool = False, fixtures: bool = True
     if production:
         dest.mkdir(parents=True)
         for rel in json.loads((UI / "stage.json").read_text(encoding="utf-8"))["files"]:
-            out = dest / rel
+            out = dest / check_stage_entry(rel)
             out.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(UI / rel, out)
         fixtures = False
@@ -168,21 +184,29 @@ def viewport_delta(exe: str, work: pathlib.Path) -> tuple[int, int]:
 
 
 # The page writes its self-check once its fonts are in (fonts.ready + 50 ms). --dump-dom fires when the virtual-time
-# budget runs out; on a cold start under load (4 Chromes at once) the first pages have been dumped BEFORE the fonts
-# settled (fix round 1: 2 of 51 pages in one run had no self-check and no error). A dump without the self-check is a harness timing miss, not a
-# page result, so it is retried with a longer budget; every attempt is kept on the Render (attempts) and a page that
-# never writes its check still fails.
+# budget runs out; on a cold start under load (4 Chromes at once) a page has been dumped BEFORE its fonts settled (fix
+# round 1: 2 of 51 pages once). Such a CLEAN miss (no self-check, and nothing else wrong: no uncaught error, no CSP
+# line, no timeout) is dumped again with a longer budget. Anything else is never retried: the page's own failure must
+# show (review round 2, N2). Every attempt's log is kept (Render.logs, and Render.log joins them, so the console checks
+# see all attempts); the tests fail when more than 2 pages of one run needed a second dump.
 BUDGETS = (10000, 20000, 40000)
+
+
+def clean_miss(r: "Render") -> bool:
+    """A dump without the self-check whose log shows nothing wrong (a timing miss, not a page failure)."""
+    return (r.raw_check is None and not r.console_errors and not r.console_csp and not r.console_csp_notes
+            and "[harness] timeout" not in r.log and "Failed to fetch dynamically imported module" not in r.log)
 
 
 def render(exe: str, stage_dir: pathlib.Path, work: pathlib.Path, query: dict, width: int, os_kind: str = "mac",
            tag: str = "r", chrome: bool = True, delta: tuple[int, int] = (0, 0)) -> Render:
     height = CONTENT_H[width] + (CHROME_H[os_kind] if chrome else 0)
     url = (stage_dir / "index.html").resolve().as_uri() + "?" + urllib.parse.urlencode(query)
-    attempts = []
+    attempts, logs = [], []
     for i, budget in enumerate(BUDGETS):
         prof = work / f"profile-{tag}-{i}"
         cmd = _chrome_cmd(exe, prof, (width + delta[0], height + delta[1]), url, budget)
+        t0 = time.monotonic()
         try:
             r = subprocess.run(cmd, capture_output=True, timeout=180)
             dom, log = r.stdout.decode("utf-8", "replace"), r.stderr.decode("utf-8", "replace")
@@ -191,11 +215,14 @@ def render(exe: str, stage_dir: pathlib.Path, work: pathlib.Path, query: dict, w
             log = (e.stderr or b"").decode("utf-8", "replace") + "\n[harness] timeout"
         finally:
             shutil.rmtree(prof, ignore_errors=True)
-        out = Render(dom, log, query, (width, height))
+        seconds = time.monotonic() - t0
         attempts.append(budget)
-        out.attempts = attempts
-        if out.raw_check is not None:
+        logs.append(f"[harness] attempt {i + 1}, virtual-time budget {budget} ms, {seconds:.1f} s\n" + log)
+        one = Render(dom, log, query, (width, height))
+        if not clean_miss(one):
             break
+    out = Render(dom, "\n".join(logs), query, (width, height))
+    out.attempts, out.logs, out.seconds = attempts, logs, seconds
     return out
 
 

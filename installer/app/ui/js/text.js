@@ -16,8 +16,15 @@
      . the invisible look-alike makers U+200B (ZWSP), U+2060 (WJ) and U+FEFF (BOM), so two names that look the same
        on screen do not differ by an invisible character. ZWNJ / ZWJ (U+200C/D) are LEFT ALONE: Arabic and Persian
        names and emoji need them;
+     . the other invisible format characters (review round 2): U+00AD (soft hyphen), U+180E, U+2061-2064,
+       U+206A-206F, U+FFF9-FFFB and the tag block U+E0000-E007F;
      . the two private-use characters this file uses as placeholders, so data can never forge one.
-   - a T() string var that holds any of these is inserted as its own data isolate (name()), never into the line. */
+     A run of consecutive coded characters is ONE .m-ctl span (one pass, review round 2 N3).
+   - what is SHOWN of one data value is capped at DATA_MAX characters with an ellipsis (a corrupt or hostile host
+     value of a Windows long-path size must not stall the window, N3); where the whole value matters (a name, the path
+     field) it is the title, neutralised and capped at TITLE_MAX.
+   - a T() string var joins the sentence only when it is provably ONE safe run (safeRun below, the one definition);
+     anything else is its own data isolate (name()), never part of the line (review round 2, N1). */
 import { C } from "./ctx.js";
 
 export const SVG_NS = "http://www.w3.org/2000/svg";
@@ -53,21 +60,37 @@ export function frag(...kids) { return add(document.createDocumentFragment(), ki
 export function svg(tag, attrs) { return setAttrs(document.createElementNS(SVG_NS, tag), attrs); }
 
 /* ---- untrusted data ---- */
-const CTL = /[\u0000-\u0008\u000A-\u001F\u007F-\u009F\u061C\u200B\u200E\u200F\u2028\u2029\u202A-\u202E\u2060\u2066-\u2069\uFEFF\uE000\uE001]/g;
-const hasCtl = (s) => { CTL.lastIndex = 0; const r = CTL.test(s); CTL.lastIndex = 0; return r; };
-const code = (ch) => "[U+" + ch.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0") + "]";
-/* data as plain text: every control shown as its code */
-export function safe(s) { return String(s).replace(CTL, code); }
-/* data as nodes: the controls become visible .m-ctl marks */
-export function data(s) {
+const CTL_SET = "\\u0000-\\u0008\\u000A-\\u001F\\u007F-\\u009F\\u00AD\\u061C\\u180E\\u200B\\u200E\\u200F\\u2028\\u2029\\u202A-\\u202E" +
+  "\\u2060-\\u2064\\u2066-\\u206F\\uFEFF\\uFFF9-\\uFFFB\\uE000\\uE001\\u{E0000}-\\u{E007F}";
+const CTL = new RegExp("[" + CTL_SET + "]", "u");
+const CTL_RUN = new RegExp("[" + CTL_SET + "]+", "gu");
+const hasCtl = (s) => CTL.test(s);
+const codes = (run) => Array.from(run, (ch) => "[U+" + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, "0") + "]").join("");
+export const DATA_MAX = 512;
+export const TITLE_MAX = 4096;
+/* the first max characters (whole code points) with an ellipsis, when the value is longer */
+export function cap(s, max) {
   s = String(s);
+  if (s.length <= max) return s;
+  return Array.from(s.slice(0, max + 1)).slice(0, max - 1).join("") + "\u2026";
+}
+/* data as plain text (a title, a T() var that is a safe run): every coded character shown as its code; with max, the
+   result (codes included) is at most max characters */
+export function safe(s, max) {
+  s = String(s);
+  if (!max) return s.replace(CTL_RUN, codes);
+  return cap(cap(s, max).replace(CTL_RUN, codes), max);
+}
+/* data as nodes, capped at DATA_MAX: one pass, each run of coded characters one visible .m-ctl mark */
+export function data(s) {
+  s = cap(s, DATA_MAX);
   const out = document.createDocumentFragment();
   let last = 0;
-  CTL.lastIndex = 0;
-  for (let m; (m = CTL.exec(s));) {
+  CTL_RUN.lastIndex = 0;
+  for (let m; (m = CTL_RUN.exec(s));) {
     if (m.index > last) out.append(document.createTextNode(s.slice(last, m.index)));
-    out.append(h("span", { class: "m-ctl" }, code(m[0])));
-    last = m.index + 1;
+    out.append(h("span", { class: "m-ctl" }, codes(m[0])));
+    last = m.index + m[0].length;
   }
   if (last < s.length) out.append(document.createTextNode(s.slice(last)));
   return out;
@@ -80,6 +103,7 @@ export function ltr(s, cls) { return h("bdi", { dir: "ltr", class: cls || "lat" 
    slash, backslash, underscore, dot or hyphen), except with oneLine: a one-line field (I.pathField) gets no break
    opportunity at all, since Chrome breaks at <wbr> even under white-space: nowrap */
 export function path(s, oneLine) {
+  s = cap(s, DATA_MAX);
   const b = h("bdi", { dir: "ltr", class: "mono m-path" });
   if (oneLine) return add(b, [data(s)]);
   for (const piece of String(s).split(/(?<=[\\/_.\-])/)) {
@@ -90,7 +114,10 @@ export function path(s, oneLine) {
 }
 /* a name from data (a client folder, a file) in a text line: its own isolate whose direction comes from its first
    strong letter (dir=auto), so it never reorders the line around it, and the line never reorders it */
-export function name(s) { return h("bdi", { dir: "auto", class: "m-data" }, data(s)); }
+export function name(s) {
+  s = String(s);
+  return h("bdi", { dir: "auto", class: "m-data", title: s.length > DATA_MAX ? safe(s, TITLE_MAX) : null }, data(s));
+}
 /* a mono run; a pure time (6:40) tightens the colon, which a monospace face spaces as a full cell */
 export function mono(s) {
   s = String(s);
@@ -167,11 +194,25 @@ function txt(s, marks) {
   return out;
 }
 
+/* The ONE definition of a T() string var that may join the sentence as is (review round 2, N1): at most DATA_MAX
+   characters, and either a plain number (digits with . , or : between them: "25.1", "0:42", "1,234") or exactly ONE
+   Latin run as LATIN keeps it whole (ASCII letters and digits with ' _ - . inside, single spaces or NBSPs between
+   words, a slash inside a word; no trailing . - _ ', not a path). In an Arabic line such a value stays one LTR run
+   and joins the words around it ("After Effects {version}"). Anything else (other punctuation, brackets, accented or
+   non-Latin letters, symbols, a TAB, a coded character) would be cut into several runs that the line reorders, so it
+   becomes its own isolate (name()). */
+function safeRun(s) {
+  if (s.length > DATA_MAX) return false;
+  if (s === "" || /^[0-9]+(?:[.,:][0-9]+)*$/.test(s)) return true;
+  LATIN.lastIndex = 0;
+  const m = LATIN.exec(s);
+  LATIN.lastIndex = 0;
+  return !!m && m.index === 0 && m[0] === s && !/[.\-_']$/.test(s) && !PATHSTART.test(s);
+}
+
 /* T(key, vars): the string for this language as a fragment, Latin runs isolated in Arabic. A var is plain text
-   (substituted BEFORE the Latin runs are isolated, so "After Effects {version}" stays one run) or a Node (inserted as
-   is, through a private-use placeholder). A plain-text var that holds a neutralised character becomes its own data
-   isolate (name()): its [U+XXXX] codes would otherwise split the Latin run in an Arabic line. A missing key is recorded
-   and drawn as [key]. */
+   (substituted BEFORE the Latin runs are isolated) when safeRun() allows it, a data isolate (name()) otherwise, or a
+   Node (inserted as is, through a private-use placeholder). A missing key is recorded and drawn as [key]. */
 export function T(key, vars) {
   const s = C.S[key];
   if (s === undefined) { C.missing.push(key); return frag("[" + key + "]"); }
@@ -180,7 +221,7 @@ export function T(key, vars) {
   for (let i = 0; i < parts.length; i++) {
     if (i % 2 === 0) { str += parts[i]; continue; }
     let v = vars ? vars[parts[i]] : undefined;
-    if (v !== undefined && !(v instanceof Node) && hasCtl(String(v))) v = name(v);
+    if (v !== undefined && !(v instanceof Node) && (hasCtl(String(v)) || !safeRun(String(v)))) v = name(v);
     if (v instanceof Node) { str += "\uE000" + marks.length + "\uE001"; marks.push(v); }
     else str += v === undefined ? "{" + parts[i] + "}" : safe(v);
   }

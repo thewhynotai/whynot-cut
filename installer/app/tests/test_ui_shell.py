@@ -11,12 +11,16 @@ Run heavy: heavy.sh job et1-07 -- python -m unittest -v (from installer/app/test
 from __future__ import annotations
 
 import concurrent.futures as cf
+import html
+import json
 import pathlib
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.parse
 
 import _harness as H
 
@@ -60,6 +64,12 @@ class ShellRenders(unittest.TestCase):
         jobs[("remount", "en", 760, "mac")] = (cls.stage, {"demo": "shell", "fixture": "remount", "lang": "en"}, 760, "mac")
         for lang in LANGS:
             jobs[("prod-idle", lang, 760, "mac")] = (cls.stage_prod, {"lang": lang}, 760, "mac")
+        # review round 2: ?demo= on a production bundle (N6), long data (N3), the late remount (N5), the path cut (01b7afe)
+        jobs[("prod-demo", "en", 760, "mac")] = (cls.stage_prod, {"demo": "shell", "fixture": "hostile", "lang": "en"}, 760, "mac")
+        jobs[("long", "ar", 760, "mac")] = (cls.stage, {"demo": "shell", "fixture": "long", "lang": "ar"}, 760, "mac")
+        jobs[("remount-late", "en", 760, "mac")] = (cls.stage, {"demo": "shell", "fixture": "remount-late", "lang": "en"}, 760, "mac")
+        for w in WIDTHS:
+            jobs[("pathshort", "en", w, "mac")] = (cls.stage, {"demo": "shell", "fixture": "pathshort", "lang": "en"}, w, "mac")
         with cf.ThreadPoolExecutor(max_workers=4) as ex:
             futs = {k: ex.submit(H.render, cls.exe, st, cls.work, q, w, os_kind, "-".join(map(str, k)), delta=cls.delta)
                     for k, (st, q, w, os_kind) in jobs.items()}
@@ -71,7 +81,8 @@ class ShellRenders(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.work, ignore_errors=True)
 
-    def cases(self, kinds=("shell", "hostile", "idle", "nosupport", "order", "plural", "remount", "prod-idle")):
+    def cases(self, kinds=("shell", "hostile", "idle", "nosupport", "order", "plural", "remount", "prod-idle",
+                           "prod-demo", "long", "remount-late", "pathshort")):
         return [(k, r) for k, r in self.R.items() if k[0] in kinds]
 
     # ---- every normal page ----
@@ -187,7 +198,8 @@ class ShellRenders(unittest.TestCase):
                     self.assertEqual(bad, [], (t, a))
                 for cls in ("i-path", "i-monobox", "i-step-name"):
                     text = "".join(d.text_in[cls])
-                    self.assertIn(HOSTILE_HTML, text, cls)
+                    if cls != "i-path":  # the path field shows the middle cut (01b7afe): the HTML folder is in its title
+                        self.assertIn(HOSTILE_HTML, text, cls)
                     self.assertEqual(sorted(set(text) & BIDI_CONTROLS), [], f"bidi control left in {cls}")
                     self.assertIn("[U+202E]", text, cls)
 
@@ -234,7 +246,8 @@ class ShellRenders(unittest.TestCase):
 
     def test_plural_follows_the_cldr_category(self):
         # F5: Intl.PluralRules picks key.zero|one|two|few|many|other, falling back to the base key when a form is missing
-        want = {"ar": {"0": "", "1": ".one", "2": ".two", "3": "", "10": "", "11": "", "100": "", "s2": ".two"},
+        want = {"ar": {"0": ".zero", "1": ".one", "2": ".two", "3": ".few", "10": ".few", "11": ".many", "100": ".other",
+                       "s2": ".two"},
                 "en": {"0": "", "1": ".one", "2": "", "3": "", "10": "", "11": "", "100": "", "s2": ""}}
         S = H.strings()
         for k, r in self.cases(("plural",)):
@@ -246,6 +259,98 @@ class ShellRenders(unittest.TestCase):
                     key = "i04.amber.fonts" + form
                     self.assertIn(key, S[k[1]])
                     self.assertEqual(got[n], key, n)
+
+    # ---- review round 2 ----
+    def test_retries_stay_rare(self):
+        # N2: a re-dump is only for a clean timing miss; more than 2 in one run is a signal, not noise
+        retried = sorted(str(k) for k, r in self.R.items() if len(r.attempts) > 1)
+        self.assertLessEqual(len(retried), 2, f"pages dumped again: {retried}")
+
+    def test_long_data_renders_fast_and_is_capped(self):
+        # N3: 200 000 characters through every data place: about as fast as the plain demo, shown capped, title capped
+        r, base = self.R[("long", "ar", 760, "mac")], self.R[("shell", "ar", 760, "mac")]
+        self.assertIsNotNone(r.raw_check, r.log[-1500:])
+        self.assertLess(r.seconds - base.seconds, 3.0, f"long {r.seconds:.1f} s vs plain {base.seconds:.1f} s")
+        d = H.scan_dom(r.dom, ("m-data", "i-path", "probe-long"))
+        # each shown value: at most 512 characters of the data, each coded one drawn as "[U+XXXX]" (8), then "…"
+        for cls in ("m-data", "i-path"):
+            pieces = re.findall(r'<(?:bdi|div)[^>]*class="[^"]*\b' + cls + r'\b[^"]*"[^>]*>(.*?)</(?:bdi|div)>', r.dom, re.S)
+            with self.subTest(cls=cls):
+                self.assertTrue(pieces)
+                texts = [html.unescape(re.sub(r"<[^>]+>", "", piece)) for piece in pieces]
+                for text in texts:
+                    self.assertLessEqual(len(text), 512 * 8 + 1)
+                self.assertTrue(any(t.endswith("\u2026") and len(t) > 512 for t in texts), "the long value is cut")
+        self.assertLessEqual(len("".join(d.text_in["probe-long"])), 4 * (512 * 8 + 1))
+        titles = [a.get("title") for t, a in d.tags if a.get("title")]
+        self.assertTrue(titles)
+        for t in titles:
+            self.assertLessEqual(len(t), 4096 + 1)
+            self.assertEqual(sorted(set(t) & NEUTRALISED), [])
+
+    def test_pathshort_follows_the_mockup_rule(self):
+        want = json.loads((H.HERE / "pathshort.json").read_text(encoding="utf-8"))
+        r = self.R[("pathshort", "en", 760, "mac")]
+        m = re.search(r'<meta name="pathshort" content="([^"]*)"', r.dom)
+        self.assertIsNotNone(m, r.log[-1500:])
+        got = {}
+        for part in m.group(1).split():
+            a, b, c = part.split(":", 2)
+            got[(a, int(b))] = urllib.parse.unquote(c)
+        self.assertEqual([got[("case", i)] for i in range(len(want["cases"]))], want["cases"])
+        for budget in ("46", "38"):
+            for i, exp in enumerate(want["expected"][budget]):
+                with self.subTest(budget=budget, case=want["cases"][i]):
+                    self.assertEqual(got[(budget, i)], exp)
+
+    def test_pathshort_expectations_are_the_mockups_own(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not on PATH: the expectations were made with it (tests/pathshort.json)")
+        src = H.REPO / "adobe" / "panel-ui" / "design" / "js" / "installer.js"
+        js = ("const fs=require('fs');const src=fs.readFileSync(process.argv[1],'utf8');"
+              "const m=src.match(/I\\.pathShort = (function \\(path, budget\\) \\{[\\s\\S]*?\\n  \\});/);"
+              "const f=new Function('return '+m[1])();const d=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));"
+              "const out={};for(const b of [46,38])out[b]=d.cases.map(c=>f(c,b));process.stdout.write(JSON.stringify(out));")
+        r = subprocess.run([node, "-e", js, str(src), str(H.HERE / "pathshort.json")], capture_output=True, text=True,
+                           encoding="utf-8")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        want = json.loads((H.HERE / "pathshort.json").read_text(encoding="utf-8"))["expected"]
+        self.assertEqual(json.loads(r.stdout), want)
+
+    def test_path_field_cuts_in_the_middle_for_the_width(self):
+        want = json.loads((H.HERE / "pathshort.json").read_text(encoding="utf-8"))
+        for w, budget in ((760, "46"), (640, "38")):
+            r = self.R[("pathshort", "en", w, "mac")]
+            fields = H.scan_dom(r.dom, ("i-path",))
+            with self.subTest(w=w):
+                self.assertEqual("".join(fields.text_in["i-path"]), want["expected"][budget][0])
+                titles = [a.get("title") for t, a in fields.tags if "i-path" in (a.get("class") or "").split()]
+                self.assertEqual(titles, [want["cases"][0]])
+
+    def test_remount_late_pins_removal_and_generation(self):
+        # N5: right after a re-mount no old self-check is left (removal at mount), and B's late check never writes
+        r = self.R[("remount-late", "en", 760, "mac")]
+        m = re.search(r'<meta name="remount" content="([^"]*)"', r.dom)
+        self.assertIsNotNone(m, r.log[-1500:])
+        got = dict(x.split("=", 1) for x in m.group(1).split())
+        self.assertEqual(got["afterB"], "0")
+        self.assertEqual(got["writes"], "shell:remount-late,C")
+        self.assertEqual(r.check.get("state"), "C")
+        self.assertEqual(r.check.get("missing"), "")
+
+    def test_production_bundle_ignores_demo(self):
+        # N6: no demo module in the shipped bundle: ?demo= draws the normal idle shell, never a blank window
+        r = self.R[("prod-demo", "en", 760, "mac")]
+        self.assertEqual(r.check.get("state"), "idle", r.log[-1500:])
+        self.assertIn("i-rail", r.dom)
+
+    def test_rail_has_the_accessible_name(self):
+        S = H.strings()
+        for k, r in self.cases(("shell", "idle")):
+            navs = [a for t, a in H.scan_dom(r.dom).tags if t == "nav"]
+            with self.subTest(k=k):
+                self.assertEqual([a.get("aria-label") for a in navs], [S[k[1]]["i00.rail.aria"]])
 
     def test_path_field_stays_one_line(self):
         # the field is 32 px high and cuts at its end: no break opportunity inside it (Chrome breaks at <wbr> even

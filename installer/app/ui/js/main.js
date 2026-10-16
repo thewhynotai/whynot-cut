@@ -16,8 +16,13 @@ C.S = STRINGS[C.lang];
 C.cfg.supportLive = q.get("support") !== "off";
 
 let view = { state: "idle" };
+let demo = null;
 if (q.get("demo") === "shell") {
-  const demo = await import("./demo.js");
+  /* review round 2 (N6): the shipped bundle has no demo module; the parameter is then ignored and the normal idle
+     shell is drawn, never a blank window */
+  try { demo = await import("./demo.js"); } catch (e) { demo = null; }
+}
+if (demo) {
   const fx = q.get("fixture");
   view = fx ? await demo.fixtureView(fx) : demo.shellView();
 }
