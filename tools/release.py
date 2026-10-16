@@ -355,7 +355,27 @@ def parse_locked_areas(text: str) -> list:
     m = re.search(r"^## Locked now\s*$(.*?)(?=^## |\Z)", text, re.M | re.S)
     if not m:
         raise ValueError("LOCKED-AREAS.md has no '## Locked now' section")
-    areas = [(g.strip(), why.strip()) for g, why in re.findall(r"^- `([^`]+)`\s*[:\u2014-]\s*(.+?)\s*$", m.group(1), re.M)]
+    # A bullet is either "- `glob`: why" or, inside a track's nested list, "- `g1`, `g2`," (continued on indented lines)
+    # under a parent bullet with no glob ("- tools track (...):"), whose text is then the why.
+    bullets, areas, parent = [], [], ""
+    for ln in m.group(1).splitlines():
+        if re.match(r"^\s*- ", ln):
+            bullets.append(ln)
+        elif bullets and ln.startswith((" ", "\t")) and ln.strip():
+            bullets[-1] += " " + ln.strip()
+    for b in bullets:
+        top = not b.startswith((" ", "\t"))
+        body = b.strip()[2:].strip()
+        one = re.match(r"^`([^`]+)`\s*[:\u2014-]\s*(.+?)\s*$", body)
+        if one:
+            areas.append((one.group(1).strip(), one.group(2).strip()))
+            if top:
+                parent = ""
+        elif "`" not in body:
+            if top:
+                parent = body.rstrip(":").strip()
+        elif not top and parent:
+            areas += [(g.strip(), parent) for g in re.findall(r"`([^`]+)`", body)]
     if not areas:
         raise ValueError("LOCKED-AREAS.md lists no locked path")
     return areas
@@ -408,13 +428,83 @@ def passed_phases(progress: str, tags=(), version: str = "") -> tuple:
             continue
         num, name = cells[0].split(None, 1)
         state = cells[1].lower()
-        if "**passed**" in state:
-            passed.append((num, name, cells[2] or gate.get(num, "")))
+        if re.search(r"\*\*[^*]*\bpassed\b[^*]*\*\*", state):      # "**passed**" or "**Gate 3 passed on Windows, …**"
+            tag = re.match(r"v[\w.]+-p\d+(?:\.\d+)?", cells[2])
+            passed.append((num, name, tag.group(0) if tag else (cells[2] or gate.get(num, ""))))
         elif num in gate:
             passed.append((num, name, gate[num]))
         elif "in progress" in state:
             active.append((num, name))
     return passed, active
+
+
+def gate_record(progress: str) -> list:
+    """Rows of PROGRESS.md's '## Gate record' table (the executor adds one per gate tag, oldest first):
+    [{gate, tag, windows, mac_ci, live_mac}]. No table = []."""
+    m = re.search(r"^## Gate record\s*$(.*?)(?=^## |\Z)", progress, re.M | re.S)
+    rows = []
+    for ln in (m.group(1) if m else "").splitlines():
+        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+        if len(cells) >= 5 and re.fullmatch(r"\d+", cells[0]):
+            rows.append({"gate": cells[0], "tag": cells[1].strip("`"), "windows": cells[2], "mac_ci": cells[3],
+                         "live_mac": cells[4]})
+    return rows
+
+
+def _mac_ci_kind(cell: str) -> str:
+    c = cell.lower()
+    if not c or c in ("-", "—", "none", "not run"):
+        return ""
+    if c.startswith("red") or "fail" in c:
+        return "red"
+    if c.startswith("smoke"):
+        return "smoke"
+    return "full" if c.startswith("full") else "other"
+
+
+def gate_state(progress: str, tags=(), version: str = "") -> dict:
+    """What PROGRESS.md records about the gates: passed phase numbers, phases in progress, the latest gate tag and the
+    latest gate row that has a macOS CI result (the Mac line of the PREVIEW banner and WHAT-WORKS page)."""
+    passed, active = passed_phases(progress, tags, version)
+    rows = gate_record(progress)
+    mac = None
+    for r in reversed(rows):
+        kind = _mac_ci_kind(r["mac_ci"])
+        if kind:
+            mac = {"tag": r["tag"], "ci": kind, "detail": r["mac_ci"], "live": r["live_mac"] or "Not verified"}
+            break
+    latest = rows[-1]["tag"] if rows else (passed[-1][2] if passed else "")
+    return {"passed": [n for n, _name, _tag in passed], "active": active, "latest_tag": latest, "mac": mac}
+
+
+def gate_lines_en(st: dict) -> list:
+    L = [f"Phases passed: {', '.join(st['passed'])} (latest gate tag `{st['latest_tag']}`)." if st["passed"]
+         else "Phases passed: none yet."]
+    L += [f"In progress: phase {n} ({name})." for n, name in st["active"]]
+    mac = st["mac"]
+    if not mac:
+        L.append("macOS: never run yet (no gate in PROGRESS.md has a macOS CI result).")
+    else:
+        L.append({"full": f"macOS: CI full suite green at `{mac['tag']}`.",
+                  "smoke": f"macOS: CI smoke job green at `{mac['tag']}` (not the full suite).",
+                  "red": f"macOS: CI red at `{mac['tag']}`: {mac['detail']}."}.get(
+                      mac["ci"], f"macOS: CI at `{mac['tag']}`: {mac['detail']}."))
+        L.append(f"Live Mac checks: {mac['live']}.")
+    return L
+
+
+def gate_lines_ar(st: dict) -> list:
+    mac = st["mac"]
+    if not mac:
+        return ["الماك: لسه ما اتجرّبش على ماك خالص (مفيش مرحلة في PROGRESS.md ليها نتيجة ماك)."]
+    L = [{"full": f"الماك: كل الاختبارات الآلية (full suite) عدّت على ماك في CI عند `{mac['tag']}`.",
+          "smoke": f"الماك: الاختبار السريع (smoke) بس هو اللي عدّى على ماك عند `{mac['tag']}`، مش كل الاختبارات.",
+          "red": f"الماك: فيه اختبارات فشلت على ماك عند `{mac['tag']}` ({mac['detail']})."}.get(
+              mac["ci"], f"الماك: نتيجة CI عند `{mac['tag']}`: {mac['detail']}.")]
+    live = mac["live"].lower()
+    L.append("التجربة الحية على ماك حقيقي: اتأكّدت." if live.startswith("verified")
+             else f"التجربة الحية على ماك حقيقي: لسه ({mac['live']}).")
+    return L
 
 
 def render(template: str, values: dict) -> str:
@@ -601,12 +691,16 @@ def _size(n: int) -> str:
         n /= 1024
 
 
-def _items(data: dict, key: str, lang: str) -> list:
-    return [i[lang] for i in data.get(key, [])]
+def _items(data: dict, key: str, lang: str, passed=()) -> list:
+    """An item with "until_passed": "<N>" is dropped once phase N has passed (gate state, not fixed text)."""
+    done = {str(n) for n in passed}
+    return [i[lang] for i in data.get(key, []) if "until_passed" not in i or str(i["until_passed"]) not in done]
 
 
 def what_works_ar(data: dict, ctx: dict) -> str:
     passed, active = passed_phases(ctx["progress"], ctx.get("tags", ()), ctx["version"])
+    st = gate_state(ctx["progress"], ctx.get("tags", ()), ctx["version"])
+    done = st["passed"]
     L = ["# WhyNot Cut: إيه اللي شغّال دلوقتي؟", ""]
     if ctx["preview"]:
         L += [f"> **نسخة تجريبية (PREVIEW) من المرحلة {ctx['phase'] or 'الحالية'}**: مش النسخة النهائية.", ""]
@@ -616,9 +710,10 @@ def what_works_ar(data: dict, ctx: dict) -> str:
     L += ["## المراحل اللي عدّت الاختبار", ""]
     L += [f"- المرحلة {n} ({name}): `{tag}`" for n, name, tag in passed] or ["- لسه مفيش."]
     L += [f"- المرحلة {n} ({name}): لسه شغّالة." for n, name in active]
-    L += ["", "## شغّال دلوقتي", ""] + [f"- {t}" for t in _items(data, "works", "ar")]
-    L += ["", "## شغّال جزئيًا (بيتجرّب)", ""] + [f"- {t}" for t in _items(data, "partial", "ar")]
-    L += ["", "## لسه جاي", ""] + [f"- {t}" for t in _items(data, "coming", "ar")]
+    L += [""] + [f"- {t}" for t in gate_lines_ar(st)]
+    L += ["", "## شغّال دلوقتي", ""] + [f"- {t}" for t in _items(data, "works", "ar", done)]
+    L += ["", "## شغّال جزئيًا (بيتجرّب)", ""] + [f"- {t}" for t in _items(data, "partial", "ar", done)]
+    L += ["", "## لسه جاي", ""] + [f"- {t}" for t in _items(data, "coming", "ar", done)]
     if ctx["excluded"]:
         L += ["", "## ملفات مش في الحزمة دي", ""] + [f"- `{e['file']}`: {e['why_ar']}" for e in ctx["excluded"]]
     L += ["", "---", "الصفحة دي متولّدة أوتوماتيك بـ `tools/release.py handoff` من `tools/handoff/what-works.json` "
@@ -837,10 +932,12 @@ def _build(repo, new, ctx, ship, locked, zip_name, sample_maker, summary, log):
         raise HandoffError(f"the sample client could not be made: {e}")
     data = json.loads(_template("what-works.json"))
     if ctx["preview"]:
-        not_yet = _items(data, "coming", "en") + _items(data, "partial", "en")
+        st = gate_state(ctx["progress"], ctx.get("tags", ()), ctx["version"])
+        not_yet = _items(data, "coming", "en", st["passed"]) + _items(data, "partial", "en", st["passed"])
         banner = (f"> **PREVIEW of phase {ctx['phase'] or '(current)'}: not a release.** This hand-off was cut "
-                  "early so the Mac work can start; later gates regenerate it. What is not built or not finished yet:\n"
-                  + "\n".join(f"> - {t}" for t in not_yet))
+                  "early so the Mac work can start; later gates regenerate it.\n>\n"
+                  "> Gate state, as recorded in `PROGRESS.md`:\n" + "\n".join(f"> - {t}" for t in gate_lines_en(st))
+                  + "\n>\n> What is not built or not finished yet:\n" + "\n".join(f"> - {t}" for t in not_yet))
         footer = (f"_This is a PREVIEW hand-off (phase {ctx['phase'] or 'current'}). A later `release.py handoff` "
                   "replaces this file. Between hand-offs, the repo is synced through GitHub (`mac/dev`), not by copying "
                   "folders._")

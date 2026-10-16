@@ -85,7 +85,10 @@ def _build_template(root: Path) -> Path:
         "PROGRESS.md": ("## Phase table\n\n| Phase | State | Tag | Verified |\n|---|---|---|---|\n"
                         "| 0 Baseline | **passed** | v9.9.9-p0 | Verified: x |\n"
                         "| 1 Ship-blockers | **passed** | v9.9.9-p1 | Verified: y |\n"
-                        "| 2 Next | **in progress** | | |\n"),
+                        "| 2 Next | **in progress** | | |\n\n"
+                        "## Gate record\n\n| Gate | Tag | Windows | macOS CI | Live Mac |\n|---|---|---|---|---|\n"
+                        "| 0 | v9.9.9-p0 | full suite green | | Not verified |\n"
+                        "| 1 | v9.9.9-p1 | full suite green | full suite green (run 42) | Not verified (Phase 12) |\n"),
         ".gitignore": "node_modules/\n",
     }
     for rel_path, text in files.items():
@@ -219,6 +222,12 @@ class TestLayout(SharedRun):
         self.assertTrue(start.lstrip().startswith("# "))
         self.assertIn("PREVIEW", start.split("## ")[0])          # the banner is at the top, before any section
         self.assertIn("p3", start.split("## ")[0])
+        top = start.split("## ")[0]                               # the gate state comes from PROGRESS.md, not fixed text
+        self.assertIn("Phases passed: 0, 1", top)
+        self.assertIn("In progress: phase 2 (Next)", top)
+        self.assertIn("macOS: CI full suite green at `v9.9.9-p1`", top)
+        self.assertIn("Live Mac checks: Not verified (Phase 12)", top)
+        self.assertNotIn("never run yet", top)
         for must in ("mac/dev", "MAC-INBOX.md", "LOCKED-AREAS.md", "whynot-cut/installer/**", "guide-ar/**",
                      "H13", "bash tools/test.sh", "mac-test-report.md", "Never push to `release/3.0`",
                      "gh auth login", "PlayerDebugMode", "install.sh", head):
@@ -232,6 +241,8 @@ class TestLayout(SharedRun):
         what = (self.out / "WHAT-WORKS-NOW-AR.md").read_text(encoding="utf-8")
         self.assertIn("v9.9.9-p1", what)                          # passed phases come from PROGRESS.md
         self.assertIn("(Next)", what)                             # the phase in progress is named
+        self.assertIn("الماك", what.split("## شغّال دلوقتي")[0])  # the Mac line, from the gate record
+        self.assertNotIn("لسه ما اشتغلش على ماك خالص", what)
         self.assertNotIn("{{", what + guide + readme)
 
     def test_zip_holds_the_plugin_and_pins_the_artefacts(self):
@@ -509,6 +520,66 @@ class TestPassedPhases(unittest.TestCase):
         self.assertEqual(active, [])
 
 
+class TestGateState(unittest.TestCase):
+    """The PREVIEW banner and WHAT-WORKS page say what PROGRESS.md records (gate record), never fixed text."""
+    PROGRESS = ("| Phase | State | Tag | Verified |\n|---|---|---|---|\n"
+                "| 0 Baseline | **passed** | v9.9.9-p0 | x |\n"
+                "| 3 Plugin layer | **Gate 3 passed on Windows, Mac Not verified** | v9.9.9-p3 (Windows snapshot; "
+                "v9.9.9-p3.1 = abc: full suite green) | x |\n"
+                "| 4 Editor features | **in progress** | | |\n\n"
+                "## Gate record\n\n| Gate | Tag | Windows | macOS CI | Live Mac |\n|---|---|---|---|---|\n"
+                "| 0 | v9.9.9-p0 | full suite green | | Not verified |\n"
+                "| 3 | v9.9.9-p3 | full suite green | red (45 F + 6 E, triaged) | Not verified |\n"
+                "| 3 | v9.9.9-p3.1 | full suite green | full suite green (run 7) | Not verified (Phase 12) |\n")
+
+    def test_gate_record_rows(self):
+        rows = rel.gate_record(self.PROGRESS)
+        self.assertEqual([r["tag"] for r in rows], ["v9.9.9-p0", "v9.9.9-p3", "v9.9.9-p3.1"])
+        self.assertEqual(rows[2]["mac_ci"], "full suite green (run 7)")
+        self.assertEqual(rel.gate_record("no table here"), [])
+
+    def test_the_latest_mac_result_wins(self):
+        st = rel.gate_state(self.PROGRESS, tags=["v9.9.9-p0", "v9.9.9-p3", "v9.9.9-p3.1"], version="9.9.9")
+        self.assertEqual(st["passed"], ["0", "3"])
+        self.assertEqual(st["active"], [("4", "Editor features")])
+        self.assertEqual(st["latest_tag"], "v9.9.9-p3.1")
+        self.assertEqual(st["mac"], {"tag": "v9.9.9-p3.1", "ci": "full", "detail": "full suite green (run 7)",
+                                     "live": "Not verified (Phase 12)"})
+        en = rel.gate_lines_en(st)
+        self.assertIn("Phases passed: 0, 3 (latest gate tag `v9.9.9-p3.1`).", en)
+        self.assertIn("In progress: phase 4 (Editor features).", en)
+        self.assertIn("macOS: CI full suite green at `v9.9.9-p3.1`.", en)
+        self.assertIn("Live Mac checks: Not verified (Phase 12).", en)
+
+    def test_a_bold_passed_phrase_with_a_long_tag_cell_counts(self):
+        passed, _ = rel.passed_phases(self.PROGRESS)
+        self.assertEqual(passed, [("0", "Baseline", "v9.9.9-p0"), ("3", "Plugin layer", "v9.9.9-p3")])
+
+    def test_red_smoke_and_never_run(self):
+        base = ("| Phase | State | Tag | V |\n|---|---|---|---|\n| 0 B | **passed** | v1-p0 | x |\n\n## Gate record\n\n"
+                "| Gate | Tag | Windows | macOS CI | Live Mac |\n|---|---|---|---|---|\n")
+        for cell, want_en, want_ar in (
+                ("smoke green", "macOS: CI smoke job green at `v1-p0` (not the full suite).", "سريع"),
+                ("red (3 F)", "macOS: CI red at `v1-p0`: red (3 F).", "فشل"),
+                ("", "macOS: never run yet (no gate in PROGRESS.md has a macOS CI result).", "لسه ما اتجرّبش")):
+            st = rel.gate_state(base + f"| 0 | v1-p0 | full suite green | {cell} | Not verified |\n", version="1")
+            self.assertIn(want_en, rel.gate_lines_en(st), cell)
+            self.assertIn(want_ar, "\n".join(rel.gate_lines_ar(st)), cell)
+
+    def test_items_drop_once_their_phase_passed(self):
+        data = {"coming": [{"ar": "a3", "en": "e3", "until_passed": "3"}, {"ar": "a6", "en": "e6", "until_passed": "6"},
+                           {"ar": "x", "en": "x"}]}
+        self.assertEqual(rel._items(data, "coming", "en", passed=["0", "3"]), ["e6", "x"])
+        self.assertEqual(rel._items(data, "coming", "en"), ["e3", "e6", "x"])
+
+    def test_the_real_what_works_has_no_fixed_gate_text(self):
+        data = json.loads((REPO / "tools" / "handoff" / "what-works.json").read_text(encoding="utf-8"))
+        for key in ("works", "partial", "coming"):
+            for item in data.get(key, []):
+                self.assertNotRegex(item["en"], r"(?i)macos: never run|phase \d+\) is still in progress",
+                                    "gate state belongs to the PROGRESS gate record, not what-works.json")
+
+
 def make_dir_link(link: Path, target: Path) -> bool:
     """A directory junction (Windows, no admin needed) or symlink (elsewhere); False when the OS refuses."""
     try:
@@ -564,11 +635,23 @@ class TestRepoCoordinationFiles(unittest.TestCase):
     def test_locked_areas_parse(self):
         areas = rel.parse_locked_areas((REPO / "LOCKED-AREAS.md").read_text(encoding="utf-8"))
         globs = [g for g, _why in areas]
-        for must in ("whynot-cut/evals/**", "whynot-cut/hooks/**", "whynot-cut/output-styles/**",
-                     "whynot-cut/skills/status/**", "adobe/**", "whynot-cut/engine/reel/serve/**",
-                     "whynot-cut/installer/**", "guide-ar/**"):
+        for must in ("whynot-cut/evals/**", "whynot-cut/hooks/**", "whynot-cut/engine/reel/**", "adobe/**",
+                     "whynot-cut/engine/reel/serve/**", "whynot-cut/installer/**", "installer/app/**", "guide-ar/**",
+                     # nested track lists (several globs per bullet) count too
+                     "adobe/tools/**", "whynot-cut/engine/reel/lib/kalam*.py", "whynot-cut/skills/tidy/**",
+                     "whynot-cut/tests/test_align_w2v*.py"):
             self.assertIn(must, globs)
         self.assertTrue(all(why for _g, why in areas))
+
+    def test_nested_track_lists_parse(self):
+        text = ("# L\n\n## Locked now\n\nPhase 9:\n\n- `a/**`: executor\n- `b/**`: Adobe track; except `b/t/**`\n"
+                "- tools track (Kalam, Hush):\n  - `b/t/**`\n  - `c/k*.py`, `c/h*.py`,\n    `c/x*.py`\n"
+                "- `d/**`: guide track\n\n## Other\n- `z/**`: not locked\n")
+        self.assertEqual(rel.parse_locked_areas(text), [
+            ("a/**", "executor"), ("b/**", "Adobe track; except `b/t/**`"),
+            ("b/t/**", "tools track (Kalam, Hush)"), ("c/k*.py", "tools track (Kalam, Hush)"),
+            ("c/h*.py", "tools track (Kalam, Hush)"), ("c/x*.py", "tools track (Kalam, Hush)"),
+            ("d/**", "guide track")])
 
     def test_locked_areas_empty_is_an_error(self):
         with self.assertRaises(ValueError):

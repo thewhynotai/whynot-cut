@@ -31,6 +31,8 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
   - `adobe/tools/**`
   - `whynot-cut/engine/reel/lib/kalam*.py`, `whynot-cut/engine/reel/lib/hush*.py`, `whynot-cut/engine/reel/lib/tidy*.py`,
     `whynot-cut/engine/reel/lib/align_w2v*.py`
+  - packages: `whynot-cut/engine/reel/lib/kalam*/**`, `whynot-cut/engine/reel/lib/hush*/**`,
+    `whynot-cut/engine/reel/lib/tidy*/**`, `whynot-cut/engine/reel/lib/align_w2v*/**`
   - `whynot-cut/skills/kalam/**`, `whynot-cut/skills/hush/**`, `whynot-cut/skills/tidy/**`
   - `whynot-cut/evals/kalam-*/**`, `whynot-cut/evals/hush-*/**`, `whynot-cut/evals/tidy-*/**`
   - `whynot-cut/tests/test_kalam*.py`, `whynot-cut/tests/test_hush*.py`, `whynot-cut/tests/test_tidy*.py`,

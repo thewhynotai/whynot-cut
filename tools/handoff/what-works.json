@@ -1,5 +1,5 @@
 {
-  "_note": "Data for WHAT-WORKS-NOW-AR.md and the PREVIEW banner of Mac/START-HERE.md (tools/release.py handoff). Update it at every phase gate from PROGRESS.md (verified items only, no marketing claims), then run the handoff again. The passed phases and their tags are read from PROGRESS.md automatically; list here only what a tester can rely on and what is still missing.",
+  "_note": "Data for WHAT-WORKS-NOW-AR.md and the PREVIEW banner of Mac/START-HERE.md (tools/release.py handoff). Update it at every phase gate from PROGRESS.md (verified items only, no marketing claims), then run the handoff again. Gate state (passed phases, the phase in progress, the macOS CI and live-Mac line) is NOT written here: it is generated from PROGRESS.md (phase table + \"## Gate record\" table + gate tags). An item may carry \"until_passed\": \"<N>\" to drop out by itself once phase N has passed. The passed phases and their tags are read from PROGRESS.md automatically; list here only what a tester can rely on and what is still missing.",
   "as_of": "2026-10-14",
   "works": [
     {"ar": "تحويل فيديو كلام (talking-head) لمشروع Premiere Pro جاهز للتعديل، على ويندوز: اتجرّب على عميل تجربة عربي واتشافت الفريمات من Premiere نفسه (المرحلة 2).",
@@ -24,8 +24,6 @@
      "en": "The Arabic PDF guide is a draft: no screenshots yet."}
   ],
   "coming": [
-    {"ar": "طبقة الإضافة (المرحلة 3) لسه شغّالة.",
-     "en": "The plugin layer (Phase 3) is still in progress."},
     {"ar": "نقل أدوات Kalam وHush وTidy (المرحلة 6B).",
      "en": "The Kalam / Hush / Tidy port (Phase 6B)."},
     {"ar": "الموافقة على الخطة وتشغيل الشغل من جوّه لوحة Premiere (المرحلة 6).",
@@ -34,8 +32,6 @@
      "en": "A click-to-install Setup app (Setup.exe / Mac app): not built; today the install is one Terminal command."},
     {"ar": "رابط التثبيت dl.thewhynot.ai بيشتغل يوم الإطلاق بس.",
      "en": "The dl.thewhynot.ai install address goes live on release day only."},
-    {"ar": "الماك: البرنامج لسه ما اشتغلش على ماك خالص. ده شغل المرحلة 12 على ماك الإيجنسي.",
-     "en": "macOS: never run yet. That is Phase 12 on the agency Mac."},
     {"ar": "اختبارات الأعطال (من غير نت، قفل Premiere في النص، الهارد مليان...) والتشغيل الطويل (المرحلة 9).",
      "en": "Fault injection (offline, Premiere closed mid-job, disk full, ...) and the soak run (Phase 9)."},
     {"ar": "Magnific: لسه شغّال بنسخة تجريبية (mocks) من غير اتصال حقيقي (المرحلة 5).",
