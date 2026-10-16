@@ -200,7 +200,8 @@ def load_media_fixtures():
     out = {}
     for name in ("DJI", "IPHONE", "AE", "COMPOSE", "LAVF"):
         m = re.search(r"^var %s = '((?:\\.|[^'\\])*)';" % name, src, re.M)
-        assert m, name
+        if not m:
+            return None
         out[name] = js_string(m.group(1))
     return out
 
@@ -286,7 +287,22 @@ def expand_regex(pat):
     return out
 
 
-FIX = load_media_fixtures()
+_FIX = []
+
+
+def fixtures():
+    """The test_media.js fixtures, parsed lazily (never at import: a changed owner file must not break the module); None
+    when they are not there or the file has another shape."""
+    if not _FIX:
+        _FIX.append(load_media_fixtures())
+    return _FIX[0]
+
+
+def need_fixtures(tc):
+    fx = fixtures()
+    if fx is None:
+        tc.skipTest(NO_TOOLS + " or test_media.js changed shape")
+    return fx
 
 # Source Text values (textEditValue) the pure parity test sends through both implementations; the last six are the
 # surrogate cases of the Task 8 review: an escaped emoji (two \u escapes = ONE character in JS), a lone high, a lone low,
@@ -348,9 +364,7 @@ class TidyDisk(Tmp):
 class TidyMediaRules(unittest.TestCase):
     def fx(self):
         """The fixtures of test_media.js, read from the owner's file (skipped without adobe/tools)."""
-        if FIX is None:
-            self.skipTest(NO_TOOLS)
-        return FIX
+        return need_fixtures(self)
 
     def test_video_kind_like_test_media_js(self):
         f = self.fx()
@@ -469,27 +483,97 @@ class TidyMediaRules(unittest.TestCase):
         self.assertEqual(k("", "Interview final.mp4"), "render")
 
 
+def js_to_py(src):
+    """A JS regex source as the twin writes it: the same text, except that `$` (the very end in JS) is `\\Z` in Python."""
+    out, i = [], 0
+    while i < len(src):
+        c = src[i]
+        if c == "\\":
+            out.append(src[i:i + 2])
+            i += 2
+            continue
+        out.append("\\Z" if c == "$" else c)
+        i += 1
+    return "".join(out)
+
+
+def js_literals():
+    """{name: (source, flags)} of the regex literals of the port's media.js that the twin must copy: the tag and name
+    lists, the extension lists, the RAW list, the three camera-model regexes and the icon-name regex. None if the file
+    has another shape (the test then skips instead of failing to import)."""
+    src = (PORT / "js" / "media.js").read_text(encoding="utf-8")
+    out = {}
+    for name in ("RENDER_TAGS", "RENDER_NAME", "CAMERA_TAGS", "CAMERA_NAME", "CAMERA_RAW", "VIDEO_EXT", "IMAGE_EXT"):
+        m = re.search(r"\b%s = /((?:\\.|[^/\\\n])+)/([a-z]*)[;,]" % name, src)
+        if not m:
+            return None
+        out[name] = (m.group(1), m.group(2))
+    models = re.findall(r"/((?:\\.|[^/\\\n])+)/\.exec\(text", src)
+    icon = re.search(r"/((?:\\.|[^/\\\n])+)/(i)\.test\(name \|\| ''\)", src)
+    if len(models) != 3 or not icon:
+        return None
+    out["DJI_MODEL"], out["IPHONE"], out["OTHER_MODEL"] = ((s, "") for s in models)
+    out["ICON_NAME"] = (icon.group(1), icon.group(2))
+    return out
+
+
+# JS literal name -> the compiled pattern of media.py that must be the same text
+PY_REGEXES = {"RENDER_TAGS": "RENDER_TAGS", "RENDER_NAME": "RENDER_NAME", "CAMERA_TAGS": "CAMERA_TAGS", "CAMERA_NAME": "CAMERA_NAME",
+              "CAMERA_RAW": "CAMERA_RAW", "VIDEO_EXT": "_VIDEO_EXT", "IMAGE_EXT": "_IMAGE_EXT", "DJI_MODEL": "_DJI_MODEL",
+              "IPHONE": "_IPHONE", "OTHER_MODEL": "_OTHER_MODEL", "ICON_NAME": "_ICON_NAME"}
+
+
 @unittest.skipUnless(TOOLS_PRESENT, NO_TOOLS)
 class TidyMediaTokens(unittest.TestCase):
-    """Task 8 review I1. Hand-picked texts cannot catch a token the twin forgot, so the alternatives are read OUT OF
-    adobe/tools/tidy/src/js/media.js: every one of RENDER_TAGS, CAMERA_TAGS, CAMERA_NAME and RENDER_NAME is expanded to a
-    concrete string and judged by the twin (here, no node) and by the JS (test below, node): the answers must be the
-    alternative's own kind, and equal. A future token added to media.js that media.py misses fails here."""
+    """Task 8 review I1 / re-review N1, N2. Hand-picked texts cannot catch a token the twin forgot, so the guard has two
+    halves that can each fail:
+    * SOURCE: the regex literals of adobe/tools/tidy/src/js/media.js (tag and name lists, video / image / RAW extension lists,
+      the three camera-model regexes, the icon-name regex) are read and compared, text for text (after `$` -> `\\Z`, and
+      the flags), with the pattern media.py compiled. A token added or removed on EITHER side differs.
+    * BEHAVIOUR: every alternative of the four lists is expanded to a concrete string and judged by the twin (here, no
+      node) and by the JS (test below, node). The render cases carry camera evidence that the render tag must beat
+      (text `..<tag>..DJI Osmo..`, name `C1111 <word>.mp4`), so a render token the twin forgot gives `camera` and fails
+      (without that evidence `render` is the default answer and the case proves nothing).
+    The mutation tests prove both halves by breaking the twin in memory."""
 
     @staticmethod
     def cases():
-        rt, _ = js_regex_literal("RENDER_TAGS")
-        ct, _ = js_regex_literal("CAMERA_TAGS")
-        cn, _ = js_regex_literal("CAMERA_NAME")
-        rn, _ = js_regex_literal("RENDER_NAME")
-        out = [("..%s.." % a, "clip.mp4", "render", "RENDER_TAGS") for a in expand_regex(rt)]
-        out += [("..%s.." % a, "clip.mp4", "camera", "CAMERA_TAGS") for a in expand_regex(ct)]
-        out += [("", a, "camera", "CAMERA_NAME") for a in expand_regex(cn)]
-        out += [("", "clip %s x" % a, "render", "RENDER_NAME") for a in expand_regex(rn)]
+        lits = js_literals()
+        out = [("..%s..DJI Osmo.." % a, "C1111.mp4", "render", "RENDER_TAGS") for a in expand_regex(lits["RENDER_TAGS"][0])]
+        out += [("..%s.." % a, "clip.mp4", "camera", "CAMERA_TAGS") for a in expand_regex(lits["CAMERA_TAGS"][0])]
+        out += [("", a, "camera", "CAMERA_NAME") for a in expand_regex(lits["CAMERA_NAME"][0])]
+        out += [("", "C1111 %s.mp4" % a, "render", "RENDER_NAME") for a in expand_regex(lits["RENDER_NAME"][0])]
         return out
 
+    @classmethod
+    def source_problems(cls):
+        lits = js_literals()
+        out = []
+        for js_name, py_name in PY_REGEXES.items():
+            rx = getattr(tmedia, py_name)
+            src, flags = lits[js_name]
+            if rx.pattern != js_to_py(src):
+                out.append("%s: media.py has %r, media.js has %r" % (js_name, rx.pattern, js_to_py(src)))
+            want = re.ASCII | (re.I if "i" in flags else 0)
+            if rx.flags & (re.I | re.A | re.U) != want:
+                out.append("%s: flags differ (twin %r, JS %r)" % (js_name, rx.flags & (re.I | re.A | re.U), flags))
+        return out
+
+    @classmethod
+    def case_problems(cls):
+        return ["%s: video_kind(%r, %r) is %r, the regex says %s" % (where, text, name, tmedia.video_kind(text, name), want)
+                for text, name, want, where in cls.cases() if tmedia.video_kind(text, name) != want]
+
+    @classmethod
+    def problems(cls):
+        return cls.source_problems() + cls.case_problems()
+
+    def setUp(self):
+        if js_literals() is None:
+            self.skipTest("media.js has another shape than the guard reads")
+
     def test_the_expander_reads_the_whole_literal(self):
-        alts = [c[0].strip(".") for c in self.cases() if c[3] == "CAMERA_TAGS"]
+        alts = [c[0].split("..")[1] for c in self.cases() if c[3] == "CAMERA_TAGS"]
         for want in ("DJI Osmo", "DJI Pocket", "DJI Action", "DJI Mini", "DJI Mavic", "DJI Air", "DJI Avata", "DJI Neo", "DJI Mimo",
                      "com.apple.quicktime.model", "NonRealTimeMeta", "GoPro", "Insta360", "Canon", "Panasonic", "Blackmagic",
                      "FUJIFILM", "NIKON", "com.android.manufacturer", "samsung"):
@@ -497,11 +581,72 @@ class TidyMediaTokens(unittest.TestCase):
         names = [c[1] for c in self.cases() if c[3] == "CAMERA_NAME"]
         for want in ("C1111", "IMG_1", "DSC1", "DSC_1", "GX111111", "A111C111", "11111.MTS"):
             self.assertTrue(any(n.startswith(want) or n == want for n in names), want)
-        self.assertGreaterEqual(len(self.cases()), 45)
+        render = [c for c in self.cases() if c[3] in ("RENDER_TAGS", "RENDER_NAME")]
+        self.assertEqual(len(render), 14)
+        self.assertGreaterEqual(len(self.cases()), 49)
 
-    def test_the_twin_judges_every_alternative_as_its_regex_says(self):
+    def test_the_twin_is_the_same_text_as_the_js_and_judges_every_alternative(self):
+        self.assertEqual(self.problems(), [])
+
+    def test_the_render_cases_have_camera_evidence_to_beat(self):
+        """Without evidence the answer `render` is the default: show that each render case really is a contest."""
         for text, name, want, where in self.cases():
-            self.assertEqual(tmedia.video_kind(text, name), want, (where, text, name))
+            if where == "RENDER_TAGS":
+                self.assertEqual(tmedia.camera_model(text), "DJI Osmo")                         # the text says camera
+                self.assertEqual(tmedia.video_kind(text.replace(text.split("..")[1], "x"), name), "camera", text)
+            if where == "RENDER_NAME":
+                self.assertEqual(tmedia.video_kind("", name.replace(name.split()[1].split(".mp4")[0], "x")), "camera", name)
+
+    # --- the guard can fail: break the twin in memory and require a report (N1) ---
+    def mutated(self, name, old, new):
+        rx = getattr(tmedia, name)
+        self.assertIn(old, rx.pattern)
+        return mock.patch.object(tmedia, name, re.compile(rx.pattern.replace(old, new, 1), rx.flags))
+
+    def test_a_token_added_only_in_python_is_caught(self):
+        with self.mutated("CAMERA_TAGS", "NIKON", "NIKON|Foo"):
+            probs = self.source_problems()
+        self.assertTrue([p for p in probs if p.startswith("CAMERA_TAGS")], probs)
+        with self.mutated("RENDER_TAGS", "CapCut", "CapCut|Foo"):
+            self.assertTrue([p for p in self.source_problems() if p.startswith("RENDER_TAGS")])
+        with self.mutated("CAMERA_NAME", "PXL_", "PXL_|FOO_"):
+            self.assertTrue([p for p in self.source_problems() if p.startswith("CAMERA_NAME")])
+
+    def test_a_token_removed_from_the_python_render_name_regex_is_caught_by_both_halves(self):
+        with self.mutated("RENDER_NAME", "compose|", ""):
+            src, beh = self.source_problems(), self.case_problems()
+        self.assertTrue([p for p in src if p.startswith("RENDER_NAME")], src)
+        self.assertTrue([p for p in beh if p.startswith("RENDER_NAME") and "compose" in p], beh)
+
+    def test_a_render_tag_removed_from_python_is_caught_by_both_halves(self):
+        with self.mutated("RENDER_TAGS", "CapCut|", ""):
+            src, beh = self.source_problems(), self.case_problems()
+        self.assertTrue([p for p in src if p.startswith("RENDER_TAGS")], src)
+        self.assertTrue([p for p in beh if p.startswith("RENDER_TAGS") and "CapCut" in p], beh)
+
+    def test_extension_lists_and_model_regexes_are_compared_too(self):
+        """N2: dropping mkv, a RAW extension or a camera-model token is a source difference (no seeded test needed)."""
+        with self.mutated("_VIDEO_EXT", "mkv|", ""):
+            self.assertTrue([p for p in self.source_problems() if p.startswith("VIDEO_EXT")])
+        with self.mutated("_IMAGE_EXT", "|icns", ""):
+            self.assertTrue([p for p in self.source_problems() if p.startswith("IMAGE_EXT")])
+        with self.mutated("CAMERA_RAW", "braw|", ""):
+            self.assertTrue([p for p in self.source_problems() if p.startswith("CAMERA_RAW")])
+        with self.mutated("_DJI_MODEL", "Neo", "Neo|Mimo"):
+            self.assertTrue([p for p in self.source_problems() if p.startswith("DJI_MODEL")])
+        with self.mutated("_IPHONE", "mini", "mini|Ultra"):
+            self.assertTrue([p for p in self.source_problems() if p.startswith("IPHONE")])
+        with self.mutated("_OTHER_MODEL", "BMPCC", "BMPCC|ARRI"):
+            self.assertTrue([p for p in self.source_problems() if p.startswith("OTHER_MODEL")])
+        with self.mutated("_ICON_NAME", "emoji", "emoji|glyph"):
+            self.assertTrue([p for p in self.source_problems() if p.startswith("ICON_NAME")])
+
+    def test_a_flag_difference_is_caught(self):
+        rx = tmedia.RENDER_NAME
+        with mock.patch.object(tmedia, "RENDER_NAME", re.compile(rx.pattern, re.ASCII)):
+            self.assertTrue([p for p in self.source_problems() if "flags differ" in p])
+        with mock.patch.object(tmedia, "RENDER_NAME", re.compile(rx.pattern, re.I)):          # Unicode instead of ASCII
+            self.assertTrue([p for p in self.source_problems() if "flags differ" in p])
 
     @unittest.skipUnless(NODE, "node is not installed")
     def test_the_js_and_the_twin_agree_on_every_alternative(self):
@@ -998,12 +1143,13 @@ class TidyMediaParity(unittest.TestCase):
     LOAD = ["js/media.js"]
 
     def test_describe_on_400_seeded_items_and_the_test_media_fixtures(self):
+        fx = need_fixtures(self)
         cases = rand_items(400, 11)
-        dji = FIX["DJI"]
+        dji = fx["DJI"]
         for name, path, text in (("Script 1 - 2.mp4", "/Volumes/X/RAW/Script 1/Script 1 - 2.mp4", dji), ("C0001.MP4", "/x/Cam B/C0001.MP4", None),
                                  ("a.png", "/x/a.png", "".join(chr(c) for c in [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 64, 0, 0, 0, 48])),
                                  ("notes.txt", "/x/notes.txt", "abc"), ("A.R3D", "/r/A.R3D", None), ("clip.braw", "/r/clip.braw", None),
-                                 ("x.mp4", "/x.mp4", FIX["IPHONE"]), ("y.mp4", "/y.mp4", FIX["AE"]), ("z.mp4", "/z.mp4", FIX["COMPOSE"])):
+                                 ("x.mp4", "/x.mp4", fx["IPHONE"]), ("y.mp4", "/y.mp4", fx["AE"]), ("z.mp4", "/z.mp4", fx["COMPOSE"])):
             cases.append(({"name": name, "path": path}, text))
         calls = [call("TidyMedia.describe", it, text) for it, text in cases]
         js = run_js(self, PORT, self.LOAD, calls)
@@ -1014,7 +1160,8 @@ class TidyMediaParity(unittest.TestCase):
         self.assertGreater(sum(1 for r in js if "icon" in r), 20)
 
     def test_pure_functions_and_regex_corner_cases(self):
-        texts = [t for _, t in rand_items(300, 12)] + [FIX["DJI"], FIX["IPHONE"], "DJI Osmo", "DJI Osmo\n", "DJI Osmo Action 5 Pro!", "iPhone 16 Pro Max Plus e mini"]
+        fx = need_fixtures(self)
+        texts = [t for _, t in rand_items(300, 12)] + [fx["DJI"], fx["IPHONE"], "DJI Osmo", "DJI Osmo\n", "DJI Osmo Action 5 Pro!", "iPhone 16 Pro Max Plus e mini"]
         names = [it.get("name") for it, _ in rand_items(300, 13)] + ["00001.MTS", "00001.MTS\n", "x\u00e9edit.mp4", "xedit.mp4", " edit ", "EDIT", "re_edit"]
         calls = [call("TidyMedia.cameraModel", t) for t in texts]
         calls += [call("TidyMedia.videoKind", t, n) for t, n in zip(texts * 2, names)]
