@@ -33,7 +33,9 @@ def _values(env):
 
 
 def envelope(samples, sample_rate, hop=None):
-    """RMS level per hop in dBFS (floor -100), float32."""
+    """RMS level per hop in dBFS (floor -100), float32. The samples are coerced to float32 first (the JS reads a
+    Float32Array; a plain JS array of doubles would not be rounded, callers pass decode() output, which already is
+    float32)."""
     hop = hop or HOP
     x = np.asarray(samples, dtype=np.float32)
     n = max(1, js_round(sample_rate * hop))
@@ -98,10 +100,9 @@ def cuts_from_silences(sil, o, length):
 
 def _range(r):
     out = {"s": r["s"], "e": r["e"]}
-    if r.get("kind") is not None:
-        out["kind"] = r["kind"]
-    if r.get("label") is not None:
-        out["label"] = r["label"]
+    for key in ("kind", "label"):  # a missing key is JS undefined (dropped); a null value stays null
+        if key in r:
+            out[key] = r[key]
     return out
 
 
@@ -134,10 +135,9 @@ def snap(ranges, fps, min_frames=None):
         e = math.floor(r["e"] * fps + 1e-6) / fps
         if (e - s) * fps >= min_frames - 0.001:
             item = {"s": s, "e": e}
-            if r.get("kind") is not None:
-                item["kind"] = r["kind"]
-            if r.get("label") is not None:
-                item["label"] = r["label"]
+            for key in ("kind", "label"):
+                if key in r:
+                    item[key] = r[key]
             out.append(item)
     return out
 

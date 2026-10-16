@@ -13,7 +13,7 @@ import re
 
 import numpy as np
 
-from ._js import js_str
+from ._js import UNDEFINED, js_str
 
 # "strong" fillers are ticked by default; "soft" ones are listed but left unticked (they are often real words)
 DEFAULT_STRONG = ("um, umm, uh, uhh, uhm, erm, er, ah, ahh, hmm, hm, mm, mmm, mhm, "
@@ -72,11 +72,11 @@ def find(words, strong_text, soft_text):
     strong, soft = parse_list(strong_text), parse_list(soft_text)
     out, i, count = [], 0, len(words)
     while i < count:
-        n = norm(words[i].get("w"))
+        n = norm(words[i].get("w", UNDEFINED))
         if not n:
             i += 1
             continue
-        n2 = n + " " + norm(words[i + 1].get("w")) if i + 1 < count else None
+        n2 = n + " " + norm(words[i + 1].get("w", UNDEFINED)) if i + 1 < count else None
         hit = None
         if n2 is not None and n2 in strong:
             hit = (True, 2)
@@ -88,9 +88,14 @@ def find(words, strong_text, soft_text):
             hit = (False, 1)
         if hit:
             last = words[i + hit[1] - 1]
-            label = js_str(words[i].get("w")) + " " + js_str(last.get("w")) if hit[1] == 2 else words[i].get("w")
-            out.append({"s": words[i]["s"], "e": last["e"], "label": label, "kind": "filler", "on": hit[0],
-                        "source": "word"})
+            first_w = words[i].get("w", UNDEFINED)
+            item = {"s": words[i]["s"], "e": last["e"]}
+            if hit[1] == 2:
+                item["label"] = js_str(first_w) + " " + js_str(last.get("w", UNDEFINED))
+            elif first_w is not UNDEFINED:  # an undefined label is dropped from the JSON, like the JS object
+                item["label"] = first_w
+            item.update({"kind": "filler", "on": hit[0], "source": "word"})
+            out.append(item)
             i += hit[1] - 1
         i += 1
     return out

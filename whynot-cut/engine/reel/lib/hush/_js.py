@@ -5,7 +5,10 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-__all__ = ["js_num_str", "js_str"]
+__all__ = ["js_num_str", "js_str", "UNDEFINED"]
+
+UNDEFINED = type("JsUndefined", (), {"__repr__": lambda self: "UNDEFINED", "__bool__": lambda self: False})()
+# a key that is absent from a JSON object reads as JS undefined (distinct from null, which is None)
 
 
 def js_num_str(x):
@@ -42,6 +45,8 @@ def js_str(v):
     """String(v) for the JSON-like values that reach the filler matcher."""
     if isinstance(v, str):
         return v
+    if v is UNDEFINED:
+        return "undefined"
     if v is None:
         return "null"
     return js_num_str(v)

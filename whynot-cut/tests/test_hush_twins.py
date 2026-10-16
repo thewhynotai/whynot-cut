@@ -183,9 +183,17 @@ def make_fillers(rng, length):
     out = []
     for _ in range(rng.choice([0, 0, 1, 2, 4])):
         s = round(rng.uniform(0, max(0.5, length - 0.5)), 3)
-        out.append({"s": s, "e": round(s + rng.uniform(0.1, 0.6), 3), "kind": "filler",
-                    "label": rng.choice(["um", "uh", "like", "\u064a\u0639\u0646\u064a", ""]),
-                    "on": rng.random() < 0.5, "source": "word"})
+        item = {"s": s, "e": round(s + rng.uniform(0.1, 0.6), 3), "kind": "filler",
+                "label": rng.choice(["um", "uh", "like", "\u064a\u0639\u0646\u064a", "", None]),
+                "on": rng.random() < 0.5, "source": "word"}
+        roll = rng.random()
+        if roll < 0.08:
+            del item["label"]  # a missing key is JS undefined (dropped from the JSON), unlike null
+        elif roll < 0.13:
+            item["kind"] = None
+        elif roll < 0.18:
+            del item["kind"]
+        out.append(item)
     return out
 
 
@@ -267,13 +275,20 @@ class HushTwinsCorpus(unittest.TestCase):
             " um ", "\tuh\n", "\u00a0um\u00a0", "\u3000hmm\u3000", "\u0130stanbul", "\u03a3\u0391\u03a3",
         ]
         lists = [None, "", "um, uh", "like\nyou know,i mean", "foo\u060cbar\nbaz", ",,\n,", fillers.DEFAULT_STRONG,
-                 fillers.DEFAULT_SOFT, "\u0627\u0647\u060c \u0639\u0644\u064a", "ummmm, hum, \tuh ", "hm;mm"]
+                 fillers.DEFAULT_SOFT, "\u0627\u0647\u060c \u0639\u0644\u064a", "ummmm, hum, \tuh ", "hm;mm", "undefined, null", "7, 1.5, 0, -2, null undefined"]
         find_calls, un_calls = [], []
         for _ in range(220):
             t, words = 0.0, []
             for _ in range(rng.randint(0, 25)):
                 s = round(t + rng.uniform(0, 0.4), 3)
                 words.append({"w": rng.choice(vocab), "s": s, "e": round(s + rng.uniform(0.05, 0.7), 3), "p": 0.9})
+                roll = rng.random()
+                if roll < 0.04:
+                    del words[-1]["w"]          # JS String(undefined) = "undefined"
+                elif roll < 0.08:
+                    words[-1]["w"] = None       # JS String(null) = "null"
+                elif roll < 0.11:
+                    words[-1]["w"] = rng.choice([7, 1.5, 0, -2])
                 t = words[-1]["e"]
             for _ in range(3):
                 find_calls.append(call("HushFillers.find", words, rng.choice(lists), rng.choice(lists)))
@@ -284,12 +299,51 @@ class HushTwinsCorpus(unittest.TestCase):
                                  rng.choice([0.15, 0.1, 0.3]), rng.choice([1.2, 0.5, 2.0])))
         found = run_both(self, find_calls)
         self.assertGreater(sum(len(f) for f in found), 500)
-        self.assertTrue(any(h["label"] and " " in h["label"] for f in found for h in f))  # two-word phrases occur
+        self.assertTrue(any(isinstance(h.get("label"), str) and " " in h["label"] for f in found for h in f))  # two-word phrases occur
         sounds = run_both(self, un_calls)
         self.assertGreater(sum(len(f) for f in sounds), 100)
         run_both(self, [call("HushFillers.norm", w) for w in vocab])
         run_both(self, [call("HushFillers.parseList", t) for t in lists])
         run_both(self, [call("HushFillers.isHesitation", fillers.norm(w)) for w in vocab])
+
+    def test_null_and_missing_keys_behave_like_js(self):
+        """kind / label: absent is JS undefined (dropped), null stays null; a word without w is String(undefined)."""
+        ranges = [
+            [{"s": 0, "e": 1, "kind": "filler", "label": None}], [{"s": 0, "e": 1, "kind": None, "label": "x"}],
+            [{"s": 0, "e": 1}], [{"s": 0, "e": 1, "kind": "silence", "label": None}, {"s": 1.05, "e": 2, "kind": "filler"}],
+            [{"s": 0, "e": 1, "kind": "filler", "label": None}, {"s": 0.5, "e": 2, "kind": "filler", "label": None}],
+            [{"s": 0, "e": 1, "kind": "filler", "label": "um"}, {"s": 1.0, "e": 2, "kind": "filler", "label": None}],
+            [{"s": 0, "e": 1, "kind": "filler", "label": "um"}, {"s": 1.0, "e": 2, "kind": "filler"}],
+            [{"s": 1.0, "e": 2.0, "kind": None, "label": None}],
+        ]
+        out = run_both(self, [call("HushDetect.combine", r, 0.25) for r in ranges] +
+                       [call("HushDetect.snap", r, 25) for r in ranges])
+        self.assertEqual(out[0], [{"s": 0, "e": 1, "kind": "filler", "label": None}])  # the JS keeps the null
+        words = [[{"s": 0, "e": 1}], [{"w": None, "s": 0, "e": 1}], [{"w": 7, "s": 0, "e": 1}],
+                 [{"s": 0, "e": 1}, {"s": 1, "e": 2}], [{"w": "you", "s": 0, "e": 1}, {"s": 1, "e": 2}],
+                 [{"w": None, "s": 0, "e": 1}, {"w": None, "s": 1, "e": 2}]]
+        lists = [("undefined", ""), ("null", ""), ("7", ""), ("", "undefined undefined"), ("", "null null"),
+                 ("", "you undefined")]
+        found = run_both(self, [call("HushFillers.find", w, a, b) for w in words for a, b in lists])
+        self.assertTrue(any(found))
+        run_both(self, [call("HushFillers.norm", None), call("HushFillers.norm", 7), call("HushFillers.norm", 1.5)])
+
+    def test_degenerate_wav_headers_match(self):
+        """channels / bits 0 with an empty data chunk: JS frames is NaN (duration NaN); rate 0 gives Infinity."""
+        cases = {"ch0": (1, 0, 8000, 16, b""), "bits0": (1, 1, 8000, 0, b""), "both0": (1, 0, 8000, 0, b""),
+                 "rate0": (1, 1, 0, 16, b"\x01\x00\x02\x00"), "rate0_empty": (1, 1, 0, 16, b""),
+                 "ch0_data": (1, 0, 8000, 16, b"\x01\x00\x02\x00"),
+                 "bits12": (1, 1, 8000, 12, b"\x01\x00\x02\x00\x03\x00")}
+        with tempfile.TemporaryDirectory() as td:
+            calls = []
+            for name, (tag, ch, rate, bits, raw) in cases.items():
+                p = Path(td) / (name + ".wav")
+                p.write_bytes(HC.riff(HC.chunk(b"fmt ", HC.fmt_payload(tag, ch, rate, bits)), HC.chunk(b"data", raw)))
+                calls += [call("HushWav.header", HC.FILE(p), {"$dataview": 0}), call("HushWav.decode", HC.FILE(p)),
+                          call("HushWav.envelope", HC.FILE(p), 0.01)]
+            res = run_both(self, calls)
+        self.assertEqual(res[2]["duration"], "NaN")  # channels 0, empty data
+        self.assertEqual(res[2]["env"], [])
 
     def test_fmt_grid(self):
         values = [i / 100 for i in range(0, 13000)] + [599.96, 3599.96, 3725.04, 86399.96, 0.05, 0.15, 0.25, 0.35, 59.95,
@@ -422,6 +476,58 @@ class HushTwinUnits(unittest.TestCase):
         # js_num / readout rounding of milliseconds: 0.0005 * 1000 = 0.5 -> 1, 0.0015 * 1000 = 1.5 -> 2, 0.0025 -> 3
         self.assertEqual(settings.readout({"threshold": -1, "minSilence": 0.0005, "padBefore": 0.0015, "padAfter": 0.0025}),
                          "-1 dB  |  1 ms min  |  2/3 ms pad")
+
+    def test_js_round_is_exact_math_round(self):
+        # floor(x + 0.5) is wrong for 0.49999999999999994 (x + 0.5 rounds up to 1.0) and for odd integers >= 2**52
+        cases = [(0.49999999999999994, 0), (0.5, 1), (1.5, 2), (2.5, 3), (-0.5, 0), (-1.5, -1), (-2.5, -2), (0.4, 0),
+                 (-0.49999999999999994, 0), (2.0 ** 52 + 1, 2 ** 52 + 1), (2.0 ** 53, 2 ** 53),
+                 (-(2.0 ** 52 + 1), -(2 ** 52 + 1)), (57.49999999999999, 57), (1e300, int(1e300))]
+        for x, want in cases:
+            self.assertEqual(wav.js_round(x), want, repr(x))
+        self.assertEqual(wav.js_round(math.inf), math.inf)
+        self.assertEqual(wav.js_round(-math.inf), -math.inf)
+        self.assertTrue(math.isnan(wav.js_round(math.nan)))
+
+    def test_combine_and_snap_keep_kind_and_label_that_are_present_even_as_none(self):
+        # JSON null is not JS undefined: {"label": null} stays, a missing label stays missing
+        self.assertEqual(detect.combine([{"s": 0, "e": 1, "kind": "filler", "label": None}], 0.1),
+                         [{"s": 0, "e": 1, "kind": "filler", "label": None}])
+        self.assertEqual(detect.combine([{"s": 0, "e": 1, "kind": None}], 0.1), [{"s": 0, "e": 1, "kind": None}])
+        self.assertEqual(detect.combine([{"s": 0, "e": 1}], 0.1), [{"s": 0, "e": 1}])
+        self.assertEqual(detect.snap([{"s": 1.0, "e": 2.0, "kind": None, "label": None}], 25),
+                         [{"s": 1.0, "e": 2.0, "kind": None, "label": None}])
+        self.assertEqual(detect.snap([{"s": 1.0, "e": 2.0}], 25), [{"s": 1.0, "e": 2.0}])
+        # a null label next to a labelled filler still joins as an empty string, like `r.label || ''`
+        got = detect.combine([{"s": 0, "e": 1, "kind": "filler", "label": "um"},
+                              {"s": 1.0, "e": 2, "kind": "filler", "label": None}], 0.25)
+        self.assertEqual(got, [{"s": 0, "e": 2, "kind": "filler", "label": "um "}])
+
+    def test_word_without_w_is_string_undefined_and_null_is_string_null(self):
+        self.assertEqual(fillers.norm(None), "null")
+        hit = fillers.find([{"s": 0, "e": 1}], "undefined", "")
+        self.assertEqual(hit, [{"s": 0, "e": 1, "kind": "filler", "on": True, "source": "word"}])  # no label key
+        hit = fillers.find([{"w": None, "s": 0, "e": 1}], "null", "")
+        self.assertEqual(hit, [{"s": 0, "e": 1, "label": None, "kind": "filler", "on": True, "source": "word"}])
+        self.assertEqual(fillers.find([{"w": None, "s": 0, "e": 1}], "undefined", ""), [])
+        self.assertEqual(fillers.find([{"s": 0, "e": 1}], "null", ""), [])
+        two = fillers.find([{"s": 0, "e": 1}, {"s": 1, "e": 2}], "", "undefined undefined")
+        self.assertEqual(two, [{"s": 0, "e": 2, "label": "undefined undefined", "kind": "filler", "on": False,
+                                "source": "word"}])
+
+    def test_zero_channel_or_zero_bit_wav_with_no_data_has_nan_duration(self):
+        for ch, bits in ((0, 16), (1, 0), (0, 0)):
+            data = HC.riff(HC.chunk(b"fmt ", HC.fmt_payload(1, ch, 8000, bits)), HC.chunk(b"data", b""))
+            r = wav.envelope(data, 0.01)
+            self.assertTrue(math.isnan(r["duration"]), (ch, bits))
+            self.assertEqual(len(r["env"]), 0)
+            self.assertEqual(len(wav.decode(data)["samples"]), 0)
+        data = HC.riff(HC.chunk(b"fmt ", HC.fmt_payload(1, 1, 0, 16)), HC.chunk(b"data", b"\x01\x00\x02\x00"))
+        self.assertEqual(wav.envelope(data, 0.01)["duration"], math.inf)  # 2 frames / rate 0
+
+    def test_envelope_docstring_says_the_input_is_coerced_to_float32(self):
+        doc = detect.envelope.__doc__.lower()
+        self.assertIn("float32", doc)
+        self.assertIn("coerc", doc)
 
     def test_total_is_a_plain_left_to_right_sum(self):
         # Python 3.12's sum() of floats is compensated and would give 1.0; the JS loop (and so this twin) gives 0.99999...

@@ -28,8 +28,13 @@ class WavError(ValueError):
 
 
 def js_round(x):
-    """JavaScript Math.round: round half up (floor(x + 0.5)), never Python's banker's round()."""
-    return math.floor(x + 0.5)
+    """JavaScript Math.round: halves go up (-2.5 -> -2), never Python's banker's round(). Exact: floor(x + 0.5) is
+    wrong for 0.49999999999999994 (the sum rounds up to 1.0) and for odd integers from 2**52 on, so the fraction is
+    compared instead. Infinity and NaN come back unchanged."""
+    if x != x or x in (math.inf, -math.inf):
+        return x
+    f = math.floor(x)
+    return f + 1 if x - f >= 0.5 else f
 
 
 def _tag(data, o):
@@ -103,7 +108,7 @@ def _frames(h):
     bps, ch = h["bits"] / 8, h["channels"]
     if bps * ch == 0:
         if h["dataLen"] == 0:
-            return 0
+            return math.nan  # JS: Math.floor(0 / 0) = NaN: no frames, and the duration is NaN too
         raise WavError("Invalid typed array length: Infinity")  # JS: frames = Infinity
     return math.floor(h["dataLen"] / (bps * ch))
 
@@ -172,6 +177,8 @@ def hop_levels(mono_chunk, frames, n):
 
 def _div(a, b):
     """a / b with JavaScript's results for a zero divisor (Infinity / NaN) instead of an exception."""
+    if a != a:
+        return a
     if b:
         return a / b
     return float("inf") if a else float("nan")
@@ -181,7 +188,7 @@ def decode(data):
     """{sampleRate, samples (float32 mono mix), channels}"""
     h = header(data)
     frames = _frames(h)
-    samples = _mono(data, h, 0, frames).astype(np.float32)
+    samples = _mono(data, h, 0, 0 if frames != frames else frames).astype(np.float32)
     return {"sampleRate": h["rate"], "samples": samples, "channels": h["channels"]}
 
 
@@ -190,5 +197,5 @@ def envelope(data, hop):
     h = header(data)
     frames = _frames(h)
     n = max(1, js_round(h["rate"] * hop))
-    env = hop_levels(lambda f0, f1: _mono(data, h, f0, f1), frames, n)
+    env = hop_levels(lambda f0, f1: _mono(data, h, f0, f1), 0 if frames != frames else frames, n)
     return {"env": env, "duration": _div(frames, h["rate"]), "sampleRate": h["rate"]}

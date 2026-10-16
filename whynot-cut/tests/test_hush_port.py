@@ -43,7 +43,12 @@ class HushPortParity(HC.HushCharacterizationPort):
     """Re-runs the whole characterization class; each js() call is also run on upstream and compared."""
 
     compared = 0
+    tests_run = 0
     fmt_differences = set()
+
+    def setUp(self):
+        super().setUp()
+        type(self).tests_run += 1
 
     def js(self, calls, load=LOAD):
         up = HC.run_js(self, UPSTREAM, load, calls)
@@ -64,7 +69,33 @@ class HushPortParity(HC.HushCharacterizationPort):
         # only the values the tests feed that round up across 10 s / 60 s may differ (each is checked to be malformed upstream)
         if not cls.fmt_differences <= {9.96, 59.96, 119.96, 599.96, 3599.96}:
             raise AssertionError("unexpected fmt differences: %r" % sorted(cls.fmt_differences))
+        if cls.tests_run and not cls.compared:
+            raise AssertionError("%d parity tests ran but none compared a result with upstream" % cls.tests_run)
         super().tearDownClass()
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+@unittest.skipUnless(HC.TOOLS_PRESENT, HC.NO_TOOLS)
+class HushPortParityGuard(unittest.TestCase):
+    """tearDownClass of the parity class raises (AssertionError, not a bare assert) when parity tests ran and none
+    compared anything, and stays quiet when no test of the class ran (a -k filter)."""
+
+    def probe(self, **attrs):
+        base = dict(compared=0, tests_run=0, fmt_differences=set())
+        base.update(attrs)
+        return type("Probe", (HushPortParity,), base)
+
+    def test_no_comparison_after_tests_ran_is_an_error(self):
+        with self.assertRaises(AssertionError):
+            self.probe(tests_run=3).tearDownClass()
+
+    def test_nothing_ran_nothing_to_report(self):
+        self.probe(tests_run=0).tearDownClass()
+        self.probe(tests_run=2, compared=5).tearDownClass()
+
+    def test_unexpected_fmt_differences_raise_assertion_error(self):
+        with self.assertRaises(AssertionError):
+            self.probe(tests_run=1, compared=1, fmt_differences={1.23}).tearDownClass()
 
 
 @unittest.skipUnless(NODE, "node is not installed")
