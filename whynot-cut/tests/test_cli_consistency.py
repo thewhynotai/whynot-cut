@@ -263,6 +263,11 @@ class TestNothingBuiltIsNotExit0(Base):
         self.assertEqual(r["status"], "EXISTS")
         self.assertIn("--force", r["how"])
         self.assertEqual(exit_code(r), 2)
+        # Phase 4 hygiene: the refusal names the backup the rebuild makes, as previous_version_backup does after it
+        for key in ("how", "fix"):
+            self.assertIn(f"{prproj.stem}_prev_", r[key])
+            self.assertIn(".prproj", r[key])
+            self.assertIn(str(prproj.parent.name), r[key])
 
     def test_ppro_build_missing_graphics_fails(self):
         from lib import ppro_build
