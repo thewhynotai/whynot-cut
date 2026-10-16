@@ -5,9 +5,12 @@
 //
 // Link: read ~/.whynot-cut/bridge/engine.json ({port, token, pid, version, protocol, home?}; re-read on every
 // attempt, retried briefly while the daemon swaps it) -> ws://localhost:<port>/session -> `hello` (kind "panel",
-// protocol 4, no capabilities) -> `welcome` -> `snapshot` now and every POLL_MS (the daemon pushes nothing yet, and
-// the poll is also the keepalive: the daemon pings after 30 s of silence and closes after 60 s). The daemon's state
-// is a stub: only its `connection` is merged; everything else stays local. Reconnects back off 1-2-4-8-15 s.
+// protocol 4, no capabilities) -> `welcome` -> `snapshot` now and every POLL_MS (the poll is also the keepalive: the
+// daemon pings after 30 s of silence and closes after 60 s). From the daemon's state the panel takes its `connection`,
+// `jobs`, and (H3 review) the item part: `client`, `item`, `pipeline`, `approval`, `qc` and `stale`, each checked by
+// hand and a malformed object dropped whole; a pipeline step of a command this panel is running stays the panel's own.
+// An older daemon that sends no item part leaves the local values as they are. Language, editor name, context and log
+// stay local. Reconnects back off 1-2-4-8-15 s.
 //
 // Jobs (Addendum G2 H1): a command outlives a lost connection. When the link drops, a pending command is kept (its own
 // expiry timer still runs) and its pipeline step keeps running; the daemon keeps running CEP jobs and journals their
@@ -20,11 +23,13 @@
 // The token goes only into `hello` and the /status probe's Authorization header: never into a URL, a log line,
 // PanelState, a diagnosis or an error text (every text the transport hands back is scrubbed of it).
 //
-// Perf (Addendum G2 H3): the source carries a PerfRecorder (src/perf.ts; `perf: false` = none): panel.boot when it is
-// made, link.welcome, link.first_state and panel.usable (the first state is on screen: subscribers paint inside
-// update()) once each; mount adds its paint and click marks through `perf`. The buffer goes to the daemon as `perf`
-// batches of at most 50 marks, right after the first state and then with each poll, only when the welcome lists
-// "perf" (an older daemon would answer error{unknown_type}). A daemon that lists "push" sends states on change (no id);
+// Perf (Addendum G2 H3): the source carries a PerfRecorder (src/perf.ts; `perf: false` = none; a real one by default,
+// in tests too: nothing is sent unless the welcome lists "perf"), timed on transport.monotonic() or performance.now():
+// panel.boot when it is made, link.welcome, link.first_state (the first state of any kind) and panel.usable (the first
+// state that is not stale is on screen, with its item or with no active item: subscribers paint inside update()) once
+// each; mount adds its paint and click marks through `perf`. The buffer goes to the daemon as `perf` batches of at most
+// 50 marks, right after panel.usable and then with each poll, only when the welcome lists "perf" (an older daemon would
+// answer error{unknown_type}). A daemon that lists "push" sends states on change (no id);
 // they are handled like the snapshot answers, and the 2 s poll stays as the fallback (H6 lengthens it once push is
 // proven live).
 import { ACTION_NAMES, PROGRESS_PHASES, PROTOCOL } from "./contract.ts";
@@ -38,7 +43,7 @@ import type {
 import { NO_PERF, PERF_BATCH_MAX, PerfRecorder } from "./perf.ts";
 import type { PerfSink } from "./perf.ts";
 import { CLAUDE_STATES, JOB_STATES, STEP_IDS } from "./source.ts";
-import type { ClaudeState, ConnectionState, HostState, JobState, JobSummary, Language, LogLine, PanelDataSource, PanelState, PipelineStep, Result, StepId } from "./source.ts";
+import type { Approval, ClaudeState, ConnectionState, FlaggedItem, HostState, JobState, JobSummary, Language, LogLine, PanelDataSource, PanelState, PipelineStep, QcFrame, Result, StepId, StepStatus } from "./source.ts";
 
 // ------------------------------------------------------------------------------------------------ injected transport
 
@@ -75,6 +80,8 @@ export interface DaemonTransport {
   httpGetStatus?(url: string, headers: { Authorization: string }): Promise<number | null>;
   /** Milliseconds since the epoch. */
   now(): number;
+  /** A monotonic millisecond clock for perf durations (H3); default performance.now(), else now(). */
+  monotonic?(): number;
   /** Run fn once after ms; returns the function that cancels it. */
   setTimer(fn: () => void, ms: number): () => void;
   /** Optional console sink for link events (already scrubbed of the token). */
@@ -175,7 +182,7 @@ const BLOCKED: Omit<LinkDiagnosis, "retry_in_s"> = {
 
 type Incoming =
   | { type: "welcome"; daemon_version: string; update: PanelUpdate; features: DaemonFeature[] }
-  | { type: "state"; connection: ConnectionState; id?: string; jobs?: JobSummary[] }
+  | { type: "state"; connection: ConnectionState; id?: string; jobs?: JobSummary[]; item?: ItemPart; stale: boolean }
   | { type: "reply"; id: string; intent: ReplyIntent; ok: boolean; readback?: object; error?: string; how?: string }
   | { type: "result"; id: string | undefined; action: ActionName; ok: boolean; readback?: object; error?: string; how?: string }
   | { type: "progress"; id: string; step: string; n?: number; of?: number; phase?: ProgressPhase; elapsed_s?: number }
@@ -220,6 +227,92 @@ function parseJobs(v: unknown): JobSummary[] | undefined {
   return out;
 }
 
+/** The item part of a daemon state (H3 review): each key only when the daemon sent it in a usable shape. */
+interface ItemPart {
+  client?: string;
+  item?: string;
+  pipeline?: PipelineStep[];
+  approval?: Approval | null;
+  qc?: QcFrame[];
+}
+
+const STEP_STATES: readonly StepStatus[] = ["done", "running", "waiting", "pending", "failed"];
+const VERDICTS: readonly QcFrame["verdict"][] = ["pass", "fail", "pending", "media_pending"];
+const isInt = (v: unknown, min: number): v is number => typeof v === "number" && Number.isInteger(v) && v >= min;
+const strMax = (v: unknown, n: number): v is string => isStr(v) && v.length <= n;
+
+function parseStep(v: unknown): PipelineStep | null {
+  if (!isObj(v) || !(STEP_IDS as readonly unknown[]).includes(v["id"]) || !STEP_STATES.includes(v["state"] as StepStatus)) return null;
+  const out: PipelineStep = { id: v["id"] as StepId, state: v["state"] as StepStatus };
+  const pr = v["progress"];
+  if (pr !== undefined) {
+    if (pr === null) out.progress = null;
+    else if (isObj(pr) && isInt(pr["n"], 0) && isInt(pr["of"], 1) && (pr["step"] === undefined || strMax(pr["step"], 256))) {
+      out.progress = { n: pr["n"], of: pr["of"], ...(isStr(pr["step"]) ? { step: pr["step"] } : {}) };
+    } else return null;
+  }
+  const ph = v["phase"];
+  if (ph !== undefined) {
+    if (ph !== null && !(PROGRESS_PHASES as readonly unknown[]).includes(ph)) return null;
+    out.phase = ph as ProgressPhase | null;
+  }
+  const host = v["host"];
+  if (host !== undefined) {
+    if (host !== null && host !== "premiere" && host !== "aftereffects") return null;
+    out.host = host;
+  }
+  const el = v["elapsed_s"];
+  if (el !== undefined) {
+    if (el !== null && !(isNum(el) && el >= 0)) return null;
+    out.elapsed_s = el;
+  }
+  const rid = v["request_id"];
+  if (rid !== undefined) {
+    if (rid !== null && !strMax(rid, 64)) return null;
+    out.request_id = rid;
+  }
+  return out;
+}
+
+function parseApproval(v: unknown): Approval | null {
+  if (!isObj(v) || !strMax(v["summary"], 20000) || !(v["preview_mp4"] === null || strMax(v["preview_mp4"], 4096))) return null;
+  if (!isStr(v["fingerprint"]) || !v["fingerprint"] || v["fingerprint"].length > 256 || !Array.isArray(v["flagged"]) || v["flagged"].length > 200) return null;
+  const flagged: FlaggedItem[] = [];
+  for (const f of v["flagged"] as unknown[]) {
+    if (!isObj(f) || (f["kind"] !== "medical" && f["kind"] !== "religious") || !strMax(f["text"], 2000) || !strMax(f["tc"], 32)) return null;
+    flagged.push({ kind: f["kind"], text: f["text"], tc: f["tc"] });
+  }
+  return { summary: v["summary"], preview_mp4: v["preview_mp4"] as string | null, flagged, fingerprint: v["fingerprint"] };
+}
+
+function parseQc(v: unknown): QcFrame | null {
+  if (!isObj(v) || !isNum(v["t_s"]) || !strMax(v["tc"], 32) || !strMax(v["file"], 4096) || !strMax(v["label"], 512)) return null;
+  if (!VERDICTS.includes(v["verdict"] as QcFrame["verdict"])) return null;
+  const out: QcFrame = { t_s: v["t_s"], tc: v["tc"], file: v["file"], label: v["label"], verdict: v["verdict"] as QcFrame["verdict"] };
+  for (const k of ["w", "h"] as const) {
+    if (v[k] === undefined) continue;
+    if (!isNum(v[k])) return null;
+    out[k] = v[k];
+  }
+  if (v["thumb"] !== undefined) {
+    if (v["thumb"] !== null && !strMax(v["thumb"], 4096)) return null;
+    out.thumb = v["thumb"] as string | null;
+  }
+  return out;
+}
+
+/** The item part of state.state: a key the daemon did not send, or sent in a shape this panel cannot use, is left out
+ *  (the local value stays); a malformed approval is no approval; malformed steps and frames are skipped one by one. */
+function parseItem(st: Record<string, unknown>): ItemPart | undefined {
+  const out: ItemPart = {};
+  if (isStr(st["client"])) out.client = st["client"].slice(0, 256);
+  if (isStr(st["item"])) out.item = st["item"].slice(0, 256);
+  if (Array.isArray(st["pipeline"])) out.pipeline = (st["pipeline"] as unknown[]).slice(0, 32).map(parseStep).filter((x): x is PipelineStep => x !== null);
+  if ("approval" in st) out.approval = st["approval"] === null ? null : parseApproval(st["approval"]);
+  if (Array.isArray(st["qc"])) out.qc = (st["qc"] as unknown[]).slice(0, 500).map(parseQc).filter((x): x is QcFrame => x !== null);
+  return Object.keys(out).length ? out : undefined;
+}
+
 /** A daemon -> panel message, checked by hand (no ajv in the panel bundle); null = malformed or not for a panel. */
 export function parseIncoming(text: string): Incoming | null {
   let m: unknown;
@@ -245,7 +338,9 @@ export function parseIncoming(text: string): Incoming | null {
       const connection = parseConnection(m["state"]["connection"]);
       if (!connection) return null;
       const jobs = parseJobs(m["state"]["jobs"]);
-      return { type: "state", connection, ...(isStr(m["id"]) ? { id: m["id"] } : {}), ...(jobs ? { jobs } : {}) };
+      const item = parseItem(m["state"]);
+      const stale = m["state"]["stale"] === true;
+      return { type: "state", connection, ...(isStr(m["id"]) ? { id: m["id"] } : {}), ...(jobs ? { jobs } : {}), ...(item ? { item } : {}), stale };
     }
     case "reply": {
       const { id, intent, ok, readback, error, how } = m;
@@ -447,7 +542,9 @@ export class DaemonSource implements PanelDataSource {
     const r = (opts.random ?? Math.random)();
     const rand = Math.floor((Number.isFinite(r) ? Math.abs(r) % 1 : 0) * 36 ** 5).toString(36).padStart(5, "0");
     this.idBase = Math.floor(this.t.now()).toString(36).slice(-8) + rand;
-    this.recorder = opts.perf === false ? null : (opts.perf ?? new PerfRecorder({ now: () => this.t.now(), ...(opts.random ? { random: opts.random } : {}) }));
+    const perfNow = (globalThis as { performance?: { now?: () => number } }).performance;
+    const mono = this.t.monotonic ? () => this.t.monotonic!() : typeof perfNow?.now === "function" ? () => perfNow.now!() : () => this.t.now();
+    this.recorder = opts.perf === false ? null : (opts.perf ?? new PerfRecorder({ now: () => this.t.now(), mono, ...(opts.random ? { random: opts.random } : {}) }));
   }
 
   /** The perf marks of this panel (H3): mount marks its paints and clicks here. */
@@ -739,11 +836,11 @@ export class DaemonSource implements PanelDataSource {
     switch (m.type) {
       case "state": {
         if (m.jobs) this.jobs = new Map(m.jobs.map((j) => [j.request_id, j] as const));
-        const first = this.recorder !== null && !this.recorder.has("panel.usable");
+        const usable = this.recorder !== null && !m.stale && !this.recorder.has("panel.usable");
         this.recorder?.mark("link.first_state");
-        this.onState(m.connection);
-        if (first) {
-          this.recorder!.mark("panel.usable"); // a changed connection was painted inside onState (update -> subscribers)
+        this.onState(m);
+        if (usable) {
+          this.recorder!.mark("panel.usable"); // the first fresh state was painted inside onState (update -> subscribers)
           this.flushPerf(sock);
           if (this.sock !== sock) return;
         }
@@ -812,9 +909,43 @@ export class DaemonSource implements PanelDataSource {
     this.sendText(sock, JSON.stringify(msg));
   }
 
-  private onState(c: ConnectionState): void {
-    const next: ConnectionState = { ...c, engine: "connected" };
-    if (JSON.stringify(next) !== JSON.stringify(this.state.connection)) this.update({ connection: next });
+  /** A daemon state: its connection, its item part and `stale` (H3 review), applied in one update when anything
+   *  differs (an unchanged state is no re-render). */
+  private onState(m: Extract<Incoming, { type: "state" }>): void {
+    const patch: Partial<PanelState> = {};
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    const connection: ConnectionState = { ...m.connection, engine: "connected" };
+    if (!same(connection, this.state.connection)) patch.connection = connection;
+    const it = m.item;
+    if (it) {
+      if (it.client !== undefined && it.client !== this.state.client) patch.client = it.client;
+      if (it.item !== undefined && it.item !== this.state.item) patch.item = it.item;
+      if (it.approval !== undefined && !same(it.approval, this.state.approval)) patch.approval = it.approval;
+      if (it.qc !== undefined && !same(it.qc, this.state.qc)) patch.qc = it.qc;
+      if (it.pipeline !== undefined) {
+        const merged = this.mergeSteps(it.pipeline);
+        if (!same(merged, this.state.pipeline)) patch.pipeline = merged;
+      }
+    }
+    const staleChanged = m.stale !== (this.state.stale === true);
+    if (!Object.keys(patch).length && !staleChanged) return;
+    const next: PanelState = { ...this.state, ...patch };
+    if (m.stale) next.stale = true;
+    else delete next.stale;
+    this.emit(next);
+  }
+
+  /** The daemon's steps, except the step of a command this panel is running (its own progress wins) and the panel's
+   *  own steps the daemon does not list; in STEP_IDS order. */
+  private mergeSteps(daemon: PipelineStep[]): PipelineStep[] {
+    const out = new Map<StepId, PipelineStep>();
+    for (const s of daemon) out.set(s.id, s);
+    for (const s of this.state.pipeline) {
+      const own = typeof s.request_id === "string" && this.commands.has(s.request_id);
+      if (own || !out.has(s.id)) out.set(s.id, s);
+    }
+    const order = STEP_IDS as readonly StepId[];
+    return [...out.values()].sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
   }
 
   private onReply(m: Extract<Incoming, { type: "reply" }>): void {
@@ -1002,7 +1133,11 @@ export class DaemonSource implements PanelDataSource {
   }
 
   private update(patch: Partial<PanelState>): void {
-    this.state = { ...this.state, ...patch };
+    this.emit({ ...this.state, ...patch });
+  }
+
+  private emit(next: PanelState): void {
+    this.state = next;
     for (const cb of [...this.subs]) {
       try {
         cb(clone(this.state));

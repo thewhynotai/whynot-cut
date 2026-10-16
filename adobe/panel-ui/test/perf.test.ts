@@ -95,3 +95,21 @@ test("NO_PERF and perfOf: a source without a recorder (the mock, tests) gets the
   const { perf } = rec();
   assert.equal(perfOf({ perf }), perf);
 });
+
+test("H3 review P2-8: durations come from the monotonic clock, t from the wall clock", () => {
+  const wall = { t: 1_760_000_000_000 };
+  const mono = { t: 50 };
+  const perf = new PerfRecorder({ now: () => wall.t, mono: () => mono.t, random: () => 0 });
+  wall.t += 3_600_000; // the wall clock steps an hour (NTP, a time-zone fix)
+  mono.t += 120;
+  perf.mark("panel.first_paint");
+  perf.click();
+  wall.t -= 10_000; // and back
+  mono.t += 7;
+  perf.painted();
+  const [, first, click, paint] = perf.take();
+  assert.equal(first!.ms, 120);
+  assert.equal(first!.t, 1_760_003_600_000);
+  assert.equal(paint!.ms, 7);
+  assert.equal(click!.t, 1_760_003_600_000);
+});

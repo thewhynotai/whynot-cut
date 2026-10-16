@@ -292,7 +292,7 @@ Landed in H3 (`serve/app.py`, `serve/push.py`, `serve/perf.py`, `serve/perf_repo
 | Where | Field | Type | Meaning |
 |---|---|---|---|
 | `panel_state` | `stale` | boolean, optional | `true` when the daemon built this state from its last good engine-state read because the fresh read did not answer in time. A session's FIRST snapshot waits at most 1 s (later ones 3 s). A panel then gets the fresh state as a push as soon as that read answers. Absent = fresh. |
-| `welcome` | `features` | array ≤ 8 of `"perf"` \| `"push"`, optional | `perf`: the daemon appends the panel's perf batches. `push`: it pushes a `state` (no `id`) when the engine state changes. Absent (an older daemon) = no perf batch is sent. |
+| `welcome` | `features` | array ≤ 8 of `"perf"` \| `"push"`, optional | `perf`: the daemon appends the panel's perf batches. `push`: it keeps every welcomed panel that has had a state current with pushed `state`s (no `id`): on a change (debounced), and when that panel fell behind (a failed send, a stale answer). Never before the welcome. Absent (an older daemon) = no perf batch is sent. |
 | new message `perf` | `marks` | 1..50 `perf_mark` | panel → daemon, only when `features` has `perf`. Answered with nothing. |
 | `perf_mark` | `mark` | `panel.boot` \| `panel.first_paint` \| `link.welcome` \| `link.first_state` \| `panel.usable` \| `ui.click` \| `ui.paint` | the panel's marks only; the daemon's own (`cmd.*`, `link.welcome_sent`) are refused |
 | | `t` | number, 0..10^14 | epoch ms, the panel's clock |
@@ -302,18 +302,25 @@ Landed in H3 (`serve/app.py`, `serve/push.py`, `serve/perf.py`, `serve/perf_repo
 The daemon's rules:
 - **Who may send `perf`.** Only a `kind: "panel"` session. From any other session it is `error{schema}` and audited.
 - **Rate.** At most 1 batch/s per session, burst 5. A batch over the rate is dropped silently, audited once per session.
-- **The file.** `serve/perf.py` keeps only `{t, mark, ms?, rid?}` and drops every other key. It appends to
-  `<home>/logs/perf.jsonl`, which is capped at 512 KB with one rotated `perf.jsonl.1`.
+- **The file.** `serve/perf.py` keeps only `{t, mark, ms?, rid?, s?}` and drops every other key. `rid` is written only
+  as a 12-hex HMAC under a salt made for each daemon run, so no request id (which may hold a name) or token prefix
+  reaches the file; `s` is the daemon's tag for the panel session the marks came from (never the session id). One
+  background thread writes `<home>/logs/perf.jsonl` (a bounded queue: a full queue drops the batch; `close()` flushes
+  it), which is capped at 512 KB with one rotated `perf.jsonl.1`. When Windows refuses the rotation (a reader or the
+  antivirus holds the file) the line is appended anyway up to 2× the cap.
 - **Its own marks.** The daemon writes `cmd.received`, `cmd.queued`, `cmd.claimed`, `cmd.first_progress` and
   `cmd.result` (each with its ms since `cmd.received` and the request id), plus `link.welcome_sent` (ms since the hello).
 - **The report.** `python -m serve.perf_report --since <iso>` (and `reel perf-report`) prints the p95 per budget and
-  exits 1 on a miss:
+  exits 1 on a miss, 2 on a bad `--since`, 3 on an internal error. A mark without `ms` is paired only within its own
+  session `s` (or its rid), and a negative pairing is no sample:
   - S1 ≤ 1500 ms: `panel.boot` → `panel.usable` (or `link.first_state` when no usable mark exists);
   - S2 ≤ 100 ms: `ui.click` → `ui.paint`;
   - S3 ≤ 2000 ms: `cmd.received` → `cmd.first_progress`.
 
-The panel sends its marks only right after the first state and then once per poll. Clicks are sampled (1 in 5), and a
-click whose handler paints nothing records nothing. The panel's 2 s snapshot poll stays as the fallback for pushed
+The panel times durations on a monotonic clock (`performance.now()`), `t` stays epoch ms. It now reads the item part
+of the state too (`client`, `item`, `pipeline`, `approval`, `qc`, `stale`; data only, nothing new is rendered yet), so
+`panel.usable` is the first state that is not stale. The panel sends its marks right after `panel.usable` and then once
+per poll. Clicks are sampled (1 in 5), and a click whose handler paints nothing records nothing. The panel's 2 s snapshot poll stays as the fallback for pushed
 states; H6 lengthens it once push is proven live.
 
 ```json

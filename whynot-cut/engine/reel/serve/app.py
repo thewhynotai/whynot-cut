@@ -54,18 +54,22 @@ session.
 ok / stale / newer / unknown; engine_state.panel_update).
 G2 H3 (perf hooks and a faster first state):
   * `welcome.features` lists what this daemon does beyond protocol 4's core: "perf", and "push" while push is on.
-  * Perf marks (serve/perf.py, <home>/logs/perf.jsonl; never a token, a path or a name): link.welcome_sent (ms since
-    the hello arrived) here, the cmd.* marks in the Router. A `perf` message from a `kind: "panel"` session is appended
-    (panel marks only, at most 50); from any other session it is error{schema} (audited); over PERF_RATE per session
-    it is dropped silently (audited once per session).
+  * Perf marks (serve/perf.py, <home>/logs/perf.jsonl; never a token, a path or a name; written by its own thread,
+    flushed by close()): link.welcome_sent (ms since the hello arrived) here, the cmd.* marks in the Router. A `perf`
+    message from a `kind: "panel"` session is appended with that session's tag (panel marks only, at most 50); from
+    any other session it is error{schema} (audited); over PERF_RATE per session it is dropped silently (audited once
+    per session).
   * The FIRST snapshot of a session waits at most FIRST_FIELDS_TIMEOUT (1 s) for the engine-state read, not
     FIELDS_TIMEOUT: past it the state carries the last good item (else none) and `stale: true`, and a panel session gets
     the fresh state as a push as soon as that same read answers (within its own FIELDS_TIMEOUT). Any state built from
     the fallback says `stale: true`.
   * Push on change (serve/push.py StatePusher): while a panel session is connected, the engine state is looked at every
-    push_interval (1 s) and a change is pushed (a `state` without an id) to every panel session that has not got it,
-    debounced. The change test is cheap: the PanelFields cache generation (engine_state.PanelFields.generation), the
-    host connection and the job journal's in-memory summaries. A stale look pushes nothing. The panel's snapshot poll
+    push_interval (1 s) and every welcomed panel session that already has a state and whose last state (state_fp)
+    differs from the current one gets the current state (a `state` without an id): a change (debounced), and also a
+    panel that fell behind (a failed send, a stale answer, an answer sent after a newer push). The fingerprint is cheap:
+    the PanelFields cache generation (engine_state.PanelFields.generation), `stale`, the host connection and the job
+    journal's in-memory summaries; a stuck item read still lets host and job changes through, marked stale with the
+    last good item. A session gets no push before its welcome, nor before its first state. The panel's snapshot poll
     stays as the fallback.
 """
 from __future__ import annotations
@@ -168,6 +172,8 @@ class Session:
         self.perf_dropped = 0
         self.snapshots = 0                                         # the first one gets FIRST_FIELDS_TIMEOUT
         self.state_fp = None                                       # the fingerprint of the last state it was sent
+        self.welcomed = False                                      # its welcome is out: pushes may follow it
+        self.perf_tag: str | None = None                           # its perf marks' session tag
         self.link = HostLink(self._send_or_raise)
         self.tasks: set[asyncio.Task] = set()
 
@@ -288,6 +294,7 @@ class App:
         if self._pusher_task is not None and not self._pusher_task.done():
             self._pusher_task.cancel()
             await asyncio.wait({self._pusher_task}, timeout=left(CLOSE_ROUND_S))
+        await asyncio.to_thread(self.perf.close, left(CLOSE_ROUND_S))   # the perf writer: what is queued is written
         await self.router.close(timeout=left(CLOSE_ROUND_S))   # job tasks; a CEP job stays journaled as active
         self._state_worker.cancel_pending()
         for shared in [self._fields_shared, *(a for _, a in self._fields_abandoned)]:
@@ -496,6 +503,7 @@ class App:
                     reason=f"{session.kind} {session.host or ''} {','.join(session.capabilities)}".strip())
         features = ("perf",) + (("push",) if self.push_interval is not None else ())
         await session.send(messages.welcome(sid, self.version, update, features))
+        session.welcomed = True                                 # only now may a pushed state follow (never before it)
         self.perf.mark("link.welcome_sent", ms=(time.monotonic() - t_hello) * 1000)
         if session.kind == "panel":
             self._ensure_pusher()
@@ -562,8 +570,8 @@ class App:
             s.snapshots += 1
             out, fp = await self._state_fp(msg.get("id"), first=first)
             if await s.send(out):
-                s.state_fp = fp
-            if fp is None and first and s.kind == "panel" and out["state"].get("stale"):
+                s.state_fp = fp                      # a stale one too: the pusher sends the fresh one when it differs
+            if first and s.kind == "panel" and out["state"].get("stale"):
                 task = asyncio.create_task(self._fresh_after_stale(s))   # the fresh state follows when the read answers
                 s.tasks.add(task)
                 task.add_done_callback(s.tasks.discard)
@@ -579,7 +587,9 @@ class App:
                     self._audit("rate", s.peer, session=s.id, action="perf", outcome="dropped",
                                 reason="perf batches over the rate (later ones are not logged)")
                 return
-            self.perf.extend(msg["marks"])
+            if s.perf_tag is None:
+                s.perf_tag = self.perf.new_session()
+            self.perf.extend(msg["marks"], session=s.perf_tag)
         elif t in INTENTS:
             if s.kind != "panel":                    # only the WhyNot Cut panel speaks for the editor
                 self._audit("intent", s.peer, session=s.id, action=t, outcome="rejected",
@@ -666,8 +676,8 @@ class App:
     async def _item_fields_ex(self, timeout: float | None = None) -> tuple[dict | None, bool, object]:
         """(fields, stale, generation). The item part of the panel state: engine_state.PanelFields on the app's
         engine-state worker, bounded by fields_timeout. A snapshot that arrives while a read is running awaits that
-        same read (asyncio.shield: one waiter going away never cancels it). Past the read's deadline the snapshot gets the last
-        good fields (else no item), stale. After FIELDS_RETIRE_AFTER consecutive timeouts the stuck worker is abandoned
+        same read (asyncio.shield: one waiter going away never cancels it). Past the read's deadline the snapshot gets
+        the last good fields (else no item), stale. After FIELDS_RETIRE_AFTER consecutive timeouts the stuck worker is abandoned
         and a fresh one reads again (at most FIELDS_ABANDONED_MAX stuck at once); otherwise a snapshot never queues
         behind a stuck read. `timeout` (a session's first snapshot, G2 H3): this waiter gives up sooner, with the same
         stale fallback, and the read goes on (it is not counted as stuck). (None, False, None) if the read failed.
@@ -712,13 +722,13 @@ class App:
         """The panel state (see _state_fp)."""
         return (await self._state_fp(id, first=first))[0]
 
-    async def _state_fp(self, id, *, first: bool = False) -> tuple[dict, tuple | None]:
-        """(the state message, its fingerprint; None when it is stale). The panel state: the connection (_host) and
+    async def _state_fp(self, id, *, first: bool = False) -> tuple[dict, tuple]:
+        """(the state message, its fingerprint). The panel state: the connection (_host) and
         the item the engine works on, with the job journal's summaries. A session's first snapshot waits
         first_fields_timeout for the read (G2 H3), later ones the read's own fields_timeout."""
         item, stale, gen = await self._item_fields_ex(self.first_fields_timeout if first else None)
         host, jobs = await self._host(), self._job_rows()
-        return self._compose(id, item, stale, host, jobs), (None if stale else self._fingerprint(item, gen, host, jobs))
+        return self._compose(id, item, stale, host, jobs), self._fingerprint(item, gen, stale, host, jobs)
 
     def _job_rows(self) -> list:
         try:
@@ -751,26 +761,27 @@ class App:
         return messages.state(host[0], host[1], id, item, jobs=jobs, stale=stale)
 
     @staticmethod
-    def _fingerprint(item, gen, host: tuple, jobs: list) -> tuple:
+    def _fingerprint(item, gen, stale: bool, host: tuple, jobs: list) -> tuple:
         """What a pushed state is compared by, cheaply: the PanelFields cache generation of the fields (it moves only
-        when the fields served change; read together with them) when the reader has one, else the fields' JSON; the
-        host; each job's id, state and time."""
+        when the fields served change; read together with them) when the reader has one, else the fields' JSON;
+        whether it is stale; the host; each job's id, state and time."""
         if item is None:
             ik: tuple = ("none",)
         elif isinstance(gen, int) and not isinstance(gen, bool):
             ik = ("gen", gen)
         else:
             ik = ("json", json.dumps(item, sort_keys=True, ensure_ascii=False, default=str))
-        return ik, tuple(host), tuple((j.get("request_id"), j.get("state"), j.get("updated_at")) for j in jobs)
+        return ik, bool(stale), tuple(host), tuple((j.get("request_id"), j.get("state"), j.get("updated_at"))
+                                                   for j in jobs)
 
     async def _fresh_after_stale(self, s: Session) -> None:
         """A panel's first snapshot was answered stale: send it the fresh state once the same read answers (within its
         own deadline; a read that stays stuck sends nothing: the pusher and the poll take over)."""
         item, stale, gen = await self._item_fields_ex()
-        if stale or item is None or self.sessions.get(s.id) is not s or s.sock.closed:
+        if stale or item is None or self.sessions.get(s.id) is not s or s.sock.closed or not s.welcomed:
             return
         host, jobs = await self._host(), self._job_rows()
-        fp = self._fingerprint(item, gen, host, jobs)
+        fp = self._fingerprint(item, gen, False, host, jobs)
         if fp != s.state_fp and await s.send(self._compose(None, item, False, host, jobs)):
             s.state_fp = fp
 
@@ -783,28 +794,37 @@ class App:
             return
         if self._pusher_task is not None and not self._pusher_task.done():
             return
-        self._pusher = push.StatePusher(self._push_probe, self._push_publish, interval=self.push_interval,
+        self._pusher = push.StatePusher(self._push_probe, self._push_publish, self._push_behind,
+                                        interval=self.push_interval,
                                         debounce=self.push_debounce,
                                         debounce_max=max(self.push_debounce, push.DEBOUNCE_MAX_S))
         self._pusher_task = asyncio.create_task(self._pusher.run(self._panels_connected))
 
     async def _push_probe(self):
-        """One look for the pusher: (fingerprint, payload). A stale look is no news (the last fingerprint, no
-        payload)."""
+        """One look for the pusher: (fingerprint, payload, stale). A stuck or failed item read is the last good item
+        marked stale, so host and job changes still go through."""
         item, stale, gen = await self._item_fields_ex()
-        if stale or item is None:
-            return (self._pusher.last if self._pusher is not None else None), None
+        if item is None:                                    # the read failed: the last good item, stale
+            item, stale, gen = self._fields_fallback(), True, self._last_gen
         host, jobs = await self._host(), self._job_rows()
-        return self._fingerprint(item, gen, host, jobs), (item, host, jobs)
+        return self._fingerprint(item, gen, stale, host, jobs), (item, host, jobs), stale
 
-    async def _push_publish(self, fp, payload) -> None:
-        """Send the changed state (no id) to every panel session that has not got it yet."""
-        if payload is None:
-            return
-        msg = self._compose(None, payload[0], False, payload[1], payload[2])
+    def _pushable(self, s: Session) -> bool:
+        """A panel session the pusher keeps current: welcomed, open, and it has had a state (its own snapshot first)."""
+        return s.kind == "panel" and s.welcomed and not s.sock.closed and s.state_fp is not None
+
+    def _push_behind(self, fp) -> bool:
+        return any(self._pushable(s) and s.state_fp != fp for s in list(self.sessions.values()))
+
+    async def _push_publish(self, fp, payload, stale: bool) -> int:
+        """Send the current state (no id) to every panel session whose last state differs; how many got it."""
+        msg = self._compose(None, payload[0], stale, payload[1], payload[2])
+        sent = 0
         for s in list(self.sessions.values()):
-            if s.kind == "panel" and not s.sock.closed and s.state_fp != fp and await s.send(msg):
+            if self._pushable(s) and s.state_fp != fp and await s.send(msg):
                 s.state_fp = fp
+                sent += 1
+        return sent
 
     async def _end(self, s: Session) -> None:
         self.sessions.pop(s.id, None)

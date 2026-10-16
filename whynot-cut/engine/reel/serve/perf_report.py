@@ -9,10 +9,12 @@ Budgets (docs/adobe/g2-reliability-speed-gaps.md):
                              panel.usable mark exists                                                     <= 1500 ms
     S2  click to paint       ui.click -> ui.paint (sampled clicks)                                         <=  100 ms
     S3  command to progress  cmd.received -> cmd.first_progress (the first progress the requester sees)    <= 2000 ms
-A sample is the end mark's `ms`; an end mark without one is paired with its start: the same rid (S2, S3), or the
-latest panel.boot before it (S1). p95 is the nearest rank: the ceil(0.95 n)-th smallest sample.
+A sample is the end mark's `ms`; an end mark without one is paired with its start within the same panel session
+(`s`, the daemon's tag): the same rid (S2; S3 by rid, whose hash is per daemon run), or that session's latest
+panel.boot before it (S1). A mark with no session is never paired across panels; a negative duration (a clock step)
+is no sample. p95 is the nearest rank: the ceil(0.95 n)-th smallest sample.
 Prints a plain table and exits 0 when every budget with samples is met (no samples = "no data", not a miss), 1 when a
-p95 is over its budget, 2 on a usage error (an unreadable --since).
+p95 is over its budget, 2 on a usage error (an unreadable --since), 3 on an internal error (never read as a miss).
 """
 from __future__ import annotations
 
@@ -46,20 +48,23 @@ def p95(values) -> float | None:
     return xs[max(1, rank) - 1]
 
 
-def _durations(marks: list[dict], start: str, end: str, *, by_rid: bool) -> list[float]:
+def _durations(marks: list[dict], start: str, end: str, *, by_rid: bool, by_session: bool = True) -> list[float]:
     out: list[float] = []
-    last_start: dict = {}                            # rid (or None) -> the t of its latest start mark
+    last_start: dict = {}                            # (session, rid) -> the t of its latest start mark
     for m in sorted(marks, key=lambda x: x["t"]):
-        key = m.get("rid") if by_rid else None
+        key = (m.get("s") if by_session else None, m.get("rid") if by_rid else None)
         if m["mark"] == start:
             last_start[key] = m["t"]
         elif m["mark"] == end:
             if "ms" in m:
-                out.append(m["ms"])
-            elif (by_rid and key is None) or key not in last_start:
-                continue
+                v = m["ms"]
+            elif ((by_rid and key[1] is None) or (by_session and not by_rid and key[0] is None)
+                  or key not in last_start):
+                continue                             # nothing of its own to pair with
             else:
-                out.append(m["t"] - last_start[key])
+                v = m["t"] - last_start[key]
+            if v >= 0:
+                out.append(v)
     return out
 
 
@@ -69,7 +74,7 @@ def samples(marks: list[dict]) -> dict[str, list[float]]:
         s1 = _durations(marks, "panel.boot", "link.first_state", by_rid=False)
     return {"S1": s1,
             "S2": _durations(marks, "ui.click", "ui.paint", by_rid=True),
-            "S3": _durations(marks, "cmd.received", "cmd.first_progress", by_rid=True)}
+            "S3": _durations(marks, "cmd.received", "cmd.first_progress", by_rid=True, by_session=False)}
 
 
 def report(marks: list[dict]) -> list[dict]:
@@ -105,7 +110,7 @@ def _since_ms(text: str) -> float:
 
 def main(argv=None, *, out=None) -> int:
     """`reel perf-report` / `python -m serve.perf_report`: prints the table; 0 = every budget met (or no data), 1 = a
-    miss, 2 = a usage error."""
+    miss, 2 = a usage error, 3 = an internal error."""
     out = out if out is not None else sys.stdout
     ap = argparse.ArgumentParser(prog="reel perf-report", description="p95 of the WhyNot Cut speed budgets S1-S3 from "
                                  "<engine home>/logs/perf.jsonl")
@@ -131,8 +136,12 @@ def main(argv=None, *, out=None) -> int:
             sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
             from lib.plat import engine_home
         home = engine_home()
-    rows = report(perf.read(home, since))
-    print(format_table(rows), file=out)
+    try:
+        rows = report(perf.read(home, since))
+        print(format_table(rows), file=out)
+    except Exception as e:                           # noqa: BLE001  a crash is never a budget miss
+        print(f"perf-report: internal error ({type(e).__name__}); the budgets were not checked", file=out)
+        return 3
     return 1 if any(r["ok"] is False for r in rows) else 0
 
 

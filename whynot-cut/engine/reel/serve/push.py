@@ -1,14 +1,19 @@
-"""Push on change (3.0 Addendum G2 hardening H3; H6 builds the idle budget on it): `reel serve` sends the connected
-panels a `state` when the engine state changes, instead of the panel finding out on its next snapshot poll.
+"""Push on change (3.0 Addendum G2 hardening H3; H6 builds the idle budget on it): `reel serve` keeps every connected
+panel's state current instead of the panel finding out on its next snapshot poll.
 
-StatePusher looks every `interval` seconds through `probe()` -> (fingerprint, payload). The fingerprint is cheap: the
-App builds it from the PanelFields cache generation (engine_state.PanelFields.generation: it moves only when the fields
-served change, and an unchanged item is a cache hit that re-reads nothing), the host connection and the job journal's
-in-memory summaries. The first look is the baseline (nothing is pushed). A changed fingerprint is debounced: the pusher
-looks again every `debounce` seconds until two looks agree or `debounce_max` has passed, then publishes the last
-state once, so a burst of engine writes (a build writing a dozen evidence files) is one push.
-A probe or publish that fails is logged once and the loop goes on: the panel's poll is the fallback.
-The clock and the sleep are injected (tests drive it on a fake clock, with no wall-clock wait).
+StatePusher looks every `interval` seconds through `probe()` -> (fingerprint, payload, stale) and keeps each panel up to
+date, not a single server-wide "last": `behind(fp)` says whether any panel's last state differs from fp, and
+`publish(fp, payload, stale)` sends it to every such panel and returns how many got it. So a panel that fell behind (a
+failed send, a stale first snapshot that outlived its read, a snapshot answer that went out after a newer push) is
+caught up on the next look even though nothing changed. The fingerprint is cheap: the App builds it from the PanelFields
+cache generation (engine_state.PanelFields.generation: it moves only when the fields served change, and an unchanged
+item is a cache hit that re-reads nothing), whether the read was stale, the host connection and the job journal's
+in-memory summaries; a stuck item read still has a fingerprint, so host and job changes go through (marked stale).
+A CHANGED fingerprint is debounced: the pusher looks again every `debounce` seconds until two looks agree or
+`debounce_max` has passed, then publishes the last state once, so a burst of engine writes is one push. A stale look
+during that wait never takes a fresh change back: the fresh one is sent at once. A panel that is merely behind (no
+change) is sent the state without waiting. A probe that fails is logged once and the loop goes on: the panel's poll is
+the fallback. The clock and the sleep are injected (tests drive it on a fake clock, with no wall-clock wait).
 """
 from __future__ import annotations
 
@@ -28,16 +33,17 @@ _UNSET = object()
 
 
 class StatePusher:
-    def __init__(self, probe, publish, *, interval: float = PUSH_INTERVAL_S, debounce: float = DEBOUNCE_S,
+    def __init__(self, probe, publish, behind, *, interval: float = PUSH_INTERVAL_S, debounce: float = DEBOUNCE_S,
                  debounce_max: float = DEBOUNCE_MAX_S, sleep=asyncio.sleep, clock=time.monotonic):
-        self.probe = probe                  # async () -> (fingerprint, payload)
-        self.publish = publish              # async (fingerprint, payload) -> None
+        self.probe = probe                  # async () -> (fingerprint, payload, stale)
+        self.publish = publish              # async (fingerprint, payload, stale) -> how many panels got it
+        self.behind = behind                # (fingerprint) -> does any panel lack it
         self.interval = interval
         self.debounce = debounce
         self.debounce_max = debounce_max
         self.sleep = sleep
         self.clock = clock
-        self.last = _UNSET
+        self.last = _UNSET                  # the last fingerprint looked at (only to tell a change from a lag)
         self._failed = False
 
     def _fail(self, what: str, e: BaseException) -> None:
@@ -46,43 +52,46 @@ class StatePusher:
             log.warning("reel serve: the state push %s failed (%s); the panel's poll still works", what,
                         type(e).__name__)
 
-    async def tick(self) -> bool:
-        """One look: True when a changed state was published."""
+    async def _look(self):
         try:
-            fp, payload = await self.probe()
+            return await self.probe()
         except asyncio.CancelledError:
             raise
         except Exception as e:                       # noqa: BLE001
             self._fail("look", e)
+            return None
+
+    async def tick(self) -> bool:
+        """One look: True when a state reached at least one panel."""
+        look = await self._look()
+        if look is None:
             return False
-        if self.last is _UNSET:
-            self.last = fp
-            return False
-        if fp == self.last:
-            return False
-        start = self.clock()
-        while self.debounce > 0 and self.clock() - start + self.debounce <= self.debounce_max:
-            await self.sleep(self.debounce)
-            try:
-                again, newer = await self.probe()
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:                   # noqa: BLE001
-                self._fail("look", e)
-                break
-            if again == fp:
-                break
-            fp, payload = again, newer
+        fp, payload, stale = look
+        changed = fp != self.last
         self.last = fp
+        if not self.behind(fp):
+            return False
+        if changed:
+            start = self.clock()
+            while self.debounce > 0 and self.clock() - start + self.debounce <= self.debounce_max:
+                await self.sleep(self.debounce)
+                again = await self._look()
+                if again is None or (again[2] and not stale):
+                    break                            # no look, or a stale one: never take the fresh change back
+                if again[0] == fp:
+                    break
+                fp, payload, stale = again
+            self.last = fp
         try:
-            await self.publish(fp, payload)
+            sent = await self.publish(fp, payload, stale)
         except asyncio.CancelledError:
             raise
         except Exception as e:                       # noqa: BLE001
             self._fail("send", e)
             return False
-        self._failed = False
-        return True
+        if sent:
+            self._failed = False
+        return bool(sent)
 
     async def run(self, active) -> None:
         """Look every `interval` while active() is true."""

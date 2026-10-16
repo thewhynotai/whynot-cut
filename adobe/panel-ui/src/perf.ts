@@ -10,8 +10,11 @@
 //   panel.usable      that state is on screen (S1 = its ms)
 //   ui.click/ui.paint a sampled click and the first paint its handler made (S2 = ui.paint's ms); a click whose handler
 //                     painted nothing records nothing
-// The boot marks are kept once each and carry their ms since panel.boot. A source without a recorder (the mock, the
-// offline source, the tests) gets NO_PERF: mount's calls do nothing.
+// The boot marks are kept once each and carry their ms since panel.boot. Durations come from a monotonic clock (`mono`:
+// DaemonSource passes performance.now(), so a wall-clock step never makes a sample); `t` stays epoch ms. A source
+// without a recorder (the mock, the offline source) gets NO_PERF: mount's calls do nothing. DaemonSource makes a real
+// recorder by default, in tests too; it sends nothing unless the daemon's welcome lists "perf" (the tests' fake daemon
+// does not, except in the perf tests).
 
 export const PERF_MARKS = ["panel.boot", "panel.first_paint", "link.welcome", "link.first_state", "panel.usable", "ui.click", "ui.paint"] as const;
 export type PerfMarkName = (typeof PERF_MARKS)[number];
@@ -58,21 +61,24 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 
 export class PerfRecorder implements PerfSink {
   private readonly now: () => number;
+  private readonly mono: () => number;
   private readonly random: () => number;
   private readonly sampleRate: number;
   private readonly boot: number;
   private buf: PerfMark[] = [];
   private seen = new Set<PerfMarkName>();
-  private pending: { rid: string; t: number } | null = null;
+  private pending: { rid: string; t: number; at: number } | null = null;
   private seq = 0;
   /** marks dropped because the buffer was full */
   dropped = 0;
 
-  constructor(opts: { now: () => number; random?: () => number; sampleRate?: number }) {
+  /** now: epoch ms (each mark's t); mono: a monotonic ms clock for the durations (default: now) */
+  constructor(opts: { now: () => number; mono?: () => number; random?: () => number; sampleRate?: number }) {
     this.now = opts.now;
+    this.mono = opts.mono ?? opts.now;
     this.random = opts.random ?? Math.random;
     this.sampleRate = opts.sampleRate ?? UI_SAMPLE_RATE;
-    this.boot = this.now();
+    this.boot = this.mono();
     this.mark("panel.boot");
   }
 
@@ -91,7 +97,7 @@ export class PerfRecorder implements PerfSink {
     }
     this.seen.add(mark);
     const t = this.now();
-    const ms = opts.ms ?? (ONCE.includes(mark) && mark !== "panel.boot" ? t - this.boot : undefined);
+    const ms = opts.ms ?? (ONCE.includes(mark) && mark !== "panel.boot" ? this.mono() - this.boot : undefined);
     const m: PerfMark = { mark, t: Math.round(t) };
     if (typeof ms === "number" && Number.isFinite(ms) && ms >= 0 && ms <= MS_MAX) m.ms = round1(ms);
     if (typeof opts.rid === "string" && RID_RE.test(opts.rid)) m.rid = opts.rid;
@@ -109,14 +115,14 @@ export class PerfRecorder implements PerfSink {
     } catch {
       r = 1;
     }
-    this.pending = Number.isFinite(r) && r < this.sampleRate ? { rid: `c-${++this.seq}`, t: this.now() } : null;
+    this.pending = Number.isFinite(r) && r < this.sampleRate ? { rid: `c-${++this.seq}`, t: this.now(), at: this.mono() } : null;
   }
 
   painted(): void {
     const p = this.pending;
     if (!p) return;
     this.pending = null;
-    const ms = this.now() - p.t;
+    const ms = this.mono() - p.at;
     this.buf.length < PERF_BUFFER_MAX ? this.buf.push({ mark: "ui.click", t: Math.round(p.t), rid: p.rid }) : this.dropped++;
     this.mark("ui.paint", { ms, rid: p.rid });
   }

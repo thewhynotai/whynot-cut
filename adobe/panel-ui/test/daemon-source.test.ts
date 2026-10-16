@@ -239,6 +239,7 @@ function rig(opts: { record?: unknown; noProbe?: boolean; openThrows?: boolean; 
       return r.daemon.open(url);
     },
     now: r.clock.now,
+    monotonic: r.clock.now,
     setTimer: r.clock.setTimer,
     log: (line: string) => {
       r.logs.push(line);
@@ -1178,4 +1179,72 @@ test("H3 perf: an older daemon (no features) never gets a perf message; perf: fa
   off.perf.mark("panel.usable");
   assert.equal(typeof off.perf.mark, "function");
   off.stop();
+});
+
+// ---------------------------------------------------------------------------------------------------- item fields (H3 review P1-3)
+const ITEM_FIELDS = {
+  client: "Dr Nour",
+  item: "C0239",
+  pipeline: [{ id: "transcript", state: "done" }, { id: "approve", state: "waiting" }],
+  approval: { summary: "plan", preview_mp4: null, flagged: [{ kind: "medical", text: "x", tc: "00:00:01:00" }], fingerprint: "abc123" },
+  qc: [{ t_s: 1.5, tc: "00:00:01:15", file: "D:/f.png", label: "hook", verdict: "pass" }],
+};
+
+test("H3 review P1-3: a stale first state then the fresh push both reach PanelState; panel.usable waits for the fresh one", async () => {
+  const r = rig();
+  r.daemon.features = ["perf"];
+  const realReceive = r.daemon.receive.bind(r.daemon);
+  let answered = 0;
+  r.daemon.receive = (s, m) => {
+    if (m.type === "snapshot" && answered++ === 0) {
+      const st = stubState("uxp", "Premiere Pro 26.5.2", m["id"] as string) as { state: Record<string, unknown> };
+      Object.assign(st.state, { client: "Dr Nour", item: "C0001", stale: true });
+      return s.deliver(st);
+    }
+    if (m.type === "snapshot") return; // the poll is not under test here
+    realReceive(s, m);
+  };
+  r.src.start();
+  await r.clock.advance(0);
+  let st = await r.src.snapshot();
+  assert.deepEqual([st.client, st.item, st.stale], ["Dr Nour", "C0001", true]);
+  assert.ok(validPanelState(st), JSON.stringify(validPanelState.errors));
+  assert.ok(!perfMarks(r).some((m) => m.mark === "panel.usable"), "a stale state is not usable");
+  r.clock.t += 300;
+  const fresh = stubState("uxp", "Premiere Pro 26.5.2") as { state: Record<string, unknown> };
+  Object.assign(fresh.state, ITEM_FIELDS);
+  r.daemon.last.deliver(fresh);
+  await flush();
+  st = await r.src.snapshot();
+  assert.deepEqual([st.client, st.item, st.stale], ["Dr Nour", "C0239", undefined]);
+  assert.ok(!("stale" in st), "a fresh state carries no stale key");
+  assert.deepEqual(st.pipeline.map((p) => [p.id, p.state]), [["transcript", "done"], ["approve", "waiting"]]);
+  assert.equal(st.approval?.fingerprint, "abc123");
+  assert.equal(st.qc.length, 1);
+  assert.ok(validPanelState(st), JSON.stringify(validPanelState.errors));
+  const usable = perfMarks(r).filter((m) => m.mark === "panel.usable");
+  assert.equal(usable.length, 1);
+  assert.equal(usable[0]!.ms, 300);
+  assert.deepEqual(r.daemon.invalid, []);
+});
+
+test("H3 review P1-3: a malformed item part is dropped whole, and a running command's own step is never overwritten", async () => {
+  const r = await connected();
+  r.daemon.onCommand = () => {};
+  const p = r.src.run("export_frames", { sequence_name: "C0239_main", times: [1.5], out_dir: "D:/out", project_path: null });
+  await flush();
+  const st = stubState("uxp") as { state: Record<string, unknown> };
+  Object.assign(st.state, ITEM_FIELDS, { pipeline: [{ id: "frames", state: "done" }, { id: "approve", state: "waiting" }, { id: "nope", state: "done" }], approval: { summary: 3 }, qc: [{ t_s: "1" }] });
+  r.daemon.last.deliver(st);
+  await flush();
+  const s = await r.src.snapshot();
+  assert.equal(s.item, "C0239");
+  assert.equal(s.pipeline.find((x) => x.id === "frames")!.state, "running", "the panel's own running command wins");
+  assert.equal(s.pipeline.find((x) => x.id === "approve")!.state, "waiting");
+  assert.ok(!s.pipeline.some((x) => (x.id as string) === "nope"));
+  assert.equal(s.approval, null, "a malformed approval is dropped whole");
+  assert.deepEqual(s.qc, [], "a malformed qc frame is dropped");
+  assert.ok(validPanelState(s), JSON.stringify(validPanelState.errors));
+  r.src.stop();
+  await p;
 });
