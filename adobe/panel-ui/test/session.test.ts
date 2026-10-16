@@ -11,6 +11,7 @@ import { PANEL_UPDATE_STATES, SESSION_ERROR_CODES, SESSION_MESSAGE_TYPES } from 
 import type { SessionMessage } from "../src/session.ts";
 import { SCENARIOS, sampleState } from "../src/mock.ts";
 import { CLAUDE_STATES } from "../src/source.ts";
+import { PERF_MARKS } from "../src/perf.ts";
 
 const CONTRACT = new URL("../../../whynot-cut/engine/reel/contract/", import.meta.url);
 const ajv = new Ajv2020({ strictSchema: true, strictTypes: false, strictRequired: false, strictTuples: false, allErrors: true });
@@ -50,6 +51,9 @@ const SAMPLES: SessionMessage[] = [
   { type: "reply", id: "p-3", intent: "rebuild", ok: false, error: "x", how: "y" },
   { type: "error", code: "schema", message: "bad", id: "r-9" },
   { type: "error", code: "auth", message: "no" },
+  { type: "perf", marks: [{ mark: "panel.boot", t: 1_760_000_000_000 }, { mark: "panel.usable", t: 1_760_000_000_812, ms: 812 }, { mark: "ui.paint", t: 1_760_000_001_000, ms: 6.5, rid: "c-3" }] },
+  { type: "welcome", session_id: "s-1", protocol: 4, daemon_version: "3.0.0", update: { panel: "ok" }, features: ["perf", "push"] },
+  { type: "state", state: { ...sampleState("en", "showcase"), stale: true } },
 ];
 
 test("session.schema.json compiles under ajv strict, and its message oneOf lists every type the TS mirror knows, in order", () => {
@@ -98,6 +102,12 @@ test("bad messages are rejected: wrong protocol or missing token in hello, unkno
     { type: "welcome", session_id: "s", protocol: 4, daemon_version: "3", update: { panel: "maybe" } },
     { type: "welcome", session_id: "s", protocol: 4, daemon_version: "3", update: {} },
     { type: "rebuild", id: "p", item: "x", project_path: "", replace_edited: true },
+    { type: "perf", marks: [] },
+    { type: "perf", marks: [{ mark: "cmd.received", t: 1 }] },
+    { type: "perf", marks: [{ mark: "panel.boot", t: 1, rid: "D:/clients/x" }] },
+    { type: "perf", marks: [{ mark: "panel.boot", t: 1, client: "Dr Nour" }] },
+    { type: "perf", marks: Array.from({ length: 51 }, () => ({ mark: "ui.click", t: 1 })) },
+    { type: "welcome", session_id: "s", protocol: 4, daemon_version: "3", features: ["teleport"] },
     {},
     [],
     "hello",
@@ -129,4 +139,10 @@ test("the build-stamp answer and the Claude pill states equal the schema (C2.3 /
     st.connection = { ...st.connection, claude };
     assert.ok(v(st), `${claude}: ${JSON.stringify(v.errors)}`);
   }
+});
+
+test("H3: the perf marks equal the schema's perf_mark enum", () => {
+  type Defs = Record<string, { properties: Record<string, { enum?: string[] }> }>;
+  const defs = session.$defs as unknown as Defs;
+  assert.deepEqual(defs["perf_mark"]!.properties["mark"]!.enum, [...PERF_MARKS]);
 });

@@ -2297,6 +2297,7 @@ PANEL_STATE = {
              {"request_id": "r-0", "action": "export_frames", "state": "interrupted", "item": "C0239",
               "submitted_at": "2026-10-14T11:30:00Z", "updated_at": "2026-10-14T11:31:30Z",
               "result": {"ok": False, "code": "interrupted"}}],
+    "stale": False,
 }
 MINIMAL_STATE = {"connection": {"engine": "offline", "claude": "unknown", "host": {"state": "offline"}}, "client": "", "item": "",
                  "language": "en", "editor_name": "",
@@ -2318,7 +2319,12 @@ SESSION_SAMPLES = {
     "cancel": {"type": "cancel", "id": "r-1"},
     "reply": {"type": "reply", "id": "p-2", "intent": "approve", "ok": True},
     "error": {"type": "error", "code": "schema", "message": "bad hello", "id": "r-9"},
+    "perf": {"type": "perf", "marks": [{"mark": "panel.boot", "t": 1760000000000},
+                                       {"mark": "panel.usable", "t": 1760000000812, "ms": 812},
+                                       {"mark": "ui.paint", "t": 1760000001000, "ms": 6.5, "rid": "c-12"}]},
 }
+PANEL_PERF_MARKS = ["panel.boot", "panel.first_paint", "link.welcome", "link.first_state", "panel.usable", "ui.click",
+                    "ui.paint"]
 
 
 def session_errors(instance, name=None):
@@ -2450,6 +2456,51 @@ class SessionContractTests(unittest.TestCase):
         every = copy.deepcopy(SESSION_SAMPLES["hello"])
         every["client"]["capabilities"] = list(contract.ACTIONS)
         self.assertEqual(session_errors(every, "hello"), [])
+
+    def test_welcome_features(self):
+        """G2 H3: what this daemon accepts beyond protocol 4's core: `perf` batches and pushed states. Absent from an
+        older daemon (the panel then sends no perf batch)."""
+        w = SESSION_SAMPLES["welcome"]
+        features = V.load(SESSION)["$defs"]["welcome"]["properties"]["features"]
+        self.assertEqual(features["items"]["enum"], ["perf", "push"])
+        for ok in ([], ["perf"], ["perf", "push"], ["push"]):
+            self.assertEqual(session_errors(dict(w, features=ok), "welcome"), [], ok)
+        for bad in (["teleport"], "perf", [1], None, ["perf"] * 9):
+            self.assertTrue(session_errors(dict(w, features=bad), "welcome"), repr(bad))
+
+    # ---- perf (G2 H3)
+    def test_perf_is_a_bounded_batch_of_panel_marks(self):
+        defs = V.load(SESSION)["$defs"]
+        self.assertEqual(defs["perf_mark"]["properties"]["mark"]["enum"], PANEL_PERF_MARKS)
+        self.assertEqual(defs["perf"]["properties"]["marks"]["maxItems"], 50)
+        ts = (TS_SOURCE.parent / "perf.ts").read_text(encoding="utf-8")       # the panel's own list, in the same order
+        listed = re.search(r"PERF_MARKS = \[([^\]]+)\]", ts).group(1)
+        self.assertEqual(re.findall(r'"([^"]+)"', listed), PANEL_PERF_MARKS)
+        p = SESSION_SAMPLES["perf"]
+        good = p["marks"][0]
+        self.assertEqual(session_errors(dict(p, marks=[good] * 50), "perf"), [])
+        for mark in PANEL_PERF_MARKS:
+            self.assertEqual(session_errors(dict(p, marks=[dict(good, mark=mark)]), "perf"), [], mark)
+
+    def test_perf_rejects_serve_marks_paths_tokens_and_bad_numbers(self):
+        p = SESSION_SAMPLES["perf"]
+        good = p["marks"][0]
+        bad_marks = [dict(good, mark="cmd.received"), dict(good, mark="link.welcome_sent"), dict(good, mark="x"),
+                     dict(good, rid="D:/clients/x"), dict(good, rid=TOKEN), dict(good, rid="a b"), dict(good, rid=""),
+                     dict(good, ms=-1), dict(good, ms=3600001), dict(good, ms="5"), dict(good, t=-1),
+                     dict(good, t="2026-10-16T10:00:00Z"), dict(good, t=1e15), dict(good, client="Dr Nour"),
+                     {"mark": "panel.boot"}, {"t": 1}]
+        for bad in bad_marks:
+            self.assertTrue(session_errors(dict(p, marks=[bad]), "perf"), repr(bad))
+            self.assertTrue(session_errors(dict(p, marks=[bad])), repr(bad))
+        for bad in ([], [good] * 51, None, good):
+            self.assertTrue(session_errors(dict(p, marks=bad), "perf"), repr(bad))
+
+    def test_state_stale_is_an_optional_boolean(self):
+        """G2 H3: a state built from the last good engine-state read while the fresh one is still running."""
+        self.assertEqual(session_errors(dict(MINIMAL_STATE, stale=True), "panel_state"), [])
+        for bad in ("yes", 1, None):
+            self.assertTrue(session_errors(dict(MINIMAL_STATE, stale=bad), "panel_state"), repr(bad))
 
     def test_welcome(self):
         w = SESSION_SAMPLES["welcome"]

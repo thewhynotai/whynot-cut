@@ -138,6 +138,8 @@ export interface PanelState {
   log: LogLine[];
   /** the daemon's newest journaled commands, newest first (absent from an older daemon and from the mock) */
   jobs?: JobSummary[];
+  /** G2 H3: the daemon built this state from its last good engine-state read (the fresh one follows as a push) */
+  stale?: boolean;
 }
 
 /** An action result. Contract hosts answer with the v4 result envelope; approvals answer with this too. */

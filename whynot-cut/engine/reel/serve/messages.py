@@ -12,7 +12,7 @@ from contract import validate
 from contract.validator import load
 
 __all__ = ["TYPES", "CLIENT_TYPES", "DAEMON_TYPES", "ID_RE", "MESSAGE_MAX", "PANEL_UPDATES", "validate_message",
-           "message_id", "error", "reply", "welcome", "state", "clip", "compare_builds", "BUILD_ID_RE"]
+           "message_id", "error", "reply", "welcome", "state", "clip", "compare_builds", "BUILD_ID_RE", "FEATURES"]
 
 TYPES = tuple(ref["$ref"].rsplit("/", 1)[1] for ref in load("session")["$defs"]["message"]["oneOf"])
 DAEMON_TYPES = frozenset({"welcome", "state", "reply", "error"})            # only the daemon sends these
@@ -23,6 +23,7 @@ PANEL_UPDATES = ("ok", "stale", "newer", "unknown")                         # we
 BUILD_ID_RE = re.compile(r"[0-9]{8}T[0-9]{6}Z")                             # the build id: 20261013T142530Z (UTC)
 BUILD_MAX = 64                                                              # hello client.build maxLength
 JOBS_MAX = 50                                                               # panel_state.jobs maxItems
+FEATURES = ("perf", "push")                                                 # welcome.features (G2 H3)
 
 
 def validate_message(msg) -> tuple[str, list[str]] | None:
@@ -95,17 +96,20 @@ def compare_builds(panel, expected) -> str:
     return "stale"
 
 
-def welcome(session_id: str, daemon_version: str, update: str = "unknown") -> dict:
+def welcome(session_id: str, daemon_version: str, update: str = "unknown", features=FEATURES) -> dict:
+    """`features` (G2 H3): perf = this daemon appends the panel's perf batches; push = it pushes a state on change."""
     return {"type": "welcome", "session_id": session_id, "protocol": 4, "daemon_version": daemon_version,
-            "update": {"panel": update if update in PANEL_UPDATES else "unknown"}}
+            "update": {"panel": update if update in PANEL_UPDATES else "unknown"},
+            "features": [f for f in FEATURES if f in features]}
 
 
 def state(host_state: str, host_detail: str | None = None, id: str | None = None, item: dict | None = None,
-          jobs: list | None = None) -> dict:
+          jobs: list | None = None, stale: bool = False) -> dict:
     """The daemon's `state`: the connection (engine connected, which host path is live; the Claude pill stays "unknown"
     until the T6.2b probe exists) and, from engine_state.panel_fields, the item's client, item, pipeline, approval and
     QC tiles. Language, editor name, context and log are the panel's own. `jobs`: the job journal's newest summaries
-    (serve/jobs.py summaries(); G2 H1), by which a reconnected panel reattaches to its commands."""
+    (serve/jobs.py summaries(); G2 H1), by which a reconnected panel reattaches to its commands. `stale` (G2 H3): the
+    item comes from the last good engine-state read because the fresh one did not answer in time."""
     host: dict = {"state": host_state}
     if host_detail:
         host["detail"] = clip(host_detail, 256)
@@ -119,6 +123,8 @@ def state(host_state: str, host_detail: str | None = None, id: str | None = None
             out["state"][key] = item[key]
     if jobs is not None:
         out["state"]["jobs"] = list(jobs)[:JOBS_MAX]
+    if stale:
+        out["state"]["stale"] = True
     if isinstance(id, str) and ID_RE.fullmatch(id):
         out["id"] = id
     return out

@@ -92,6 +92,8 @@ Cost (PanelFields)
     is never cached. active.json itself is read on every call, so staleness and a changed item are seen at once. An
     unchanged item is never re-read or re-fingerprinted. Blocking (file reads, hashing): the daemon runs it on its own
     bounded worker with a timeout (serve/app.py App._item_fields), never on the event loop or the default executor.
+    PanelFields.generation (G2 H3) moves only when the fields served change; the daemon's push on change compares it
+    (with_generation hands the fields and their generation over together), so a cache hit costs no comparison.
 
 The build stamp (C1.8 / C2.3)
     <plugin>/adobe/expected.json {product, build, sha} is written by release.py (the executor's part) with `build` =
@@ -852,12 +854,27 @@ class PanelFields:
     hash of the small gate files in GATE_FILES:
     an approval or verdict rewritten in place with the same size and a kept mtime is still seen). active.json is read
     on every call. A result built while any read failed for a reason other than "not found" is never cached (the next
-    call reads again). Thread-safe; every call returns its own copy."""
+    call reads again). Thread-safe; every call returns its own copy.
+    `generation` (G2 H3, the daemon's push on change) moves only when the fields served differ from the ones served
+    before: a cache hit compares nothing, a new key whose fields came out the same (a touched file) does not move it."""
 
     def __init__(self):
         self._lock = threading.Lock()
         self._key = None
         self._val: dict | None = None
+        self._served: dict | None = None          # the fields the last call returned (generation's reference)
+        self._served_key = None                   # ... and their cache key (None: not served from a key)
+        self.generation = 0
+
+    def _served_now(self, val: dict, key) -> None:
+        """Under the lock: the fields this call returns. Served from the same key as last time: nothing to compare;
+        otherwise a change of the fields moves generation."""
+        if key is not None and key == self._served_key:
+            return
+        if val != self._served:
+            self._served = copy.deepcopy(val)
+            self.generation += 1
+        self._served_key = key
 
     def _signature(self, act: dict, home):
         try:
@@ -874,16 +891,25 @@ class PanelFields:
             return None
 
     def __call__(self, home, now: _dt.datetime | None = None) -> dict:
+        return self.with_generation(home, now)[0]
+
+    def with_generation(self, home, now: _dt.datetime | None = None) -> tuple[dict, int]:
+        """(the fields, the generation they belong to), taken together under the lock: a caller that compares
+        generations (the daemon's push) never pairs one read's fields with another read's generation."""
         act = read_active(home, now)
         if act is None:
-            return _empty()
+            val = _empty()
+            with self._lock:
+                self._served_now(val, None)
+                return val, self.generation
         _FAILS.n = 0
         key = self._signature(act, home)
         if _FAILS.n:                              # a stat or hash failed: the key cannot be trusted
             key = None
         with self._lock:
             if key is not None and key == self._key and self._val is not None:
-                return copy.deepcopy(self._val)
+                self._served_now(self._val, key)  # a hit: unchanged unless something else was served meanwhile
+                return copy.deepcopy(self._val), self.generation
         val = _fields(act, home)
         clean = not _FAILS.n
         with self._lock:
@@ -891,4 +917,5 @@ class PanelFields:
                 self._key, self._val = key, copy.deepcopy(val)
             else:                                 # never serve a result built over a failed read
                 self._key, self._val = None, None
-        return val
+            self._served_now(val, key if clean else None)
+            return val, self.generation

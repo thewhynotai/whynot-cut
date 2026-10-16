@@ -7,6 +7,7 @@ import type { LogLine, PanelDataSource, PanelState, Result } from "../src/source
 import { MockSource } from "../src/mock.ts";
 import type { ActionName } from "../src/contract.ts";
 import { AR, EN } from "../src/i18n.ts";
+import { PerfRecorder } from "../src/perf.ts";
 
 // A tiny fake DOM: enough for event delegation, innerHTML and querySelector of data attributes.
 type Listener = (e: { target: PanelElement | null }) => void;
@@ -699,4 +700,37 @@ test("C2.2 r2: a Start engine notice clears itself once the engine connects", as
   await tick();
   for (const cb of source.cbs) cb({ ...off, connection: { ...off.connection, engine: "connected" } });
   assert.equal((handle.ui.notice as { text: string } | null)?.text, "Premiere is busy.");
+});
+
+// ---------------------------------------------------------------------------------------------------- perf (H3)
+test("H3 perf: mount marks the first paint and times a sampled click to the paint it causes", async () => {
+  const clock = { t: 1_760_000_000_000 };
+  const perf = new PerfRecorder({ now: () => clock.t, random: () => 0 });
+  const root = new FakeRoot();
+  const source = Object.assign(new RecSource(), { perf });
+  const { host } = hostRec();
+  clock.t += 30;
+  const h = mount(root, source, host);
+  await h.ready;
+  const s = await source.snapshot();
+  clock.t += 5;
+  root.input("changes", "shorter hook");
+  root.click({ "data-action": "request-changes" });
+  await tick();
+  root.click({ "data-action": "no-such-action" }); // paints nothing: no sample
+  const marks = perf.take();
+  assert.deepEqual(marks.map((m) => m.mark), ["panel.boot", "panel.first_paint", "ui.click", "ui.paint"]);
+  assert.equal(marks[1]!.ms, 30);
+  assert.equal(marks[2]!.rid, marks[3]!.rid);
+  assert.equal(typeof marks[3]!.ms, "number");
+  assert.equal(source.calls.requestChanges.length, 1);
+  assert.ok(s.client);
+  h.unmount();
+});
+
+test("H3 perf: a source without a recorder (the mock) mounts and clicks as before", async () => {
+  const { root, source } = await setup();
+  root.click({ "data-action": "no-such-action" });
+  assert.ok(root.innerHTML.includes("WhyNot Cut"));
+  assert.equal((source as unknown as { perf?: unknown }).perf, undefined);
 });

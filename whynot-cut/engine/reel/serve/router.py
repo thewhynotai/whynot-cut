@@ -28,12 +28,17 @@ While a CEP job runs, the FileQueueAdapter watches its queue files (read only, a
 and its queued / claimed state, journals them, and sends the requester progress with a `phase` (H2). At daemon
 start recover() reconciles the journal with the queue files (jobs.reconcile) and follows the jobs still in a live
 bridge's queue to their result.
+
+Perf marks (G2 H3, serve/perf.py; budget S3): cmd.received when a valid command arrives, then for a command routed
+here cmd.queued / cmd.claimed (the H2 synthetic phases), cmd.first_progress (the first progress the requester gets)
+and cmd.result, each with its ms since cmd.received and the request id; nothing else of the command is written.
 """
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import logging
+import time
 
 from contract import RESERVED, validate_request, validate_result
 from contract.cep import CEP_NAME
@@ -87,12 +92,15 @@ def bridge_alive(lane: str) -> bool:
 
 class _Job:
     """One command in flight in this daemon: the Router's task that runs it and the requesters waiting for it."""
-    __slots__ = ("rid", "action", "route", "owner", "task", "listeners")
+    __slots__ = ("rid", "action", "route", "owner", "task", "listeners", "t0", "progressed", "phases")
 
-    def __init__(self, rid: str, action: str, route: str, owner):
+    def __init__(self, rid: str, action: str, route: str, owner, t0: float | None = None):
         self.rid, self.action, self.route, self.owner = rid, action, route, owner
         self.task: asyncio.Task | None = None
         self.listeners: list = []                     # the requesters' send(msg) coroutines (progress)
+        self.t0 = time.monotonic() if t0 is None else t0      # cmd.received (perf marks count from here)
+        self.progressed = False
+        self.phases: set = set()
 
 
 # Phase 6B (Addendum A2): the tool and the task that will make each reserved action prefix work
@@ -113,8 +121,9 @@ def reserved_result(action: str, rid: str) -> dict:
 class Router:
     """`sessions()` lists the connected, authenticated sessions (objects with id, kind, host, capabilities, link)."""
 
-    def __init__(self, *, home, sessions, file_queue=None, audit=None, journal=None):
+    def __init__(self, *, home, sessions, file_queue=None, audit=None, journal=None, perf=None):
         self.home = home
+        self.perf = perf                               # serve/perf.PerfLog, or None: no marks
         self._sessions = sessions
         self.file_queue = file_queue if file_queue is not None else FileQueueAdapter()
         self.audit = audit
@@ -129,6 +138,20 @@ class Router:
     def _audit(self, event, **kw) -> None:
         if self.audit is not None:
             self.audit.log(event, **kw)
+
+    def _mark(self, mark: str, rid: str, t0: float | None = None) -> None:
+        """A perf mark (never fails the command); ms since t0 when given."""
+        if self.perf is not None:
+            self.perf.mark(mark, rid=rid, ms=None if t0 is None else (time.monotonic() - t0) * 1000)
+
+    def _progress_marks(self, job: _Job, progress: dict) -> None:
+        phase = progress.get("phase") if isinstance(progress, dict) else None
+        if phase in ("queued", "claimed") and phase not in job.phases:
+            job.phases.add(phase)
+            self._mark(f"cmd.{phase}", job.rid, job.t0)
+        if not job.progressed:
+            job.progressed = True
+            self._mark("cmd.first_progress", job.rid, job.t0)
 
     def pick(self, action: str):
         """(adapter, label) for `action`, or (None, reason). The most recently connected capable session wins."""
@@ -161,6 +184,8 @@ class Router:
             self._audit("command", peer=peer, session=session_id, action=action, outcome="rejected",
                         reason="request id not journalable")
             return messages.error("schema", BAD_ID, rid)
+        t0 = time.monotonic()
+        self._mark("cmd.received", rid)
         job = self._jobs.get(rid)
         if job is not None:                                 # in flight here: attach, never run it twice
             if job.action != action:
@@ -202,7 +227,7 @@ class Router:
             return messages.error("schema", "context.root is not a usable folder path.", rid)
 
         route = "uxp" if isinstance(adapter, UxpAdapter) else "cep"
-        job = _Job(rid, action, route, session_id)
+        job = _Job(rid, action, route, session_id, t0)
         self._jobs[rid] = job
         self._running[rid] = adapter
         self._journal(self.journal.start, rid, action=action, session_kind=session_kind, route=route,
@@ -259,6 +284,7 @@ class Router:
         rid, action = job.rid, job.action
 
         async def relay(progress: dict) -> None:
+            self._progress_marks(job, progress)
             await self._relay(job, progress)
 
         try:
@@ -281,6 +307,7 @@ class Router:
             self._jobs.pop(rid, None)
         res = self.checked(res, action, rid, peer=peer, session_id=session_id, label=label)
         self._journal(self.journal.finish, rid, res)
+        self._mark("cmd.result", rid, job.t0)
         return res
 
     def session_ended(self, session_id) -> list:

@@ -8,6 +8,8 @@
 // or host text that holds a command is not shown (render swaps in the panel's own sentence, src/commands.ts
 // runtimeText; never a cut-up sentence). Every failure and every held-back text goes to the log drawer, through the
 // panel's own log lines (token-scrubbed like DaemonSource's, and merged with the source's by time, newest last).
+// Perf (G2 H3): with a source that carries a recorder (DaemonSource.perf; src/perf.ts) mount marks its first paint and
+// times sampled clicks to the paint their handler makes; any other source gets the no-op.
 import { exportFramesAction, openProjectAction, rebuildInput, renderReviewAction } from "./actions.ts";
 import type { BuiltAction } from "./actions.ts";
 import { runtimeText } from "./commands.ts";
@@ -18,6 +20,7 @@ import { initialUi, render, renderError, renderLoading } from "./render.ts";
 import type { FixAction, Notice, UiState } from "./render.ts";
 import type { StringKey } from "./i18n.ts";
 import type { LogLine, PanelDataSource, PanelState, Result } from "./source.ts";
+import { perfOf } from "./perf.ts";
 import { kitControlSelector, kitDisabled, kitKeyHandler, kitPointerGuard } from "./kit/activate.ts";
 
 /** the panel's own log lines kept (the source keeps its own) */
@@ -83,6 +86,7 @@ export function logEpoch(l: LogLine, now: number): number {
 
 export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost): MountHandle {
   const ui: UiState = initialUi();
+  const perf = perfOf(source);
   let state: PanelState | null = null;
   let off: (() => void) | null = null;
   let live = true;
@@ -161,6 +165,7 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
       const selEnd = active?.selectionEnd ?? null;
       logHeld(state);
       root.innerHTML = render(view(state), strings(), ui);
+      perf.painted();
       if (field && root.querySelector) {
         const el = root.querySelector(`[data-field="${field}"]`);
         if (el?.focus) {
@@ -403,12 +408,14 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
 
   /** A handler that throws (a state that is slightly off) becomes a notice, not an exception in the event loop. */
   function onClick(e: PanelEvent): void {
+    perf.click();
     try {
       handleClick(e);
     } catch (err) {
       setNotice(null, undefined, err); // the handler itself broke: Copy diagnostics, never a re-run
       paint();
     }
+    perf.clickDone();
   }
 
   function onInput(e: PanelEvent): void {
@@ -438,6 +445,7 @@ export function mount(root: MountRoot, source: PanelDataSource, host: PanelHost)
   // Subscribe first, then ask for the snapshot: a change that lands in between is not lost, and a pushed
   // state that arrives before the snapshot answers wins (it is newer).
   root.innerHTML = renderLoading(stringsFor("en"));
+  perf.mark("panel.first_paint");
   let pushed = false;
   /** A new state. A Start engine notice clears itself once the engine is connected (its fix is done). */
   function setState(next: PanelState): void {

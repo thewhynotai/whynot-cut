@@ -136,6 +136,10 @@ class FakeDaemon {
   notYet = NOT_YET;
   /** welcome.update (C2.3); undefined = an older daemon that sends none */
   update: unknown = undefined;
+  /** welcome.features (H3); undefined = an older daemon that sends none (the panel then sends no perf batch) */
+  features: string[] | undefined = undefined;
+  /** the perf batches received (H3: serve appends them to perf.jsonl and answers nothing) */
+  perf: Msg[] = [];
   onCommand: (s: FakeSocket, m: Msg) => void = (s, m) => {
     const req = m["request"] as { id: string; action: string };
     s.deliver({ type: "result", result: { ok: true, action: req.action, readback: { position_s: 1 }, id: req.id } });
@@ -165,7 +169,7 @@ class FakeDaemon {
         s.deliver({ type: "error", code: "auth", message: "The first message must be a hello with the engine token from engine.json." });
         s.serverClose(1008, "authentication required");
       } else {
-        s.deliver({ type: "welcome", session_id: "s-0123456789abcdef", protocol: 4, daemon_version: "3.0.0", ...(this.update === undefined ? {} : { update: this.update }) });
+        s.deliver({ type: "welcome", session_id: "s-0123456789abcdef", protocol: 4, daemon_version: "3.0.0", ...(this.update === undefined ? {} : { update: this.update }), ...(this.features === undefined ? {} : { features: this.features }) });
       }
       return;
     }
@@ -187,6 +191,9 @@ class FakeDaemon {
         return;
       case "cancel":
         this.onCancel(s, m);
+        return;
+      case "perf":
+        this.perf.push(m);
         return;
       default:
         s.deliver({ type: "error", code: "schema", message: `${m.type} is sent by the daemon, not by clients.` });
@@ -1120,4 +1127,55 @@ test("H1: a jobs[] entry that is malformed is skipped, never the whole state", a
   assert.equal(r.src.diagnosis.code, "connected");
   assert.equal((await r.src.snapshot()).connection.engine, "connected");
   assert.equal((await p).ok, true); // the good entry still reattached it
+});
+
+// ---------------------------------------------------------------------------------------------------- perf (H3)
+const perfMarks = (r: Rig) => r.daemon.perf.flatMap((m) => m["marks"] as { mark: string; t: number; ms?: number; rid?: string }[]);
+
+test("H3 perf: a daemon that lists perf gets the link marks in a batch right after the first state; every batch validates", async () => {
+  const r = rig();
+  r.daemon.features = ["perf", "push"];
+  r.clock.t += 40; // the panel was constructed (panel.boot) 40 ms before it starts its link
+  r.src.start();
+  await r.clock.advance(0);
+  assert.equal(r.src.diagnosis.code, "connected");
+  const names = perfMarks(r).map((m) => m.mark);
+  for (const want of ["panel.boot", "link.welcome", "link.first_state", "panel.usable"]) assert.ok(names.includes(want), `${want} in ${names}`);
+  const usable = perfMarks(r).find((m) => m.mark === "panel.usable")!;
+  assert.equal(usable.ms, 40);
+  assert.ok(sentOf(r.daemon.last, "perf").length >= 1);
+  assert.deepEqual(r.daemon.invalid, []);
+  assert.deepEqual(r.daemon.last.sent.slice(0, 2).map((m) => m.type), ["hello", "snapshot"]);
+  const before = r.daemon.perf.length;
+  await r.clock.advance(2000);
+  assert.equal(r.daemon.perf.length, before, "nothing new: no empty batch");
+});
+
+test("H3 perf: marks wait in the buffer and go out at most 50 per batch on the poll", async () => {
+  const r = rig();
+  r.daemon.features = ["perf"];
+  r.src.start();
+  await r.clock.advance(0);
+  r.daemon.perf.length = 0;
+  for (let i = 0; i < 120; i++) r.src.perf.mark("ui.click", { rid: `c-${i}` });
+  await r.clock.advance(2000);
+  await r.clock.advance(2000);
+  await r.clock.advance(2000);
+  assert.deepEqual(r.daemon.perf.map((m) => (m["marks"] as unknown[]).length), [50, 50, 20]);
+  assert.deepEqual(perfMarks(r).map((m) => m.rid), Array.from({ length: 120 }, (_, i) => `c-${i}`));
+  assert.deepEqual(r.daemon.invalid, []);
+});
+
+test("H3 perf: an older daemon (no features) never gets a perf message; perf: false records nothing", async () => {
+  const r = await connected();
+  r.src.perf.mark("ui.click", { rid: "c-1" });
+  await r.clock.advance(4000);
+  assert.equal(sentOf(r.daemon.last, "perf").length, 0);
+  assert.deepEqual(r.daemon.perf, []);
+  assert.ok(!r.states.at(-1)!.log.some((l) => /perf/.test(l.text)), "no error logged");
+  const clock = new Clock();
+  const off = new DaemonSource({ transport: { ...r.transport, now: clock.now, setTimer: clock.setTimer }, perf: false });
+  off.perf.mark("panel.usable");
+  assert.equal(typeof off.perf.mark, "function");
+  off.stop();
 });

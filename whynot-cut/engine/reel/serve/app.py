@@ -52,6 +52,21 @@ Infinity are not JSON); a message that cannot be encoded is logged and answered 
 session.
 `welcome.update.panel` answers the hello's optional client.build against <plugin>/adobe/expected.json (C2.3:
 ok / stale / newer / unknown; engine_state.panel_update).
+G2 H3 (perf hooks and a faster first state):
+  * `welcome.features` lists what this daemon does beyond protocol 4's core: "perf", and "push" while push is on.
+  * Perf marks (serve/perf.py, <home>/logs/perf.jsonl; never a token, a path or a name): link.welcome_sent (ms since
+    the hello arrived) here, the cmd.* marks in the Router. A `perf` message from a `kind: "panel"` session is appended
+    (panel marks only, at most 50); from any other session it is error{schema} (audited); over PERF_RATE per session
+    it is dropped silently (audited once per session).
+  * The FIRST snapshot of a session waits at most FIRST_FIELDS_TIMEOUT (1 s) for the engine-state read, not
+    FIELDS_TIMEOUT: past it the state carries the last good item (else none) and `stale: true`, and a panel session gets
+    the fresh state as a push as soon as that same read answers (within its own FIELDS_TIMEOUT). Any state built from
+    the fallback says `stale: true`.
+  * Push on change (serve/push.py StatePusher): while a panel session is connected, the engine state is looked at every
+    push_interval (1 s) and a change is pushed (a `state` without an id) to every panel session that has not got it,
+    debounced. The change test is cheap: the PanelFields cache generation (engine_state.PanelFields.generation), the
+    host connection and the job journal's in-memory summaries. A stale look pushes nothing. The panel's snapshot poll
+    stays as the fallback.
 """
 from __future__ import annotations
 
@@ -65,7 +80,8 @@ import time
 
 from lib import common
 
-from . import engine_state, messages, security, ws
+from . import engine_state, messages, push, security, ws
+from . import perf as perf_log
 from .adapters import FileQueueAdapter, HostLink, QueueWorker
 from .router import Router
 
@@ -88,6 +104,9 @@ OFFLOAD_BYTES = 256 * 1024         # messages above this are parsed and validate
 FIELDS_TIMEOUT = 3.0               # the engine state read (engine_state.PanelFields) for one snapshot
 FIELDS_RETIRE_AFTER = 2            # consecutive timeouts of one read before its worker is abandoned for a fresh one
 FIELDS_ABANDONED_MAX = 4           # abandoned workers whose read is still stuck: past this no new worker is made
+FIRST_FIELDS_TIMEOUT = 1.0         # a session's FIRST snapshot waits this long for the read (S1 <= 1.5 s), then stale
+PERF_RATE = (1.0, 5)               # perf batches per second per session, burst (the panel sends one per poll)
+PUSH_INTERVAL_S = push.PUSH_INTERVAL_S   # how often the engine state is looked at while a panel is connected
 AUTH_REFUSED = "The first message must be a hello with the engine token from engine.json."
 PROTOCOL_REQUIRED = "protocol 4 required"
 # the panel intents until T6.2b ships their engine side: editor words, never a command (Addendum C1.4)
@@ -145,6 +164,10 @@ class Session:
         self.progress_dropped = 0
         self.late_results = 0                                      # results / progress nobody waits for
         self.late_progress = 0
+        self.perf_limiter = security.RateLimiter(*PERF_RATE)       # a panel's perf batches (G2 H3)
+        self.perf_dropped = 0
+        self.snapshots = 0                                         # the first one gets FIRST_FIELDS_TIMEOUT
+        self.state_fp = None                                       # the fingerprint of the last state it was sent
         self.link = HostLink(self._send_or_raise)
         self.tasks: set[asyncio.Task] = set()
 
@@ -178,7 +201,8 @@ class App:
                  hello_timeout: float = HELLO_TIMEOUT, max_connections: int = MAX_CONNECTIONS,
                  rate: tuple = RATE, max_running: int = MAX_RUNNING,
                  idle_timeout: float = ws.IDLE_TIMEOUT, file_queue=None, expected_path=None,
-                 fields_timeout: float = FIELDS_TIMEOUT):
+                 fields_timeout: float = FIELDS_TIMEOUT, first_fields_timeout: float = FIRST_FIELDS_TIMEOUT,
+                 perf=None, push_interval: float | None = PUSH_INTERVAL_S, push_debounce: float = push.DEBOUNCE_S):
         if not security.token_shape_ok(token):
             raise ValueError("the engine token must be 64 lowercase hex characters (security.make_token)")
         self.home = home
@@ -192,6 +216,13 @@ class App:
         self.idle_timeout = idle_timeout
         self.expected_path = expected_path if expected_path is not None else engine_state.expected_path()
         self.fields_timeout = fields_timeout
+        self.first_fields_timeout = first_fields_timeout
+        self.perf = perf if perf is not None else perf_log.PerfLog(home)
+        self.push_interval = push_interval                      # None: no push (the panel's poll only)
+        self.push_debounce = push_debounce
+        self._pusher: push.StatePusher | None = None
+        self._pusher_task: asyncio.Task | None = None
+        self._stopping = False
         self._fields = engine_state.PanelFields()               # the item's fields, cached by their files' state
         self._state_worker = QueueWorker("reel-serve-engine-state")   # one daemon thread: a stuck read costs one
         self._state_workers_made = 1
@@ -203,11 +234,13 @@ class App:
         self._fields_abandoned: list = []                       # (future, shared) of retired workers' stuck reads
         self._fields_cap_logged = False
         self._last_fields: dict | None = None                   # the last good read: shown while a read is stuck
+        self._last_gen = None                                   # ... and its PanelFields generation
         self._fields_timed_out = False                          # logged once per stuck episode
         self.port: int | None = None
         self.sessions: dict[str, Session] = {}
         self.router = Router(home=home, sessions=lambda: list(self.sessions.values()),
-                             file_queue=file_queue if file_queue is not None else FileQueueAdapter(), audit=self.audit)
+                             file_queue=file_queue if file_queue is not None else FileQueueAdapter(), audit=self.audit,
+                             perf=self.perf)
         self._conns = 0
         self._handlers: dict[asyncio.Task, asyncio.StreamWriter] = {}
         self._server: ws.LoopbackServer | None = None
@@ -251,6 +284,10 @@ class App:
 
         if self._server is not None:
             self._server.close()
+        self._stopping = True
+        if self._pusher_task is not None and not self._pusher_task.done():
+            self._pusher_task.cancel()
+            await asyncio.wait({self._pusher_task}, timeout=left(CLOSE_ROUND_S))
         await self.router.close(timeout=left(CLOSE_ROUND_S))   # job tasks; a CEP job stays journaled as active
         self._state_worker.cancel_pending()
         for shared in [self._fields_shared, *(a for _, a in self._fields_abandoned)]:
@@ -427,6 +464,7 @@ class App:
         if raw is None:
             await self._refuse(sock, peer_s, f"closed before hello ({sock.close_code})")
             return None
+        t_hello = time.monotonic()
         msg, problem = _parse(raw)
         proto = _hello_protocol(msg)
         if proto is not _NO_PROTOCOL and (isinstance(proto, bool) or proto != security.PROTOCOL):
@@ -456,7 +494,11 @@ class App:
             update = "unknown"
         self._audit("auth", peer_s, session=sid, outcome="ok",
                     reason=f"{session.kind} {session.host or ''} {','.join(session.capabilities)}".strip())
-        await session.send(messages.welcome(sid, self.version, update))
+        features = ("perf",) + (("push",) if self.push_interval is not None else ())
+        await session.send(messages.welcome(sid, self.version, update, features))
+        self.perf.mark("link.welcome_sent", ms=(time.monotonic() - t_hello) * 1000)
+        if session.kind == "panel":
+            self._ensure_pusher()
         return session
 
     async def _run(self, s: Session) -> None:
@@ -516,7 +558,28 @@ class App:
                     self._audit("late-progress", s.peer, session=s.id, action=msg["progress"].get("action"),
                                 outcome="ignored", reason="no command waits for this id (later ones are not logged)")
         elif t == "snapshot":
-            await s.send(await self._state(msg.get("id")))
+            first = s.snapshots == 0
+            s.snapshots += 1
+            out, fp = await self._state_fp(msg.get("id"), first=first)
+            if await s.send(out):
+                s.state_fp = fp
+            if fp is None and first and s.kind == "panel" and out["state"].get("stale"):
+                task = asyncio.create_task(self._fresh_after_stale(s))   # the fresh state follows when the read answers
+                s.tasks.add(task)
+                task.add_done_callback(s.tasks.discard)
+        elif t == "perf":
+            if s.kind != "panel":                    # only the panel's own marks go into perf.jsonl
+                self._audit("message", s.peer, session=s.id, action="perf", outcome="rejected",
+                            reason=f"perf from a {s.kind} session")
+                await s.send(messages.error("schema", "perf is a panel message: only a panel session may send it."))
+                return
+            if not s.perf_limiter.allow():
+                s.perf_dropped += 1                  # dropped silently; audited once per session
+                if s.perf_dropped == 1:
+                    self._audit("rate", s.peer, session=s.id, action="perf", outcome="dropped",
+                                reason="perf batches over the rate (later ones are not logged)")
+                return
+            self.perf.extend(msg["marks"])
         elif t in INTENTS:
             if s.kind != "panel":                    # only the WhyNot Cut panel speaks for the editor
                 self._audit("intent", s.peer, session=s.id, action=t, outcome="rejected",
@@ -555,12 +618,21 @@ class App:
     def _start_read(self, loop: asyncio.AbstractEventLoop) -> None:
         """Submit one PanelFields read to the current engine-state worker; every snapshot until it answers shares it."""
         home = self.home
-        fut = self._state_worker.submit(lambda: self._fields(home))
+        fut = self._state_worker.submit(lambda: self._read_fields(home))
         shared = asyncio.wrap_future(fut, loop=loop)
         shared.add_done_callback(lambda f: f.cancelled() or f.exception())   # retrieved even when nobody waits
         self._fields_running, self._fields_shared = fut, shared
         self._fields_deadline = loop.time() + self.fields_timeout
         self._fields_read_counted = False
+
+    def _read_fields(self, home) -> tuple:
+        """On the engine-state worker: (fields, generation). A reader with with_generation (engine_state.PanelFields)
+        hands both over taken together; any other reader (a test's stand-in) has no generation (None)."""
+        reader = self._fields
+        with_gen = getattr(type(reader), "with_generation", None)
+        if with_gen is not None:
+            return with_gen(reader, home)
+        return reader(home), None
 
     def _count_timeout(self) -> None:
         self._fields_timeouts += 1
@@ -588,12 +660,18 @@ class App:
         return True
 
     async def _item_fields(self) -> dict | None:
-        """The item part of the panel state: engine_state.PanelFields on the app's engine-state worker, bounded by
-        fields_timeout. A snapshot that arrives while a read is running awaits that same read (asyncio.shield: one
-        waiter going away never cancels it). Past the read's deadline the snapshot gets the last good fields (else no
-        item). After FIELDS_RETIRE_AFTER consecutive timeouts the stuck worker is abandoned and a fresh one reads
-        again (at most FIELDS_ABANDONED_MAX stuck at once); otherwise a snapshot never queues behind a stuck read.
-        None if the read failed."""
+        """The item part of the panel state (see _item_fields_ex); None if the read failed."""
+        return (await self._item_fields_ex())[0]
+
+    async def _item_fields_ex(self, timeout: float | None = None) -> tuple[dict | None, bool, object]:
+        """(fields, stale, generation). The item part of the panel state: engine_state.PanelFields on the app's
+        engine-state worker, bounded by fields_timeout. A snapshot that arrives while a read is running awaits that
+        same read (asyncio.shield: one waiter going away never cancels it). Past the read's deadline the snapshot gets the last
+        good fields (else no item), stale. After FIELDS_RETIRE_AFTER consecutive timeouts the stuck worker is abandoned
+        and a fresh one reads again (at most FIELDS_ABANDONED_MAX stuck at once); otherwise a snapshot never queues
+        behind a stuck read. `timeout` (a session's first snapshot, G2 H3): this waiter gives up sooner, with the same
+        stale fallback, and the read goes on (it is not counted as stuck). (None, False, None) if the read failed.
+        generation: the PanelFields cache generation of these fields (None from a reader without one)."""
         loop = asyncio.get_running_loop()
         shared = self._fields_shared
         if shared is not None and not shared.done():
@@ -601,46 +679,61 @@ class App:
                 self._count_timeout()
                 self._fields_read_counted = True
                 if self._fields_timeouts < FIELDS_RETIRE_AFTER or not self._retire_worker():
-                    return self._fields_fallback()
+                    return self._fields_fallback(), True, self._last_gen
                 self._start_read(loop)
         else:
             self._start_read(loop)
         shared = self._fields_shared
+        wait = max(0.0, self._fields_deadline - loop.time())
+        short = timeout is not None and timeout < wait       # this waiter's own, shorter limit
         try:
-            out = await asyncio.wait_for(asyncio.shield(shared), max(0.0, self._fields_deadline - loop.time()))
+            out = await asyncio.wait_for(asyncio.shield(shared), max(0.0, timeout) if short else wait)
         except TimeoutError:
-            if shared is self._fields_shared and not self._fields_read_counted:
+            if not short and shared is self._fields_shared and not self._fields_read_counted:
                 self._fields_read_counted = True             # concurrent waiters of one read count one timeout
                 self._count_timeout()
-            return self._fields_fallback()
+            return self._fields_fallback(), True, self._last_gen
         except asyncio.CancelledError:
             if shared.cancelled() and not asyncio.current_task().cancelling():
-                return self._fields_fallback()               # the daemon is stopping (close() cancelled the read)
+                return self._fields_fallback(), True, self._last_gen   # the daemon is stopping (close() cancelled it)
             raise
         except Exception as e:
             self._fields_timeouts = 0
             log.warning("reel serve: engine state failed (%s)", type(e).__name__)
-            return None
+            return None, False, None
+        out, gen = out
         self._fields_timeouts = 0
         self._fields_timed_out = False
         self._fields_cap_logged = False
-        self._last_fields = out
-        return out
+        self._last_fields, self._last_gen = out, gen
+        return out, False, gen
 
-    async def _state(self, id) -> dict:
-        """The panel state: the connection (a UXP Premiere panel connected, else the CEP heartbeat) and the item the
-        engine works on. Only a session that implements something counts as the host: a uxp session with no
-        capabilities (spike 0.1.3, a probe) cannot run a command, so it is not the Premiere host the pill means. Nor
-        does a session whose socket has closed while its removal (_end, async) is still pending."""
-        item = await self._item_fields()
+    async def _state(self, id, *, first: bool = False) -> dict:
+        """The panel state (see _state_fp)."""
+        return (await self._state_fp(id, first=first))[0]
+
+    async def _state_fp(self, id, *, first: bool = False) -> tuple[dict, tuple | None]:
+        """(the state message, its fingerprint; None when it is stale). The panel state: the connection (_host) and
+        the item the engine works on, with the job journal's summaries. A session's first snapshot waits
+        first_fields_timeout for the read (G2 H3), later ones the read's own fields_timeout."""
+        item, stale, gen = await self._item_fields_ex(self.first_fields_timeout if first else None)
+        host, jobs = await self._host(), self._job_rows()
+        return self._compose(id, item, stale, host, jobs), (None if stale else self._fingerprint(item, gen, host, jobs))
+
+    def _job_rows(self) -> list:
         try:
-            job_rows = self.router.journal.summaries()          # the in-memory index: no file is read
+            return self.router.journal.summaries()          # the in-memory index: no file is read
         except (OSError, ValueError):
-            job_rows = []
+            return []
+
+    async def _host(self) -> tuple[str, str | None]:
+        """(host state, detail): a UXP Premiere panel connected, else the CEP heartbeat. Only a session that implements
+        something counts as the host: a uxp session with no capabilities (spike 0.1.3, a probe) cannot run a command,
+        so it is not the Premiere host the pill means. Nor does a session whose socket has closed while its removal
+        (_end, async) is still pending."""
         for s in reversed(list(self.sessions.values())):
             if s.kind == "uxp" and s.host == "premiere" and s.capabilities and not s.sock.closed and not s.link.closed:
-                return messages.state("uxp", f"Premiere Pro {s.host_version}".strip() if s.host_version else None, id,
-                                      item, jobs=job_rows)
+                return "uxp", (f"Premiere Pro {s.host_version}".strip() if s.host_version else None)
         ctx = common.Context(home=self.home)
 
         def cep_alive() -> bool:
@@ -651,7 +744,67 @@ class App:
             alive = await asyncio.to_thread(cep_alive)
         except Exception:
             alive = False
-        return messages.state("cep" if alive else "offline", None, id, item, jobs=job_rows)
+        return ("cep" if alive else "offline"), None
+
+    @staticmethod
+    def _compose(id, item, stale: bool, host: tuple, jobs: list) -> dict:
+        return messages.state(host[0], host[1], id, item, jobs=jobs, stale=stale)
+
+    @staticmethod
+    def _fingerprint(item, gen, host: tuple, jobs: list) -> tuple:
+        """What a pushed state is compared by, cheaply: the PanelFields cache generation of the fields (it moves only
+        when the fields served change; read together with them) when the reader has one, else the fields' JSON; the
+        host; each job's id, state and time."""
+        if item is None:
+            ik: tuple = ("none",)
+        elif isinstance(gen, int) and not isinstance(gen, bool):
+            ik = ("gen", gen)
+        else:
+            ik = ("json", json.dumps(item, sort_keys=True, ensure_ascii=False, default=str))
+        return ik, tuple(host), tuple((j.get("request_id"), j.get("state"), j.get("updated_at")) for j in jobs)
+
+    async def _fresh_after_stale(self, s: Session) -> None:
+        """A panel's first snapshot was answered stale: send it the fresh state once the same read answers (within its
+        own deadline; a read that stays stuck sends nothing: the pusher and the poll take over)."""
+        item, stale, gen = await self._item_fields_ex()
+        if stale or item is None or self.sessions.get(s.id) is not s or s.sock.closed:
+            return
+        host, jobs = await self._host(), self._job_rows()
+        fp = self._fingerprint(item, gen, host, jobs)
+        if fp != s.state_fp and await s.send(self._compose(None, item, False, host, jobs)):
+            s.state_fp = fp
+
+    def _panels_connected(self) -> bool:
+        return not self._stopping and any(s.kind == "panel" and not s.sock.closed for s in self.sessions.values())
+
+    def _ensure_pusher(self) -> None:
+        """Start the state pusher (one task) while a panel session is connected; it ends with the last panel."""
+        if self.push_interval is None or self._stopping:
+            return
+        if self._pusher_task is not None and not self._pusher_task.done():
+            return
+        self._pusher = push.StatePusher(self._push_probe, self._push_publish, interval=self.push_interval,
+                                        debounce=self.push_debounce,
+                                        debounce_max=max(self.push_debounce, push.DEBOUNCE_MAX_S))
+        self._pusher_task = asyncio.create_task(self._pusher.run(self._panels_connected))
+
+    async def _push_probe(self):
+        """One look for the pusher: (fingerprint, payload). A stale look is no news (the last fingerprint, no
+        payload)."""
+        item, stale, gen = await self._item_fields_ex()
+        if stale or item is None:
+            return (self._pusher.last if self._pusher is not None else None), None
+        host, jobs = await self._host(), self._job_rows()
+        return self._fingerprint(item, gen, host, jobs), (item, host, jobs)
+
+    async def _push_publish(self, fp, payload) -> None:
+        """Send the changed state (no id) to every panel session that has not got it yet."""
+        if payload is None:
+            return
+        msg = self._compose(None, payload[0], False, payload[1], payload[2])
+        for s in list(self.sessions.values()):
+            if s.kind == "panel" and not s.sock.closed and s.state_fp != fp and await s.send(msg):
+                s.state_fp = fp
 
     async def _end(self, s: Session) -> None:
         self.sessions.pop(s.id, None)

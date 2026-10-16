@@ -19,14 +19,24 @@
 //
 // The token goes only into `hello` and the /status probe's Authorization header: never into a URL, a log line,
 // PanelState, a diagnosis or an error text (every text the transport hands back is scrubbed of it).
+//
+// Perf (Addendum G2 H3): the source carries a PerfRecorder (src/perf.ts; `perf: false` = none): panel.boot when it is
+// made, link.welcome, link.first_state and panel.usable (the first state is on screen: subscribers paint inside
+// update()) once each; mount adds its paint and click marks through `perf`. The buffer goes to the daemon as `perf`
+// batches of at most 50 marks, right after the first state and then with each poll, only when the welcome lists
+// "perf" (an older daemon would answer error{unknown_type}). A daemon that lists "push" sends states on change (no id);
+// they are handled like the snapshot answers, and the 2 s poll stays as the fallback (H6 lengthens it once push is
+// proven live).
 import { ACTION_NAMES, PROGRESS_PHASES, PROTOCOL } from "./contract.ts";
 import type { ActionName, ProgressPhase, RequestEnvelope } from "./contract.ts";
 import { linkFixCommand, NOT_YET_CODE, scrubToken } from "./diagnostics.ts";
-import { PANEL_UPDATE_STATES, SESSION_ERROR_CODES, SESSION_PROTOCOL } from "./session.ts";
+import { DAEMON_FEATURES, PANEL_UPDATE_STATES, SESSION_ERROR_CODES, SESSION_PROTOCOL } from "./session.ts";
 import type {
-  ApproveMessage, CancelMessage, CommandMessage, HelloMessage, PanelUpdate, RebuildMessage, ReplyIntent,
-  RequestChangesMessage, SessionErrorCode, SnapshotMessage,
+  ApproveMessage, CancelMessage, CommandMessage, DaemonFeature, HelloMessage, PanelUpdate, PerfMessage, RebuildMessage,
+  ReplyIntent, RequestChangesMessage, SessionErrorCode, SnapshotMessage,
 } from "./session.ts";
+import { NO_PERF, PERF_BATCH_MAX, PerfRecorder } from "./perf.ts";
+import type { PerfSink } from "./perf.ts";
 import { CLAUDE_STATES, JOB_STATES, STEP_IDS } from "./source.ts";
 import type { ClaudeState, ConnectionState, HostState, JobState, JobSummary, Language, LogLine, PanelDataSource, PanelState, PipelineStep, Result, StepId } from "./source.ts";
 
@@ -164,7 +174,7 @@ const BLOCKED: Omit<LinkDiagnosis, "retry_in_s"> = {
 // ------------------------------------------------------------------------------------------------ incoming messages
 
 type Incoming =
-  | { type: "welcome"; daemon_version: string; update: PanelUpdate }
+  | { type: "welcome"; daemon_version: string; update: PanelUpdate; features: DaemonFeature[] }
   | { type: "state"; connection: ConnectionState; id?: string; jobs?: JobSummary[] }
   | { type: "reply"; id: string; intent: ReplyIntent; ok: boolean; readback?: object; error?: string; how?: string }
   | { type: "result"; id: string | undefined; action: ActionName; ok: boolean; readback?: object; error?: string; how?: string }
@@ -225,7 +235,10 @@ export function parseIncoming(text: string): Incoming | null {
       // C2.3: absent from an older daemon; a value this panel does not know reads as unknown
       const u = isObj(m["update"]) ? m["update"]["panel"] : undefined;
       const update: PanelUpdate = (PANEL_UPDATE_STATES as readonly unknown[]).includes(u) ? (u as PanelUpdate) : "unknown";
-      return { type: "welcome", daemon_version: m["daemon_version"], update };
+      // H3: absent from an older daemon; names this panel does not know are ignored
+      const f = Array.isArray(m["features"]) ? (m["features"] as unknown[]) : [];
+      const features = DAEMON_FEATURES.filter((x) => f.includes(x));
+      return { type: "welcome", daemon_version: m["daemon_version"], update, features };
     }
     case "state": {
       if (!isObj(m["state"]) || !(m["id"] === undefined || isId(m["id"]))) return null;
@@ -315,8 +328,10 @@ export interface DaemonSourceOptions {
   /** the host the panel itself runs in (e.g. {state: "uxp", detail: "Premiere Pro 26.5.2"}): the host pill while the
    *  engine is offline. Default {state: "offline"}. Online, the daemon's connection wins. */
   localHost?: { state: HostState; detail?: string };
-  /** a number in [0, 1) for the request-id base (default Math.random) */
+  /** a number in [0, 1) for the request-id base and the click sampling (default Math.random) */
   random?: () => number;
+  /** the perf recorder (H3); default a new one on the transport's clock; false = no marks at all */
+  perf?: PerfRecorder | false;
 }
 
 interface PendingCommand {
@@ -413,6 +428,9 @@ export class DaemonSource implements PanelDataSource {
   private seq = 0;
   private diag: LinkDiagnosis = { code: "idle", text: "Not connected to the engine yet." };
   private lastLogged: LinkCode | null = null;
+  private readonly recorder: PerfRecorder | null;
+  /** the daemon's welcome listed "perf": it takes perf batches */
+  private perfOn = false;
 
   constructor(opts: DaemonSourceOptions) {
     this.t = opts.transport;
@@ -429,6 +447,12 @@ export class DaemonSource implements PanelDataSource {
     const r = (opts.random ?? Math.random)();
     const rand = Math.floor((Number.isFinite(r) ? Math.abs(r) % 1 : 0) * 36 ** 5).toString(36).padStart(5, "0");
     this.idBase = Math.floor(this.t.now()).toString(36).slice(-8) + rand;
+    this.recorder = opts.perf === false ? null : (opts.perf ?? new PerfRecorder({ now: () => this.t.now(), ...(opts.random ? { random: opts.random } : {}) }));
+  }
+
+  /** The perf marks of this panel (H3): mount marks its paints and clicks here. */
+  get perf(): PerfSink {
+    return this.recorder ?? NO_PERF;
   }
 
   // ---------------------------------------------------------------------------------------------- public
@@ -703,6 +727,7 @@ export class DaemonSource implements PanelDataSource {
     if (!this.welcomed) {
       if (m.type === "welcome") {
         this.panelUpdateState = m.update;
+        this.perfOn = m.features.includes("perf");
         return this.onWelcome(sock, m.daemon_version);
       }
       if (m.type === "error") {
@@ -712,14 +737,22 @@ export class DaemonSource implements PanelDataSource {
       return this.malformed();
     }
     switch (m.type) {
-      case "state":
+      case "state": {
         if (m.jobs) this.jobs = new Map(m.jobs.map((j) => [j.request_id, j] as const));
+        const first = this.recorder !== null && !this.recorder.has("panel.usable");
+        this.recorder?.mark("link.first_state");
         this.onState(m.connection);
+        if (first) {
+          this.recorder!.mark("panel.usable"); // a changed connection was painted inside onState (update -> subscribers)
+          this.flushPerf(sock);
+          if (this.sock !== sock) return;
+        }
         if (this.reattachDue) {
           this.reattachDue = false;
           this.reattach(sock, m.jobs);
         }
         return;
+      }
       case "reply":
         return this.onReply(m);
       case "result":
@@ -738,6 +771,7 @@ export class DaemonSource implements PanelDataSource {
     this.failures = 0;
     this.stopHello?.();
     this.stopHello = null;
+    this.recorder?.mark("link.welcome");
     this.setDiag({ code: "connected", text: `Connected to the WhyNot Cut engine ${this.scrub(daemonVersion).slice(0, 64)}.` }, true);
     this.update({ connection: { ...this.state.connection, engine: "connected" } });
     this.reattachDue = true;
@@ -765,7 +799,17 @@ export class DaemonSource implements PanelDataSource {
     const msg: SnapshotMessage = { type: "snapshot", id: this.newId("snap") };
     this.sendText(sock, JSON.stringify(msg));
     if (this.sock !== sock) return;
+    this.flushPerf(sock);
+    if (this.sock !== sock) return;
     this.stopPoll = this.t.setTimer(() => this.poll(sock), this.pollMs);
+  }
+
+  /** One perf batch (at most PERF_BATCH_MAX marks), only to a daemon that takes them (H3). */
+  private flushPerf(sock: DaemonSocket): void {
+    const r = this.recorder;
+    if (!r || !this.perfOn || !this.welcomed || this.sock !== sock || r.size === 0) return;
+    const msg: PerfMessage = { type: "perf", marks: r.take(PERF_BATCH_MAX) };
+    this.sendText(sock, JSON.stringify(msg));
   }
 
   private onState(c: ConnectionState): void {

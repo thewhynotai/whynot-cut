@@ -876,6 +876,37 @@ class EditorSummaryRows(Base):
             self.assertEqual(ES.editor_summary(md), want, md)
 
 
+class CacheGeneration(Base):
+    """G2 H3: serve pushes a state when the engine state changes. The change test is the cache's own: `generation`
+    moves only when the fields served differ from the ones served before (a cache hit never compares anything)."""
+
+    def setUp(self):
+        super().setUp()
+        self.activate()
+        self.compiled_plan()
+        self.cache = ES.PanelFields()
+
+    def test_generation_moves_only_when_the_fields_change(self):
+        g0 = self.cache.generation
+        first = self.cache(self.home, now=NOW)
+        g1 = self.cache.generation
+        self.assertEqual(g1, g0 + 1, "the first read is a change")
+        self.assertEqual(self.cache(self.home, now=NOW), first)
+        self.assertEqual(self.cache.generation, g1, "a cache hit is no change")
+        st = self.p("01_analysis/edit-plan.md").stat()
+        os.utime(self.p("01_analysis/edit-plan.md"), ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+        self.assertEqual(self.cache(self.home, now=NOW), first)          # a new key, the same fields
+        self.assertEqual(self.cache.generation, g1, "a touched file with the same content is no change")
+        self.approve()
+        self.assertEqual(self.steps(self.cache(self.home, now=NOW))["approve"], "done")
+        self.assertEqual(self.cache.generation, g1 + 1)
+        (self.home / "state" / "active.json").unlink()
+        self.assertEqual(self.cache(self.home, now=NOW)["item"], "")
+        self.assertEqual(self.cache.generation, g1 + 2, "no item any more is a change")
+        self.cache(self.home, now=NOW)
+        self.assertEqual(self.cache.generation, g1 + 2)
+
+
 class CacheRound2(Base):
     """Round 2: the cache key has the inode and ctime of every watched path and a content hash of the small gate files;
     a read that failed for any reason other than "not found" is never cached."""

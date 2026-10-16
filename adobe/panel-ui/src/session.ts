@@ -5,6 +5,7 @@
 // Types only (plus two name lists the test checks): it changes no panel behaviour. PanelState is source.ts's, not a copy.
 import type { ActionName, ProgressEvent, RequestEnvelope, ResultEnvelope } from "./contract.ts";
 import type { PanelDataSource, PanelState } from "./source.ts";
+import type { PerfMark } from "./perf.ts";
 
 export const SESSION_PROTOCOL = 4 as const;
 
@@ -23,6 +24,7 @@ export const SESSION_MESSAGE_TYPES = [
   "cancel",
   "reply",
   "error",
+  "perf",
 ] as const;
 export type SessionMessageType = (typeof SESSION_MESSAGE_TYPES)[number];
 
@@ -56,13 +58,20 @@ export interface HelloMessage {
 export const PANEL_UPDATE_STATES = ["ok", "stale", "newer", "unknown"] as const;
 export type PanelUpdate = (typeof PANEL_UPDATE_STATES)[number];
 
-/** daemon -> client, the answer to an accepted hello. `update` is absent from a daemon older than C2.3. */
+/** What a daemon does beyond protocol 4's core (G2 H3): perf = it takes the panel's perf batches; push = it pushes a
+ *  state when the engine state changes. */
+export const DAEMON_FEATURES = ["perf", "push"] as const;
+export type DaemonFeature = (typeof DAEMON_FEATURES)[number];
+
+/** daemon -> client, the answer to an accepted hello. `update` is absent from a daemon older than C2.3, `features` from
+ *  one older than G2 H3 (the panel then sends no perf batch). */
 export interface WelcomeMessage {
   type: "welcome";
   session_id: string;
   protocol: 4;
   daemon_version: string;
   update?: { panel: PanelUpdate };
+  features?: DaemonFeature[];
 }
 
 /** A v4 request (client -> daemon, or daemon -> host client). `request.data` is checked by the action's schema. */
@@ -140,6 +149,13 @@ export interface ErrorMessage {
   id?: string;
 }
 
+/** panel -> daemon (G2 H3): a batch of perf marks (src/perf.ts), 1-50, only to a daemon whose welcome lists "perf".
+ *  The daemon appends them to perf.jsonl and answers nothing. */
+export interface PerfMessage {
+  type: "perf";
+  marks: PerfMark[];
+}
+
 export type SessionMessage =
   | HelloMessage
   | WelcomeMessage
@@ -153,7 +169,8 @@ export type SessionMessage =
   | SnapshotMessage
   | CancelMessage
   | ReplyMessage
-  | ErrorMessage;
+  | ErrorMessage
+  | PerfMessage;
 
 // Compile-time guards: the union covers exactly the listed types, and the panel intents are the PanelDataSource inputs.
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;

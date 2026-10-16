@@ -285,6 +285,42 @@ and sent by default; `data_url` stays absent until Yunus publishes the page (H24
 isn't live. Diagnostics are copied to the
 clipboard by the editor (P-22 "Copy details"), never attached to the URL.
 
+### 2.11 Speed: `stale`, `welcome.features`, pushed states and the `perf` message (H3; budgets S1, S2, S3)
+
+Landed in H3 (`serve/app.py`, `serve/push.py`, `serve/perf.py`, `serve/perf_report.py`, `src/perf.ts`).
+
+| Where | Field | Type | Meaning |
+|---|---|---|---|
+| `panel_state` | `stale` | boolean, optional | `true` when the daemon built this state from its last good engine-state read because the fresh read did not answer in time. A session's FIRST snapshot waits at most 1 s (later ones 3 s). A panel then gets the fresh state as a push as soon as that read answers. Absent = fresh. |
+| `welcome` | `features` | array ≤ 8 of `"perf"` \| `"push"`, optional | `perf`: the daemon appends the panel's perf batches. `push`: it pushes a `state` (no `id`) when the engine state changes. Absent (an older daemon) = no perf batch is sent. |
+| new message `perf` | `marks` | 1..50 `perf_mark` | panel → daemon, only when `features` has `perf`. Answered with nothing. |
+| `perf_mark` | `mark` | `panel.boot` \| `panel.first_paint` \| `link.welcome` \| `link.first_state` \| `panel.usable` \| `ui.click` \| `ui.paint` | the panel's marks only; the daemon's own (`cmd.*`, `link.welcome_sent`) are refused |
+| | `t` | number, 0..10^14 | epoch ms, the panel's clock |
+| | `ms` | number, 0..3600000, optional | the duration the mark closes: since `panel.boot` for the boot marks, since its `ui.click` for `ui.paint` |
+| | `rid` | `^[A-Za-z0-9][A-Za-z0-9._-]*$`, ≤ 48, optional | pairs a `ui.click` with its `ui.paint` (`c-12`). It is too short for the engine token and cannot hold a path. |
+
+The daemon's rules:
+- **Who may send `perf`.** Only a `kind: "panel"` session. From any other session it is `error{schema}` and audited.
+- **Rate.** At most 1 batch/s per session, burst 5. A batch over the rate is dropped silently, audited once per session.
+- **The file.** `serve/perf.py` keeps only `{t, mark, ms?, rid?}` and drops every other key. It appends to
+  `<home>/logs/perf.jsonl`, which is capped at 512 KB with one rotated `perf.jsonl.1`.
+- **Its own marks.** The daemon writes `cmd.received`, `cmd.queued`, `cmd.claimed`, `cmd.first_progress` and
+  `cmd.result` (each with its ms since `cmd.received` and the request id), plus `link.welcome_sent` (ms since the hello).
+- **The report.** `python -m serve.perf_report --since <iso>` (and `reel perf-report`) prints the p95 per budget and
+  exits 1 on a miss:
+  - S1 ≤ 1500 ms: `panel.boot` → `panel.usable` (or `link.first_state` when no usable mark exists);
+  - S2 ≤ 100 ms: `ui.click` → `ui.paint`;
+  - S3 ≤ 2000 ms: `cmd.received` → `cmd.first_progress`.
+
+The panel sends its marks only right after the first state and then once per poll. Clicks are sampled (1 in 5), and a
+click whose handler paints nothing records nothing. The panel's 2 s snapshot poll stays as the fallback for pushed
+states; H6 lengthens it once push is proven live.
+
+```json
+{ "type": "perf", "marks": [ { "mark": "panel.boot", "t": 1760000000000 },
+  { "mark": "panel.usable", "t": 1760000000812, "ms": 812 }, { "mark": "ui.paint", "t": 1760000001000, "ms": 6.5, "rid": "c-12" } ] }
+```
+
 ## 3. Screen → fields
 
 | Screen | Reads (new fields) |
