@@ -12,7 +12,7 @@ supplies those globals; each upstream file is one test method here and must exit
   expectation needs it, its own COUNTS; nothing below hard-codes the upstream path inside a test method.
 * `test_upstream_files_unchanged` pins the upstream files these suites run (test files, the js/jsx they load or read)
   to adobe/tools/UPSTREAM-SHA256.txt, so a green run is a run of the owner's bytes.
-Run:  bash tools/test.sh -p test_tidy_upstream_js.py
+Run:  bash tools/test.sh -p test_tidy_baseline_js.py
 """
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
@@ -29,6 +29,8 @@ ADOBE_TOOLS = REPO / "adobe" / "tools"
 SHIM = ADOBE_TOOLS / "_harness" / "jsc_shim.js"
 SHA_FILE = ADOBE_TOOLS / "UPSTREAM-SHA256.txt"
 NODE = shutil.which("node")
+HAVE_TOOLS = ADOBE_TOOLS.is_dir()   # the shipped plugin zip has no repo-root adobe/: these suites then skip, not error
+SKIP_REASON = "node is not installed" if not NODE else "adobe/tools is not part of this layout (the plugin zip ships without the repo-root adobe/)"
 
 
 def run_suite(tc, root, test_file):
@@ -38,7 +40,7 @@ def run_suite(tc, root, test_file):
     return p.returncode, p.stdout.splitlines(), p.stderr
 
 
-@unittest.skipUnless(NODE, "node is not installed")
+@unittest.skipUnless(NODE and HAVE_TOOLS, SKIP_REASON)
 class TidyUpstreamJsMixin:
     ROOT = ADOBE_TOOLS / "tidy" / "_upstream"
     VERIFY_SHA = True
