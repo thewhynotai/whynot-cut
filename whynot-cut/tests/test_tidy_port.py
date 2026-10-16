@@ -50,7 +50,7 @@ def run_js(tc, root, load, calls):
         p = subprocess.run([NODE, str(RUNNER), str(root), str(req)], capture_output=True, text=True,
                            encoding="utf-8", timeout=120)
     tc.assertEqual(p.returncode, 0, p.stderr)
-    lines = p.stdout.strip().splitlines()
+    lines = p.stdout.rstrip("\n").split("\n")   # not splitlines(): JSON.stringify leaves U+2028 / U+2029 unescaped
     tc.assertTrue(lines, "runner printed nothing: " + p.stderr)
     out = json.loads(lines[-1])["results"]
     tc.assertEqual(len(out), len(calls))
@@ -187,7 +187,7 @@ class TidyPortShape(unittest.TestCase):
         ) % ", ".join("[%s, %s]" % (json.dumps(GLOBALS[f]), json.dumps(str(PORT / "js" / (f + ".js")))) for f in FILES)
         p = subprocess.run([NODE, "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=120)
         self.assertEqual(p.returncode, 0, p.stderr)
-        self.assertEqual(json.loads(p.stdout.strip().splitlines()[-1]), {v: True for v in GLOBALS.values()})
+        self.assertEqual(json.loads(p.stdout.rstrip("\n").split("\n")[-1]), {v: True for v in GLOBALS.values()})
 
     def test_require_works_without_window_and_plan_finds_classify(self):
         script = (
@@ -198,7 +198,7 @@ class TidyPortShape(unittest.TestCase):
         ) % tuple(json.dumps(str(PORT / "js" / (f + ".js"))) for f in ("plan", "media", "sync"))
         p = subprocess.run([NODE, "-e", script], capture_output=True, text=True, encoding="utf-8", timeout=120)
         self.assertEqual(p.returncode, 0, p.stderr)
-        out = json.loads(p.stdout.strip().splitlines()[-1])
+        out = json.loads(p.stdout.rstrip("\n").split("\n")[-1])
         self.assertEqual((out["b"], out["m"], out["y"], out["win"]), ("function", "function", "function", "undefined"))
         self.assertEqual(out["stats"], {"removeCount": 0, "removeSize": 0, "totalSize": 0, "byType": {}})
 
