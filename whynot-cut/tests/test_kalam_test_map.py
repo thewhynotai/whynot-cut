@@ -8,7 +8,7 @@ file into whynot-cut/tests/test_kalam_*.py as unittest methods that keep the ups
   * a test method of the port file named in MAPPING, or
   * listed in NOT_PORTED with the reason, or
   * (its whole file) listed in PENDING with the task that ports it.
-Tasks 10 and 11 move files from PENDING into MAPPING (and extend the package); Task 11 must leave PENDING empty.
+Tasks 10 and 11 moved files from PENDING into MAPPING (and extended the package); Task 16 (align.py) must leave PENDING empty.
 
 The upstream side exists only in the repository (adobe/ is not in the plugin zip), so those checks skip with a reason
 without adobe/tools; the checks of the maps themselves (the port files exist, the maps do not overlap) always run.
@@ -31,16 +31,16 @@ MAPPING = {
     "test_units.py": "test_kalam_engine_pure.py",
     "test_correct.py": "test_kalam_engine_correct.py",      # Task 10
     "test_platform.py": "test_kalam_engine_correct.py",
+    "test_doctor.py": "test_kalam_engine_run.py",          # Task 11
+    "test_portable.py": "test_kalam_engine_run.py",
+    "test_setup_models.py": "test_kalam_engine_run.py",
+    "test_cli.py": "test_kalam_engine_run.py",
+    "test_pipeline_slow.py": "test_kalam_engine_run.py",
 }
 
-# upstream test file -> the task that ports it (not mapped yet). Task 11 must empty this.
+# upstream test file -> the task that ports it (not mapped yet). Task 16 (align.py) must empty this.
 PENDING = {
-    "test_align.py": "Task 11",
-    "test_doctor.py": "Task 11",
-    "test_portable.py": "Task 11",
-    "test_setup_models.py": "Task 11",
-    "test_cli.py": "Task 11",
-    "test_pipeline_slow.py": "Task 11",
+    "test_align.py": "Task 16",
 }
 
 # upstream test function name -> why it has no port (the verify_bundle tool checked a pre-built macOS bundle on a Mac)
@@ -102,7 +102,7 @@ class TestMapsThemselves(unittest.TestCase):
     def test_pending_names_a_task_for_every_file(self):
         for f, task in PENDING.items():
             self.assertTrue(f.startswith("test_") and f.endswith(".py"), f)
-            self.assertEqual(task, "Task 11", f)
+            self.assertEqual(task, "Task 16", f)
 
     def test_not_ported_gives_a_reason_for_every_name(self):
         for name, reason in NOT_PORTED.items():
