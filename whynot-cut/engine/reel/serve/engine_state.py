@@ -83,7 +83,10 @@ PanelState from the item's evidence files (panel_fields)
 Cost (PanelFields)
     The panel polls a snapshot every 2 s. PanelFields caches the item's fields by the mtime / size / mode / links /
     inode / ctime of every file and folder they are read from (the evidence files, the run folders, the helpers'
-    inputs and configs) and a sha256 of the small gate files (GATE_FILES, at most GATE_HASH_MAX each): an approval or
+    inputs and configs), the listing (entry names and kinds) of every folder whose entries are listed (the frame
+    folders and their run-* folders: NTFS stamps a folder's mtime in clock ticks, so a frame written in the same tick
+    as the folder's last change leaves the folder's stat as it was) and a sha256 of the small gate files (GATE_FILES,
+    at most GATE_HASH_MAX each): an approval or
     verdict rewritten in place with the same size and a kept mtime still changes the key. A result built while any
     read failed for a reason other than "not found" (a sharing violation, a permission flip, a share that dropped)
     is never cached. active.json itself is read on every call, so staleness and a changed item are seen at once. An
@@ -558,6 +561,19 @@ class _Item:
                 out += [run, run / "_sheet.jpg", run / "frames.json"]
         return out
 
+    def listed(self) -> list[Path]:
+        """Every folder whose entries panel_fields lists (the frame folders and their run-* folders): PanelFields keys
+        these by their listing (_listing), never by the folder's own mtime."""
+        out = []
+        for rel in ("08_quality_control/premiere_frames", "08_quality_control/ae_frames"):
+            folder = self.p(rel)
+            out.append(folder)
+            try:
+                out += sorted(folder.glob("run-*"))
+            except OSError as e:
+                _failed(e)
+        return out
+
 
 def _is_motion(it: _Item) -> bool:
     return (it.json("00_inputs/source.json") or {}).get("kind") == "motion_reel"
@@ -804,6 +820,20 @@ def _stat_key(p: Path):
     return (st.st_mtime_ns, st.st_size, st.st_mode, st.st_nlink, st.st_ino, st.st_ctime_ns)
 
 
+def _listing(folder: Path):
+    """A folder's entries as sorted (name, link?, folder?, file?) — one directory read, no stat per entry (the kinds
+    come with the listing on Windows, macOS and Linux). None when there is no folder. A folder's own mtime is not
+    enough: NTFS stamps it from a clock that moves in ticks (about 1-16 ms), so a frame written in the same tick as the
+    folder's last change leaves the folder's whole stat key as it was."""
+    try:
+        with os.scandir(folder) as entries:
+            return tuple(sorted((e.name, e.is_symlink(), e.is_dir(follow_symlinks=False),
+                                 e.is_file(follow_symlinks=False)) for e in entries))
+    except (OSError, ValueError) as e:
+        _failed(e)
+        return None
+
+
 def _gate_hash(path: Path, base: Path) -> str | None:
     """sha256 of the first GATE_HASH_MAX bytes of a gate file (checked like every read here; "-" when it is absent,
     None when it is refused or unreadable): a same-size rewrite that keeps the mtime still changes the key."""
@@ -818,7 +848,8 @@ def _gate_hash(path: Path, base: Path) -> str | None:
 
 class PanelFields:
     """panel_fields with a cache: the item's fields are computed again only when a file or folder they come from
-    changed (_stat_key of every path in _Item.watched, plus a content hash of the small gate files in GATE_FILES:
+    changed (_stat_key of every path in _Item.watched, the _listing of every folder in _Item.listed, plus a content
+    hash of the small gate files in GATE_FILES:
     an approval or verdict rewritten in place with the same size and a kept mtime is still seen). active.json is read
     on every call. A result built while any read failed for a reason other than "not found" is never cached (the next
     call reads again). Thread-safe; every call returns its own copy."""
@@ -833,8 +864,10 @@ class PanelFields:
             with common.use_context(common.Context(root=act["client_root"], home=home)):
                 it = _Item(common.Paths(act["client_root"], act["item"]))
                 watched = it.watched()
+                listed = tuple((str(f), _listing(f)) for f in it.listed())
                 gates = tuple(_gate_hash(it.p(rel), it.base) for rel in GATE_FILES)
-            return (str(act["client_root"]), act["item"], tuple((str(p), _stat_key(p)) for p in watched), gates)
+            return (str(act["client_root"]), act["item"], tuple((str(p), _stat_key(p)) for p in watched), listed,
+                    gates)
         except Exception as e:                    # no key: compute without the cache
             _failed(e)
             log.debug("engine state: no cache key (%s)", type(e).__name__)

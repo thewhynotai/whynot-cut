@@ -740,6 +740,30 @@ class Cache(Base):
         self.assertEqual(self.cache(self.home, now=NOW)["item"], "C0239")
         self.assertNotEqual(first, self.cache(self.home, now=NOW))
 
+    def test_a_frame_added_or_removed_within_one_folder_clock_tick_is_seen(self):
+        """Why the test above failed about 1 run in 5 on Windows: NTFS stamps a folder's mtime from a clock that moves
+        in ticks (about 1-16 ms), so a frame written into a run folder in the same tick as the folder's last change
+        leaves the folder's whole stat key (mtime, size 0, links, file id, creation time) as it was. The frames are
+        listed, not watched one by one, so a key built from the folder's stat alone served the old tile list. Here the
+        folder's mtime is put back with os.utime (what one tick does on NTFS); POSIX also moves the folder's ctime, so
+        there the folder's stat key is held as it was."""
+        run = self.p("08_quality_control/premiere_frames/run-20261013-110000")
+        write(run / "frame_001000.png", b"")
+        self.assertEqual(len(self.cache(self.home, now=NOW)["qc"]), 1)
+        st, key, real = os.stat(run), ES._stat_key(run), ES._stat_key
+
+        def one_tick():                                                 # the folder looks as it did at the last call
+            os.utime(run, ns=(st.st_atime_ns, st.st_mtime_ns))
+            if os.name == "nt":
+                self.assertEqual(ES._stat_key(run), key, "NTFS: the folder's stat key did not change")
+        with mock.patch.object(ES, "_stat_key", side_effect=lambda p: key if Path(p) == run else real(p)):
+            write(run / "frame_002000.png", b"")
+            one_tick()
+            self.assertEqual(len(self.cache(self.home, now=NOW)["qc"]), 2, "a frame added in one tick")
+            (run / "frame_002000.png").unlink()
+            one_tick()
+            self.assertEqual(len(self.cache(self.home, now=NOW)["qc"]), 1, "a frame removed in one tick")
+
     def test_staleness_is_checked_on_every_call(self):
         self.assertEqual(self.cache(self.home, now=NOW)["item"], "C0239")
         self.assertEqual(self.cache(self.home, now=NOW + timedelta(hours=13))["item"], "")
