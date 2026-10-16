@@ -26,7 +26,7 @@ _sys.path.insert(0, str(SK / "engine" / "reel"))
 _sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from contract import validate  # noqa: E402
-from lib import common, ppro_bridge  # noqa: E402
+from lib import cep_queue, common, ppro_bridge  # noqa: E402
 from serve import host_busy, messages  # noqa: E402
 from test_serve_app import AppCase  # noqa: E402
 from test_serve_perf import FakeFields  # noqa: E402
@@ -41,6 +41,14 @@ def write_beat(queue: Path, *, age_s: float = 0.0, now: float = NOW, raw: str | 
                 "version": "3.0.0", "bundle": "3.0.0"}, **fields)
     hb.write_text(raw if raw is not None else json.dumps(doc), encoding="utf-8")
     return hb
+
+
+def status_carries_host_busy() -> bool:
+    """Does this engine's cep_queue.status already return host_busy (the executor's T4.10 hunk)? Asked once, on a
+    fake heartbeat, so the cost test expects 0 extra reads with the hunk and 1 without it."""
+    with tempfile.TemporaryDirectory() as t:
+        write_beat(Path(t), now=time.time(), host_busy="idle")
+        return "host_busy" in cep_queue.status(Path(t))
 
 
 class AccessorTests(unittest.TestCase):
@@ -77,6 +85,20 @@ class AccessorTests(unittest.TestCase):
                 write_beat(self.pq, age_s=age, host_busy="rendering")
                 self.assertEqual(host_busy.lane(self.pq, now=NOW), want)
         self.assertEqual(host_busy.lane_value(self.pq, now=NOW), "unknown")   # alive already known: never offline
+
+    def test_a_torn_read_is_read_once_more(self):
+        write_beat(self.pq, host_busy="exporting")
+        good = (self.pq / "bridge.heartbeat").read_text(encoding="utf-8")
+        reads = iter(['{"at": 17', good])
+        with mock.patch.object(Path, "read_text", lambda self, encoding=None: next(reads)):
+            self.assertEqual(host_busy.lane(self.pq, now=NOW), "exporting")
+        reads = iter(['{"at": 17', '{"at"'])
+        with mock.patch.object(Path, "read_text", lambda self, encoding=None: next(reads)):
+            self.assertEqual(host_busy.lane(self.pq, now=NOW), "unknown")   # torn twice: no third read
+
+    def test_fresh_is_the_engines_own_rule(self):
+        import inspect
+        self.assertEqual(host_busy.FRESH_S, inspect.signature(cep_queue.status).parameters["max_age_s"].default)
 
     def test_overall(self):
         table = [  # (premiere, after effects) -> overall; None = no heartbeat at all
@@ -185,9 +207,9 @@ class AppHostBusyTests(AppCase):
         self.assertEqual(self.app.read_host_busy(), {"premiere": "exporting", "after_effects": "offline",
                                                      "overall": "exporting"})
 
-    async def test_one_push_look_costs_one_fields_read_one_status_and_one_heartbeat_read(self):
-        """The cost of the 1 s push look (push.py), counted: no wall clock. With the executor's status hunk the
-        heartbeat read goes too (previous test)."""
+    async def test_one_push_look_costs_one_fields_read_one_status_and_at_most_one_heartbeat_read(self):
+        """The cost of the 1 s push look (push.py), counted: no wall clock. The host_busy heartbeat read happens only
+        while cep_queue.status does not carry host_busy (the executor's T4.10 hunk): 1 per look before it, 0 after."""
         self.beat(host_busy="idle")
         looks = 25
         with mock.patch("lib.ppro_bridge.status", wraps=ppro_bridge.status) as status, \
@@ -200,10 +222,24 @@ class AppHostBusyTests(AppCase):
                 fps.add(fp)
             self.assertEqual(self.fields.calls - calls, looks)               # one engine-state read (a cache hit)
             self.assertEqual(status.call_count, looks)                        # one bridge status
-            self.assertEqual(lane.call_count, looks)                          # one host_busy heartbeat read
+            extra = 0 if status_carries_host_busy() else 1
+            self.assertEqual(lane.call_count, looks * extra)                  # the host_busy heartbeat read, if any
             self.assertEqual(jobs.call_count, looks)                          # the journal: in memory, no file
         self.assertEqual(len(fps), 1, "nothing changed: one fingerprint, so no push")
         self.assertIsNone(self.app._pusher_task, "no panel: the test drove the looks itself")
+
+    async def test_a_snapshot_restarts_a_pusher_that_stopped(self):
+        """Review P2: a pusher task that ended (a crash, a cancel) starts again on the panel's next snapshot."""
+        c = await self.hello(kind="panel")
+        self.assertEqual((await c.recv())["type"], "welcome")
+        await self.host_of(c, "first")
+        await self.until(lambda: self.app._pusher_task is not None)
+        old = self.app._pusher_task
+        old.cancel()
+        await self.until(lambda: old.done())
+        await self.host_of(c, "again")
+        self.assertIsNot(self.app._pusher_task, old)
+        self.assertFalse(self.app._pusher_task.done())
 
     async def test_no_panel_no_look_and_the_looks_stop_with_the_last_panel(self):
         c = await self.cli()

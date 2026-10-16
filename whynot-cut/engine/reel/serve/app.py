@@ -583,6 +583,8 @@ class App:
                 task = asyncio.create_task(self._fresh_after_stale(s))   # the fresh state follows when the read answers
                 s.tasks.add(task)
                 task.add_done_callback(s.tasks.discard)
+            if s.kind == "panel" and s.welcomed:
+                self._ensure_pusher()                # H6 review: a pusher that stopped (failed, ended) starts again
         elif t == "perf":
             if s.kind != "panel":                    # only the panel's own marks go into perf.jsonl
                 self._audit("message", s.peer, session=s.id, action="perf", outcome="rejected",

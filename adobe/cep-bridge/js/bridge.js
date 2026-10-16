@@ -36,30 +36,43 @@
    3 times (1 s, 2 s, 4 s apart) and then a minimal `<id>.error` marker {ok: false, error: 'result write failed', at}
    is written, so the engine and `reel serve` see a failed job at once.
 
-   Lean footprint (hardening H6). The daemon wakes for three reasons only:
-     - the heartbeat, every HEARTBEAT_MS (2 s; cep_queue.status counts a beat older than 5 s as dead, and the panel
-       role 6.5 s), and every SAFETY_EVERY-th beat (10 s) the safety tick: a queue scan (a missed watch event costs at
-       most 10 s), the job timeout, re-arming a lost watch. The engine check rides on the beat: every 30 s, backing off
-       30 -> 60 -> 120 s while the engine runs and no job came (any job, or an engine that is not running, resets it);
-     - fs.watch on the queue folder: a name ending in .job.json (or no name: macOS may give none) asks for one scan,
-       WATCH_SETTLE_MS later, so a burst of duplicate events is one scan; every other name (this daemon's own
-       heartbeat and result writes) is ignored, but it proves the watch is alive. Until the watch has delivered an event
-       (its first heartbeat write does at once) and after a watch error or a watch that throws, the queue is scanned
-       every FALLBACK_SCAN_MS (1 s) as before; the safety tick re-arms the watch, and a watch that stays deaf for
-       WATCH_DEAF_MS (its own heartbeat writes stop showing) is dropped for the same fallback;
+   Lean footprint (hardening H6, its review). The daemon wakes for these only:
+     - the heartbeat, a timer chain: every HEARTBEAT_ACTIVE_MS (1 s) while anything could make the engine wait on this
+       daemon (a job file in the queue, a job claimed or running, a result still to write, a probe out, host_busy
+       "exporting" / "rendering"), else every HEARTBEAT_IDLE_MS (2 s). The engine cancels a waiting job on ONE beat
+       older than 5 s (cep_queue), so 1 s keeps the 2.x margin whenever a job is involved. The job timeout is checked on
+       every beat; every SAFETY_MS (10 s) the safety tick scans the queue (a missed watch event costs at most 10 s) and
+       re-arms a lost watch;
+     - the engine check, its own timer: every 30 s, backing off 30 -> 60 -> 120 s while the engine runs and no job
+       comes; a job sets it back to 30 s at once (an engine that is not running keeps 30 s, then the slow retry);
+     - fs.watch on the queue folder. The first test is the name: bridge.heartbeat and its temp file (this daemon's own
+       writes, about 3 events per beat) are dropped there, they only prove the watch alive; a .job.json name,
+       probe.request, or no name (macOS may give none) asks for one scan WATCH_SETTLE_MS later, so duplicates are one
+       scan. Until the watch has delivered an event, after a watch error, a watch that throws, or one that saw nothing
+       for WATCH_DEAF_MS: the queue is scanned every FALLBACK_SCAN_MS (1 s) as before, and the safety tick re-arms it;
      - a job's own life: its evalScript answer, a result retry when due, the next scan right after a job ends.
-   No evalScript runs on a timer: the host is touched only when a job runs (the job, and the host_busy probe or bind
-   below just before it).
+   No evalScript runs on a timer: the host is touched only for a job (the job, and the AE probe or the Premiere bind
+   just before it) or a probe the engine asked for (probe.request, below).
 
-   host_busy (H6), in every heartbeat: "exporting" | "rendering" | "idle" | "unknown", from memory (no host call):
-     - Premiere: this daemon's own export job (export_frames, the audio exports) is "exporting". Else app.encoder's
-       job events, bound once before the first job (an ExtendScript handler per event dispatching the CSXS event
-       ENCODER_EVENT), counted: queued +1, complete / error / canceled -1. A count above 0 is "exporting" while an
-       event came within ENCODER_STALE_MS; past it, or a count that went below 0 (a missed queued), or progress with
-       nothing queued, the count is reset and the value is "unknown" until the next queued event. "idle" only after
-       one full queued -> done cycle proved the events reach this daemon. No bind, or a bind that failed: "unknown".
-     - After Effects: app.project.renderQueue.rendering, probed with one short evalScript just before each job (the
-       panel's status check is a job too), believed for HOST_BUSY_TTL_MS, then "unknown".
+   host_busy (H6), in every heartbeat, with host_busy_reason (a fixed code or null) and host_probe {asked_at,
+   answered_at}: "exporting" | "rendering" | "idle" | "unknown", from memory:
+     - Premiere: this daemon's own export job (export_frames, the audio exports) is "exporting". The app.encoder job
+       events are OFF unless ~/.whynot-cut/bridge/config.json says "encoder_events": true (app.encoder.bind may replace
+       other extensions' handlers in the shared ExtendScript engine; the live checklist decides): off, Premiere is
+       "unknown" (encoder_events_off, or media_encoder_running when Adobe Media Encoder's process runs). On, they are
+       bound once before the first job and counted: queued +1, complete / error / canceled -1; a count above 0 is
+       "exporting" while an event came within ENCODER_STALE_MS; past it, a count below 0 (a missed queued) or progress
+       with nothing queued resets the count to "unknown" (missed_event) until the next queued event; "idle" only after
+       one full cycle proved the events arrive, and never while Media Encoder runs (it may encode jobs queued in it).
+     - After Effects: app.project.renderQueue.rendering, probed just before each job and on request, believed for
+       HOST_BUSY_TTL_MS, then "unknown" (probe_old / no_probe).
+     - probe.request: the engine (its GPU lock) creates <queue>/probe.request; the bridge deletes it and runs one probe
+       (AE: the render queue; Premiere: a no-op, and the Media Encoder process check). Never behind this daemon's own
+       job: then it runs when the job ends. HEURISTIC, unproven until the live check: a probe out for more than
+       PROBE_BLOCKED_MS (3 s) while this node-side heartbeat keeps beating means the host's script engine is blocked:
+       After Effects "rendering", Premiere "unknown", both with reason script_engine_busy.
+       The Media Encoder check runs tasklist (Windows) / pgrep (macOS) from node with fixed arguments and no shell,
+       at most once per AME_TTL_MS, only on a probe request.
      The live behaviour is unverified (docs/adobe/evidence/h6-live-checklist.md). */
 (function () {
   var req = (window.cep_node && window.cep_node.require) || window.require;
@@ -159,8 +172,14 @@
   // queue). Kept ABOVE the engine's heartbeat window (cep_queue.status max_age_s = 5 s)
   var DAEMON_STALE_MS = 6500;
   var stateEl = document.getElementById('state'), logEl = document.getElementById('log');
+  // H6: the daemon never holds a host process open by itself. In CEP the panel's page keeps it alive (its timers are
+  // the page's); under plain node (tests, tools) a node timer is unref'd and the queue watch is not persistent, so the
+  // process ends when nothing else holds it
+  function later(f, ms) { var t = setTimeout(f, ms); if (t && typeof t.unref === 'function') { t.unref(); } return t; }
+  function every(f, ms) { var t = setInterval(f, ms); if (t && typeof t.unref === 'function') { t.unref(); } return t; }
   // H6 timings (see the header)
-  var HEARTBEAT_MS = 2000, SAFETY_EVERY = 5, FALLBACK_SCAN_MS = 1000, WATCH_SETTLE_MS = 50, WATCH_DEAF_MS = 10000;
+  var HEARTBEAT_ACTIVE_MS = 1000, HEARTBEAT_IDLE_MS = 2000, SAFETY_MS = 10000;
+  var FALLBACK_SCAN_MS = 1000, WATCH_SETTLE_MS = 50, WATCH_DEAF_MS = 10000;
 
   function show(t) { if (stateEl) { stateEl.textContent = t; } }
   function log(m) {
@@ -193,15 +212,19 @@
   }
   function heartbeat() {
     try {
+      var hb = hostBusyOf();
       writeAtomic(HEARTBEAT, JSON.stringify({ at: Date.now(), busy: busy, role: ROLE, host: HOST,
                                               hostVersion: HOST_VERSION, bundle: BUNDLE, version: VERSION,
                                               protocol: PROTOCOL, build: BUILD, libs: LIB_SHA, current: current,
                                               action: currentAction || null, engine_start: engineStart,
-                                              engine_retry: engineSlow ? 'slow' : null, host_busy: hostBusy() }));
+                                              engine_retry: engineSlow ? 'slow' : null, host_busy: hb[0],
+                                              host_busy_reason: hb[1],
+                                              host_probe: { asked_at: probe.askedAt || null,
+                                                            answered_at: probe.answeredAt || null } }));
     } catch (e) {}
   }
   // Result delivery (hardening H2). A result that cannot be written (disk full, a locked folder) is tried 3 more times,
-  // 1 s, 2 s and 4 s apart (on later ticks, never blocking one), the job staying claimed (`<id>.running`) meanwhile and
+  // 1 s, 2 s and 4 s apart (each on its own timer, never blocking), the job staying claimed (`<id>.running`) meanwhile and
   // the queue free for the next job. After the last failed try a minimal `<id>.error` marker {ok, error, at} is
   // written (no path, no text from the file system) and the job file is removed: the engine and `reel serve` read a
   // marker, or a job that vanished with no result, as a failed job instead of waiting for their timeout.
@@ -245,7 +268,7 @@
     if (!pendingResults.length) { return; }
     var due = pendingResults[0].due;
     for (var i = 1; i < pendingResults.length; i++) { if (pendingResults[i].due < due) { due = pendingResults[i].due; } }
-    retryTimer = setTimeout(function () { retryTimer = null; retryResults(); }, Math.max(0, due - Date.now()));
+    retryTimer = later(function () { retryTimer = null; retryResults(); }, Math.max(0, due - Date.now()));
   }
   function finish(job, file, payload) {
     if (writeResult(job.id, payload)) {
@@ -258,6 +281,7 @@
       busy = false; current = null; currentFile = null; currentAction = '';
       heartbeat();                             // the engine sees the queue free at once, not at the next beat
     }
+    if (!busy && probe.wanted) { runProbe(); }  // a probe that waited behind this job
     scheduleScan();                            // the next job, if any, without waiting for an event
   }
   // A bridge that restarted: every `<id>.running` in the queue was claimed by a previous run that never finished it
@@ -291,9 +315,9 @@
   var ENGINE_JSON = path.join(HOME, '.whynot-cut', 'bridge', 'engine.json');
   var engineStart = null, engineCheckedAt = null, engineFailures = 0, enginePending = false, engineSlow = false;
   // H6: the check interval while the engine runs: 30 s after the first check that finds it running, then doubled up
-  // to 120 s by each further check that finds it running with no job since the previous one; a job, or an engine that
-  // is not running, sets it back to 30 s
-  var engineEvery = ENGINE_CHECK_MS, jobSinceEngineCheck = false, engineWasAlive = false;
+  // to 120 s by each further check that finds it running with no job since the previous one; a job (at once, in
+  // runJob), or an engine that is not running, sets it back to 30 s. Its own timer (engineTimer)
+  var engineEvery = ENGINE_CHECK_MS, jobSinceEngineCheck = false, engineWasAlive = false, engineTimer = null;
   // engine.json holds the engine's token: the reviver keeps only `pid`, so nothing else of the file is held, and no
   // error text (a parse error can quote the file) is ever logged
   function enginePid() {
@@ -412,11 +436,21 @@
       child.unref();
     } catch (e) {}
   }
+  function engineEveryNow() {
+    return engineSlow && !enginePending ? ENGINE_SLOW_MS : enginePending ? ENGINE_CHECK_MS : engineEvery;
+  }
+  // the next check at its due time (a state that changed meanwhile, e.g. a spawn that failed, is re-read then)
+  function scheduleEngine() {
+    if (engineTimer !== null) { clearTimeout(engineTimer); }
+    var due = (engineCheckedAt === null ? Date.now() : engineCheckedAt) + engineEveryNow();
+    engineTimer = later(function () { engineTimer = null; engineTick(); }, Math.max(0, due - Date.now()));
+  }
   function engineTick() {
-    var every = engineSlow && !enginePending ? ENGINE_SLOW_MS : enginePending ? ENGINE_CHECK_MS : engineEvery;
-    if (engineCheckedAt !== null && Date.now() - engineCheckedAt < every) { return; }
-    engineCheckedAt = Date.now();
-    try { engineCheck(); } catch (e) { log('engine start check failed'); }
+    if (engineCheckedAt === null || Date.now() - engineCheckedAt >= engineEveryNow()) {
+      engineCheckedAt = Date.now();
+      try { engineCheck(); } catch (e) { log('engine start check failed'); }
+    }
+    scheduleEngine();
   }
   // the file to evaluate for `job`: {file} or {error, ...}. `lib` = this host's bundled library, inside jsx/ after
   // links are resolved; `script` = the compatibility path, directly inside <engine home>/<scripts>/ with the same
@@ -473,7 +507,9 @@
     }
     busy = true; current = job.id; currentFile = running; currentAction = job.action || ''; startedAt = Date.now();
     jobSinceEngineCheck = true;
+    if (engineEvery !== ENGINE_CHECK_MS) { engineEvery = ENGINE_CHECK_MS; scheduleEngine(); }   // a job: 30 s at once
     heartbeat();
+    kickBeat();
     show('running ' + job.id + ' (' + currentAction + ')');
     log('run ' + job.id + ' ' + currentAction);
     hostTouch();                               // host_busy: the bind / probe rides on this job (queued before it)
@@ -487,11 +523,13 @@
     });
   }
   // ---- host_busy (H6; see the header) ----
-  var HOST_BUSY_TTL_MS = 15000, ENCODER_STALE_MS = 120000;
+  var HOST_BUSY_TTL_MS = 15000, ENCODER_STALE_MS = 120000, PROBE_BLOCKED_MS = 3000, AME_TTL_MS = 15000;
   var EXPORT_ACTIONS = { 'export_frames': 1, 'WNC_AUDIO.exportRange': 1, 'WNC_AUDIO.exportClipAudio': 1 };
   var ENCODER_EVENT = 'ai.thewhynot.cut.encoder';
+  var PROBE_REQUEST = 'probe.request';
   // one ExtendScript call: binds the five encoder events once per ExtendScript engine (a global guard: a reloaded
-  // daemon never binds twice); each handler dispatches ENCODER_EVENT with its kind
+  // daemon never binds twice); each handler dispatches ENCODER_EVENT with its kind. OFF unless config.json says
+  // "encoder_events": true (app.encoder.bind may replace another extension's handlers; the live checklist decides)
   var ENCODER_BIND = '(function () { if ($.global.__wncEncoderBound) { return "bound"; } try {' +
     ' if (typeof CSXSEvent === "undefined") { new ExternalObject("lib:PlugPlugExternalObject"); }' +
     ' var send = function (k) { return function () { try { var e = new CSXSEvent(); e.type = "' + ENCODER_EVENT + '";' +
@@ -502,19 +540,35 @@
     ' $.global.__wncEncoderBound = true; return "bound"; } catch (e) { return "unavailable"; } })()';
   var AE_PROBE = '(function () { try { return app.project.renderQueue.rendering ? "rendering" : "idle"; }' +
     ' catch (e) { return "unknown"; } })()';
-  var enc = { tried: false, bound: false, proven: false, count: 0, at: 0, doubt: false };
-  var aeProbe = { value: null, at: 0 };
-  function hostBusy() {
+  var PPRO_PROBE = '(function () { return "answered"; })()';   // Premiere: only "is its script engine free?"
+  var enc = { tried: false, on: false, bound: false, proven: false, count: 0, at: 0, doubt: false };
+  // the last host probe: asked / answered (ms epoch), its answer (AE: renderQueue), and one waiting behind our job
+  var probe = { askedAt: 0, answeredAt: 0, value: null, wanted: false };
+  var ame = { running: null, at: 0, checking: false };          // Adobe Media Encoder's process (on demand, from node)
+  function probeOutstanding() { return probe.askedAt > 0 && probe.answeredAt < probe.askedAt; }
+  // [value, reason]: reason is a fixed code (null when the value needs none)
+  function hostBusyOf() {
     var now = Date.now();
-    if (HOST === 'AEFT') { return aeProbe.value && now - aeProbe.at < HOST_BUSY_TTL_MS ? aeProbe.value : 'unknown'; }
-    if (busy && EXPORT_ACTIONS[currentAction]) { return 'exporting'; }
-    if (!enc.bound) { return 'unknown'; }
+    var blocked = probeOutstanding() && now - probe.askedAt > PROBE_BLOCKED_MS;   // unproven heuristic (header)
+    if (HOST === 'AEFT') {
+      if (blocked) { return ['rendering', 'script_engine_busy']; }
+      if (probe.value && probe.answeredAt && now - probe.answeredAt < HOST_BUSY_TTL_MS) { return [probe.value, null]; }
+      return ['unknown', probe.answeredAt ? 'probe_old' : 'no_probe'];
+    }
+    if (busy && EXPORT_ACTIONS[currentAction]) { return ['exporting', null]; }
+    if (blocked) { return ['unknown', 'script_engine_busy']; }
+    var ameOn = ame.running === true && now - ame.at < AME_TTL_MS;
+    if (!enc.bound) { return ['unknown', ameOn ? 'media_encoder_running' : enc.on ? 'encoder_events_unavailable' : 'encoder_events_off']; }
     if (enc.count > 0) {
-      if (now - enc.at < ENCODER_STALE_MS) { return 'exporting'; }
+      if (now - enc.at < ENCODER_STALE_MS) { return ['exporting', null]; }
       enc.count = 0; enc.doubt = true;         // a done event was missed: never a stuck "exporting"
     }
-    return enc.proven && !enc.doubt ? 'idle' : 'unknown';
+    if (ameOn) { return ['unknown', 'media_encoder_running']; }      // it may encode jobs queued in it: never "idle"
+    if (enc.doubt) { return ['unknown', 'missed_event']; }
+    if (!enc.proven) { return ['unknown', 'no_event_yet']; }
+    return ['idle', null];
   }
+  function hostBusy() { return hostBusyOf()[0]; }
   function onEncoderEvent(ev) {
     var kind = ev && typeof ev === 'object' ? ev.data : ev;
     var before = hostBusy();
@@ -529,21 +583,56 @@
       if (enc.count === 0) { enc.count = 1; enc.doubt = true; }      // rendering, but its queued was missed
     } else { return; }
     enc.at = Date.now();
-    if (hostBusy() !== before) { heartbeat(); }                     // a change shows at once (progress never writes)
+    if (hostBusy() !== before) { heartbeat(); kickBeat(); }        // a change shows at once (progress never writes)
   }
-  // the host call that rides on a job: Premiere binds the encoder events once, After Effects probes its render queue
+  // Adobe Media Encoder's process, from node (never the host): tasklist / pgrep with fixed arguments, no shell, at
+  // most once per AME_TTL_MS, only when a probe is asked for. Running only ever means "unknown", never "exporting"
+  function checkMediaEncoder() {
+    var now = Date.now();
+    if (HOST !== 'PPRO' || ame.checking || (ame.at && now - ame.at < AME_TTL_MS)) { return; }
+    var cp;
+    try { cp = req('child_process'); } catch (e) { return; }
+    if (!cp || typeof cp.execFile !== 'function') { return; }
+    var win = IS_WIN;
+    var file = win ? 'C:\\Windows\\System32\\tasklist.exe' : '/usr/bin/pgrep';
+    var args = win ? ['/FI', 'IMAGENAME eq Adobe Media Encoder.exe', '/NH', '/FO', 'CSV'] : ['-f', 'Adobe Media Encoder'];
+    ame.checking = true;
+    try {
+      cp.execFile(file, args, { windowsHide: true, timeout: 5000 }, function (err, out) {
+        ame.checking = false;
+        ame.at = Date.now();
+        ame.running = win ? !err && /Adobe Media Encoder\.exe/i.test(String(out || '')) : !err;
+        heartbeat();
+      });
+    } catch (e) { ame.checking = false; }
+  }
+  // one host probe (AE: the render queue; Premiere: is its script engine free), never while our own job runs (it
+  // would queue behind the job and look blocked): then it runs when the job ends
+  function runProbe() {
+    if (busy) { probe.wanted = true; return; }
+    probe.wanted = false;
+    checkMediaEncoder();
+    if (probeOutstanding()) { return; }                               // one at a time
+    probe.askedAt = Date.now();
+    kickBeat();
+    try {
+      window.__adobe_cep__.evalScript(HOST === 'AEFT' ? AE_PROBE : PPRO_PROBE, function (res) {
+        probe.answeredAt = Date.now();
+        probe.value = res === 'rendering' || res === 'idle' ? res : HOST === 'AEFT' ? 'unknown' : null;
+        heartbeat();
+      });
+    } catch (e) { probe.askedAt = 0; }
+  }
+  // the host call that rides on a job: After Effects probes its render queue; Premiere binds the encoder events once,
+  // only with config.json "encoder_events": true
   function hostTouch() {
     var cep = window.__adobe_cep__;
-    if (HOST === 'AEFT') {
-      try {
-        cep.evalScript(AE_PROBE, function (res) {
-          if (res === 'rendering' || res === 'idle' || res === 'unknown') { aeProbe.value = res; aeProbe.at = Date.now(); }
-        });
-      } catch (e) {}
-      return;
-    }
+    if (HOST === 'AEFT') { runProbeBeforeJob(); return; }
     if (enc.tried) { return; }
     enc.tried = true;
+    var cfg = readConfig();
+    enc.on = !!(cfg && cfg.encoder_events === true);
+    if (!enc.on) { return; }
     try {
       if (typeof cep.addEventListener !== 'function') { return; }
       cep.addEventListener(ENCODER_EVENT, onEncoderEvent);
@@ -553,37 +642,97 @@
       });
     } catch (e) {}
   }
+  // the AE probe just before a job: queued ahead of the job in the host, so it is not "behind our job"
+  function runProbeBeforeJob() {
+    if (probeOutstanding()) { return; }
+    probe.askedAt = Date.now();
+    try {
+      window.__adobe_cep__.evalScript(AE_PROBE, function (res) {
+        probe.answeredAt = Date.now();
+        probe.value = res === 'rendering' || res === 'idle' ? res : 'unknown';
+      });
+    } catch (e) { probe.askedAt = 0; }
+  }
 
-  // ---- the queue: fs.watch, the heartbeat and the safety tick (H6; see the header) ----
-  var watcher = null, fallbackTimer = null, scanTimer = null, lastWatchEvent = 0, beats = 0, watchNote = '';
-  // the log says each watch trouble once, not on every re-arm
-  function watchLog(note) {
+  // ---- the heartbeat, the queue watch and the safety tick (H6; see the header) ----
+  var beatTimer = null, beatDue = 0, lastBeat = 0, lastSafety = 0, queueHasJob = false;
+  var watcher = null, fallbackTimer = null, scanTimer = null, watchSeen = false, watchArmedAt = 0, watchNote = '';
+  // 1 s while anything could make the engine wait on this daemon; 2 s only when the queue is empty and all is idle
+  function active() {
+    var hb = hostBusy();
+    return busy || queueHasJob || pendingResults.length > 0 || probeOutstanding() || probe.wanted ||
+      hb === 'exporting' || hb === 'rendering';
+  }
+  function scheduleBeat() {
+    if (beatTimer !== null) { clearTimeout(beatTimer); }
+    beatDue = lastBeat + (active() ? HEARTBEAT_ACTIVE_MS : HEARTBEAT_IDLE_MS);
+    beatTimer = later(beatTick, Math.max(0, beatDue - Date.now()));
+  }
+  // something became active: the next beat no later than 1 s after the last one
+  function kickBeat() {
+    if (beatTimer !== null && beatDue > lastBeat + HEARTBEAT_ACTIVE_MS && active()) { scheduleBeat(); }
+  }
+  function checkJobTimeout() {
+    if (busy && Date.now() - startedAt > JOB_TIMEOUT_MS) {
+      log('TIMEOUT ' + current + ' - no reply from ' + HOST + '; queue released');
+      show('idle - watching the queue');
+      finish({ id: current }, currentFile, { ok: false, error: 'no reply from ' + HOST + ' within ' + (JOB_TIMEOUT_MS / 60000) + ' min', at: Date.now() });
+    }
+  }
+  function beatTick() {
+    beatTimer = null;
+    lastBeat = Date.now();
+    checkJobTimeout();                         // every beat: 1 s while a job runs
+    heartbeat();
+    if (lastBeat - lastSafety >= SAFETY_MS) { lastSafety = lastBeat; safetyTick(); }
+    scheduleBeat();
+  }
+  function watchLog(note) {                    // the log says each watch trouble once, not on every re-arm
     if (note !== watchNote) { watchNote = note; if (note) { log(note); } }
   }
   function scanQueue() {
     if (busy) { return; }
-    var jobs;
-    try { jobs = fs.readdirSync(QUEUE).filter(function (f) { return /\.job\.json$/.test(f); }).sort(); } catch (e) { return; }
+    var names;
+    try { names = fs.readdirSync(QUEUE); } catch (e) { return; }
+    var jobs = names.filter(function (f) { return /\.job\.json$/.test(f); }).sort();
+    queueHasJob = jobs.length > 0;
+    if (names.indexOf(PROBE_REQUEST) >= 0) {
+      try { fs.unlinkSync(path.join(QUEUE, PROBE_REQUEST)); } catch (e) {}
+      runProbe();
+    }
     for (var i = 0; i < jobs.length && !busy; i++) { runJob(path.join(QUEUE, jobs[i])); }
+    if (!busy) { queueHasJob = false; }
   }
   // one scan WATCH_SETTLE_MS from now, however many events ask for it meanwhile
   function scheduleScan() {
     if (scanTimer !== null) { return; }
-    scanTimer = setTimeout(function () {
+    scanTimer = later(function () {
       scanTimer = null;
       try { scanQueue(); } catch (e) { log('queue scan failed'); }
     }, WATCH_SETTLE_MS);
   }
   function startFallback() {
-    if (fallbackTimer === null) { fallbackTimer = setInterval(function () { try { scanQueue(); } catch (e) {} }, FALLBACK_SCAN_MS); }
+    if (fallbackTimer === null) { fallbackTimer = every(function () { try { scanQueue(); } catch (e) {} }, FALLBACK_SCAN_MS); }
   }
   function stopFallback() {
     if (fallbackTimer !== null) { clearInterval(fallbackTimer); fallbackTimer = null; }
   }
+  // the first thing: this daemon's own heartbeat (and its temp file) is dropped by its name, before any work; it
+  // only proves the watch alive. A job, a probe request or no name (macOS) asks for one scan
   function onWatch(type, name) {
-    lastWatchEvent = Date.now();
-    if (fallbackTimer !== null) { stopFallback(); watchLog(''); } // proven: events reach this daemon
-    if (name === null || name === undefined || /\.job\.json$/.test(String(name))) { scheduleScan(); }
+    watchSeen = true;
+    if (name !== null && name !== undefined) {
+      name = String(name);
+      if (name.lastIndexOf('bridge.heartbeat', 0) === 0) {
+        if (fallbackTimer !== null) { stopFallback(); watchLog(''); }     // proven: events reach this daemon
+        return;
+      }
+      if (name !== PROBE_REQUEST && !/\.job\.json$/.test(name)) { return; }
+    }
+    if (fallbackTimer !== null) { stopFallback(); watchLog(''); }
+    queueHasJob = true;
+    kickBeat();
+    scheduleScan();
   }
   function dropWatch(why) {
     var w = watcher;
@@ -598,9 +747,10 @@
   function armWatch() {
     if (watcher) { return; }
     startFallback();
-    lastWatchEvent = Date.now();
+    watchSeen = false;
+    watchArmedAt = Date.now();
     try {
-      var w = fs.watch(QUEUE, { persistent: true }, onWatch);
+      var w = fs.watch(QUEUE, { persistent: false }, onWatch);
       watcher = w;
       w.on('error', function () { if (watcher === w) { dropWatch('error'); } });
     } catch (e) {
@@ -609,20 +759,12 @@
     }
   }
   function safetyTick() {
-    if (busy && Date.now() - startedAt > JOB_TIMEOUT_MS) {
-      log('TIMEOUT ' + current + ' - no reply from ' + HOST + '; queue released');
-      show('idle - watching the queue');
-      finish({ id: current }, currentFile, { ok: false, error: 'no reply from ' + HOST + ' within ' + (JOB_TIMEOUT_MS / 60000) + ' min', at: Date.now() });
+    if (watcher) {
+      if (watchSeen) { watchSeen = false; }
+      else if (Date.now() - watchArmedAt >= WATCH_DEAF_MS) { dropWatch('deaf'); }   // its own beats stopped showing
     }
-    if (watcher && Date.now() - lastWatchEvent > WATCH_DEAF_MS) { dropWatch('deaf'); }
     if (!watcher) { armWatch(); }
     scanQueue();
-  }
-  function beat() {
-    engineTick();
-    heartbeat();
-    beats += 1;
-    if (beats % SAFETY_EVERY === 0) { safetyTick(); }
   }
   try {
     ensureQueue();
@@ -632,8 +774,9 @@
     show('idle - watching the queue');
     log('WhyNot Cut ' + BUNDLE + ' (' + HOST + ', ' + ROLE + ', build ' + (BUILD || 'unknown') + ') started; queue ' + QUEUE);
     armWatch();
+    lastBeat = lastSafety = Date.now();
     scanQueue();
-    setInterval(beat, HEARTBEAT_MS);
+    scheduleBeat();
   } catch (e) {
     show('FAILED to start: ' + e);
   }

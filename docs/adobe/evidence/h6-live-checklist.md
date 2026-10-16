@@ -16,18 +16,23 @@ while ($true) { try { $b = Get-Content $q -Raw | ConvertFrom-Json; $age = ([Date
 ## 1. The bridge loads and idles (both apps)
 
 1. Install the bundle built from this commit; start Premiere.
-2. Run the watcher. **Log:** the age stays under 3 s for 2 minutes (the heartbeat is every 2 s now; the engine counts
-   a beat dead at 5 s). `host_busy` = `unknown` (no job has run yet, so no encoder bind).
+2. Run the watcher. **Log:** idle, the age stays under 3 s for 2 minutes (2 s beats; the engine counts a beat dead at
+   5 s); while a job runs or waits, under 2 s (1 s beats). `host_busy` = `unknown`, `host_busy_reason` =
+   `encoder_events_off` (the encoder events are off by default).
 3. Press the panel's status check (or run any `reel` command that pings Premiere). **Log:** it answers within a second (the job arrived
    through `fs.watch`, not the 10 s safety tick). Repeat 5 times; note the slowest.
 4. In the daemon log: no `queue watch …` line. If you see `queue watch unavailable`, `error` or `deaf`, copy it: the
-   1 s fallback is running, which works but wakes more.
+   1 s fallback is running, which works but wakes more. (The watch is created with `persistent: false` so a plain node
+   run can end; confirm here that CEP still delivers its events: step 3 answering within a second shows it.)
 5. Task Manager → Details → the `CEPHtmlEngine.exe` of the WhyNot Cut daemon: **log** CPU % and memory over 10 idle
    minutes (expect ~0 % CPU).
 6. Same for After Effects with `ae-queue`.
 
-## 2. Premiere: the encoder events (app.encoder)
+## 2. Premiere: the encoder events (app.encoder) — OFF by default
 
+0. First check step 7 below with the events OFF (they are off unless `~/.whynot-cut/bridge/config.json` has
+   `"encoder_events": true`). Then add that key, restart Premiere, and do steps 1–8. Turn it on for customers only
+   if step 7 says the bind does not replace another extension's handler.
 1. After step 1.3 (one job has run) the daemon log says `encoder events: bound` or `encoder events: unavailable`.
    **Log which.** `unavailable` means `app.encoder.bind` or `PlugPlugExternalObject` failed: host_busy stays `unknown`.
 2. Queue a sequence to Adobe Media Encoder: File → Export → Media → **Send to Media Encoder**, start the queue in AME.
@@ -46,6 +51,16 @@ while ($true) { try { $b = Get-Content $q -Raw | ConvertFrom-Json; $age = ([Date
    once (the `$.global.__wncEncoderBound` guard: no double counting). **Log** whether a single export now counts
    twice (watch for `exporting` staying on after AME finished: that means two handlers).
 
+## 2b. Premiere: Media Encoder's process and probe.request
+
+1. With Adobe Media Encoder open, create `<engine home>\ppro-queue\probe.request` (an empty file). **Log:** the file
+   disappears within a second; the heartbeat says `host_busy` `unknown`, `host_busy_reason` `media_encoder_running`,
+   and `host_probe.answered_at` moves. Quit AME, wait 15 s, request again: the reason goes back.
+2. **Log** the process name tasklist sees (`tasklist /FI "IMAGENAME eq Adobe Media Encoder.exe"`); on macOS, what
+   `pgrep -f "Adobe Media Encoder"` prints. If the name differs, the check never finds it.
+3. Start a long in-app export (Export mode → Export) and create `probe.request` during it. **Log:** does the no-op probe
+   answer during the export? If not, after 3 s the reason is `script_engine_busy` (value `unknown`).
+
 ## 3. After Effects: renderQueue.rendering
 
 1. Add a comp to the render queue; press Render.
@@ -55,6 +70,14 @@ while ($true) { try { $b = Get-Content $q -Raw | ConvertFrom-Json; $age = ([Date
 3. During the render, **log** whether the heartbeat age stays under 3 s (does the CEP daemon keep beating while AE
    renders?). If it stops, `serve.host_busy` reports that lane `unknown` while the beat is under 120 s old.
 4. After the render: host_busy goes `unknown` 15 s after the last job (the probe's lifetime). Expected.
+5. **The probe.request heuristic (unproven):** start a render that takes over a minute, then create
+   `<engine home>\ae-queue\probe.request`. **Log:** after about 3 s the watcher shows `rendering` with reason
+   `script_engine_busy` (the probe is out, the heartbeat keeps beating), and when the render ends the probe answers and
+   it goes to `idle`. If AE answers the probe DURING the render, log the answer: then `renderQueue.rendering` itself is
+   the signal and the heuristic never fires. If the heartbeat stops during the render, the heuristic cannot fire
+   either (the lane goes stale: "proceed").
+6. Repeat 5 with a modal dialog open in AE instead of a render: does the heuristic call that "rendering" too? **Log**
+   it: a false "rendering" only delays a GPU job, but it should be known.
 
 ## 4. For the next step (not built in H6)
 

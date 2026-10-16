@@ -20,15 +20,19 @@ The engine GPU lock (G-GPU, Phase 4) calls host_busy() before a GPU job and wait
 """
 from __future__ import annotations
 
+import inspect
 import json
 import time
 from pathlib import Path
+
+from lib import cep_queue
 
 __all__ = ["HOST_BUSY", "LANES", "FRESH_S", "RECENT_S", "beat_value", "lane", "lane_value", "host_busy"]
 
 HOST_BUSY = ("exporting", "rendering", "idle", "unknown")
 LANES = {"premiere": "ppro-queue", "after_effects": "ae-queue"}
-FRESH_S = 5.0          # cep_queue.status max_age_s: a beat older than this is not a running bridge
+# a beat older than this is not a running bridge: the engine's own rule, read from cep_queue.status (never a copy)
+FRESH_S = float(inspect.signature(cep_queue.status).parameters["max_age_s"].default)
 RECENT_S = 120.0       # a beat that stopped less than this ago: the app may be frozen (unknown), not quit (offline)
 HEARTBEAT = "bridge.heartbeat"
 
@@ -40,20 +44,27 @@ def beat_value(beat) -> str:
 
 
 def lane(queue, *, now: float | None = None) -> str:
-    """One queue folder's value: HOST_BUSY or "offline" (one read of its heartbeat, nothing else)."""
+    """One queue folder's value: HOST_BUSY or "offline" (one read of its heartbeat, a second one only when the
+    first was torn; nothing else)."""
     hb = Path(queue) / HEARTBEAT
     now = time.time() if now is None else now
+    beat = None
+    for _ in range(2):                       # a torn read (Windows may write the file in place) is read once more
+        try:
+            raw = hb.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return "offline"
+        except OSError:
+            return "unknown"
+        try:
+            beat = json.loads(raw)
+            break
+        except ValueError:
+            beat = None
     try:
-        raw = hb.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return "offline"
-    except OSError:
-        return "unknown"
-    try:
-        beat = json.loads(raw)
         age = now - float(beat["at"]) / 1000
     except (ValueError, TypeError, KeyError, OverflowError):
-        return "unknown"                     # a torn or broken beat: something writes it, so not offline
+        return "unknown"                     # a broken beat: something writes it, so not offline
     if age < FRESH_S:
         return beat_value(beat)
     return "unknown" if age < RECENT_S else "offline"

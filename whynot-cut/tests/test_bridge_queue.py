@@ -1352,8 +1352,8 @@ class TestWaitForMedia(_Home):
 
 # ===================================================================================================== bridge.js
 NODE = shutil.which("node")
-# The bridge runs on its own clock (its setIntervals, 50 ms each here; its setTimeouts 1/20 of their delay), and the
-# run ends on that clock, never on wall
+# The bridge runs on its own clock (every setInterval / setTimeout at 1/20 of its delay: the bridge's ratios kept), and
+# the run ends on that clock, never on wall
 # time: a loaded machine stretches every tick, so a fixed lifetime ended the bridge before it had done its work (jobs
 # left unanswered, a claimed job never finished, an engine submit finding the bridge already gone). The test closes
 # this process's stdin to ask for the end (once the outcome it waits for is on disk, or at once); the harness then
@@ -1377,6 +1377,17 @@ function end() {
     panel: b ? { role: b.role, host: b.host, bundle: b.bundle, queue: b.queue, beat: b.readBeat() } : null }));
   process.exit(0);
 }
+// every timer at 1/20 of its delay (the bridge's own ratios kept: a 1 s beat is 50 ms, its 2 s idle beat 100 ms, the
+// 10 s safety tick 500 ms); every timer that fires is a tick
+const scale = (ms) => Math.max(1, Math.ceil((+ms || 0) / 20));
+// the bridge unrefs its node timers (H6: it never holds a plain node process open); this harness IS the bridge's
+// process, so its clock keeps running until the harness ends it
+const held = (t) => { t.unref = () => t; return t; };
+function tick() {
+  ticks += 1;
+  if (stopAsked && inFlight === 0) { settled += 1; }
+  maybeEnd();
+}
 function maybeEnd() {
   if (stopAsked && (clocks === 0 || (inFlight === 0 && ticks >= +minTicks && settled >= SETTLE))) { end(); }
 }
@@ -1397,13 +1408,9 @@ const cep = {
   }
 };
 const ctx = { window: { __adobe_cep__: cep, cep_node: { require } }, document: { getElementById: (id) => id === 'state' ? state : logEl },
-              setInterval: (f) => { clocks += 1; return setInterval(() => {
-                f(); ticks += 1;
-                if (stopAsked && inFlight === 0) { settled += 1; }
-                maybeEnd();
-              }, 50); },
-              clearInterval, setTimeout: (f, ms) => setTimeout(f, Math.ceil((+ms || 0) / 20)), clearTimeout,
-              process, console };
+              setInterval: (f, ms) => { clocks += 1; return held(setInterval(() => { f(); tick(); }, scale(ms))); },
+              setTimeout: (f, ms) => { clocks += 1; return held(setTimeout(() => { f(); tick(); }, scale(ms))); },
+              clearInterval, clearTimeout, process, console };
 vm.runInNewContext(fs.readFileSync(bridgeJs, 'utf8'), ctx);
 const stop = () => { stopAsked = true; maybeEnd(); };
 process.stdin.on('end', stop);
@@ -1611,9 +1618,11 @@ class TestBridgeJs(_SharedBridgeJsTests, _BridgeJs):
         hb = self.beat()
         self.assertEqual(sorted(hb), sorted(["at", "busy", "role", "host", "hostVersion", "bundle", "version", "protocol",
                                              "build", "libs", "current", "action", "engine_start", "engine_retry",
-                                             "host_busy"]))
+                                             "host_busy", "host_busy_reason", "host_probe"]))
         self.assertIsNone(hb["engine_retry"])                                # H2: "slow" only after 5 failed engine starts
-        self.assertEqual(hb["host_busy"], "unknown")                         # H6: no job yet, so no encoder bind
+        self.assertEqual(hb["host_busy"], "unknown")                         # H6: the encoder events are off by default
+        self.assertEqual(hb["host_busy_reason"], "encoder_events_off")
+        self.assertEqual(hb["host_probe"], {"asked_at": None, "answered_at": None})
         self.assertEqual(hb["engine_start"]["outcome"], "no_launcher")       # config.json launcher null (Task 5)
         build = json.loads((self.ext / "build.json").read_text(encoding="utf-8"))
         self.assertEqual((hb["bundle"], hb["version"], hb["protocol"], hb["build"], hb["hostVersion"], hb["role"]),

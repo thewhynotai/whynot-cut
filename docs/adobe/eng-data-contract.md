@@ -328,32 +328,62 @@ the fallback for pushed states: 15 s once the welcome lists `push`, 2 s otherwis
   { "mark": "panel.usable", "t": 1760000000812, "ms": 812 }, { "mark": "ui.paint", "t": 1760000001000, "ms": 6.5, "rid": "c-12" } ] }
 ```
 
-### 2.12 Lean footprint and `connection.host.busy` (H6; Addendum G13)
+### 2.12 Lean footprint and `connection.host.busy` (H6 and its review; Addendum G13)
 
 Landed in H6 (`js/bridge.js`, `serve/host_busy.py`, `serve/app.py`, `src/daemon-source.ts`).
 
 | Where | Field | Type | Meaning |
 |---|---|---|---|
-| `connection.host` | `busy` | `"exporting"` \| `"rendering"` \| `"idle"` \| `"unknown"`, optional | Read only. The CEP bridge's own word on whether Premiere is exporting (Media Encoder jobs counted from `app.encoder` events, or the bridge's own export job) or After Effects is rendering (`renderQueue.rendering`, probed just before a job, believed 15 s). `unknown` = the bridge cannot vouch for it (no event yet, a missed event, an older bridge). Absent = no host, a UXP host (it does not report it yet), or an older daemon. A panel that meets a word it does not know shows `unknown`. |
-| bridge heartbeat | `host_busy` | the same four words | Written with every heartbeat (every 2 s) and at once when it changes. Never read with an `evalScript` on a timer. |
+| `connection.host` | `busy` | `"exporting"` \| `"rendering"` \| `"idle"` \| `"unknown"`, optional | Read only: the CEP bridge's own word (below). `unknown` = the bridge cannot vouch for it. Absent = no host, a UXP host (it does not report it yet), or an older daemon. A panel that meets a word it does not know shows `unknown`. |
+| bridge heartbeat | `host_busy` | the same four words | In every heartbeat, and at once when it changes. Never from an `evalScript` on a timer. |
+| bridge heartbeat | `host_busy_reason` | `null` or a fixed code | `script_engine_busy`, `media_encoder_running`, `encoder_events_off`, `encoder_events_unavailable`, `no_event_yet`, `missed_event`, `no_probe`, `probe_old` |
+| bridge heartbeat | `host_probe` | `{asked_at, answered_at}` (ms epoch or null) | the last host probe |
+
+What the bridge vouches for:
+- **Premiere.** Its own export job (`export_frames`, the audio exports) is `exporting`. The `app.encoder` job events are
+  **off by default**: `app.encoder.bind` may replace other extensions' handlers in the shared ExtendScript engine. They
+  are on only with `"encoder_events": true` in `~/.whynot-cut/bridge/config.json`, and the live checklist decides. Off,
+  Premiere is `unknown`. On, the events are counted: a missed event gives `unknown`, never a stuck `exporting`. A
+  running Adobe Media Encoder process (tasklist / pgrep from node, on a probe request) only ever gives `unknown`
+  (`media_encoder_running`).
+- **After Effects.** `renderQueue.rendering`, probed just before each job and on a probe request, and believed 15 s.
+- **A probe that does not answer for 3 s** while the heartbeat keeps beating means the host's script engine is
+  blocked. After Effects reports `rendering`, Premiere `unknown`, both with `script_engine_busy`. This is a heuristic,
+  **unproven until the live check**.
+
+`probe.request` (for the GPU lock):
+1. Create `<engine home>/{ppro,ae}-queue/probe.request` (any content).
+2. The bridge deletes it and runs one probe: about 50 ms through `fs.watch`; on a missed event, at the 10 s safety tick;
+   behind one of its own jobs, when that job ends.
+3. Read the heartbeat until `host_probe.answered_at` is at or after your request. Or, 3 s after `host_probe.asked_at`
+   with no answer, you get `script_engine_busy`.
 
 Who reads it:
 - **The panel**: data only for now (`ConnectionState.host.busy`); nothing new is rendered.
-- **The engine GPU lock (Phase 4, executor)**: `serve.host_busy.host_busy(home=None, *, now=None)` →
-  `{"premiere", "after_effects", "overall"}`. Per app it is one of the four words, or `"offline"` when no bridge beats
-  there. `overall` is `exporting` > `rendering` > `unknown` > `idle`; apps that are offline do not count. Read only.
-  `reel serve` gives the same thing as `App.read_host_busy()`.
+- **The engine GPU lock (Phase 4, executor)**: it reads the heartbeat through `cep_queue.status`. Alternatively it can
+  call `serve.host_busy.host_busy(home=None, *, now=None)`, which returns `{"premiere", "after_effects", "overall"}`.
+  - Per app the value is one of the four words, or `"offline"` when no bridge beats there.
+  - `overall` is `exporting` > `rendering` > `unknown` > `idle`; apps that are offline do not count.
+  - It is read only, and a torn read is read once more. `reel serve` gives the same thing as `App.read_host_busy()`.
 
-Idle cost (counted with fake timers over 10 simulated minutes):
+The cost, counted with fake timers over 10 simulated minutes. "Callbacks" are every timer and `fs.watch` callback the
+daemon runs. A watch burst is the callbacks one event-loop turn delivers. Every heartbeat write (a temp write, then a
+rename) fires about 3 watch events. The daemon drops them by name before any work, but they still run:
 
-| Part | Before H6 | After H6 |
-|---|---|---|
-| Panel snapshot poll | 300 (every 2 s) | 40 with a daemon that lists `push` (every 15 s, still the keepalive under the daemon's 30 s ping); 300 without it |
-| CEP daemon wakeups | 600 (one 1 s tick) | about 302: a 2 s heartbeat whose every 5th beat is the 10 s safety tick, plus the 1 s scans until `fs.watch` delivers its first event |
-| CEP queue scans | 601 | 63: a job arrives through `fs.watch` on the queue folder (duplicates are one scan; a missed event waits for the 10 s safety tick; a watch error or a deaf watch goes back to the 1 s scan and is re-armed) |
-| CEP engine checks | 21 (every 30 s) | 7 (30 s, then 60, then 120 s while the engine runs and no job comes) |
-| Host calls (`evalScript`) | 0 | 0 (the probe or the encoder bind rides on a job only) |
-| `reel serve` push look | every 1 s, only while a panel is connected | the same. One look = one engine-state read (a cache hit when nothing changed), one bridge status, one `host_busy` heartbeat read (none once `cep_queue.status` carries `host_busy`) |
+| Part | Before H6 | Idle after H6 | A job running 10 min (and one queued behind it) |
+|---|---|---|---|
+| Panel snapshot poll | 300 (2 s) | 40 with `push` (15 s, still the keepalive under the daemon's 30 s ping); 300 without | the same |
+| Daemon timer callbacks | 600 (one 1 s tick) | 308: 300 beats (2 s) + 6 engine checks + 2 scans before the watch delivered | 622: 600 beats (1 s) + 20 engine checks + 2 |
+| Daemon `fs.watch` callbacks | 0 (no watch) | 900, in 300 bursts (one per beat), all dropped by name | 1812, in 602 bursts |
+| Queue folder reads | 601 | 64: the orphan check + start + 2 + 60 safety ticks | a few (a job ends: the next one) |
+| Heartbeat writes | 601 | 301 (2 s: the queue is empty and all is idle) | 602 (1 s: the engine cancels a waiting job on one beat older than 5 s) |
+| Engine checks | 21 (30 s) | 7 (30 → 60 → 120 s; a job sets it back to 30 s at once) | 21 |
+| Host calls (`evalScript`) | 0 | 0 | the job, plus the probe / bind just before it |
+| `reel serve` push look | every 1 s while a panel is connected | the same | the same |
+
+A `reel serve` push look costs one engine-state read (a cache hit), one bridge status, and one `host_busy` heartbeat
+read. The heartbeat read disappears once `cep_queue.status` carries `host_busy`. In plain node (tests, tools) the
+daemon's timers are unref'd and the watch is not persistent, so it never holds a process open.
 
 ```json
 { "connection": { "engine": "connected", "claude": "unknown", "host": { "state": "cep", "busy": "exporting" } } }

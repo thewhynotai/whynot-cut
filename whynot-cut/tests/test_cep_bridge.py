@@ -904,8 +904,11 @@ NODE = shutil.which("node")
 # `missJobs` = job events are lost), a fake process.kill (only the scenario's pids are alive) and, when the scenario says
 # so, os.platform() and fs.statSync uid / mode overrides (POSIX checks on any host). `addJobs` {second: {name: text}}
 # writes a job the engine's way (<id>.tmp, then the rename) at that second; `encoder` {second: [kind]} fires the CEP
-# encoder event; `aeRendering` is what the render-queue probe answers. The scenario is a JSON file; HOME / USERPROFILE of
-# the node process are a temp folder.
+# encoder event; `aeRendering` is what the render-queue probe answers (`probeHang`: a probe never answers, `probeDelay`:
+# it answers that many ms later); `touch` {second: [name]} writes a plain file (probe.request); `ame` = "running" makes
+# the Media Encoder process check find it. Every heartbeat write is timed (beatTimes); a flush of watch callbacks is
+# one burst (one turn of the event loop). The scenario is a JSON file; HOME / USERPROFILE of the node process are a
+# temp folder.
 SPAWN_HARNESS = r"""
 const vm = require('vm'), fs = require('fs'), path = require('path'), os = require('os');
 const sc = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
@@ -929,7 +932,8 @@ for (const k of Object.keys(sc.stat || {})) { statOv[norm(k)] = sc.stat[k]; }
 // ---- fake timers
 const timers = [];
 let tseq = 0;
-const count = { wakeups: 0, scans: 0, beatWrites: 0, watchCalls: 0, watchScanEvents: 0, engineChecks: 0 };
+const count = { wakeups: 0, scans: 0, beatWrites: 0, watchCalls: 0, watchBursts: 0, watchScanEvents: 0, engineChecks: 0 };
+const beatTimes = [], execs = [], scanTimes = [];
 function addTimer(f, ms, repeat) {
   const t = { id: ++tseq, f, ms: Math.max(repeat ? 1 : 0, +ms || 0), repeat, live: true };
   t.at = now + t.ms;
@@ -937,7 +941,12 @@ function addTimer(f, ms, repeat) {
   return t.id;
 }
 const clearTimer = (id) => { const t = timers.find((x) => x.id === id); if (t) { t.live = false; } };
-const flush = () => { while (pending.length) { pending.shift()(); } };
+// one flush delivers what one turn of the event loop would: the watch callbacks it runs are one burst (H6 review)
+const flush = () => {
+  const calls = count.watchCalls;
+  while (pending.length) { pending.shift()(); }
+  if (count.watchCalls > calls) { count.watchBursts += 1; }
+};
 function runUntil(target) {
   for (;;) {
     let due = null;
@@ -956,7 +965,7 @@ const watchers = [];
 const watchMode = String(sc.watch || 'ok');
 function emit(type, name) {
   if (watchMode === 'deaf') { return; }
-  if (sc.missJobs && /\.job\.json$/.test(name)) { return; }
+  if (sc.missJobs && /\.job\.json$|^probe\.request$/.test(name)) { return; }
   for (const w of watchers.slice()) {
     if (w.closed) { continue; }
     for (let i = 0; i < (sc.dup || 1); i++) {
@@ -986,7 +995,7 @@ const fakeFs = Object.assign({}, fs, {
     return ov ? Object.assign(Object.create(Object.getPrototypeOf(s)), s, ov) : s;
   },
   readdirSync(p, o) {
-    if (norm(p) === norm(queueDir)) { count.scans += 1; }
+    if (norm(p) === norm(queueDir)) { count.scans += 1; scanTimes.push(now); }
     return fs.readdirSync(p, o);
   },
   writeFileSync(p, data, o) {
@@ -1003,7 +1012,7 @@ const fakeFs = Object.assign({}, fs, {
   },
   renameSync(a, b) {
     const r = fs.renameSync(a, b);
-    if (/bridge\.heartbeat$/.test(String(b))) { count.beatWrites += 1; }
+    if (/bridge\.heartbeat$/.test(String(b))) { count.beatWrites += 1; beatTimes.push(now); }
     if (inQueue(a)) { emit('rename', path.basename(String(a))); }
     if (inQueue(b)) { emit('rename', path.basename(String(b))); }
     return r;
@@ -1037,6 +1046,13 @@ const fakeCp = {
     return child;
   }
 };
+// the Media Encoder process check (H6 review): tasklist / pgrep answered from sc.ame ("running" or not)
+fakeCp.execFile = (file, args, opts, cb) => {
+  execs.push({ file, args, at: now });
+  const on = sc.ame === 'running';
+  if (/tasklist/i.test(file)) { pending.push(() => cb(null, on ? '"Adobe Media Encoder.exe","4120","Console","1","912,000 K"' : 'INFO: No tasks are running which match the specified criteria.')); }
+  else { pending.push(() => (on ? cb(null, '4120\n') : cb(Object.assign(new Error('exit 1'), { code: 1 }), ''))); }
+};
 if (sc.realSpawn) { fakeCp.spawn = require('child_process').spawn; }
 const fakeRequire = (n) => n === 'child_process' ? fakeCp : n === 'os' ? fakeOs : n === 'fs' ? fakeFs : require(n);
 const fakeProcess = {
@@ -1057,7 +1073,11 @@ const cep = {
   addEventListener: (type, f) => { (cepListeners[type] = cepListeners[type] || []).push(f); },
   evalScript: (code, cb) => {
     evals.push(code);
-    if (/renderQueue\.rendering/.test(code)) { return cb(sc.aeRendering === undefined ? 'idle' : sc.aeRendering); }
+    const isProbe = /renderQueue\.rendering|return "answered"/.test(code);
+    if (isProbe && sc.probeHang) { return; }                         // a host whose script engine never answers
+    const probeAnswer = /renderQueue\.rendering/.test(code) ? (sc.aeRendering === undefined ? 'idle' : sc.aeRendering) : 'answered';
+    if (isProbe && sc.probeDelay) { addTimer(() => cb(probeAnswer), sc.probeDelay, false); return; }
+    if (isProbe) { return cb(probeAnswer); }
     if (/app\.encoder\.bind/.test(code)) { return cb(sc.encoderBind === undefined ? 'bound' : sc.encoderBind); }
     if (sc.jobDelay) { addTimer(() => cb('{}'), sc.jobDelay, false); return; }
     cb('{}');
@@ -1070,7 +1090,7 @@ const ctx = { window: { __adobe_cep__: cep, cep_node: { require: fakeRequire } }
               clearInterval: clearTimer, clearTimeout: clearTimer, process: fakeProcess, console, Date: FakeDate };
 vm.runInNewContext(fs.readFileSync(sc.bridge, 'utf8'), ctx);
 const beat = () => { try { return JSON.parse(fs.readFileSync(sc.heartbeat, 'utf8')); } catch (e) { return null; } };
-const outcomes = [], retries = [], hostBusy = [], atStart = Object.assign({}, count);
+const outcomes = [], retries = [], hostBusy = [], reasons = [], atStart = Object.assign({}, count);
 flush();
 runUntil(now);
 for (let s = 0; s < (sc.seconds || 0); s++) {
@@ -1080,6 +1100,10 @@ for (let s = 0; s < (sc.seconds || 0); s++) {
       fakeFs.writeFileSync(tmp, sc.addJobs[s][k]);
       fakeFs.renameSync(tmp, path.join(queueDir, k));
     }
+    flush();
+  }
+  if (sc.touch && sc.touch[s]) {
+    for (const k of sc.touch[s]) { fakeFs.writeFileSync(path.join(queueDir, k), JSON.stringify({ at: now })); }
     flush();
   }
   if (sc.encoder && sc.encoder[s]) {
@@ -1092,6 +1116,7 @@ for (let s = 0; s < (sc.seconds || 0); s++) {
   outcomes.push(b && b.engine_start ? b.engine_start.outcome : null);
   retries.push(b && b.engine_retry !== undefined ? b.engine_retry : null);
   hostBusy.push(b && b.host_busy !== undefined ? b.host_busy : null);
+  reasons.push(b && b.host_busy_reason !== undefined ? b.host_busy_reason : null);
   if ((sc.snapAt || []).includes(s + 1)) { snaps[s + 1] = listQueue(); }
 }
 // one read per file: a file the antivirus holds for a moment (EBUSY on a loaded Windows) must not drop every file
@@ -1108,8 +1133,9 @@ for (const f of listQueue()) { const t = readQueued(f); if (t !== null) { queueF
 const jobEvals = evals.filter((c) => /^\$\.evalFile\(/.test(c));
 fs.writeFileSync(sc.out, JSON.stringify({ spawns, beat: beat(), outcomes, log: logEl.textContent, state: state.textContent,
   panel: ctx.window.WNC_BRIDGE ? { role: ctx.window.WNC_BRIDGE.role } : null, start: 1000000000000, queueFiles,
-  evals, jobEvals, resultAttempts, snaps, retries, hostBusy, count, atStart, kills,
-  watchers: watchers.map((w) => ({ closed: w.closed })), liveTimers: timers.filter((t) => t.live).map((t) => t.ms) }));
+  evals, jobEvals, resultAttempts, snaps, retries, hostBusy, reasons, count, atStart, kills, beatTimes, execs, scanTimes,
+  watchers: watchers.map((w) => ({ closed: w.closed })),
+  liveIntervals: timers.filter((t) => t.live && t.repeat).map((t) => t.ms) }));
 """
 TOKEN = "7f" * 32          # what engine.json's token looks like (64 hex): must never leave the file
 
@@ -1142,14 +1168,15 @@ class _NodeBridge(unittest.TestCase):
         f.write_text("@echo off\r\n", encoding="utf-8")
         return f
 
-    def config(self, launcher, home: Path = None):
+    def config(self, launcher, home: Path = None, **extra):
         home = home or self.home
         home.mkdir(parents=True, exist_ok=True)
         cfg = self.user / ".whynot-cut" / "bridge" / "config.json"
         cfg.parent.mkdir(parents=True, exist_ok=True)
-        cfg.write_text(json.dumps({"schema": 1, "engine_home": str(home),
-                                   "launcher": None if launcher is None else str(launcher),
-                                   "written_by": "installer", "at": "2026-10-13T00:00:00+00:00"}), encoding="utf-8")
+        cfg.write_text(json.dumps(dict({"schema": 1, "engine_home": str(home),
+                                        "launcher": None if launcher is None else str(launcher),
+                                        "written_by": "installer", "at": "2026-10-13T00:00:00+00:00"}, **extra)),
+                       encoding="utf-8")
         return cfg
 
     def engine(self, pid: int, raw: str = None):
@@ -1616,11 +1643,18 @@ AE_JOB_DOC = dict(JOB_DOC, lib="wnc_ae_bridge.jsx")
 TEN_MIN = 600
 
 
+def _gaps(times: list) -> list:
+    return [b - a for a, b in zip(times, times[1:])]
+
+
 @unittest.skipUnless(NODE, "needs node to run js/bridge.js with a stubbed CEP")
 class TestIdleFootprint(_NodeBridge):
-    """G2 H6 (Addendum G13): the daemon idles on a 2 s heartbeat whose every 5th beat is the 10 s safety tick; a job
-    arrives through fs.watch on the queue folder; the engine check backs off 30 -> 60 -> 120 s while the engine runs;
-    no evalScript on a timer. Fake timers and a fake fs.watch: every number below is counted, never timed."""
+    """G2 H6 (Addendum G13) and its review: the heartbeat beats every 2 s only when the queue is empty and all is idle,
+    every 1 s whenever a job is queued, claimed or running (the engine cancels a waiting job on ONE beat older than
+    5 s); the safety tick every 10 s; jobs arrive through fs.watch on the queue folder, the daemon's own heartbeat
+    events dropped by name first; the engine check has its own timer and backs off 30 -> 60 -> 120 s; no evalScript on
+    a timer. Fake timers and a fake fs.watch: every number below is counted, never timed. Wakeups are reported as
+    timer callbacks plus watch callbacks (and watch bursts: the callbacks one event-loop turn delivers)."""
 
     def setUp(self):
         super().setUp()
@@ -1633,20 +1667,48 @@ class TestIdleFootprint(_NodeBridge):
     def job(self, jid, doc=JOB_DOC):
         return json.dumps(dict(doc, id=jid))
 
-    def test_ten_idle_minutes_cost_about_300_wakeups_and_no_host_call(self):
+    def test_ten_idle_minutes_counted_honestly(self):
         out = self.idle()
         c = out["count"]
-        # before H6 (one 1 s setInterval): 600 wakeups, 600 queue scans, 601 heartbeat writes, 21 engine checks
-        self.assertLessEqual(c["wakeups"], 305, c)             # 300 beats + the 1 s scans until the watch proved live
-        self.assertGreaterEqual(c["wakeups"], 300, c)
-        self.assertLessEqual(c["scans"], 65, c)                # 1 at start + 60 safety ticks (+ <= 4 before the watch)
-        self.assertLessEqual(c["beatWrites"], 302, c)
+        # before H6 (one 1 s setInterval, no watch): 600 timer callbacks, 600 queue scans, 601 heartbeat writes, 21
+        # engine checks. Now: 300 beats + 6 engine-check timers + 2 fallback scans before the watch delivered, and the
+        # watch reports every heartbeat write (temp write + rename = 3 callbacks, one burst per beat), each dropped by
+        # its name before any work
+        self.assertEqual(c["wakeups"], 308, c)
+        self.assertEqual(c["watchCalls"], 900, c)
+        self.assertEqual(c["watchBursts"], 300, c)
+        self.assertEqual(c["watchScanEvents"], 0, c)           # the daemon's own writes never ask for a scan
+        self.assertEqual(c["scans"], 64, [t - out["start"] for t in out["scanTimes"]][:8])   # orphans + start + 2 fallback + 60 safety
+        self.assertEqual(c["beatWrites"], 301, c)              # 1 at start + 300 beats
+        self.assertEqual(set(_gaps(out["beatTimes"])), {2000})
         self.assertEqual(out["kills"], [out["start"] + s * 1000 for s in (0, 30, 90, 210, 330, 450, 570)])
         self.assertEqual(out["evals"], [], "no host call while idle")
-        self.assertEqual(out["liveTimers"], [2000], "one timer left: the heartbeat")
-        self.assertEqual(c["watchScanEvents"], 0)              # the daemon's own writes never ask for a scan
-        self.assertGreater(c["watchCalls"], 0)                 # ... but they reach the watch (it is alive)
+        self.assertEqual(out["liveIntervals"], [], "no interval left: the heartbeat and the engine check are timeouts")
         self.assertEqual(out["beat"]["engine_start"]["outcome"], "running")
+
+    def test_ten_minutes_with_a_job_running_beat_every_second(self):
+        """A job that runs the whole 10 minutes, and one waiting behind it: 1 s beats throughout."""
+        jobs = {"j1.job.json": self.job("j1"), "j2.job.json": self.job("j2")}
+        out = self.idle(addJobs={"0": jobs}, jobDelay=TEN_MIN * 1000 + 5000)
+        c = out["count"]
+        gaps = _gaps([t for t in out["beatTimes"] if t >= out["start"] + 1000])
+        self.assertLessEqual(max(gaps), 1000, gaps[:20])
+        self.assertEqual(c["beatWrites"], 602, c)              # 1 at start, 1 at the claim, 600 beats
+        self.assertEqual(c["wakeups"], 622, c)                 # 600 beats + 20 engine checks (30 s while a job runs)
+        self.assertEqual(c["watchCalls"], 1812, c)             # + 1 scan + 1 fallback scan before the watch delivered
+        self.assertEqual(c["watchBursts"], 602, c)
+        self.assertEqual(len(out["jobEvals"]), 1)
+        self.assertTrue(out["beat"]["busy"])
+
+    def test_a_queued_job_beats_every_second_until_it_is_done_then_2_s(self):
+        out = self.run_bridge(seconds=40, alive=[4242], jobDelay=8000,
+                              addJobs={"10": {"j1.job.json": self.job("j1"), "j2.job.json": self.job("j2")}})
+        t = [x - out["start"] for x in out["beatTimes"]]
+        during = [x for x in t if 10000 < x <= 26000]
+        self.assertLessEqual(max(_gaps(during)), 1000, during)
+        after = [x for x in t if x >= 30000]
+        self.assertEqual(set(_gaps(after)), {2000}, after)
+        self.assertEqual(len(out["jobEvals"]), 2)
 
     def test_a_job_the_engine_writes_runs_on_its_watch_event_not_the_safety_tick(self):
         out = self.run_bridge(seconds=6, alive=[4242], addJobs={"3": {"j1.job.json": self.job("j1")}}, snapAt=[3, 4])
@@ -1677,14 +1739,14 @@ class TestIdleFootprint(_NodeBridge):
         self.assertIn("j1.result.json", out["snaps"]["7"])           # the fallback scan, 1 s later
         self.assertIn("queue watch error", out["log"])
         self.assertEqual([w["closed"] for w in out["watchers"]], [True, False])   # re-armed at the next safety tick
-        self.assertEqual(out["liveTimers"], [2000], "the fallback scan stops once the new watch delivers")
+        self.assertEqual(out["liveIntervals"], [], "the fallback scan stops once the new watch delivers")
 
     def test_a_watch_that_throws_keeps_the_1_s_scan(self):
         out = self.run_bridge(seconds=60, alive=[4242], watch="throw", addJobs={"20": {"j1.job.json": self.job("j1")}},
                               snapAt=[21])
         self.assertIn("j1.result.json", out["snaps"]["21"])
-        self.assertIn("queue watch unavailable", out["log"])
-        self.assertEqual(sorted(out["liveTimers"]), [1000, 2000])
+        self.assertEqual(out["log"].count("queue watch unavailable"), 1, "said once, not on every re-arm")
+        self.assertEqual(out["liveIntervals"], [1000])
         self.assertGreaterEqual(out["count"]["scans"], 60)
 
     def test_a_deaf_watch_is_dropped_and_the_queue_still_moves(self):
@@ -1692,11 +1754,20 @@ class TestIdleFootprint(_NodeBridge):
                               snapAt=[26])
         self.assertIn("j1.result.json", out["snaps"]["26"])
         self.assertIn("queue watch deaf", out["log"])
-        self.assertIn(1000, out["liveTimers"])                        # never proven: the 1 s scan stays on
+        self.assertEqual(out["liveIntervals"], [1000])                # never proven: the 1 s scan stays on
 
-    def test_a_job_sets_the_engine_check_back_to_30_s(self):
+    def test_a_job_sets_the_engine_check_back_to_30_s_at_once(self):
+        """Review P2: the job at 100 s brings the next check from 210 s to 120 s (30 s after the last one)."""
         out = self.idle(addJobs={"100": {"j1.job.json": self.job("j1")}})
-        self.assertEqual([(k - out["start"]) // 1000 for k in out["kills"]], [0, 30, 90, 210, 240, 300, 420, 540])
+        self.assertEqual([(k - out["start"]) // 1000 for k in out["kills"]], [0, 30, 90, 120, 150, 210, 330, 450, 570])
+
+    def test_the_job_timeout_is_checked_every_second_while_a_job_runs(self):
+        """Review P2: a job with no answer is released within a second of JOB_TIMEOUT_MS (20 min), not 10 s."""
+        out = self.run_bridge(seconds=20 * 60 + 3, alive=[4242], probeHang=False, jobDelay=10 ** 9,
+                              addJobs={"0": {"j1.job.json": self.job("j1")}}, snapAt=[1200, 1201])
+        self.assertNotIn("j1.result.json", out["snaps"]["1200"])     # claimed at 0.05 s: past 20 min at the 1201 s beat
+        self.assertIn("j1.result.json", out["snaps"]["1201"])
+        self.assertIn("within 20 min", out["queueFiles"]["j1.result.json"])
 
     def test_a_queue_of_jobs_runs_back_to_back_without_waiting_for_a_tick(self):
         jobs = {f"j{i}.job.json": self.job(f"j{i}") for i in range(3)}
@@ -1707,28 +1778,34 @@ class TestIdleFootprint(_NodeBridge):
         self.assertEqual(len(out["jobEvals"]), 3)
 
     def test_no_evalscript_is_reachable_from_a_timer(self):
-        """The source: evalScript is called in runJob and in hostTouch only, and hostTouch only from runJob."""
+        """The source: evalScript runs for a job (the job, the AE probe and the Premiere bind just before it) or for
+        a probe.request; the timers reach runProbe only through scanQueue's probe.request branch."""
         js = (SRC / "js" / "bridge.js").read_text(encoding="utf-8")
         body = re.sub(r"/\*.*?\*/|//[^\n]*", "", js, flags=re.S)
-        self.assertEqual(len(re.findall(r"\.evalScript\(", body)), 3)          # the job, the AE probe, the PPro bind
-        self.assertEqual(len(re.findall(r"(?<!function )\bhostTouch\(\)", body)), 1)   # its one call, in runJob
-        run_job = body[body.index("function runJob("):body.index("function hostBusy(")]
+        self.assertEqual(len(re.findall(r"\.evalScript\(", body)), 4)          # job, AE pre-job probe, probe, bind
+        self.assertEqual(len(re.findall(r"(?<!function )\bhostTouch\(\)", body)), 1)
+        run_job = body[body.index("function runJob("):body.index("function hostBusyOf(")]
         self.assertIn("hostTouch();", run_job)
-        for needle in ("HEARTBEAT_MS = 2000", "SAFETY_EVERY = 5", "FALLBACK_SCAN_MS = 1000", "ENGINE_IDLE_MAX_MS = 120000",
-                       "fs.watch(QUEUE"):
+        calls = re.findall(r"(?<!function )\brunProbe\(\)", body)
+        self.assertEqual(len(calls), 2)                                         # scanQueue (request) and finish (waited)
+        scan = body[body.index("function scanQueue("):body.index("function scheduleScan(")]
+        self.assertRegex(scan, r"names\.indexOf\(PROBE_REQUEST\) >= 0\) \{[\s\S]{0,120}?runProbe\(\)")
+        for needle in ("HEARTBEAT_ACTIVE_MS = 1000, HEARTBEAT_IDLE_MS = 2000, SAFETY_MS = 10000", "FALLBACK_SCAN_MS = 1000",
+                       "ENGINE_IDLE_MAX_MS = 120000", "fs.watch(QUEUE", "name.lastIndexOf('bridge.heartbeat', 0) === 0"):
             self.assertIn(needle, js)
 
 
 @unittest.skipUnless(NODE, "needs node to run js/bridge.js with a stubbed CEP")
 class TestHostBusy(_NodeBridge):
-    """G2 H6: the heartbeat's host_busy "exporting" | "rendering" | "idle" | "unknown", from memory: Premiere counts
-    app.encoder's job events (bound once, riding on the first job), After Effects probes renderQueue.rendering just
-    before each job. A missed event degrades to "unknown", never a stuck "exporting". Fake hosts: the stubbed CEP
-    answers the probe / bind and fires the CSXS encoder event."""
+    """G2 H6 and its review: the heartbeat's host_busy "exporting" | "rendering" | "idle" | "unknown" with a fixed
+    reason. Premiere: app.encoder's job events only with config.json "encoder_events": true (off by default: the bind
+    may replace other extensions' handlers), counted; Media Encoder's process only ever makes it "unknown". After
+    Effects: renderQueue.rendering just before each job and on probe.request. A probe out for 3 s while the heartbeat
+    beats: AE "rendering", Premiere "unknown" (script_engine_busy; unproven until the live check). Fake hosts."""
 
     def setUp(self):
         super().setUp()
-        self.config(None)
+        self.config(None, encoder_events=True)
 
     def job(self, jid, doc=JOB_DOC, **kw):
         return json.dumps(dict(doc, id=jid, **kw))
@@ -1736,6 +1813,15 @@ class TestHostBusy(_NodeBridge):
     def ppro(self, seconds, events=None, **sc):
         return self.run_bridge(seconds=seconds, addJobs={"1": {"j1.job.json": self.job("j1")}},
                                encoder={str(k): v for k, v in (events or {}).items()}, **sc)
+
+    def test_the_encoder_events_are_off_by_default(self):
+        self.config(None)
+        out = self.ppro(30, {5: ["queued"], 8: ["complete"]})
+        self.assertEqual(len(out["evals"]), 1, "no bind")
+        self.assertEqual(set(out["hostBusy"]), {"unknown"})
+        self.assertEqual(set(out["reasons"][2:]), {"encoder_events_off"})
+        self.config(None, encoder_events="yes")                               # only the JSON true turns it on
+        self.assertEqual(len(self.ppro(5)["evals"]), 1)
 
     def test_premiere_before_any_job_is_unknown_and_nothing_is_bound(self):
         out = self.run_bridge(seconds=30, encoder={"5": ["queued"]})
@@ -1752,25 +1838,27 @@ class TestHostBusy(_NodeBridge):
             self.assertIn(ev, out["evals"][0])
         self.assertIn("$.global.__wncEncoderBound", out["evals"][0])          # never bound twice in one engine
         self.assertTrue(out["evals"][1].startswith("$.evalFile("))
-        self.assertEqual(out["hostBusy"][5], "unknown")                       # bound, not proven yet
+        self.assertEqual((out["hostBusy"][5], out["reasons"][5]), ("unknown", "no_event_yet"))
 
     def test_premiere_counts_the_encoder_jobs(self):
         ev = {5: ["queued"], 8: ["progress"], 10: ["complete"], 20: ["queued", "queued"], 22: ["error"], 25: ["canceled"],
               30: ["complete"], 40: ["queued"], 45: ["complete"]}
-        hb = self.ppro(50, ev)["hostBusy"]
+        out = self.ppro(50, ev)
+        hb = out["hostBusy"]
         self.assertEqual(hb[4], "unknown")
         self.assertEqual(hb[5:10], ["exporting"] * 5)
         self.assertEqual(hb[10:20], ["idle"] * 10)                            # one full cycle proved the events
         self.assertEqual(hb[20:25], ["exporting"] * 5)                        # two queued, one error: still one left
         self.assertEqual(hb[25:30], ["idle"] * 5)
         self.assertEqual(hb[30:40], ["unknown"] * 10)                         # a done event with nothing queued
+        self.assertEqual(set(out["reasons"][30:40]), {"missed_event"})
         self.assertEqual(hb[40:45], ["exporting"] * 5)                        # a fresh queued clears the doubt
         self.assertEqual(hb[45:], ["idle"] * 5)
 
     def test_a_missed_done_event_degrades_to_unknown_never_a_stuck_exporting(self):
         hb = self.ppro(260, {5: ["queued"], 200: ["complete"], 210: ["queued"], 215: ["complete"]})["hostBusy"]
-        self.assertEqual(set(hb[5:120]), {"exporting"})
-        self.assertEqual(set(hb[127:210]), {"unknown"})                       # 120 s with no encoder event
+        self.assertEqual(set(hb[5:124]), {"exporting"})
+        self.assertEqual(set(hb[126:210]), {"unknown"})                       # 120 s with no encoder event
         self.assertEqual(set(hb[210:215]), {"exporting"})
         self.assertEqual(set(hb[215:]), {"idle"})
 
@@ -1797,10 +1885,29 @@ class TestHostBusy(_NodeBridge):
         self.assertEqual(hb[1:4], ["exporting"] * 3)
         self.assertEqual(hb[6:9], ["unknown"] * 3)                            # a ping is not an export
 
+    def test_media_encoder_running_is_unknown_never_exporting(self):
+        """Review P1-2: the Media Encoder process check (from node, on a probe request) can only make it unknown."""
+        for events in ({}, {2: ["queued"], 3: ["complete"]}):              # flag on, even with a proven cycle
+            with self.subTest(events=events):
+                out = self.run_bridge(seconds=20, ame="running", addJobs={"1": {"j1.job.json": self.job("j1")}},
+                                      encoder={str(k): v for k, v in events.items()}, touch={"5": ["probe.request"]})
+                self.assertEqual(len(out["execs"]), 1)
+                ex = out["execs"][0]
+                if os.name == "nt":
+                    self.assertEqual(ex["file"], "C:\\Windows\\System32\\tasklist.exe")
+                    self.assertEqual(ex["args"], ["/FI", "IMAGENAME eq Adobe Media Encoder.exe", "/NH", "/FO", "CSV"])
+                else:
+                    self.assertEqual((ex["file"], ex["args"]), ("/usr/bin/pgrep", ["-f", "Adobe Media Encoder"]))
+                self.assertNotIn("exporting", out["hostBusy"][5:])
+                self.assertEqual((out["hostBusy"][6], out["reasons"][6]), ("unknown", "media_encoder_running"))
+        out = self.run_bridge(seconds=10, touch={"2": ["probe.request"]})            # not running: still not exporting
+        self.assertEqual(len(out["execs"]), 1)
+        self.assertNotIn("exporting", out["hostBusy"])
+
     def ae(self, seconds, **sc):
-        home_q = self.home / "ae-queue"
-        return self.run_bridge(seconds=seconds, host="AEFT", heartbeat=str(home_q / "bridge.heartbeat"),
-                               addJobs={"1": {"j1.job.json": self.job("j1", AE_JOB_DOC)}}, **sc)
+        sc.setdefault("addJobs", {"1": {"j1.job.json": self.job("j1", AE_JOB_DOC)}})
+        return self.run_bridge(seconds=seconds, host="AEFT", heartbeat=str(self.home / "ae-queue" / "bridge.heartbeat"),
+                               **sc)
 
     def test_after_effects_probes_the_render_queue_just_before_each_job(self):
         out = self.ae(30, aeRendering="idle")
@@ -1808,18 +1915,54 @@ class TestHostBusy(_NodeBridge):
         self.assertIn("app.project.renderQueue.rendering", out["evals"][0])
         self.assertTrue(out["evals"][1].startswith("$.evalFile("))
         hb = out["hostBusy"]
-        self.assertEqual(hb[0], "unknown")
+        self.assertEqual((hb[0], out["reasons"][0]), ("unknown", "no_probe"))
         self.assertEqual(set(hb[1:15]), {"idle"})                             # believed for 15 s
         self.assertEqual(set(hb[17:]), {"unknown"})
+        self.assertEqual(set(out["reasons"][17:]), {"probe_old"})
 
     def test_after_effects_rendering_and_a_bad_answer(self):
         self.assertEqual(self.ae(5, aeRendering="rendering")["hostBusy"][2], "rendering")
         self.assertEqual(set(self.ae(5, aeRendering="EvalScript error.")["hostBusy"]), {"unknown"})
 
     def test_after_effects_idle_never_touches_the_host(self):
-        out = self.run_bridge(seconds=TEN_MIN, host="AEFT", heartbeat=str(self.home / "ae-queue" / "bridge.heartbeat"))
+        out = self.ae(TEN_MIN, addJobs={})
         self.assertEqual(out["evals"], [])
         self.assertEqual(set(out["hostBusy"]), {"unknown"})
+
+    def test_a_probe_request_runs_one_probe_and_is_consumed(self):
+        """Review P1-3: the GPU lock's <queue>/probe.request; the answer is in the heartbeat at once."""
+        out = self.ae(10, addJobs={}, aeRendering="rendering", touch={"4": ["probe.request"]}, snapAt=[4, 5])
+        self.assertEqual(len(out["evals"]), 1)
+        self.assertIn("renderQueue.rendering", out["evals"][0])
+        self.assertNotIn("probe.request", out["snaps"]["5"])
+        self.assertEqual(out["hostBusy"][4], "rendering")
+        hp = out["beat"]["host_probe"]
+        self.assertEqual((hp["asked_at"] - out["start"], hp["answered_at"] - out["start"]), (4050, 4050))
+        missed = self.ae(15, addJobs={}, touch={"2": ["probe.request"]}, missJobs=True, snapAt=[9, 10])
+        self.assertEqual(len(missed["evals"]), 1, "a request whose event is lost still runs at the safety tick")
+
+    def test_a_probe_that_does_not_answer_for_3_s_means_the_script_engine_is_busy(self):
+        out = self.ae(12, addJobs={}, probeHang=True, touch={"2": ["probe.request"]})
+        self.assertEqual(out["hostBusy"][2:5], ["unknown"] * 3)               # asked at 2.05 s: not yet 3 s
+        self.assertEqual(set(out["hostBusy"][6:]), {"rendering"})
+        self.assertEqual(set(out["reasons"][6:]), {"script_engine_busy"})
+        self.assertLessEqual(max(_gaps([t for t in out["beatTimes"] if t > out["start"] + 2100])), 1000)
+        late = self.ae(12, addJobs={}, probeDelay=6000, aeRendering="idle", touch={"2": ["probe.request"]})
+        self.assertEqual(late["hostBusy"][6], "rendering")
+        self.assertEqual(late["hostBusy"][9], "idle")                         # answered at 8.05 s: the render ended
+        ppro = self.run_bridge(seconds=12, probeHang=True, touch={"2": ["probe.request"]})
+        self.assertEqual((ppro["hostBusy"][7], ppro["reasons"][7]), ("unknown", "script_engine_busy"))
+        self.assertIn('return "answered"', ppro["evals"][0])
+
+    def test_a_probe_never_queues_behind_this_daemons_own_job(self):
+        out = self.ae(14, jobDelay=6000, touch={"3": ["probe.request"]}, snapAt=[4, 8])
+        # the pre-job probe at 1.05 s, the job until 7.05 s; the request waits (no "busy" verdict from our own job)
+        self.assertEqual(len(out["evals"]), 3)
+        self.assertTrue(out["evals"][1].startswith("$.evalFile("))
+        self.assertIn("renderQueue.rendering", out["evals"][2])
+        self.assertIn("probe.request", out["snaps"]["4"])
+        self.assertNotIn("probe.request", out["snaps"]["8"])
+        self.assertNotIn("script_engine_busy", out["reasons"])
 
 
 def _ui_strings() -> list:
