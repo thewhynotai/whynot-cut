@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="normal,normal-live,focus,loading,checking,waiting,timeout,error,error-live,offline,success,long,win">
+<meta name="mock-states" content="normal,normal-live,focus,loading,checking,waiting,timeout,error,error-live,error-nosupport,offline,success,long,win">
 <meta name="mock-widths" content="760,640">
 <meta name="mock-keys" content="Return: Install Claude (waiting: I've signed in; timeout: Wait more; done: Continue) · Esc: Skip for now · Tab order: I already have Claude (checks again), Skip for now, Install Claude">
 <meta name="mock-motion" content="the three 'What happens' rows ARE the progress: each turns from its icon to a spinner to a green check (fill 200 ms) in a fixed row box; the download bar grows inside a reserved block (250 ms width); the sign-in card enters a reserved slot by colour; static fallback: final state">
@@ -115,7 +115,7 @@
   };
   I.mount({
     id: "I-05", name: "Install Claude for me",
-    states: ["normal", "normal-live", "focus", "loading", "checking", "waiting", "timeout", "error", "error-live", "offline", "success", "long", "win"], defaultState: "normal",
+    states: ["normal", "normal-live", "focus", "loading", "checking", "waiting", "timeout", "error", "error-live", "error-nosupport", "offline", "success", "long", "win"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       var mark = v.rail === "error" ? "error" : (state === "loading" || state === "checking") ? "busy" : state === "waiting" ? "waiting" : state === "timeout" ? "warn" : undefined;

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="loading,normal,focus,action,macprompt,signin,panelfile,amber,offline,error,error-live,details,confirm,cancelled,resume,success,long,win">
+<meta name="mock-states" content="loading,normal,focus,action,macprompt,signin,panelfile,amber,offline,error,error-live,error-nosupport,details,confirm,cancelled,resume,success,long,win">
 <meta name="mock-widths" content="760,640">
 <meta name="mock-keys" content="While running: Esc = Cancel (asks first), D = Show details, no Return action · Action card: Return = its button · Stop dialog: Return or Esc = Keep installing (the safe choice); Stop installing needs a click or Tab then Space · Done: Return = Next">
 <meta name="mock-motion" content="a finished row: icon fill + text colour 200 ms; the running row's progress block has its height reserved from the start, so rows below never jump; bar fill width 250 ms (linear stream from the percent field); the list auto-scrolls the running row into view (smooth, 250 ms); action cards slide into a reserved slot above the list by colour only; spinner rotation with a static ring fallback">
@@ -68,7 +68,7 @@
     return { end: M.btn(t("i04.hide"), { disabled: o.off }) + I.btn(t("i00.cancel"), { icon: "circle-stop", focus: o.focus, disabled: o.off, key: "esc" }) };
   }
   var always = { k: "ok", end: t("i04.end.done"), detail: I.Tos("i04.msg.always_on") };
-  var engineRun = { k: "busy", detail: t("i04.run.engine", { done: I.mb(38), total: I.mb(92) }), prog: { pct: 41, meta: "41%", time: "0:42" } };
+  var engineRun = { k: "busy", detail: t("i04.run.engine", { what: t("i04.what.video"), done: I.mb(38), total: I.mb(92) }), prog: { pct: 41, meta: "41%", time: "0:42" } };
   var modelsBg = function (pct, done) {
     return { k: "busy", end: t("i04.end.bg"), detail: t("i04.run.models", { done: I.gb(done), total: I.gb(2.9) }), prog: { pct: pct, meta: pct + "%", time: "3:10" } };
   };
@@ -130,7 +130,7 @@
     amber: function () {
       return {
         body: head({ n: KEYS.indexOf("client") + 1, min: 1 }) + list(rows("client", {
-          fonts: { k: "warn", detail: t("i04.amber.fonts"), act: M.btn(t("i00.retry"), { icon: "refresh-cw" }) },
+          fonts: { k: "warn", detail: I.plural("i04.amber.fonts", 2), act: M.btn(t("i00.retry"), { icon: "refresh-cw" }) },
           always_on: always, models: modelsBg(28, 0.8), client: { k: "busy", detail: M.mono(D.clients) }
         })), bar: runBar(), scroll: ".row-fonts"
       };
@@ -190,7 +190,7 @@
   };
   I.mount({
     id: "I-04", name: "Progress checklist",
-    states: ["loading", "normal", "focus", "action", "macprompt", "signin", "panelfile", "amber", "offline", "error", "error-live", "details", "confirm", "cancelled", "resume", "success", "long", "win"], defaultState: "normal",
+    states: ["loading", "normal", "focus", "action", "macprompt", "signin", "panelfile", "amber", "offline", "error", "error-live", "error-nosupport", "details", "confirm", "cancelled", "resume", "success", "long", "win"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       /* R2 D-P2-12: no spinner in the rail while the card says "Needs you": that is the waiting dot */

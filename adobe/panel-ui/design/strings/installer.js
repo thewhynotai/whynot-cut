@@ -66,7 +66,7 @@
     "i01.fact.user.win": "For you only. No administrator rights needed.", /* MOCK from inst.welcome.no_admin */
     "i01.fact.private": "Setup sends nothing from your computer.", /* R2 G-F-14: scoped to Setup; what Claude reads is said on I-05 */
     "i01.fact.visible": "Every step is shown here and written to a log.",
-    "i01.adds": "Setup adds 6 things, all inside your user folder. Uninstall removes all of them and never touches your client folders.",
+    "i01.adds": "Setup adds {n} things, all inside your user folder. Uninstall removes all of them and never touches your client folders.",
     "i01.adds.show": "See what goes where",
     "i01.adds.hide": "Hide the list",
     "i01.install": "Install everything", /* NEW inst.welcome.install */
@@ -179,7 +179,8 @@
     "i04.step.launch": "Open Claude", /* NEW inst.step.launch */
     "i04.end.done": "Done", "i04.end.wait": "Waiting", "i04.end.already": "Already done",
     "i04.end.you": "Needs you", "i04.end.bg": "In the background", "i04.end.offline": "Waiting for internet",
-    "i04.run.engine": "Downloading the video tools · {done} of {total}",
+    "i04.run.engine": "Downloading {what} · {done} of {total}",
+    "i04.what.video": "the video tools", /* the {what} of i04.run.engine and i07.dlfail: a noun phrase the engine names */
     "i04.elapsed": "{time} elapsed", /* R3 I-6: a bare time under the bar read as a remaining time */
     "i04.run.models": "Downloading · {done} of {total}. You can start editing while it finishes.",
     "i04.msg.always_on": "Starts when you sign in. You'll see it in Login Items.",
@@ -201,7 +202,8 @@
     "i04.prompt.text": "WhyNot Cut needs your clients folder. When macOS asks, choose Allow. It only uses the folders you chose.",
     "i04.prompt.dialog": "\u201CWhyNot Cut\u201D would like to access files in the \u201C{folder}\u201D folder.", /* R2 D-P2-8: names the clients folder, not Documents */
     "i04.prompt.deny": "Don\u2019t Allow", "i04.prompt.allow": "Allow",
-    "i04.amber.fonts": "2 fonts are in use by another app, so they'll be added after you restart the computer.",
+    "i04.amber.fonts": "{n} fonts are in use by another app, so they'll be added after you restart the computer.",
+    "i04.amber.fonts.one": "A font is in use by another app, so it'll be added after you restart the computer.", /* I.plural: n = 1 */
     "i04.offline": "No internet. The model download continues by itself when you're online; everything else is installed.", /* MOCK from NEW offline */
     "i04.cancel.title": "Stop installing?",
     "i04.cancel.text": "What's done stays. Run Setup again to continue.", /* MOCK from inst.cancel.confirm */
@@ -278,7 +280,7 @@
     "i07.manifest.btn": "Open download page", /* MOCK-VERIFY: the page address */
     "i07.address": "We stopped a download from an address that isn't on our list.", /* NEW I-07 Address not allowed */
     "i07.address.sub": "Address: {host}. Nothing from it was used.",
-    "i07.dlfail": "The download of the video tools stopped halfway.",
+    "i07.dlfail": "The download of {what} stopped halfway.",
     "i07.dlfail.sub": "The connection dropped. Try again: it continues where it stopped.",
     "i07.nointernet": "No internet. Connect and try again, or use the full offline installer.", /* MOCK from I-07 No internet */
     "i07.nointernet.sub": "What's done stays installed. Nothing else needs the internet until the next download.",
@@ -294,7 +296,7 @@
     "i08.title.error": "Update not installed",
     "i08.title.busy": "Updating to {version}…", "i08.title.offline": "Update can't download", /* R3 I-1 */
     "i08.have": "You have {version}.",
-    "i08.notes": "Faster captions, and Arabic titles fixed in After Effects.",
+    "i08.notes": "What's new", /* the heading only: the release notes themselves are DATA from the update feed (the items are example data in I-08) */
     "i08.signed": "Checked: this update is the genuine one from WhyNot Cut. It's checked again before anything is installed.",
     "i08.now": "Update", /* NEW inst.update.now */
     "i08.later": "Later", /* NEW inst.update.later */
@@ -326,11 +328,16 @@
     "i09.confirm.go": "Remove WhyNot Cut", "i09.confirm.keep": "Keep it",
     "i09.removing": "Removing WhyNot Cut",
     "i09.end.removed": "Removed", "i09.end.kept": "Kept",
+    "i09.r.git": "Git tools for Claude", /* Windows only, and only the copy Setup installed */
+    "i09.r.git.sub": "Only the copy Setup installed. A Git you already had is not touched.",
+    "i09.k.prefs": "Your preferences", /* kept: a later install uses them again */
+    "i09.k.packs": "Your motion packs", /* kept: never deleted by the uninstall */
     "i09.error": "The panels couldn't be removed because Premiere Pro is using them.",
     "i09.error.row": "Premiere Pro is using it.",
     "i09.error.sub": "Close Premiere Pro, then press Try again. Everything else is removed.",
     "i09.done": "WhyNot Cut was removed. Your client folders were not touched.", /* NEW inst.un.done */
     "i09.done.sub": "{gb} freed. The speech models stay on this computer, so installing again is quick.",
+    "i09.done.models.sub": "{gb} freed, speech models included. Installing again downloads them once more.", /* success-models: the box was ticked */
     "i09.empty.title": "WhyNot Cut isn't on this computer",
     "i09.empty.text": "There's nothing to remove. Your client folders are where you left them."
   };
@@ -369,7 +376,7 @@
     "i01.fact.user.win": "ليك إنت بس. مش محتاج صلاحيات الأدمن.",
     "i01.fact.private": "التسطيب مش بيبعت أي حاجة من جهازك.",
     "i01.fact.visible": "كل خطوة بتظهر هنا وبتتكتب في سجل.",
-    "i01.adds": "التسطيب بيضيف 6 حاجات، كلها جوه فولدر المستخدم بتاعك. الإزالة بتشيلهم كلهم ومش بتلمس فولدرات العملاء أبدًا.",
+    "i01.adds": "التسطيب بيضيف {n} حاجات، كلها جوه فولدر المستخدم بتاعك. الإزالة بتشيلهم كلهم ومش بتلمس فولدرات العملاء أبدًا.",
     "i01.adds.show": "شوف إيه بيتحط فين",
     "i01.adds.hide": "خبّي القائمة",
     "i01.install": "سطّب كل حاجة",
@@ -482,7 +489,8 @@
     "i04.step.launch": "افتح Claude",
     "i04.end.done": "خلص", "i04.end.wait": "مستني", "i04.end.already": "خلص قبل كده",
     "i04.end.you": "محتاجينك", "i04.end.bg": "في الخلفية", "i04.end.offline": "مستني النت",
-    "i04.run.engine": "بننزّل أدوات الفيديو · {done} من {total}",
+    "i04.run.engine": "بننزّل {what} · {done} من {total}",
+    "i04.what.video": "أدوات الفيديو",
     "i04.elapsed": "عدّى {time}",
     "i04.run.models": "بينزل · {done} من {total}. تقدر تبدأ مونتاج قبل ما يخلص.",
     "i04.msg.always_on": "بيشتغل أول ما تدخل على الجهاز. هتلاقيه في عناصر تسجيل الدخول.",
@@ -504,7 +512,9 @@
     "i04.prompt.text": "WhyNot Cut محتاج فولدر العملاء. لما macOS يسألك اختار «سماح». مش هيستخدم غير الفولدرات اللي اخترتها.",
     "i04.prompt.dialog": "يرغب \u201DWhyNot Cut\u201C في الوصول إلى الملفات الموجودة في المجلد \u201D{folder}\u201C.",
     "i04.prompt.deny": "عدم السماح", "i04.prompt.allow": "سماح",
-    "i04.amber.fonts": "خطين مستخدمين في برنامج تاني، فهيتضافوا بعد ما تعمل ريستارت للجهاز.",
+    "i04.amber.fonts": "{n} خطوط مستخدمة في برنامج تاني، فهيتضافوا بعد ما تعمل ريستارت للجهاز.",
+    "i04.amber.fonts.one": "خط مستخدم في برنامج تاني، فهيتضاف بعد ما تعمل ريستارت للجهاز.",
+    "i04.amber.fonts.two": "خطين مستخدمين في برنامج تاني، فهيتضافوا بعد ما تعمل ريستارت للجهاز.", /* Arabic dual: n = 2 */
     "i04.offline": "لسه مفيش نت. تحميل النموذج هيكمّل لوحده لما النت يرجع، وباقي الحاجات اتسطّبت.",
     "i04.cancel.title": "توقّف التسطيب؟",
     "i04.cancel.text": "اللي خلص هيفضل زي ما هو. شغّل التسطيب تاني عشان تكمّل.",
@@ -581,7 +591,7 @@
     "i07.manifest.btn": "افتح صفحة التحميل",
     "i07.address": "وقّفنا تحميل من عنوان مش موجود في قائمتنا.",
     "i07.address.sub": "العنوان: {host}. ما استخدمناش منه حاجة.",
-    "i07.dlfail": "تحميل أدوات الفيديو وقف في النص.",
+    "i07.dlfail": "تحميل {what} وقف في النص.",
     "i07.dlfail.sub": "النت فصل. جرّب تاني: التحميل هيكمّل من مكان ما وقف.",
     "i07.nointernet": "لسه مفيش نت. اتوصّل وجرّب تاني، أو استخدم نسخة التسطيب الكاملة اللي من غير نت.",
     "i07.nointernet.sub": "اللي خلص هيفضل متسطّب. مفيش حاجة تانية محتاجة نت لحد التحميل الجاي.",
@@ -597,7 +607,7 @@
     "i08.title.error": "التحديث ما اتسطّبش",
     "i08.title.busy": "بنحدّث لإصدار {version}…", "i08.title.offline": "التحديث مش قادر ينزل",
     "i08.have": "عندك الإصدار {version}.",
-    "i08.notes": "كابشن أسرع، وتصليح العناوين العربي في After Effects.",
+    "i08.notes": "إيه الجديد",
     "i08.signed": "اتفحص: التحديث ده أصلي من WhyNot Cut، وهيتفحص تاني قبل ما يتسطّب أي حاجة.",
     "i08.now": "حدّث",
     "i08.later": "بعدين",
@@ -629,11 +639,16 @@
     "i09.confirm.go": "شيل WhyNot Cut", "i09.confirm.keep": "لا، سيبه متسطّب",
     "i09.removing": "بنشيل WhyNot Cut",
     "i09.end.removed": "اتشال", "i09.end.kept": "فاضل",
+    "i09.r.git": "أدوات Git اللي Claude محتاجها",
+    "i09.r.git.sub": "النسخة اللي التسطيب ضافها بس. أي Git كان عندك قبل كده ما بيتلمسش.",
+    "i09.k.prefs": "تفضيلاتك",
+    "i09.k.packs": "باكات الموشن بتاعتك",
     "i09.error": "البانلز ما اتشالتش لأن Premiere Pro بيستخدمها.",
     "i09.error.row": "Premiere Pro بيستخدمها.",
     "i09.error.sub": "اقفل Premiere Pro ودوس «جرّب تاني». كل الباقي اتشال.",
     "i09.done": "WhyNot Cut اتشال. فولدرات عملاءك ما اتلمستش.",
     "i09.done.sub": "فضّينا {gb}. نماذج الكلام فاضلة على جهازك، فالتسطيب تاني هيبقى أسرع.",
+    "i09.done.models.sub": "فضّينا {gb}، ونماذج الكلام اتشالت كمان. لو سطّبت تاني هتتنزّل من جديد.",
     "i09.empty.title": "WhyNot Cut مش موجود على الجهاز ده",
     "i09.empty.text": "مفيش حاجة تتشال. فولدرات عملاءك في مكانها زي ما سبتها."
   };

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="checksum,checksum-live,manifest,manifest-live,address,dlfail,nointernet,diskfull,panel,hostopen,focus,long,win">
+<meta name="mock-states" content="checksum,checksum-live,checksum-nosupport,manifest,manifest-live,manifest-nosupport,address,dlfail,nointernet,nointernet-nosupport,diskfull,panel,hostopen,focus,long,win">
 <meta name="mock-widths" content="760,640">
 <meta name="mock-keys" content="Return: the card's one fix (Try again / Check again / Show me) · Esc: Close · S: Save a report for support · Tab order: fix, Copy details and open WhatsApp (?support=off: Copy details for support), Save a report for support, Show details, Close">
 <meta name="mock-motion" content="the card enters a reserved slot above the list by colour (200 ms); the stopped row turns red by fill colour in place; on Try again the fix button shows a spinner with its width locked; static fallback: final state">
@@ -63,7 +63,7 @@
         : I.fail(t("i07.manifest"), { safety: true, sub: M.supportLive ? t("i07.manifest.ask") : "", soonKey: "i07.soon.both" });
     } },
     address: { stop: "engine", card: function (f) { return I.fail(t("i07.address"), { safety: true, sub: t("i07.address.sub", { host: I.path(D.badHost) }), btn: fix(t("i00.retry"), "refresh-cw", f) }); } },
-    dlfail: { stop: "engine", card: function (f) { return I.fail(t("i07.dlfail"), { sub: t("i07.dlfail.sub"), btn: fix(t("i00.retry"), "refresh-cw", f) }); } },
+    dlfail: { stop: "engine", card: function (f) { return I.fail(t("i07.dlfail", { what: t("i04.what.video") }), { sub: t("i07.dlfail.sub"), btn: fix(t("i00.retry"), "refresh-cw", f) }); } },
     /* H24: "Get the offline installer" opens thewhynot.ai/download, not published: live = the button (the row wraps, R3 I-3); not live = no
        button, a line that names the next step (WhatsApp, or the ONE "coming soon" line under ?support=off) */
     nointernet: { stop: "engine", card: function (f) {
@@ -86,7 +86,7 @@
   }
   I.mount({
     id: "I-07", name: "Failure cards",
-    states: ["checksum", "checksum-live", "manifest", "manifest-live", "address", "dlfail", "nointernet", "diskfull", "panel", "hostopen", "focus", "long", "win"], defaultState: "checksum",
+    states: ["checksum", "checksum-live", "checksum-nosupport", "manifest", "manifest-live", "manifest-nosupport", "address", "dlfail", "nointernet", "nointernet-nosupport", "diskfull", "panel", "hostopen", "focus", "long", "win"], defaultState: "checksum",
     build: function (state) {
       var v;
       if (state === "focus") v = view("checksum", true);

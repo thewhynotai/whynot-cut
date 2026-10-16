@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="loading,normal,focus,adds,upgrade,offline,noclaude,internal,error,error-live,long,win">
+<meta name="mock-states" content="loading,normal,focus,adds,upgrade,offline,noclaude,internal,error,error-live,error-nosupport,long,win">
 <meta name="mock-widths" content="760,640">
 <meta name="mock-keys" content="Return: Install everything · Tab order: language switch, See what goes where, Customise, Install everything · ⌘Q / Alt+F4 quits Setup (nothing has changed yet)">
 <meta name="mock-motion" content="size line: skeleton shimmer 1200 ms, then the text fades in by colour (200 ms) in the same 24 px line box; 'See what goes where' opens the list below in a reserved slot, the bar never moves; primary hover/press colour 150 ms; static fallback: every state is drawn finished">
@@ -45,7 +45,7 @@
       I.fact("list-checks", t("i01.fact.visible")) + "</div>";
   }
   function adds(open) {
-    return '<div class="m-col mt-4" id="adds">' + I.fact("shield-check", t("i01.adds"), { ink: "ink-ok", muted: true,
+    return '<div class="m-col mt-4" id="adds">' + I.fact("shield-check", t("i01.adds", { n: 6 }), { ink: "ink-ok", muted: true,
       under: '<div class="m-row mt-1">' + M.btn(t(open ? "i01.adds.hide" : "i01.adds.show"), { kind: "ghost", icon: open ? "chevron-up" : "chevron-down", flush: true }) + "</div>" }) +
       (open ? I.adds("mt-2") : "") + "</div>";
   }
@@ -94,7 +94,7 @@
 
   I.mount({
     id: "I-01", name: "Welcome",
-    states: ["loading", "normal", "focus", "adds", "upgrade", "offline", "noclaude", "internal", "error", "error-live", "long", "win"], defaultState: "normal",
+    states: ["loading", "normal", "focus", "adds", "upgrade", "offline", "noclaude", "internal", "error", "error-live", "error-nosupport", "long", "win"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.rail = { flow: "install", at: "welcome", mark: state === "error" ? "error" : undefined };

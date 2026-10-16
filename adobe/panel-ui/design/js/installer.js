@@ -30,7 +30,7 @@
   var H = W === 760 ? 540 : 480;
   var S = window.MOCK_STRINGS[M.lang];
   var missing = [];
-  var state0 = q.get("state") || ""; /* may end in "-live" (the support and data pages live, H24): mockup.js strips it for the build */
+  var state0 = q.get("state") || ""; /* may end in "-live" (the support and data pages live, H24) or "-nosupport" (support.url absent): mockup.js strips it for the build */
   var OS = /^win/.test(state0) ? "win" : "mac";
   var D = {}, base = window.I_DATA, k;
   for (k in base) if (k !== "mac" && k !== "win") D[k] = base[k];
@@ -42,6 +42,13 @@
   I.T = T;
   /* the macOS copy is the default; a key with a ".win" twin uses it on Windows */
   I.Tos = function (key, vars) { return T(OS === "win" && S[key + ".win"] !== undefined ? key + ".win" : key, vars); };
+  /* a count in a sentence: key.one for 1 and key.two for 2 when the table has them (Arabic has the dual), else the key itself with {n} */
+  I.plural = function (key, n, vars) {
+    var v = { n: n }, k;
+    for (k in (vars || {})) v[k] = vars[k];
+    var form = n === 1 && S[key + ".one"] !== undefined ? key + ".one" : n === 2 && S[key + ".two"] !== undefined ? key + ".two" : key;
+    return T(form, v);
+  };
   I.ico = function (name, size, ink) {
     var set = (window.MOCK_ICONS || {})[name];
     if (!set || !set[String(size || 16)]) missing.push("icon:" + name + "@" + (size || 16));
@@ -193,12 +200,13 @@
     var rows = [
       ["app-window", "add.service", "add.service.sub"],
       ["puzzle", "add.claude", "add.claude.sub"],
+      o.git ? ["package", "i09.r.git", "i09.r.git.sub"] : null, /* uninstall on Windows: the Git Setup installed for Claude */
       ["layers", "add.panels", "add.panels.sub"],
       ["type", "add.fonts", "add.fonts.sub"],
       ["power", "add.login", "add.login.sub"],
       o.uninstall ? ["link", "i09.r.link", null] : ["audio-lines", "add.model", "add.model.sub"]
     ];
-    return I.list(rows.map(function (r) {
+    return I.list(rows.filter(Boolean).map(function (r) {
       return '<div class="i-step">' + I.ico(r[0], 16, "ink-muted") + '<div class="i-step-text"><div class="t-label">' + T(r[1]) + "</div>" +
         (r[2] ? '<div class="t-meta tx-muted">' + I.Tos(r[2]) + "</div>" : "") + "</div></div>";
     }), cls || "mt-3");

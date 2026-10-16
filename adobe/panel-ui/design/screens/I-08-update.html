@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="normal,focus,loading,checking,success,error,error-live,offline,repair,long,win">
+<meta name="mock-states" content="normal,focus,loading,checking,success,error,error-live,error-nosupport,offline,repair,long,win">
 <meta name="mock-widths" content="760,640">
 <meta name="mock-keys" content="Return: Update · Esc: Later (up to date, error, offline: Esc closes) · R: Repair · Tab order: Repair, Go back to the previous version, Later, Update">
 <meta name="mock-motion" content="the progress card replaces the release note in the same reserved block; bar width 250 ms; the genuine-check line turns from spinner to green check by fill colour 200 ms; static fallback: final state">
@@ -20,7 +20,8 @@
 <script>
 /* I-08 Update and repair (screen-inventory §5 I-08; E2 Tauri's updater with our own key, C1.10, D1 "running either
    door again repairs or updates").
-   Data: installed and available version, a one-line release note, the genuine-update check. NOT in the core yet: the
+   Data: installed and available version, the release notes (a short list of plain sentences from the update feed: DATA, shown
+   under the heading i08.notes; see NOTES below), the genuine-update check. NOT in the core yet: the
    update check and its verification (E-T3 / Tauri updater); repair = the same install steps re-run (the core already
    skips what state.json records as done).
    E2.1 / G made visible: "Checked: this update is the genuine one", checked again before anything is installed; a
@@ -33,11 +34,22 @@
 (function () {
   var t = I.T, D = I.D, win = I.os === "win";
   var KEYS = ["preflight", "engine", "claude"].concat(win ? ["gitbash"] : []).concat(["adobe", "fonts", "always_on", "models", "client", "doctor", "launch"]);
+  /* The release notes are DATA, not fixed copy (the update feed sends a short list of plain sentences in the editor's language;
+     the strings carry only the heading, i08.notes). These are the example items of this mockup. */
+  var NOTES = {
+    en: ["Faster captions", "Arabic titles fixed in After Effects"],
+    ar: ["كابشن أسرع", "تصليح العناوين العربي في After Effects"]
+  };
+  function notes() {
+    var items = NOTES[M.lang] || [];
+    return items.length ? '<div class="mt-3"><div class="t-label">' + t("i08.notes") + "</div>" +
+      items.map(function (it, i) { return M.bullet(M.txt(it), i ? "" : "m-bullet-first"); }).join("") + "</div>" : "";
+  }
   /* R2 D-P0-2: the headline follows the state; on a failed check it says so and the release note is dropped */
   function head(failed) {
     /* R3 I-1: the title follows the state from the one table: "{app} is ready" / "Updating to 3.0.1..." / "Update not installed" */
     return M.eyebrow(t("i08.eyebrow")) + '<div class="i-display mt-2">' + t(I.titleKey("I-08", I.state), { app: I.app(D.next), version: I.ver(D.next) }) + "</div>" +
-      '<div class="i-lead tx-muted mt-2">' + t("i08.have", { version: I.ltr(D.version) }) + (failed ? "" : " " + t("i08.notes")) + "</div>";
+      '<div class="i-lead tx-muted mt-2">' + t("i08.have", { version: I.ltr(D.version) }) + "</div>" + (failed ? "" : notes());
   }
   function genuine(kind) {
     return '<div class="m-row-top mt-4">' + (kind === "busy" ? M.status("busy") : I.ico("shield-check", 16, "ink-ok")) + '<div class="t-body ms-2 m-grow">' + t(kind === "busy" ? "i08.checking" : "i08.signed") + "</div></div>";
@@ -97,7 +109,7 @@
   };
   I.mount({
     id: "I-08", name: "Update and repair",
-    states: ["normal", "focus", "loading", "checking", "success", "error", "error-live", "offline", "repair", "long", "win"], defaultState: "normal",
+    states: ["normal", "focus", "loading", "checking", "success", "error", "error-live", "error-nosupport", "offline", "repair", "long", "win"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.rail = { flow: "update", at: v.at || "update", mark: v.mark, all: state === "success" };

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="loading,normal,focus,amber,fallback,nosignin,error,error-live,long,win">
+<meta name="mock-states" content="loading,normal,focus,amber,fallback,nosignin,error,error-live,error-nosupport,long,win">
 <meta name="mock-widths" content="760,640">
 <meta name="mock-keys" content="Return: Open Claude (fallback: Copy) · Esc: Close · ⌘O / Ctrl+O: Show my clients folder (its button sits on the Clients folder row) · Tab order: card button, row buttons, Close, Open Claude">
 <meta name="mock-motion" content="final-check rows resolve from skeleton to result by colour (200 ms) in boxes of the same height; the title appears once all rows are done (no shift: the title line is reserved); the model row's bar keeps moving (250 ms width steps); Copy turns to 'Copied' by colour for 2 s with the same width; static fallback: final state">
@@ -103,7 +103,7 @@
   };
   I.mount({
     id: "I-06", name: "Finish",
-    states: ["loading", "normal", "focus", "amber", "fallback", "nosignin", "error", "error-live", "long", "win"], defaultState: "normal",
+    states: ["loading", "normal", "focus", "amber", "fallback", "nosignin", "error", "error-live", "error-nosupport", "long", "win"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.rail = { flow: "install", at: "finish", mark: v.mark, all: !v.mark };

@@ -31,14 +31,14 @@
      details are never in the link) with the reply promise. ?support=off draws the alternate state (support.url absent:
      copy only + "The support chat is coming soon."). M.live above now only gates the PAGES that are not published yet
      (thewhynot.ai/data, /download, /help). */
-  M.supportLive = q.get("support") !== "off";
-  /* "<state>-live" is a twin of "<state>" when both are in the screen's list ("success-live" of P-07 is its own state) */
+  M.supportLive = q.get("support") !== "off" && !/-nosupport$/.test(q.get("state") || ""); /* "<state>-nosupport" draws the same alternate (support.url absent) */
+  /* "<state>-live" and "<state>-nosupport" are twins of "<state>" when both are in the screen's list ("success-live" of P-07 is its own state) */
   M.resolve = function (screen, raw) {
     var valid = screen.states.indexOf(raw) >= 0;
     var full = valid ? raw : (screen.defaultState || screen.states[0]);
-    var m = /^(.*)-live$/.exec(full);
+    var m = /^(.*)-(live|nosupport)$/.exec(full);
     var twin = !!(m && screen.states.indexOf(m[1]) >= 0);
-    if (twin) M.live = true;
+    if (twin && m[2] === "live") M.live = true;
     return { full: full, valid: valid, state: twin ? m[1] : full };
   };
 
