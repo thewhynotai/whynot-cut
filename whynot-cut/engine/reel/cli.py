@@ -552,6 +552,14 @@ def cmd_serve(a):
     serve_main(a)
 
 
+def cmd_perf_report(a):
+    """The panel speed report (G2 H3): serve/perf_report.py reads <engine home>/logs/perf.jsonl and prints the p95 of
+    the budgets S1-S3; its exit code is reel's (0 met or no data, 1 a miss, 2 a usage error, 3 an internal error)."""
+    from serve import perf_report
+    argv = (["--since", a.since] if a.since else []) + (["--home", a.home] if a.home else [])
+    sys.exit(perf_report.main(argv))
+
+
 def cmd_ppro_status(a):
     from lib.ppro_bridge import status, submit
     st = status()
@@ -857,7 +865,7 @@ def next_doc(p: Paths) -> dict:
 
 
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
-NO_ROOT = {"board", "serve", "setup", "doctor", "py", "model-download", "gpu-enable", "bench", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
+NO_ROOT = {"board", "serve", "perf-report", "setup", "doctor", "py", "model-download", "gpu-enable", "bench", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
            "ae-status", "ae-probe", "motion-icons", "motion-library", "validate"}
 NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox", "lock"}
 OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (onboarding), per video with one
@@ -876,7 +884,7 @@ CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze"
                "qc", "handoff", "mogrt-build", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build"}
 # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
 # and works while another session holds the client (gate G2).
-CORE_READS = {"board", "serve", "setup", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
+CORE_READS = {"board", "serve", "perf-report", "setup", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
               "status", "next", "lock", "doctor", "validate"}
 WRITES_IF = {
     "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
@@ -1399,6 +1407,7 @@ CORE_COMMANDS: dict[str, str] = {
     "ppro-probe": "probe the Premiere bridge (what the host reports back)",
     "serve": "the local engine the Premiere panel talks to: reel serve ensure | status | stop | run (started in the "
              "background at session start)",
+    "perf-report": "how fast the Premiere panel was: p95 of its speed budgets from the engine's perf log (--since)",
     "ppro-build": "build the native Premiere project through the bridge",
     "ppro-frames": "export frames from the built Premiere timeline for QC",
     "premiere": "write the FCP7 XML interchange (fallback when the bridge cannot be used)",
@@ -1476,6 +1485,10 @@ def main(argv: list[str] | None = None):
             if "serve" in argv:            # serve's options import its daemon module (~0.1 s): only for `reel serve`
                 from serve.cli import add_args as serve_add_args
                 serve_add_args(sp)
+        if name == "perf-report":
+            sp.add_argument("--since", default=None, help="only marks at or after this ISO time "
+                                                          "(e.g. 2026-10-16T09:00:00Z)")
+            sp.add_argument("--home", default=None, help=argparse.SUPPRESS)
         if name == "ppro-install":
             sp.add_argument("--force", action="store_true", help="replace an installed bridge that is newer")
         if name == "transcribe":
