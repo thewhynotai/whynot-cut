@@ -214,10 +214,10 @@ Goal: **detect, prove, take down.** Nothing stops a determined thief 100%.
 - **R-T10.** Weekly wnc-queue internet watch.
 - **R-T11.** Takedown kit.
 - **R-T12** (sale edition). Minify, compile and sign hardening.
-- **Blocked on Yunus's email:** adopting any verbatim asset (R1).
+- **Verbatim assets (R1):** unblocked 2026-10-15 (H19 closed by Yunus). Rebuild-first still applies: adopt a verbatim asset only where it beats our own version; never his README or demo media.
 
 ## R7. Human items (new)
-- **H19.** Forward the developer's written-assignment email (code, assets, name, derivatives; dated and signed).
-- **H20.** GitHub: confirm 2-factor login is on. Say yes to branch rules (no force-push or deletion).
-- **H21.** Google Alerts for the product and style names, on his account.
-- **H22.** Decide on ITIDA software deposit and trademark registration (fees, lawyer).
+- **H19. CLOSED 2026-10-15.** Yunus: «فكك من الايميل اعتبره اتبعتلك والموضوع خلص». He holds the developer's assignment in his own records; it is not re-checked by Claude. Keep that email permanently (it is the proof if ownership is ever questioned).
+- **H20.** GitHub 2-factor login: **DONE 2026-10-16** (Yunus enabled it; gh token still valid, verified). Branch rules: GitHub Free does not offer protected branches or rulesets on PRIVATE repos (needs GitHub Pro, about $4/month). Free path kept: `security-watch.yml` emails on every push, including force-pushes, plus full local and Mac clones as backups. Pro is optional, Yunus's call.
+- **H21. DONE 2026-10-16:** Google Alerts on info@thewhynot.ai, daily digest, for "WhyNot Cut", "WhyNot Kalam", "WhyNot Hush", "WhyNot Tidy" and "thewhynot.ai" -site:thewhynot.ai.
+- **H22. DECIDED 2026-10-15:** copyright deposit and trademark are registered in the name of The Why Not AI (thewhynot.ai). Filing (ITIDA, trademark office, lawyer, fees) stays Yunus's.
