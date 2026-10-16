@@ -468,7 +468,23 @@ to the item or client folder, no links, cached by mtime and inode. "NEW file" me
    - The editor can change the rate in Settings (preference `time_saved_rate`). It is not an owner number.
 4. **Week:** starts on Sunday.
 5. **Plan versions:** they live with `reel plan` / `reel motion-plan`. `plan.diff` is always against the last APPROVED plan.
-6. **Flags:** `reel review-flags` (Phase 4) writes `<item>/review-flags.json`, each line keyed by plan event id. Until then `flag` is absent.
+6. **Flags:** `reel review-flags` (Phase 4, T4.13) writes `<item>/review-flags.json` (item folder root, next to `poster.jpg`).
+   - Shape: `{"schema": 1, "plan_kind": "timeline"|"motion", "plan_fingerprint", "written_at", "by", "checked", "items": [...]}`.
+   - Each item: `{"event_id", "flag": "medical"|"religious", "verdict": "needs-doctor-approval"|"reword-to-match"|"remove",
+     "text", "start_s", "end_s", "reason", "carried"?}`. `event_id` is the plan event id (a clip: `events[].event_id` of
+     `timeline-spec.json`; a motion video: the scene id of `motion-plan.json`). `text`, `start_s` and `end_s` come from the
+     compiled plan (never from the reviewer), seconds with 3 decimals, `reason` at most 1024 characters. `ok` lines are not
+     listed. A `(event_id, flag)` pair appears at most once; one graphic may carry both flags.
+   - `checked` is the number of lines with on-screen text the review covered (the `ok` ones included), never more than the
+     plan has. A partial re-review keeps the other flags: a flagged row of the previous file whose `event_id` is still in the
+     plan with the SAME text is carried forward with `"carried": true` and counted in `checked`. A flagged row whose text
+     changed is never carried: the engine refuses the write until the new review lists it again.
+   - **Panel use:** read the file only when `plan_fingerprint` equals the current plan's fingerprint (`plan_fingerprint` of the
+     timeline spec, or the motion plan's fingerprint). A stale or unreadable file means "no review recorded": show no flags and
+     never an all-clear (an absent file never reads as "reviewed and clean"). A line is `flagged` (the span replaces its
+     `statement` span) when it has an item here; the approval count is `checked` against the items. `carried` rows are shown
+     like any other.
+   - Absent file: the panel shows no flags (rule 1); `flag` stays absent on spans.
 7. **Edit map:** `reel plan` writes `edit-map.json`, and `reel motion-plan` writes the motion equivalent (Phase 6 engine).
 8. **Weekly log**
    - `reel handoff` appends one line per item to `<home>/logs/time-saved.jsonl`, keyed by item id.
