@@ -283,19 +283,31 @@ def paths_of(tok: str, cwd: Path) -> list[Path]:
         s = s.split("=", 1)[1]
     if not s:
         return []
-    try:
-        p = Path(native(s)).expanduser()
-    except Exception:
-        return []
-    if not p.is_absolute():
-        p = cwd / p
-    if any(c in s for c in "*?[") and "$" not in s:
+    out = []
+    for f in path_forms(s):
         try:
-            hits = glob.glob(str(p))[:500]
+            p = Path(native(f)).expanduser()
         except Exception:
-            hits = []
-        return [Path(h) for h in hits] + [p]
-    return [p]
+            continue
+        if not p.is_absolute():
+            p = cwd / p
+        if any(c in f for c in "*?[") and "$" not in f:
+            try:
+                hits = glob.glob(str(p))[:500]
+            except Exception:
+                hits = []
+            out += [Path(h) for h in hits]
+        out.append(p)
+    return out
+
+
+def path_forms(s: str) -> list[str]:
+    """The spellings of one path to check. Off Windows a backslash is part of a file name for Python, but PowerShell
+    (pwsh, Claude Code's PowerShell tool) splits on it: `Remove-Item data\\Raw\\x` deletes data/Raw/x on a Mac, so the
+    `/` form is checked too (a harmless name with a literal backslash may be blocked: the safe side)."""
+    if IS_WIN or "\\" not in s:
+        return [s]
+    return [s, s.replace("\\", "/")]
 
 
 AE_PREFS = re.compile(r"(adobe[\\/]+after effects[\\/]+\d[\d.]*[\\/])|(adobe after effects [^\\/]*prefs[^\\/]*\.txt$)", re.I)

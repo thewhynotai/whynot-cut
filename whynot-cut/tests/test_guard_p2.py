@@ -9,7 +9,11 @@ import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/
 import json
 import os
 import re
+import shutil
+import tempfile
 import time
+import unittest
+from unittest import mock
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -128,6 +132,32 @@ def _load_guard():
     g = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(g)
     return g
+
+
+class TestGuardBackslashPathsOffWindows(unittest.TestCase):
+    r"""Gate 3 Mac full run (38847096252): on macOS/Linux `Path("data\Raw\x")` is ONE file name, so PowerShell
+    (pwsh, or Claude Code's PowerShell tool) commands with Windows-style relative paths reached a client's data/ and
+    assets/ unchecked, while PowerShell on macOS treats `\` as a separator and would delete data/Raw/x. Off Windows
+    the guard checks the `/` form too (it may block a harmless name with a literal backslash: safer)."""
+    WIN_STYLE = "data" + chr(92) + "Raw" + chr(92) + "C0001.MP4"
+
+    def setUp(self):
+        self.g = _load_guard()
+
+    def test_off_windows_a_backslash_path_is_also_checked_in_its_slash_form(self):
+        with mock.patch.object(self.g, "IS_WIN", False):
+            self.assertEqual(self.g.path_forms(self.WIN_STYLE), [self.WIN_STYLE, "data/Raw/C0001.MP4"])
+            self.assertEqual(self.g.path_forms("data/Raw/C0001.MP4"), ["data/Raw/C0001.MP4"])
+
+    def test_on_windows_the_path_is_checked_once(self):
+        with mock.patch.object(self.g, "IS_WIN", True):
+            self.assertEqual(self.g.path_forms(self.WIN_STYLE), [self.WIN_STYLE])
+
+    @unittest.skipIf(os.name == "nt", "Windows paths split on a backslash already")
+    def test_off_windows_paths_of_names_the_real_file(self):
+        cwd = Path(tempfile.mkdtemp(prefix="wnc-bs-"))
+        self.addCleanup(shutil.rmtree, cwd, True)
+        self.assertIn(cwd / "data" / "Raw" / "C0001.MP4", self.g.paths_of(self.WIN_STYLE, cwd))
 
 
 class TestGuardSeesEveryEngineLaunch(ClientFixture):
