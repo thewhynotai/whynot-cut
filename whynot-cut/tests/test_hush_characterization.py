@@ -13,9 +13,10 @@ Hush (the silence and filler-word cutter) has no upstream tests, so before it is
   They are never pasted from JS output. Where upstream differs from the PRD the test asserts what upstream does and
   says so ("QUIRK" / "PRD vs upstream" in the comment).
 * WAV fixtures are generated into a temp dir by the tests (no binary fixtures are committed).
-* `HushCharacterizationMixin.ROOT` is the tool root (a directory holding js/wav.js, js/detect.js, js/fillers.js). The
-  port's test class (Task 3) subclasses the mixin with ROOT = adobe/tools/hush/src and every test runs on both.
-  Nothing below hard-codes the upstream path inside a test method.
+* `HushCharacterizationMixin.ROOT` is the tool root (a directory holding js/wav.js, js/detect.js, js/fillers.js).
+  `HushCharacterizationUpstream` runs every test on the owner's code; `HushCharacterizationPort` (3.0 N3) runs the same
+  tests on the port (ROOT = adobe/tools/hush/src), overriding only the one expectation the port changes on purpose
+  (`HushDetect.fmt` near a rounding edge). Nothing below hard-codes a root inside a test method.
 Run:  bash tools/test.sh -p test_hush_characterization.py
 """
 import sys as _sys
@@ -37,6 +38,9 @@ REPO = SK.parent
 ADOBE_TOOLS = REPO / "adobe" / "tools"
 RUNNER = ADOBE_TOOLS / "_harness" / "js_runner.js"
 NODE = shutil.which("node")
+# the plugin zip ships whynot-cut/tests but not adobe/: without adobe/tools these tests skip with a reason
+TOOLS_PRESENT = RUNNER.is_file() and (ADOBE_TOOLS / "hush" / "_upstream" / "js").is_dir()
+NO_TOOLS = "adobe/tools is not in this checkout (the plugin zip ships the tests but not adobe/)"
 
 LOAD = ["js/wav.js", "js/detect.js", "js/fillers.js"]
 
@@ -157,6 +161,8 @@ class HushCharacterizationMixin:
     def setUp(self):
         if not NODE:
             self.skipTest("node is not installed")
+        if not TOOLS_PRESENT:
+            self.skipTest(NO_TOOLS)
         self._td = tempfile.TemporaryDirectory()
         self.tmp = Path(self._td.name)
 
@@ -847,12 +853,22 @@ class HushCharacterizationMixin:
         self.assertEqual(st, {"floor": -60, "speech": -20})
         sett = self.one("HushDetect.fromIntensity", 50, st)
         self.close(sett, self.from_intensity_prd(50, -60, -20))
-        self.assertAlmostEqual(sett["threshold"], -48.0, places=9)  # -60 + 40 * (0.15 + 0.15)
+        # FR-10 at t = 0.5, span 40: threshold -60 + 40 * (0.15 + 0.15) = -48.0, pad 0.18 - 0.06 = 0.12.
+        # minSilence is 0.9 - 0.325 = 0.575 on paper (half-up would give 0.58) but in binary doubles 0.9 - 0.65 * 0.5 is
+        # 0.57499999999999996, so Math.round(57.49999999999999) = 57 and the setting is 0.57 (QUIRK, pinned as upstream).
+        self.close(sett, {"threshold": -48.0, "minSilence": 0.57, "padBefore": 0.12, "padAfter": 0.12})
         r = self.one("HushDetect.plan", env, sett, [], 10.0, 25)
-        # minSilence ~0.58 s: the 1.5 s, 1.0 s and 2.0 s silences stay, the 0.3 s one does not
-        self.assertEqual(len(r["silences"]), 3)
-        self.assertEqual(len(r["cuts"]), 3)
-        self.assertAlmostEqual(r["before"] - r["after"], r["removed"], places=9)
+        # silences >= 0.57 s: 1.0-2.5, 6.0-7.0, 8.0-10.0 (the 0.3 s one at 4.0 is dropped). Cuts with pads 0.12:
+        #   1.12-2.38 -> 25 fps inward: 1.12 = frame 28, 2.38*25 = 59.5 -> frame 59 = 2.36
+        #   6.12-6.88 -> frame 153 = 6.12, frame 172 = 6.88
+        #   8.12-10.0 -> frame 203 = 8.12, 10.0 = frame 250
+        self.close(r["silences"], [[1.0, 2.5], [6.0, 7.0], [8.0, 10.0]])
+        self.close(r["cuts"], [{"s": 1.12, "e": 2.36, "kind": "silence"}, {"s": 6.12, "e": 6.88, "kind": "silence"},
+                               {"s": 8.12, "e": 10.0, "kind": "silence"}])
+        removed = (2.36 - 1.12) + (6.88 - 6.12) + (10.0 - 8.12)  # 1.24 + 0.76 + 1.88 = 3.88
+        self.assertAlmostEqual(r["removed"], 3.88, places=9)
+        self.assertAlmostEqual(r["removed"], removed, places=9)
+        self.assertAlmostEqual(r["after"], 6.12, places=9)
 
     # ================================================================ 9. fillers.norm =========================
     def test_norm_table(self):
@@ -1097,6 +1113,7 @@ class HushCharacterizationUpstream(HushCharacterizationMixin, unittest.TestCase)
     """The owner's upstream modules (ROOT = adobe/tools/hush/_upstream)."""
 
 
+@unittest.skipUnless(TOOLS_PRESENT, NO_TOOLS)
 class HushUpstreamIntegrity(unittest.TestCase):
     """The characterized files are the ones the owner shipped: adobe/tools/UPSTREAM-SHA256.txt lists their hashes."""
 
@@ -1111,6 +1128,21 @@ class HushUpstreamIntegrity(unittest.TestCase):
         for rel in self.FILES:
             self.assertIn(rel, listing)
             self.assertEqual(hashlib.sha256((ADOBE_TOOLS / rel).read_bytes()).hexdigest(), listing[rel], rel)
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+class HushCharacterizationPort(HushCharacterizationMixin, unittest.TestCase):
+    """The port (ROOT = adobe/tools/hush/src): every test above again. The one deliberate difference is the display bug
+    in HushDetect.fmt (controller ruling): the seconds are rounded to 0.1 before the minutes are split."""
+
+    ROOT = ADOBE_TOOLS / "hush" / "src"
+
+    def test_fmt_rounding_edges_are_quirks(self):
+        # the port rounds first: 9.96 is "0:10.0" (upstream "0:010.0") and 59.96 is "1:00.0" (upstream "0:60.0")
+        cases = [(9.96, "0:10.0"), (59.96, "1:00.0"), (119.96, "2:00.0"), (599.96, "10:00.0"), (3599.96, "60:00.0"),
+                 (9.94, "0:09.9"), (59.94, "0:59.9")]
+        got = self.js([call("HushDetect.fmt", s) for s, _ in cases])
+        self.assertEqual(got, [w for _, w in cases])
 
 
 if __name__ == "__main__":

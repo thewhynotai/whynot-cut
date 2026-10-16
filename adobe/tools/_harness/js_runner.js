@@ -22,28 +22,15 @@
 // Output: ONE json line {"results": [...]} on stdout, one slot per call. Typed arrays become plain arrays; Infinity,
 // -Infinity and NaN become the strings "Infinity", "-Infinity", "NaN" (undefined object fields are dropped by JSON).
 // A call that throws gives {"error": "<message>"} in its slot and the run continues.
-// Exit code: 0; 2 when the request or the tool root is unreadable; 3 when a file named in "load" fails to evaluate.
+// A result that cannot be turned into JSON (a BigInt, a cycle) is that slot's {"error": ...}, not a crash.
+// Exit code: 0; 2 when the request or the tool root is unreadable; 3 when a file named in "load" fails to evaluate
+// (the message goes to stderr, nothing to stdout). The process ends on its own with process.exitCode set.
 'use strict';
 var fs = require('fs');
 var path = require('path');
 var vm = require('vm');
 
-function die(code, msg) { process.stderr.write(msg + '\n'); process.exit(code); }
-
-if (process.argv.length < 4) { die(2, 'usage: node js_runner.js <tool_root> <request.json>'); }
-var root = path.resolve(process.argv[2]);
-var req;
-try {
-    if (!fs.statSync(root).isDirectory()) { die(2, 'tool root is not a directory: ' + root); }
-    req = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
-} catch (e) { die(2, 'cannot read request or tool root: ' + e.message); }
-
-globalThis.window = globalThis;
-(req.load || []).forEach(function (rel) {
-    var file = path.join(root, rel);
-    try { vm.runInThisContext(fs.readFileSync(file, 'utf8'), { filename: file }); }
-    catch (e) { die(3, 'cannot load ' + file + ': ' + e.message); }
-});
+function Fatal(code, msg) { this.code = code; this.msg = msg; }
 
 function bytesOf(file) {
     var b = fs.readFileSync(file);
@@ -100,13 +87,40 @@ function resolve(fn) {
     return { parent: parent, value: parent[name] };
 }
 
-var results = (req.calls || []).map(function (call) {
+function run(call) {
+    var r = resolve(call.fn);
+    return plain(typeof r.value !== 'function' ? r.value : r.value.apply(r.parent, prepareArgs(call)));
+}
+
+function main() {
+    if (process.argv.length < 4) { throw new Fatal(2, 'usage: node js_runner.js <tool_root> <request.json>'); }
+    var root = path.resolve(process.argv[2]);
+    var req;
     try {
-        var r = resolve(call.fn);
-        if (typeof r.value !== 'function') { return plain(r.value); }
-        return plain(r.value.apply(r.parent, prepareArgs(call)));
-    } catch (e) {
-        return { error: String(e && e.message !== undefined ? e.message : e) };
-    }
-});
-process.stdout.write(JSON.stringify({ results: results }) + '\n');
+        if (!fs.statSync(root).isDirectory()) { throw new Error('tool root is not a directory: ' + root); }
+        req = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
+    } catch (e) { throw new Fatal(2, 'cannot read request or tool root: ' + e.message); }
+
+    globalThis.window = globalThis;
+    (req.load || []).forEach(function (rel) {
+        var file = path.join(root, rel);
+        try { vm.runInThisContext(fs.readFileSync(file, 'utf8'), { filename: file }); }
+        catch (e) { throw new Fatal(3, 'cannot load ' + file + ': ' + e.message); }
+    });
+
+    // each result is serialised inside its own try: one unserialisable value only spoils its own slot
+    var slots = (req.calls || []).map(function (call) {
+        var j;
+        try { j = JSON.stringify(run(call)); }
+        catch (e) { j = JSON.stringify({ error: String(e && e.message !== undefined ? e.message : e) }); }
+        return j === undefined ? 'null' : j;
+    });
+    process.stdout.write('{"results":[' + slots.join(',') + ']}\n');
+}
+
+try { main(); }
+catch (e) {
+    if (!(e instanceof Fatal)) { e = new Fatal(2, String(e && e.message !== undefined ? e.message : e)); }
+    process.stderr.write(e.msg + '\n');
+    process.exitCode = e.code; // no process.exit(): stderr is flushed before the process ends
+}
