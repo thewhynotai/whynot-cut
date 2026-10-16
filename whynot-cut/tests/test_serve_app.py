@@ -699,8 +699,16 @@ class SessionMessages(AppCase):
         per poll: panel_fields runs on the app's engine-state worker with FIELDS_TIMEOUT; past it the snapshot gets the
         last good item (else no item) and the timeout is logged once. A stuck worker is replaced after
         FIELDS_RETIRE_AFTER timeouts, at most FIELDS_ABANDONED_MAX times while the old reads are still stuck; past
-        that cap a snapshot never queues behind a stuck read."""
-        self.app.fields_timeout = 0.2
+        that cap a snapshot never queues behind a stuck read.
+        Proved by counts, not by the wall clock (Gate 3: 24 round trips took 3.92 s at 89 % RAM): every read started
+        runs `_fields` on a fresh worker (none waits in a stuck worker's queue), at most 1 + FIELDS_ABANDONED_MAX reads
+        start, and snapshots past that cap start none. The only clock check is calibrated on this machine, now: the
+        stuck run may take the same round trips with a read that answers at once, plus one timeout per read started,
+        plus a generous margin; queueing would add a timeout to each of the ~30 snapshots past the cap. (The
+        calibration runs on its own session: one session's RATE burst would not cover both runs.)"""
+        timeout = self.app.fields_timeout = 0.2
+        cap = 1 + serve_app.FIELDS_ABANDONED_MAX
+        n = 6 * (serve_app.FIELDS_ABANDONED_MAX + 2)
         good = {"client": "Dr Nour", "item": "C0239", "pipeline": [], "approval": None, "qc": []}
         release = threading.Event()
         calls = []
@@ -709,29 +717,47 @@ class SessionMessages(AppCase):
             calls.append(threading.current_thread().name)
             release.wait(T)
             return good
-        c = await self.cli()
+        cal, c = await self.cli(), await self.cli()
+
+        async def round_trips(cli, prefix: str, count: int, after=None) -> float:
+            t = time.monotonic()
+            for i in range(count):
+                await cli.send({"type": "snapshot", "id": f"{prefix}{i}"})
+                msg = await cli.recv()
+                self.assertEqual((msg.get("type"), msg.get("state", {}).get("item")), ("state", ""), msg)
+                if after is not None:
+                    after()
+            return time.monotonic() - t
+        blank = dict(good, client="", item="")
+        with mock.patch.object(self.app, "_fields", return_value=blank):
+            baseline = await round_trips(cal, "b", n)                          # n snapshots, each a real read
+        self.app._last_fields = None                                           # the calibration read is not "good"
+        margin = 1.5 + baseline / 2                                            # the machine may slow down meanwhile
         try:
             with mock.patch.object(self.app, "_fields", side_effect=stuck), \
+                    mock.patch.object(self.app, "_start_read", side_effect=self.app._start_read) as starts, \
                     self.assertLogs("serve.app", "WARNING") as logs:
                 t0 = time.monotonic()
                 await c.send({"type": "snapshot", "id": "s1"})
                 st = (await c.recv())["state"]
-                self.assertLess(time.monotonic() - t0, 0.2 + 2.0)
+                self.assertLess(time.monotonic() - t0, timeout + baseline + margin)
                 self.assertEqual((st["client"], st["item"]), ("", ""))          # nothing good yet: no item
-                n = 4 * (serve_app.FIELDS_ABANDONED_MAX + 2)
-                t1 = time.monotonic()
-                for i in range(n):
-                    await c.send({"type": "snapshot", "id": f"s{i + 2}"})
-                    self.assertEqual((await c.recv())["state"]["item"], "")
-                self.assertLess(time.monotonic() - t1, (serve_app.FIELDS_ABANDONED_MAX + 1) * 0.2 + 2.0,
-                                "a snapshot waited behind a stuck read")
-                self.assertEqual(len(calls), 1 + serve_app.FIELDS_ABANDONED_MAX, "stuck workers are capped")
+                started = []                                                    # reads started after each snapshot
+                elapsed = await round_trips(c, "w", n, after=lambda: started.append(starts.call_count))
+                self.assertEqual(started[-1], cap, "stuck workers are capped")
+                first = started.index(cap)
+                self.assertLessEqual(first, serve_app.FIELDS_RETIRE_AFTER * cap, started)
+                self.assertEqual(started[first:], [cap] * (n - first), "a snapshot past the cap started a read")
+                deadline = time.monotonic() + T
+                while len(calls) < starts.call_count and time.monotonic() < deadline:
+                    await asyncio.sleep(0.01)
+                self.assertEqual(len(calls), starts.call_count,
+                                 "a read was queued behind a stuck read instead of running on a fresh worker")
                 self.assertEqual(len(set(calls)), len(calls), "each replacement is a fresh worker thread")
-                t2 = time.monotonic()
-                for i in range(3):                                              # past the cap: answered at once
-                    await c.send({"type": "snapshot", "id": f"c{i}"})
-                    self.assertEqual((await c.recv())["state"]["item"], "")
-                self.assertLess(time.monotonic() - t2, 0.5)
+                self.assertLess(elapsed, baseline + cap * timeout + margin,
+                                f"a snapshot waited behind a stuck read (baseline {baseline:.2f}s for {n} snapshots)")
+                await round_trips(c, "c", 3)                                       # past the cap: no read at all
+                self.assertEqual((starts.call_count, len(calls)), (cap, cap), "a snapshot past the cap read again")
                 release.set()
                 deadline = time.monotonic() + T
                 while self.app._fields_running is not None and not self.app._fields_running.done() \

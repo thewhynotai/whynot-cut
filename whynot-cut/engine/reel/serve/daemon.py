@@ -12,7 +12,8 @@
                   (security.private_dir), and so are serve.lock, serve.log and the audit logs. When the home is not
                   ~/.whynot-cut (the only home the UXP panel can compute), a discovery record with the same fields plus
                   `home` is written to ~/.whynot-cut/bridge/engine.json (same atomic user-only writer; never over a
-                  live daemon's file) and removed, pid-guarded, on exit.
+                  live daemon's file) and removed, pid-guarded, on exit, BEFORE the home's own engine.json (so "own
+                  record gone" implies "pointer gone"; a pointer that cannot be removed is audited).
     ensure(home)  idempotent start (the SessionStart hook). A daemon whose engine.json pid is alive (same process start
                   time when recorded) and whose GET /status answers with the token within PROBE_TIMEOUT is returned as
                   is: no second daemon. Otherwise a stale file (dead pid) is removed and a detached daemon is started
@@ -25,9 +26,12 @@
                   authenticated /shutdown and replaced: {state: restarted, previous_version, previous_protocol}; one
                   that does not stop is reported (not_answering), never killed.
     status(home)  reads engine.json and probes it; changes nothing.
-    stop(home)    POST /shutdown with the token, then waits (STOP_WAIT) for engine.json to go and the process to
-                  exit; a stale file (dead pid) is removed. A daemon that does not answer is reported, never killed
-                  (its pid could belong to another program by now).
+    stop(home)    POST /shutdown with the token, then waits (STOP_WAIT) for engine.json to go, for the discovery
+                  record at ~/.whynot-cut to no longer record that daemon (pid + start time), and for the process to
+                  exit; a stale file (dead pid) is removed, and so is its pointer. A pointer the exited daemon could
+                  not remove is removed here (pid- and start-guarded: never another daemon's); if that fails too,
+                  {state: stopped, discovery_left: true, warning, how} says so. A daemon that does not answer is
+                  reported, never killed (its pid could belong to another program by now).
     A <home>/bridge/engine.json whose `home` field names another folder is the discovery copy of a daemon serving that
     other home (only ~/.whynot-cut gets one): ensure / status / stop of this home treat it as "no daemon here". It is
     never returned as running and never stopped; a new daemon for this home simply replaces it.
@@ -184,9 +188,9 @@ async def _serve(home: Path, *, port, version, ready, app_options, install_signa
     finally:
         await app.close()
         adapters.cancel_queued()
+        if discovery is not None:          # the pointer first: once this home's record is gone, so is the pointer
+            _remove_discovery(discovery, pid, audit)
         security.remove_engine_json(home, pid)
-        if discovery is not None:
-            security.remove_engine_json(discovery, pid)
         if started:
             audit.log("daemon", outcome="stopped", reason=f"pid {pid}")
         lock.release()
@@ -225,6 +229,35 @@ def _write_discovery(home: Path, record: dict, audit) -> Path | None:
         return None
     audit.log("discovery", outcome="written", reason=f"{where} points at this engine home")
     return disc
+
+
+def _discovery_for(home: Path) -> Path | None:
+    """The home whose engine.json may hold this home's discovery record: ~/.whynot-cut, unless `home` is it."""
+    disc = default_home()
+    return None if _same_dir(home, disc) else disc
+
+
+def _points_at(disc: Path | None, home: Path, pid, pid_created) -> bool:
+    """True while `disc`'s engine.json is the discovery record of this home's daemon (same pid, process start time
+    and home)."""
+    if disc is None:
+        return False
+    cur = security.read_engine_json(disc)
+    other = (cur or {}).get("home")
+    return (cur is not None and cur.get("pid") == pid and cur.get("pid_created") == pid_created
+            and isinstance(other, str) and bool(other) and _same_dir(Path(other), home))
+
+
+def _remove_discovery(disc: Path, pid: int, audit) -> None:
+    """Remove this daemon's discovery record (pid-guarded). When it cannot be removed (a sharing violation outlasting
+    every retry: an antivirus scan, a reader holding it), that is audited; `reel serve --stop` removes it once this
+    process has exited, and the next daemon's start replaces it."""
+    security.remove_engine_json(disc, pid)
+    cur = security.read_engine_json(disc)
+    if cur is not None and cur.get("pid") == pid:
+        audit.log("discovery", outcome="failed",
+                  reason=f"~/{plat.HOME_NAME}/bridge/engine.json could not be removed (pid {pid}); "
+                         "reel serve --stop or the next start removes it")
 
 
 # ------------------------------------------------------------------------------------------------- probing
@@ -410,8 +443,11 @@ def stop(home=None, *, wait: float = STOP_WAIT) -> dict:
     info = _own_record(home)
     if info is None:
         return {"ok": True, "running": False, "state": "not_running"}
-    pid = info.get("pid")
+    pid, created = info.get("pid"), info.get("pid_created")
+    disc = _discovery_for(home)        # its pointer at ~/.whynot-cut, when this home is not that one
     if not _alive(info):
+        if _points_at(disc, home, pid, created):
+            security.remove_engine_json(disc, pid, pid_created=created)
         security.remove_engine_json(home, pid)
         return {"ok": True, "running": False, "state": "stale_removed", "pid": pid}
     code, _ = _http(info, "POST", "/shutdown", max(PROBE_TIMEOUT, 1.0))
@@ -420,15 +456,32 @@ def stop(home=None, *, wait: float = STOP_WAIT) -> dict:
                 "error": f"reel serve (pid {pid}) did not accept the shutdown request"
                          + (f" (HTTP {code})" if code else ""),
                 "how": f"end process {pid} (Task Manager / kill), then run: reel serve --status"}
-    own = pid == os.getpid()           # an in-process daemon (tests): its process does not exit
+    own = _in_process(pid)             # an in-process daemon (tests): its process does not exit
+    where = f"~/{plat.HOME_NAME}/bridge/engine.json"
     deadline = time.monotonic() + max(0.0, float(wait))
     while True:
         gone = (security.read_engine_json(home) or {}).get("pid") != pid
         exited = None if own else not _alive(info)
-        if gone and exited is not False:
+        pointer = gone and _points_at(disc, home, pid, created)
+        if pointer and exited:         # the daemon exited without removing it (its retries ran out): a dead pid's
+            security.remove_engine_json(disc, pid, pid_created=created)     # record, removed pid- and start-guarded
+            pointer = _points_at(disc, home, pid, created)
+        if gone and not pointer and exited is not False:
             return {"ok": True, "running": False, "state": "stopped", "pid": pid, "exited": exited}
         if time.monotonic() >= deadline:
+            if gone and pointer and exited:
+                return {"ok": True, "running": False, "state": "stopped", "pid": pid, "exited": True,
+                        "discovery_left": True,
+                        "warning": f"{where} still points at the stopped daemon (pid {pid}) and could not be removed "
+                                   "(another program holds it open)",
+                        "how": f"reel serve --ensure replaces it; or delete {where} once nothing holds it open"}
             return {"ok": False, "running": not gone, "state": "stopping", "pid": pid,
-                    "error": f"reel serve (pid {pid}) did not exit within {wait:g}s",
+                    "error": f"reel serve (pid {pid}) did not remove {where} within {wait:g}s"
+                             if gone and pointer and exited is None else
+                             f"reel serve (pid {pid}) did not exit within {wait:g}s",
                     "how": f"run: reel serve --status; if it is still there, end process {pid} (Task Manager / kill)"}
         time.sleep(POLL_S)
+
+
+def _in_process(pid) -> bool:
+    return pid == os.getpid()

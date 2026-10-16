@@ -18,6 +18,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import types
 import unittest
 from pathlib import Path
@@ -307,6 +308,96 @@ class Discovery(_Home):
         self.assertEqual(security.read_engine_json(self.default)["home"], str(self.home))
         daemon.stop(self.home)
         self.assertFalse(security.engine_json_path(self.default).exists())
+
+    def test_stop_returns_only_after_the_discovery_pointer_is_gone(self):
+        """Gate 3 race: stop() answered "stopped" while ~/.whynot-cut/bridge/engine.json still pointed at the stopped
+        daemon (it removed its own record first and the pointer second; stop() polled only its own record). Made
+        deterministic, not load-based: the daemon's removal of the pointer blocks until stop() has polled this home's
+        record three times while it is blocked; the pointer must be gone when stop() says "stopped"."""
+        d = self.start_daemon()
+        self.assertIsNotNone(security.read_engine_json(self.default))
+        real_remove, real_read = security.remove_engine_json, security.read_engine_json
+        blocked, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        polls = []
+
+        def remove(home, pid, **kw):
+            if Path(home) == self.default and threading.current_thread() is d.thread:
+                blocked.set()
+                release.wait(T)
+            return real_remove(home, pid, **kw)
+
+        def read(home):
+            if blocked.is_set() and not release.is_set() and Path(home) == self.home \
+                    and threading.current_thread() is threading.main_thread():
+                polls.append(1)
+                if len(polls) >= 3:
+                    release.set()
+            return real_read(home)
+        with mock.patch.object(security, "remove_engine_json", remove), \
+                mock.patch.object(security, "read_engine_json", read):
+            res = daemon.stop(self.home, wait=T)
+            pointer_left = security.engine_json_path(self.default).exists()
+        self.assertEqual(res["state"], "stopped", res)
+        self.assertTrue(blocked.is_set(), "the daemon never removed its discovery record")
+        self.assertFalse(pointer_left, f"stop() returned {res['state']!r} while the discovery record still existed "
+                                       f"(polled {len(polls)}x while it was being removed)")
+        d.thread.join(T)
+        self.assertFalse(security.engine_json_path(self.default).exists())
+        self.assertFalse(security.engine_json_path(self.home).exists())
+
+    def _stop_as_another_process(self, d, *, stop_fails_too: bool, wait: float):
+        """stop() of `d` as if it were a separate process (exited once its thread ends) while the pointer cannot be
+        renamed away from the daemon's thread (every _replace_retry try exhausted: a sharing violation), and from
+        stop() too when `stop_fails_too`."""
+        pointer = security.engine_json_path(self.default)
+        real_replace = security._replace_retry
+
+        def replace(src, dst):
+            if Path(src) == pointer and (stop_fails_too or threading.current_thread() is d.thread):
+                raise PermissionError(32, "sharing violation (test)")
+            return real_replace(src, dst)
+        with mock.patch.object(security, "_replace_retry", replace), \
+                mock.patch.object(daemon, "_in_process", lambda pid: False), \
+                mock.patch.object(daemon, "_alive", lambda info: d.thread.is_alive()):
+            return daemon.stop(self.home, wait=wait)
+
+    def test_a_pointer_the_exited_daemon_could_not_remove_is_removed_by_stop(self):
+        d = self.start_daemon()
+        res = self._stop_as_another_process(d, stop_fails_too=False, wait=T)
+        self.assertEqual((res["ok"], res["state"], res["exited"]), (True, "stopped", True), res)
+        self.assertNotIn("discovery_left", res)
+        self.assertFalse(security.engine_json_path(self.default).exists())
+        self.assertFalse(security.engine_json_path(self.home).exists())
+        rows = [r for r in self.audit() if r["event"] == "discovery" and r["outcome"] == "failed"]
+        self.assertEqual(len(rows), 1, self.audit())
+
+    def test_a_pointer_nobody_can_remove_is_reported_not_hidden(self):
+        d = self.start_daemon()
+        pid = security.read_engine_json(self.home)["pid"]
+        res = self._stop_as_another_process(d, stop_fails_too=True, wait=0.5)
+        self.assertEqual((res["ok"], res["state"], res.get("discovery_left")), (True, "stopped", True), res)
+        self.assertIn("could not be removed", res["warning"])
+        self.assertIn("reel serve --ensure", res["how"])
+        self.assertEqual(security.read_engine_json(self.default)["pid"], pid)    # still there: reported, as it is
+        self.assertFalse(security.engine_json_path(self.home).exists())
+
+    def test_a_stale_record_takes_its_pointer_with_it_never_another_daemons(self):
+        from test_serve_daemon import dead_pid
+        pid = dead_pid()
+        security.write_engine_json(self.home, port=1, token=security.make_token(), pid=pid, version="old",
+                                   pid_created=111)
+        security.write_engine_json(self.default, port=1, token=security.make_token(), pid=pid, version="old",
+                                   pid_created=222, home=str(self.home))          # same pid, another process
+        res = daemon.stop(self.home)
+        self.assertEqual(res["state"], "stale_removed", res)
+        self.assertFalse(security.engine_json_path(self.home).exists())
+        self.assertEqual(security.read_engine_json(self.default)["pid_created"], 222)
+        security.write_engine_json(self.home, port=1, token=security.make_token(), pid=pid, version="old",
+                                   pid_created=222)
+        self.assertEqual(daemon.stop(self.home)["state"], "stale_removed")
+        self.assertFalse(security.engine_json_path(self.default).exists())
+        self.assertFalse(security.engine_json_path(self.home).exists())
 
 
 if __name__ == "__main__":

@@ -391,8 +391,12 @@ def read_engine_json(home) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
-def remove_engine_json(home, pid: int) -> bool:
-    """Delete engine.json only when it records `pid` (a newer daemon's file is never removed by an older one).
+_ANY = object()
+
+
+def remove_engine_json(home, pid: int, *, pid_created=_ANY) -> bool:
+    """Delete engine.json only when it records `pid` (a newer daemon's file is never removed by an older one), and,
+    when `pid_created` is given, that process start time too (a dead pid reused by another daemon is not "ours").
     No check-then-delete race: the file is first renamed to a private tombstone (atomic), the tombstone is read, and
     only the tombstone is deleted. When it records another pid it goes back without ever overwriting: a file another
     daemon wrote meanwhile always wins (the tombstone, an older record, is then dropped). The tombstone is deleted
@@ -408,7 +412,7 @@ def remove_engine_json(home, pid: int) -> bool:
         d = json.loads(tomb.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         d = None
-    ours = isinstance(d, dict) and d.get("pid") == pid
+    ours = isinstance(d, dict) and d.get("pid") == pid and (pid_created is _ANY or d.get("pid_created") == pid_created)
     if ours or _restore_no_overwrite(tomb, path):
         try:
             tomb.unlink()                          # gone already when the restore renamed it back
