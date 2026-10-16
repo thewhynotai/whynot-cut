@@ -1,0 +1,34 @@
+[trace_headers @ 0000020a1b2c3d40] Packet: 40000 bytes, key frame, pts 0, dts 0.
+[trace_headers @ 0000020a1b2c3d40] 0          forbidden_zero_bit                                          0 = 0
+[trace_headers @ 0000020a1b2c3d40] 1          nal_ref_idc                                                11 = 3
+[trace_headers @ 0000020a1b2c3d40] 3          nal_unit_type                                           01001 = 9
+[trace_headers @ 0000020a1b2c3d40] 0          forbidden_zero_bit                                          0 = 0
+[trace_headers @ 0000020a1b2c3d40] 1          nal_ref_idc                                                11 = 3
+[trace_headers @ 0000020a1b2c3d40] 3          nal_unit_type                                           00111 = 7
+[trace_headers @ 0000020a1b2c3d40] 0          forbidden_zero_bit                                          0 = 0
+[trace_headers @ 0000020a1b2c3d40] 1          nal_ref_idc                                                11 = 3
+[trace_headers @ 0000020a1b2c3d40] 3          nal_unit_type                                           01000 = 8
+[trace_headers @ 0000020a1b2c3d40] 0          forbidden_zero_bit                                          0 = 0
+[trace_headers @ 0000020a1b2c3d40] 1          nal_ref_idc                                                11 = 3
+[trace_headers @ 0000020a1b2c3d40] 3          nal_unit_type                                           00101 = 5
+[trace_headers @ 0000020a1b2c3d40] Packet: 900 bytes, pts 1000, dts 1000.
+[trace_headers @ 0000020a1b2c3d40] 0          forbidden_zero_bit                                          0 = 0
+[trace_headers @ 0000020a1b2c3d40] 1          nal_ref_idc                                                11 = 3
+[trace_headers @ 0000020a1b2c3d40] 3          nal_unit_type                                           01001 = 9
+[trace_headers @ 0000020a1b2c3d40] 0          forbidden_zero_bit                                          0 = 0
+[trace_headers @ 0000020a1b2c3d40] 1          nal_ref_idc                                                11 = 3
+[trace_headers @ 0000020a1b2c3d40] 3          nal_unit_type                                           00001 = 1
+[trace_headers @ 0000020a1b2c3d40] Packet: 40000 bytes, key frame, pts 2000, dts 2000.
+[trace_headers @ 0000020a1b2c3d40] 0          forbidden_zero_bit                                          0 = 0
+[trace_headers @ 0000020a1b2c3d40] 1          nal_ref_idc                                                11 = 3
+[trace_headers @ 0000020a1b2c3d40] 3          nal_unit_type                                           01001 = 9
+[trace_headers @ 0000020a1b2c3d40] 0          forbidden_zero_bit                                          0 = 0
+[trace_headers @ 0000020a1b2c3d40] 1          nal_ref_idc                                                11 = 3
+[trace_headers @ 0000020a1b2c3d40] 3          nal_unit_type                                           00001 = 1
+[trace_headers @ 0000020a1b2c3d40] Packet: 900 bytes, pts 3000, dts 3000.
+[trace_headers @ 0000020a1b2c3d40] 0          forbidden_zero_bit                                          0 = 0
+[trace_headers @ 0000020a1b2c3d40] 1          nal_ref_idc                                                11 = 3
+[trace_headers @ 0000020a1b2c3d40] 3          nal_unit_type                                           01001 = 9
+[trace_headers @ 0000020a1b2c3d40] 0          forbidden_zero_bit                                          0 = 0
+[trace_headers @ 0000020a1b2c3d40] 1          nal_ref_idc                                                11 = 3
+[trace_headers @ 0000020a1b2c3d40] 3          nal_unit_type                                           00001 = 1

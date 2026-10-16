@@ -1,0 +1,534 @@
+{
+ "format": 1,
+ "default": "ig_reels_organic",
+ "reverify": "Re-verify every number at each minor release; platforms change their UI. Last full check 2026-10-17 (3.0 Task 27).",
+ "profiles": {
+  "ig_reels_organic": {
+   "frame": [
+    1080,
+    1920
+   ],
+   "zones": [
+    {
+     "name": "top_ui",
+     "kind": "top",
+     "rect": [
+      0,
+      0,
+      1080,
+      269
+     ],
+     "basis": "official",
+     "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
+     "retrieved": "2026-10-17",
+     "note": "14% of 1080x1920 = 268.8, rounded up. Profile icon / header. Ads figure reused for organic: Meta publishes no organic Reels number."
+    },
+    {
+     "name": "bottom_ui",
+     "kind": "bottom",
+     "rect": [
+      0,
+      1248,
+      1080,
+      1920
+     ],
+     "basis": "official",
+     "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
+     "retrieved": "2026-10-17",
+     "note": "35% of 1920 = 672: the bottom band starts at y=1248. Caption / sound / buttons. Ads figure reused for organic: Meta publishes no organic Reels number."
+    },
+    {
+     "name": "left_margin",
+     "kind": "side",
+     "rect": [
+      0,
+      0,
+      65,
+      1920
+     ],
+     "basis": "official",
+     "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
+     "retrieved": "2026-10-17",
+     "note": "6% of 1080 = 64.8, rounded up. Ads figure reused for organic: Meta publishes no organic Reels number."
+    },
+    {
+     "name": "right_margin",
+     "kind": "side",
+     "rect": [
+      1015,
+      0,
+      1080,
+      1920
+     ],
+     "basis": "official",
+     "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
+     "retrieved": "2026-10-17",
+     "note": "6% of 1080 = 64.8, rounded up. The action rail itself has no published number: not guessed. Ads figure reused for organic: Meta publishes no organic Reels number."
+    }
+   ],
+   "safe_text": [
+    65,
+    269,
+    1015,
+    1248
+   ],
+   "caption_band": [
+    65,
+    1000,
+    1015,
+    1248
+   ],
+   "caption_band_note": "ours: the lowest 248 px of safe_text, where our captions sit by default",
+   "encode": {
+    "codec": [
+     "h264",
+     "hevc"
+    ],
+    "pix_fmt": "yuv420p",
+    "closed_gop": true,
+    "audio": "aac",
+    "audio_sample_rate_max": 48000,
+    "audio_channels_max": 2,
+    "container": [
+     "mp4",
+     "mov"
+    ],
+    "fps_min": 23,
+    "fps_max": 60,
+    "basis": "official",
+    "source": "https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media",
+    "retrieved": "2026-10-17",
+    "note": "Instagram Graph API Reels specification. The platform publishes no GOP length, profile, level or loudness number: those are absent, not guessed."
+   },
+   "platform_ar": "إنستجرام",
+   "gaps": [
+    "أزرار الجانب الأيمن في إنستجرام (الإعجاب والتعليق والمشاركة) لا يوجد لها رقم منشور، ولم تُقَس"
+   ]
+  },
+  "ig_reels_ads": {
+   "frame": [
+    1080,
+    1920
+   ],
+   "zones": [
+    {
+     "name": "top_ui",
+     "kind": "top",
+     "rect": [
+      0,
+      0,
+      1080,
+      269
+     ],
+     "basis": "official",
+     "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
+     "retrieved": "2026-10-17",
+     "note": "14% of 1080x1920 = 268.8, rounded up. Profile icon / header."
+    },
+    {
+     "name": "bottom_ui",
+     "kind": "bottom",
+     "rect": [
+      0,
+      1248,
+      1080,
+      1920
+     ],
+     "basis": "official",
+     "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
+     "retrieved": "2026-10-17",
+     "note": "35% of 1920 = 672: the bottom band starts at y=1248. Caption / call-to-action."
+    },
+    {
+     "name": "left_margin",
+     "kind": "side",
+     "rect": [
+      0,
+      0,
+      65,
+      1920
+     ],
+     "basis": "official",
+     "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
+     "retrieved": "2026-10-17",
+     "note": "6% of 1080 = 64.8, rounded up."
+    },
+    {
+     "name": "right_margin",
+     "kind": "side",
+     "rect": [
+      1015,
+      0,
+      1080,
+      1920
+     ],
+     "basis": "official",
+     "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
+     "retrieved": "2026-10-17",
+     "note": "6% of 1080 = 64.8, rounded up. The action rail itself has no published number: not guessed."
+    }
+   ],
+   "safe_text": [
+    65,
+    269,
+    1015,
+    1248
+   ],
+   "caption_band": [
+    65,
+    1000,
+    1015,
+    1248
+   ],
+   "caption_band_note": "ours: the lowest 248 px of safe_text, where our captions sit by default",
+   "encode": {
+    "codec": [
+     "h264"
+    ],
+    "audio": "aac",
+    "audio_bitrate_kbps_min": 128,
+    "container": [
+     "mp4",
+     "mov"
+    ],
+    "basis": "official",
+    "source": "https://www.facebook.com/business/ads-guide/update/video/instagram-reels",
+    "retrieved": "2026-10-17",
+    "note": "Meta Ads Guide, Instagram Reels video. No closed-GOP, loudness, level or GOP number on that page."
+   },
+   "platform_ar": "إنستجرام",
+   "gaps": [
+    "أزرار الجانب الأيمن في إنستجرام لا يوجد لها رقم منشور، ولم تُقَس"
+   ]
+  },
+  "ig_reels_ads_disclaimer": {
+   "frame": [
+    1080,
+    1920
+   ],
+   "zones": [
+    {
+     "name": "top_ui",
+     "kind": "top",
+     "rect": [
+      0,
+      0,
+      1080,
+      269
+     ],
+     "basis": "official",
+     "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
+     "retrieved": "2026-10-17",
+     "note": "14% of 1080x1920 = 268.8, rounded up. Profile icon / header."
+    },
+    {
+     "name": "bottom_ui",
+     "kind": "bottom",
+     "rect": [
+      0,
+      1152,
+      1080,
+      1920
+     ],
+     "basis": "community",
+     "source": "https://www.solidlabs.com/social-safe-zones",
+     "retrieved": "2026-10-17",
+     "note": "Ads with a disclaimer: the bottom 40% (768 px) stays free. Origin: Meta help article https://www.facebook.com/business/help/980593475366490/ (the page would not load as text for us); the number was read in a third-party summary at this source. Re-verify by hand."
+    },
+    {
+     "name": "left_margin",
+     "kind": "side",
+     "rect": [
+      0,
+      0,
+      65,
+      1920
+     ],
+     "basis": "official",
+     "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
+     "retrieved": "2026-10-17",
+     "note": "6% of 1080 = 64.8, rounded up."
+    },
+    {
+     "name": "right_margin",
+     "kind": "side",
+     "rect": [
+      1015,
+      0,
+      1080,
+      1920
+     ],
+     "basis": "official",
+     "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
+     "retrieved": "2026-10-17",
+     "note": "6% of 1080 = 64.8, rounded up. The action rail itself has no published number: not guessed."
+    }
+   ],
+   "safe_text": [
+    65,
+    269,
+    1015,
+    1152
+   ],
+   "caption_band": [
+    65,
+    904,
+    1015,
+    1152
+   ],
+   "caption_band_note": "ours: the lowest 248 px of safe_text",
+   "encode": {
+    "codec": [
+     "h264"
+    ],
+    "audio": "aac",
+    "audio_bitrate_kbps_min": 128,
+    "container": [
+     "mp4",
+     "mov"
+    ],
+    "basis": "official",
+    "source": "https://www.facebook.com/business/ads-guide/update/video/instagram-reels",
+    "retrieved": "2026-10-17",
+    "note": "Meta Ads Guide, Instagram Reels video. No closed-GOP, loudness, level or GOP number on that page."
+   },
+   "platform_ar": "إنستجرام",
+   "gaps": [
+    "أزرار الجانب الأيمن في إنستجرام لا يوجد لها رقم منشور، ولم تُقَس"
+   ]
+  },
+  "tiktok": {
+   "frame": [
+    1080,
+    1920
+   ],
+   "zones": [
+    {
+     "name": "top_ui",
+     "kind": "top",
+     "rect": [
+      0,
+      0,
+      1080,
+      252
+     ],
+     "basis": "template",
+     "source": "https://ads.tiktok.com/resources/help/article/tiktok-reservation-in-feed-ads-reach-frequency?lang=en",
+     "retrieved": "2026-10-17",
+     "note": "In-Feed template 'Vertical Feed 540x960', measured on the template image: top 126 px at 540x960, doubled to 1080x1920. The in-feed AD template is also used for organic TikTok (no organic template is published)."
+    },
+    {
+     "name": "left_margin",
+     "kind": "side",
+     "rect": [
+      0,
+      0,
+      120,
+      1920
+     ],
+     "basis": "template",
+     "source": "https://ads.tiktok.com/resources/help/article/tiktok-reservation-in-feed-ads-reach-frequency?lang=en",
+     "retrieved": "2026-10-17",
+     "note": "Template: left margin 60 px at 540x960, doubled. The in-feed AD template is also used for organic TikTok (no organic template is published)."
+    },
+    {
+     "name": "right_margin_top",
+     "kind": "side",
+     "rect": [
+      960,
+      252,
+      1080,
+      400
+     ],
+     "basis": "template",
+     "source": "https://ads.tiktok.com/resources/help/article/tiktok-reservation-in-feed-ads-reach-frequency?lang=en",
+     "retrieved": "2026-10-17",
+     "note": "Template: right margin 60 px at 540x960 beside the top block, doubled; the block is 200 px at 540x960 tall at this width, so it ends at y=400. The in-feed AD template is also used for organic TikTok (no organic template is published)."
+    },
+    {
+     "name": "right_rail",
+     "kind": "rail",
+     "rect": [
+      840,
+      400,
+      1080,
+      1920
+     ],
+     "basis": "template",
+     "source": "https://ads.tiktok.com/resources/help/article/tiktok-reservation-in-feed-ads-reach-frequency?lang=en",
+     "retrieved": "2026-10-17",
+     "note": "Template: right action rail 120 px wide at 540x960 below y=200, doubled. Mirrored on the Arabic (RTL) template. The in-feed AD template is also used for organic TikTok (no organic template is published).",
+     "mirror_rtl": true
+    },
+    {
+     "name": "bottom_ui",
+     "kind": "bottom",
+     "rect": [
+      0,
+      906,
+      1080,
+      1920
+     ],
+     "basis": "template",
+     "source": "https://ads.tiktok.com/resources/help/article/tiktok-reservation-in-feed-ads-reach-frequency?lang=en",
+     "retrieved": "2026-10-17",
+     "note": "Template: bottom 406 px (one line of ad copy) to 507 px (four lines) at 540x960. The four-line case is used (y=906 at 1080x1920): the one-line case starts at y=1108. The in-feed AD template is also used for organic TikTok (no organic template is published)."
+    }
+   ],
+   "safe_text": [
+    120,
+    252,
+    840,
+    906
+   ],
+   "caption_band": [
+    120,
+    700,
+    840,
+    906
+   ],
+   "caption_band_note": "ours: the lowest 248 px of safe_text, where our captions sit by default",
+   "encode": {
+    "container": [
+     "mp4",
+     "mov"
+    ],
+    "bitrate_kbps_min": 2500,
+    "basis": "official",
+    "source": "https://ads.tiktok.com/resources/help/article/tiktok-reservation-in-feed-ads-reach-frequency?lang=en",
+    "retrieved": "2026-10-17",
+    "note": "TikTok in-feed specs page: bitrate at least 2,500 kbps. No GOP, loudness or level number is published there."
+   },
+   "platform_ar": "تيك توك",
+   "gaps": []
+  },
+  "yt_shorts": {
+   "frame": [
+    1080,
+    1920
+   ],
+   "zones": [
+    {
+     "name": "top_ui",
+     "kind": "top",
+     "rect": [
+      0,
+      0,
+      1080,
+      288
+     ],
+     "basis": "community",
+     "source": "https://www.solidlabs.com/social-safe-zones",
+     "retrieved": "2026-10-17",
+     "note": "Universal all-YouTube ad template, 15% top. The official Google page shows it only as an image (no text numbers), so a third-party reading of it is used: re-verify with a screenshot."
+    },
+    {
+     "name": "bottom_ui",
+     "kind": "bottom",
+     "rect": [
+      0,
+      1248,
+      1080,
+      1920
+     ],
+     "basis": "community",
+     "source": "https://www.solidlabs.com/social-safe-zones",
+     "retrieved": "2026-10-17",
+     "note": "Universal template, 35% bottom."
+    },
+    {
+     "name": "left_margin",
+     "kind": "side",
+     "rect": [
+      0,
+      0,
+      48,
+      1920
+     ],
+     "basis": "community",
+     "source": "https://www.solidlabs.com/social-safe-zones",
+     "retrieved": "2026-10-17",
+     "note": "Universal template, 4.4% left."
+    },
+    {
+     "name": "right_rail",
+     "kind": "rail",
+     "rect": [
+      887,
+      0,
+      1080,
+      1920
+     ],
+     "basis": "community",
+     "source": "https://www.solidlabs.com/social-safe-zones",
+     "retrieved": "2026-10-17",
+     "note": "Universal template, 17.8% right (192.24 px, rounded up to 193) (the Shorts-only template is smaller: 10% top, 25% bottom, 10% right; the wider one is used for safety). Official diagram: https://support.google.com/google-ads/answer/9128498?hl=en"
+    }
+   ],
+   "safe_text": [
+    48,
+    288,
+    887,
+    1248
+   ],
+   "caption_band": [
+    48,
+    1000,
+    887,
+    1248
+   ],
+   "caption_band_note": "ours: the lowest 248 px of safe_text, where our captions sit by default",
+   "platform_ar": "يوتيوب شورتس"
+  },
+  "feed_4x5": {
+   "frame": [
+    1080,
+    1350
+   ],
+   "zones": [
+    {
+     "name": "left_margin",
+     "kind": "side",
+     "rect": [
+      0,
+      0,
+      65,
+      1350
+     ],
+     "basis": "community",
+     "source": "https://www.solidlabs.com/social-safe-zones",
+     "retrieved": "2026-10-17",
+     "note": "No 4:5 number is published. Meta asks to keep side edges clear on feed video; the 6% side figure of the Reels ads guide is borrowed. Re-verify."
+    },
+    {
+     "name": "right_margin",
+     "kind": "side",
+     "rect": [
+      1015,
+      0,
+      1080,
+      1350
+     ],
+     "basis": "community",
+     "source": "https://www.solidlabs.com/social-safe-zones",
+     "retrieved": "2026-10-17",
+     "note": "Same borrowed 6% side figure."
+    }
+   ],
+   "safe_text": [
+    65,
+    0,
+    1015,
+    1350
+   ],
+   "caption_band": [
+    65,
+    1050,
+    1015,
+    1300
+   ],
+   "caption_band_note": "ours: lower part of the 4:5 frame, no UI overlay is published",
+   "platform_ar": "إنستجرام"
+  }
+ }
+}
