@@ -48,3 +48,13 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
   - `tools/identity_scan.py`, `tools/identity_hashes.json`
   - `whynot-cut/tests/test_looks*.py`, `whynot-cut/tests/test_motion_library*.py`, `whynot-cut/tests/test_cut_proposals*.py`,
     `whynot-cut/tests/test_safe_zones*.py`, `whynot-cut/tests/test_identity_scan*.py`
+- Phase 4 fan-out (2026-10-16, executor rules and commits stay with each track):
+  - Adobe track, T4.1 smooth zoom/fades + T4.6 motion music:
+    - `whynot-cut/engine/reel/lib/ppro_build.py`, `whynot-cut/engine/reel/lib/motion_audio.py`,
+      `whynot-cut/engine/reel/lib/motion_build.py`
+    - `whynot-cut/tests/test_t41*.py`, `whynot-cut/tests/test_t46*.py`
+  - wnc-queue track, T4.4 episode sheet + T4.5 portable client database + T4.9 adopt old styles:
+    - `whynot-cut/engine/reel/lib/episode_sheet*.py`, `whynot-cut/engine/reel/lib/client_db.py`,
+      `whynot-cut/engine/reel/lib/client_move*.py`, `whynot-cut/engine/reel/lib/ref_style.py`
+    - `whynot-cut/tests/test_t44*.py`, `whynot-cut/tests/test_t45*.py`, `whynot-cut/tests/test_t49*.py`
+  - `whynot-cut/engine/reel/cli.py` stays the executor's; each track commits only its own subcommand hunks
