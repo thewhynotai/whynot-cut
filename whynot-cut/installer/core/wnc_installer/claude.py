@@ -81,11 +81,14 @@ def claude_candidates(env: Mapping, home, platform: str, sandbox: bool) -> list:
             out.append(Path(env["WNC_CLAUDE_CLI"]))
         appdata = home / "AppData" / "Roaming"
     else:
-        if env.get("CLAUDE_CLI"):
+        # (SEC-1) never a CLI from the current folder: a relative $CLAUDE_CLI is ignored, and `claude` on PATH comes
+        # from the absolute PATH folders only (base.find_on_path, PATHEXT order; not shutil.which, which on Windows
+        # answers from the current folder first and would hide the real CLI later on PATH)
+        if env.get("CLAUDE_CLI") and Path(env["CLAUDE_CLI"]).is_absolute():
             out.append(Path(env["CLAUDE_CLI"]))
-        which = shutil.which("claude", path=env.get("PATH"))
-        if which:
-            out.append(Path(which))
+        on_path = base.find_on_path("claude", env.get("PATH"), env=env)
+        if on_path:
+            out.append(Path(on_path))
         appdata = Path(env.get("APPDATA") or home / "AppData" / "Roaming")
         if win:
             local = Path(env.get("LOCALAPPDATA") or home / "AppData" / "Local")
@@ -740,7 +743,7 @@ def find_git_bash(paths: base.Paths, settings_env: Mapping, sandbox: bool) -> tu
         if p.is_file():
             return p, True
     if not sandbox:
-        git = shutil.which("git")
+        git = base.find_on_path("git", os.environ.get("PATH"))  # (SEC-1) absolute PATH folders only
         if git:
             p = Path(git).parent.parent / "bin" / "bash.exe"
             if p.is_file():

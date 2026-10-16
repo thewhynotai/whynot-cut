@@ -1545,15 +1545,67 @@ def _sleep(seconds: float) -> None:  # the retry back-off, in one place (tests p
     time.sleep(seconds)
 
 
+def iter_on_path(name: str, path, windows: Optional[bool] = None, env: Optional[Mapping] = None):
+    """(SEC-1) every runnable `name` in the ABSOLUTE folders of `path` (an os.pathsep list), folder by folder, PATHEXT
+    order inside a folder on Windows (as given, then lower case). Empty, relative and drive-less entries are skipped:
+    the current folder is never searched. Not shutil.which: on Windows it looks in the current folder first (unless
+    NoDefaultCurrentDirectoryInExePath is set), so a program planted in a client folder would run - or, once dropped,
+    hide the real one later on PATH. `Path.is_absolute` also refuses a drive-less `\\dir`, which os.path.isabs accepts.
+    The same walk as the Kalam engine's lib/kalam/platform.py iter_on_path and tools/find_claude.py _on_path."""
+    windows = (os.name == "nt") if windows is None else windows
+    env = os.environ if env is None else env
+    names = [name]
+    if windows:
+        exts = [e.strip() for e in (env.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(";") if e.strip()]
+        names = []
+        for e in exts:
+            for variant in (e, e.lower()):
+                if name + variant not in names:
+                    names.append(name + variant)
+    for entry in str(path or "").split(os.pathsep):
+        entry = entry.strip().strip('"')
+        if not entry or not os.path.isabs(entry) or not Path(entry).is_absolute():
+            continue
+        seen = set()
+        for n in names:
+            f = os.path.join(entry, n)
+            if _runnable(f, env, windows) and os.path.normcase(f) not in seen:
+                seen.add(os.path.normcase(f))
+                yield f
+
+
+def find_on_path(name: str, path, windows: Optional[bool] = None, env: Optional[Mapping] = None) -> Optional[str]:
+    """(SEC-1) the first iter_on_path hit, or None."""
+    return next(iter_on_path(name, path, windows, env), None)
+
+
+def _runnable(path, env: Mapping, windows: bool) -> bool:
+    """A file that can start: Windows, an extension in PATHEXT; elsewhere the execute bit."""
+    p = Path(path)
+    if not p.is_file():
+        return False
+    if windows:
+        exts = [e.strip().lower() for e in (env.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(";") if e.strip()]
+        return p.suffix.lower() in exts
+    return os.access(str(p), os.X_OK)
+
+
+def system32(exe: str) -> str:
+    """(SEC-1) a Windows system tool by its full path (%SystemRoot%\\System32\\<exe>): CreateProcess never looks for it
+    in the current folder."""
+    return str(Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / exe)
+
+
 def find_curl() -> Optional[str]:
-    """The OS curl first (Windows 10+ System32, macOS /usr/bin: they use the system certificate store)."""
+    """The OS curl first (Windows 10+ System32, macOS /usr/bin: they use the system certificate store), else a curl in an
+    absolute PATH folder (SEC-1: never one from the current folder)."""
     if os.name == "nt":
-        sys32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "curl.exe"
+        sys32 = Path(system32("curl.exe"))
         if sys32.is_file():
             return str(sys32)
     elif Path("/usr/bin/curl").is_file():
         return "/usr/bin/curl"
-    return shutil.which("curl")
+    return find_on_path("curl", os.environ.get("PATH"))
 
 
 def _fetch_curl(curl: str, url: str, part: Path, loopback: bool, proxy: Optional[str] = None) -> None:

@@ -53,11 +53,13 @@ def hosts_running(sandbox: bool) -> list:
         return [x.strip() for x in os.environ.get("WNC_TEST_HOSTS_RUNNING", "").split(",") if x.strip()]
     try:
         if os.name == "nt":
-            r = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], stdin=subprocess.DEVNULL, capture_output=True,
+            # (SEC-1) by its full path: CreateProcess would also look for a bare `tasklist` in the current folder
+            r = subprocess.run([base.system32("tasklist.exe"), "/FO", "CSV", "/NH"], stdin=subprocess.DEVNULL,
+                               capture_output=True,
                                timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             rows = csv.reader(io.StringIO(r.stdout.decode("utf-8", "replace")))
             return sorted({row[0] for row in rows if row and row[0].lower() in _WIN_HOSTS})
-        r = subprocess.run(["pgrep", "-fl", "Adobe Premiere Pro|Adobe After Effects"], stdin=subprocess.DEVNULL,
+        r = subprocess.run(["/usr/bin/pgrep", "-fl", "Adobe Premiere Pro|Adobe After Effects"], stdin=subprocess.DEVNULL,
                            capture_output=True, timeout=30)
     except (OSError, subprocess.SubprocessError):
         return []

@@ -2083,6 +2083,143 @@ class TestFindClaudeParity(unittest.TestCase):
         self.assertEqual(sand2, [new, old])
 
 
+class TestSec1(unittest.TestCase):
+    """SEC-1 (tools-track note I1): a program planted in the CURRENT folder is never started. On Windows shutil.which
+    (and CreateProcess) look there first unless NoDefaultCurrentDirectoryInExePath is set (Claude Code's shell sets it; a
+    launcher, a panel or a user terminal does not)."""
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.tmp = Path(self._td.name)
+        self.cl = claude_module()
+        self.home = self.tmp / ARABIC_HOME
+        self.home.mkdir()
+        self.cwd = self.tmp / "client delivery"
+        self.cwd.mkdir()
+        self.empty = self.tmp / "empty bin"
+        self.empty.mkdir()
+        old = os.getcwd()
+        self.addCleanup(os.chdir, old)
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("NoDefaultCurrentDirectoryInExePath", None)  # a panel- or launcher-started installer
+        os.chdir(self.cwd)
+
+    def exe(self, folder: Path, name: str = "claude") -> Path:
+        p = touch(folder / (name + (".exe" if IS_WIN else "")), b"")
+        if not IS_WIN:
+            os.chmod(p, 0o755)
+        return p
+
+    def is_planted(self, p, planted: Path) -> bool:
+        return os.path.normcase(os.path.abspath(str(p))) == os.path.normcase(str(planted))
+
+    @unittest.skipUnless(IS_WIN, "Windows only: shutil.which / CreateProcess search the current folder only there")
+    def test_a_claude_planted_in_the_current_folder_is_never_a_candidate(self):
+        planted = self.exe(self.cwd)
+        os.environ["PATH"] = str(self.empty)
+        self.assertTrue(shutil.which("claude", path=str(self.empty)), "the premise: which() does see the cwd")
+        got = self.cl.claude_candidates(os.environ, self.home, "win32", False)
+        self.assertFalse([p for p in got if self.is_planted(p, planted)], got)
+        self.assertTrue(all(Path(p).is_absolute() for p in got), got)
+
+    @unittest.skipUnless(IS_WIN, "Windows only: shutil.which / CreateProcess search the current folder only there")
+    def test_the_real_cli_later_on_path_is_found_and_the_planted_one_is_not(self):
+        planted = self.exe(self.cwd)
+        real = self.exe(self.tmp / "real bin")
+        os.environ["PATH"] = os.pathsep.join([str(self.empty), str(real.parent)])
+        got = self.cl.claude_candidates(os.environ, self.home, "win32", False)
+        self.assertFalse([p for p in got if self.is_planted(p, planted)], got)
+        self.assertIn(os.path.normcase(str(real)), [os.path.normcase(str(p)) for p in got])
+
+    @unittest.skipUnless(IS_WIN, "Windows only: a drive-less entry (\\dir) is relative to the current drive")
+    def test_a_drive_less_path_entry_is_skipped(self):
+        real = self.exe(self.tmp / "drive-less bin")
+        driveless = str(real.parent)[2:]  # D:\x\bin -> \x\bin (the current folder is on the same drive)
+        self.assertTrue(driveless.startswith("\\"))
+        os.environ["PATH"] = driveless
+        got = self.cl.claude_candidates(os.environ, self.home, "win32", False)
+        self.assertFalse([p for p in got if self.is_planted(p, real)], got)
+        self.assertIsNone(base.find_on_path("claude", driveless, env=os.environ))
+
+    def test_a_relative_claude_cli_is_ignored(self):
+        planted = self.exe(self.cwd)
+        os.environ["PATH"] = str(self.empty)
+        plat = "win32" if IS_WIN else "darwin"
+        env = dict(os.environ, CLAUDE_CLI=planted.name)  # "claude.exe": relative, resolves against the cwd
+        got = self.cl.claude_candidates(env, self.home, plat, False)
+        self.assertFalse([p for p in got if self.is_planted(p, planted)], got)
+        env["CLAUDE_CLI"] = str(planted)  # the same file named absolutely is the editor's explicit choice: kept
+        self.assertIn(planted, self.cl.claude_candidates(env, self.home, plat, False))
+
+    def test_the_path_walk_matches_which_for_clean_absolute_entries(self):
+        # the order inside a folder follows PATHEXT on Windows, as shutil.which and the Kalam port's find_on_path do
+        a, b = self.tmp / "a bin", self.tmp / "b bin"
+        if IS_WIN:
+            touch(a / "claude.cmd", b"")
+            touch(a / "claude.exe", b"")
+        else:
+            self.exe(a)
+        self.exe(b)
+        path = os.pathsep.join([str(self.empty), str(a), str(b)])
+        os.environ["PATH"] = path
+        os.chdir(self.empty)  # nothing planted: which() has nothing in the cwd to prefer
+        want = shutil.which("claude", path=path)
+        got = base.find_on_path("claude", path, env=os.environ)
+        self.assertEqual(os.path.normcase(str(got)), os.path.normcase(want))
+        self.assertEqual(list(base.iter_on_path("claude", path, env=os.environ))[0], got)
+        try:
+            sys.path.insert(0, str(SK / "engine" / "reel" / "lib"))
+            from kalam import platform as kp  # the tools track's reference walk
+        except ImportError:
+            kp = None
+        finally:
+            sys.path.pop(0)
+        if kp is not None:
+            self.assertEqual(kp.find_on_path("claude", path, IS_WIN, os.environ), got)
+
+    @unittest.skipUnless(IS_WIN, "Windows only")
+    def test_curl_from_the_current_folder_is_never_used(self):
+        self.exe(self.cwd, "curl")
+        no_sys32 = self.tmp / "no windows"
+        no_sys32.mkdir()
+        os.environ["PATH"] = str(self.empty)
+        os.environ["SystemRoot"] = str(no_sys32)
+        self.assertIsNone(base.find_curl())
+
+    @unittest.skipUnless(IS_WIN, "Windows only")
+    def test_tasklist_is_started_by_its_full_system_path(self):
+        seen = []
+
+        def run(cmd, **kw):
+            seen.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+        ad = importlib_module("adobe")
+        with mock.patch.object(ad.subprocess, "run", side_effect=run):
+            ad.hosts_running(False)
+        sysroot = os.environ.get("SystemRoot", r"C:\Windows")
+        self.assertEqual(os.path.normcase(seen[0][0]), os.path.normcase(os.path.join(sysroot, "System32", "tasklist.exe")))
+
+    def test_no_program_is_started_by_a_bare_name(self):
+        # static: no shutil.which (it answers from the current folder on Windows) and no subprocess argv that starts
+        # with a bare tool name, in the installer core
+        for f in sorted((CORE / "wnc_installer").glob("*.py")):
+            text = f.read_text(encoding="utf-8")
+            code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+            with self.subTest(f.name):
+                self.assertNotRegex(code, r"shutil\.which\(")
+                self.assertNotRegex(code, r"\[\s*\"(tasklist|taskkill|pgrep|open|curl|tar|git|where|reg|cmd|powershell|"
+                                          r"nvidia-smi|sw_vers|sysctl|security|xattr)\"\s*,")
+
+
+def importlib_module(name: str):
+    import importlib
+    return importlib.import_module("wnc_installer." + name)
+
+
 class TestSettingsMerge(unittest.TestCase):
     MKT = {"thewhynot-ai": {"source": {"source": "directory", "path": "C:\\Users\\x\\.whynot-cut\\marketplace"}}}
 

@@ -623,9 +623,9 @@ def step_launch(ctx: base.Ctx) -> base.StepResult:
         except OSError as e:
             return base.StepResult("launch", "skipped", f"could not open Claude ({e})")
         return base.StepResult("launch", "ok", "Claude opened on /whynot-cut:start")
-    if base.run_cmd(ctx, ["open", "-Ra", "Claude"], 30)[0] != 0:
+    if base.run_cmd(ctx, ["/usr/bin/open", "-Ra", "Claude"], 30)[0] != 0:  # (SEC-1) by its full path
         return base.StepResult("launch", "skipped", "the Claude desktop app is not installed")
-    rc, out = base.run_cmd(ctx, ["open", START_URL], 30)
+    rc, out = base.run_cmd(ctx, ["/usr/bin/open", START_URL], 30)
     if rc != 0:
         return base.StepResult("launch", "skipped", f"could not open Claude ({base.tail(out)})")
     return base.StepResult("launch", "ok", "Claude opened on /whynot-cut:start")

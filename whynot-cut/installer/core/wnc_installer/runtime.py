@@ -363,8 +363,8 @@ def step_ffmpeg(ctx: base.Ctx) -> base.StepResult:
 def _nvidia_present(ctx: base.Ctx) -> bool:
     if ctx.paths.sandbox:  # never probe the real hardware from a test
         return os.environ.get("WNC_TEST_NVIDIA") == "1"
-    smi = shutil.which("nvidia-smi")
-    sys32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "nvidia-smi.exe"
+    smi = base.find_on_path("nvidia-smi", os.environ.get("PATH"))  # (SEC-1) absolute PATH folders only
+    sys32 = Path(base.system32("nvidia-smi.exe"))
     if not smi and sys32.is_file():
         smi = str(sys32)
     if not smi:
