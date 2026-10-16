@@ -102,6 +102,21 @@ wnc_on_signal() { # code: Ctrl+C (INT) or TERM while this runs - the per-run sta
   exit "$1"
 }
 
+wnc_curl() { # curl ARGS: macOS /usr/bin/curl (sealed system volume; the Keychain), never a curl found on PATH (TLS-1)
+  case "$(uname -s)" in
+    Darwin) /usr/bin/curl "$@" ;;
+    *) curl "$@" ;;
+  esac
+}
+
+wnc_cert_hint() { # rc: (TLS-1) a curl certificate exit says why (English, Arabic); certificate checking stays on
+  case "$1" in
+    35|51|53|54|58|59|60|66|77|80|82|83|90|91)
+      echo "The secure connection could not be checked (a certificate problem). The usual cause is antivirus software that scans HTTPS connections, or a company proxy that inspects traffic. WhyNot Cut never turns certificate checking off: ask your IT team, or your antivirus vendor's support, how to let these downloads through, then run the installer again." >&2
+      echo "تعذّر التحقق من الاتصال الآمن (مشكلة في الشهادة). السبب في الغالب برنامج حماية يفحص اتصالات HTTPS، أو بروكسي في شبكة الشركة يفحص الاتصال. لا يوقف WhyNot Cut التحقق من الشهادات أبدًا: اسأل فريق تقنية المعلومات عندك أو الدعم الفني لبرنامج الحماية كيف تمر هذه التنزيلات، ثم شغّل المثبّت مرة أخرى." >&2 ;;
+  esac
+}
+
 wnc_sha() {
   if command -v shasum >/dev/null 2>&1; then shasum -a 256 < "$1" | awk '{print $1}'
   else sha256sum < "$1" | awk '{print $1}'; fi
@@ -204,8 +219,8 @@ wnc_release() { # home dry channel source sha engine-home -> RELEASE_ROOT (empty
         return 2 ;;
     esac
     [ -n "$channel" ] || channel="stable"
-    idx="$(curl -fsSL "$WNC_RELEASE_INDEX_URL" </dev/null)" \
-      || { echo "ERROR: cannot read the release index $WNC_RELEASE_INDEX_URL" >&2; return 3; }
+    idx="$(wnc_curl -fsSL "$WNC_RELEASE_INDEX_URL" </dev/null)" \
+      || { rc=$?; echo "ERROR: cannot read the release index $WNC_RELEASE_INDEX_URL" >&2; wnc_cert_hint "$rc"; return 3; }
     src="$(wnc_index_get "$idx" "$channel.url")"
     sha="$(wnc_index_get "$idx" "$channel.sha256")"
     [ -n "$src" ] || { echo "ERROR: the release index has no $channel entry" >&2; return 3; }
@@ -256,8 +271,10 @@ wnc_release() { # home dry channel source sha engine-home -> RELEASE_ROOT (empty
     case "$src" in
       http://*|https://*)
         # a plain file name inside $dir: a native Windows curl (Git Bash tests) cannot open non-ASCII paths
-        if ! (cd "$dir" && curl -fL --retry 3 -sS -o "$name.part" "$src") </dev/null; then
-          rm -f "$zip.part"; echo "ERROR: could not download $src" >&2; return 3
+        (cd "$dir" && wnc_curl -fL --retry 3 -sS -o "$name.part" "$src") </dev/null
+        rc=$?
+        if [ $rc -ne 0 ]; then
+          rm -f "$zip.part"; echo "ERROR: could not download $src" >&2; wnc_cert_hint "$rc"; return 3
         fi ;;
       *) cp "$src" "$zip.part" || { echo "ERROR: cannot read $src" >&2; return 3; } ;;
     esac

@@ -131,6 +131,13 @@ param(
     $WncModelSizes = @{ 'large-v3' = 2.9; 'large-v3-turbo' = 1.6; 'medium' = 1.5; 'small' = 0.5 }
     # the Arabic lines, UTF-8 in base64 (this file stays ASCII)
     $WncAr = @{
+        CertHint = ('2KrYudiw2ZHYsSDYp9mE2KrYrdmC2YIg2YXZhiDYp9mE2KfYqti12KfZhCDYp9mE2KLZhdmGICjZhdi02YPZhNipINmB2Yog2KfZhNi0' +
+            '2YfYp9iv2KkpLiDYp9mE2LPYqNioINmB2Yog2KfZhNi62KfZhNioINio2LHZhtin2YXYrCDYrdmF2KfZitipINmK2YHYrdi1INin2KrY' +
+            'tdin2YTYp9iqIEhUVFBT2Iwg2KPZiCDYqNix2YjZg9iz2Yog2YHZiiDYtNio2YPYqSDYp9mE2LTYsdmD2Kkg2YrZgdit2LUg2KfZhNin' +
+            '2KrYtdin2YQuINmE2Kcg2YrZiNmC2YEgV2h5Tm90IEN1dCDYp9mE2KrYrdmC2YIg2YXZhiDYp9mE2LTZh9in2K/Yp9iqINij2KjYr9mL' +
+            '2Kc6INin2LPYo9mEINmB2LHZitmCINiq2YLZhtmK2Kkg2KfZhNmF2LnZhNmI2YXYp9iqINi52YbYr9mDINij2Ygg2KfZhNiv2LnZhSDY' +
+            'p9mE2YHZhtmKINmE2KjYsdmG2KfZhdisINin2YTYrdmF2KfZitipINmD2YrZgSDYqtmF2LEg2YfYsNmHINin2YTYqtmG2LLZitmE2KfY' +
+            'qtiMINir2YUg2LTYutmR2YQg2KfZhNmF2KvYqNmR2Kog2YXYsdipINij2K7YsdmJLg==')
         FinalLink = ('2KfZhNmF2KzZhNivIFdoeU5vdEN1dCDZh9mG2Kcg2LHYp9io2LcgKNin2K7Yqti12KfYsSDYo9mIIGp1bmN0aW9uKSDYpdmE2Ykg2YXY' +
             'rNmE2K8g2KLYrtix2Iwg2YhXaHlOb3QgQ3V0INmE2Kcg2YrYq9io2ZHYqiDYudio2LEg2LHYp9io2Lcg2KPYqNiv2YvYp9iMINmB2YTZ' +
             'hSDZitmP2YPYqtioINi02YrYoSDZgdmK2Ycg2YjZhNinINmB2Yog2KfZhNmF2KzZhNivINin2YTYsNmKINmK2LTZitixINil2YTZitmH' +
@@ -183,7 +190,8 @@ param(
             'qtiu2K/ZhSDYqNi52K8g2KfZhNii2YbYmyDYp9it2LDZgdmHINio2YbZgdiz2YMg2KXZhiDZhNmFINiq2LnYryDYqtit2KrYp9is2Yc6')
     }
     $EnvNames = @('HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'CLAUDE_CONFIG_DIR', 'WHYNOT_HOME',
-        'UV_PYTHON_INSTALL_DIR', 'UV_CACHE_DIR', 'UV_NO_CONFIG', 'UV_PYTHON_PREFERENCE', 'UV_NO_MODIFY_PATH',
+        'UV_PYTHON_INSTALL_DIR', 'UV_CACHE_DIR', 'UV_NO_CONFIG', 'UV_SYSTEM_CERTS', 'UV_PYTHON_PREFERENCE',
+        'UV_NO_MODIFY_PATH',
         'WNC_TEST_ANSWERS_AT')
 
     function Write-WncLog([string]$Level, [string]$Text) {
@@ -266,6 +274,21 @@ param(
         return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
     }
 
+    # (TLS-1) a download failed on a certificate check: the two likely causes and who can help; checking stays on
+    $WncCertHint = 'The secure connection could not be checked (a certificate problem). The usual cause is antivirus software that scans HTTPS connections, or a company proxy that inspects traffic. WhyNot Cut never turns certificate checking off: ask your IT team, or your antivirus vendor''s support, how to let these downloads through, then run the installer again.'
+
+    function Test-WncCertError($Err) {
+        # (TLS-1) the exception (or one inside it) is a TLS trust / certificate failure
+        for ($x = $Err; $null -ne $x; $x = $x.InnerException) {
+            if ($x -is [System.Net.WebException]) {
+                if (@([System.Net.WebExceptionStatus]::TrustFailure,
+                        [System.Net.WebExceptionStatus]::SecureChannelFailure) -contains $x.Status) { return $true }
+            }
+            if ([string]$x.Message -match 'trust relationship|certificate') { return $true }
+        }
+        return $false
+    }
+
     function Get-WncDownload([string]$Url, [string]$Sha, [string]$Dir) {
         $name = [Uri]::UnescapeDataString(([Uri]$Url).AbsolutePath.Split('/')[-1])
         if (-not $name) { throw "cannot name the download for $Url" }
@@ -282,6 +305,7 @@ param(
         $null = New-Item -ItemType Directory -Force -Path $Dir
         Write-WncLine "download $Url"
         $last = $null
+        $cert = $false
         for ($i = 1; $i -le 3; $i++) {
             if (Test-Path -LiteralPath $part) { Remove-Item -LiteralPath $part -Force }
             try {
@@ -290,6 +314,7 @@ param(
                 break
             } catch {
                 $last = $_.Exception.Message
+                if (Test-WncCertError $_.Exception) { $cert = $true; break }  # (TLS-1) never retried
                 $status = 0
                 try { $status = [int]$_.Exception.Response.StatusCode } catch { $status = 0 }
                 if ($status -ge 400 -and $status -lt 500) { break }
@@ -301,6 +326,10 @@ param(
         }
         if ($null -ne $last) {
             if (Test-Path -LiteralPath $part) { Remove-Item -LiteralPath $part -Force }
+            if ($cert) {
+                Write-Host $WncCertHint
+                Write-Host (Get-WncArabic 'CertHint')
+            }
             throw "could not download $name from $Url ($last)"
         }
         $got = Get-WncFileSha $part
@@ -1840,6 +1869,8 @@ param(
         $env:UV_PYTHON_INSTALL_DIR = Join-Path $engine 'python'
         $env:UV_CACHE_DIR = Join-Path $engine 'cache\uv'
         $env:UV_NO_CONFIG = '1'
+        # (TLS-1) uv trusts the Windows certificate store (CryptoAPI): an antivirus that scans HTTPS, a company proxy
+        $env:UV_SYSTEM_CERTS = '1'
         $env:UV_PYTHON_PREFERENCE = 'only-managed'
         $env:UV_NO_MODIFY_PATH = '1'
         $uvExe = Join-Path $engine 'bin\uv.exe'

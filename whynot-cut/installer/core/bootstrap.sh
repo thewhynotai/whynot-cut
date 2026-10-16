@@ -165,6 +165,19 @@ file_sha() { # sha256 hex of a file (read on stdin: no path quirks)
   fi
 }
 
+wnc_curl() { # curl ARGS: macOS /usr/bin/curl (sealed system volume; the Keychain), never a curl found on PATH (TLS-1)
+  case "$(uname -s)" in
+    Darwin) /usr/bin/curl "$@" ;;
+    *) curl "$@" ;;
+  esac
+}
+
+cert_hint() { # (TLS-1) a download failed on a certificate check: the likely causes and who can help (English, Arabic)
+  printf '%s\n' "The secure connection could not be checked (a certificate problem). The usual cause is antivirus software that scans HTTPS connections, or a company proxy that inspects traffic. WhyNot Cut never turns certificate checking off: ask your IT team, or your antivirus vendor's support, how to let these downloads through, then run the installer again." >&2
+  printf '%s\n' "تعذّر التحقق من الاتصال الآمن (مشكلة في الشهادة). السبب في الغالب برنامج حماية يفحص اتصالات HTTPS، أو بروكسي في شبكة الشركة يفحص الاتصال. لا يوقف WhyNot Cut التحقق من الشهادات أبدًا: اسأل فريق تقنية المعلومات عندك أو الدعم الفني لبرنامج الحماية كيف تمر هذه التنزيلات، ثم شغّل المثبّت مرة أخرى." >&2
+  log_line ERROR "The secure connection could not be checked (a certificate problem). The usual cause is antivirus software that scans HTTPS connections, or a company proxy that inspects traffic. WhyNot Cut never turns certificate checking off: ask your IT team, or your antivirus vendor's support, how to let these downloads through, then run the installer again."
+}
+
 download() { # url sha256 dir -> DL_PATH (verified)
   url="$1"; want="$2"; dir="$3"
   name="${url##*/}"; name="${name%%\?*}"
@@ -184,13 +197,14 @@ download() { # url sha256 dir -> DL_PATH (verified)
   case "$url" in http://127.0.0.1[:/]*|http://localhost[:/]*) noproxy="--noproxy" ;; esac
   # curl writes a plain file name inside $dir: a native Windows curl (Git Bash tests) cannot open non-ASCII paths
   if [ -n "$noproxy" ]; then
-    err=$( (cd "$dir" && curl -fL --retry 3 --retry-delay 1 -sS --noproxy '*' -o "$name.part" "$url") 2>&1 </dev/null )
+    err=$( (cd "$dir" && wnc_curl -fL --retry 3 --retry-delay 1 -sS --noproxy '*' -o "$name.part" "$url") 2>&1 </dev/null )
   else
-    err=$( (cd "$dir" && curl -fL --retry 3 --retry-delay 1 -sS -o "$name.part" "$url") 2>&1 </dev/null )
+    err=$( (cd "$dir" && wnc_curl -fL --retry 3 --retry-delay 1 -sS -o "$name.part" "$url") 2>&1 </dev/null )
   fi
   rc=$?
   if [ $rc -ne 0 ]; then
     rm -f "$dest.part"
+    case "$rc" in 35|51|53|54|58|59|60|66|77|80|82|83|90|91) cert_hint ;; esac
     fail "could not download $name from $url (curl exit $rc: $(printf '%s' "$err" | tail -n 1))"
   fi
   got="$(file_sha "$dest.part")"
@@ -1719,6 +1733,8 @@ fi
 say "WhyNot Cut bootstrap: $CMD on $PLAT; engine home $ENGINE$MODE"
 
 export UV_PYTHON_INSTALL_DIR="$ENGINE/python" UV_CACHE_DIR="$ENGINE/cache/uv" UV_NO_CONFIG=1
+# (TLS-1) uv trusts the OS certificate store (the macOS Keychain): an antivirus that scans HTTPS, a company proxy
+export UV_SYSTEM_CERTS=1
 export UV_PYTHON_PREFERENCE=only-managed UV_NO_MODIFY_PATH=1
 UV_NAME="uv"
 case "$PLAT" in win-*) UV_NAME="uv.exe" ;; esac

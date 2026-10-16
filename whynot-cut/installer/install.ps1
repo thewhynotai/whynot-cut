@@ -252,6 +252,23 @@ $WncScriptPath = $PSCommandPath  # empty under `irm | iex`
                 if ($release.ContainsKey('Stage')) { $stage = $release.Stage }
             } catch {
                 Write-Host "ERROR: WhyNot Cut could not get its files: $($_.Exception.Message)"
+                $x = $_.Exception
+                while ($null -ne $x) {  # (TLS-1) a certificate failure says why (English, Arabic); checking stays on
+                    if (($x -is [System.Net.WebException] -and @([System.Net.WebExceptionStatus]::TrustFailure,
+                                [System.Net.WebExceptionStatus]::SecureChannelFailure) -contains $x.Status) -or
+                        ([string]$x.Message -match 'trust relationship|certificate')) {
+                        Write-Host 'The secure connection could not be checked (a certificate problem). The usual cause is antivirus software that scans HTTPS connections, or a company proxy that inspects traffic. WhyNot Cut never turns certificate checking off: ask your IT team, or your antivirus vendor''s support, how to let these downloads through, then run the installer again.'
+                        Write-Host ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(('2KrYudiw2ZHYsSDYp9mE2KrYrdmC2YIg2YXZhiDYp9mE2KfYqti12KfZhCDYp9mE2KLZhdmGICjZhdi02YPZhNipINmB2Yog2KfZhNi0' +
+                            '2YfYp9iv2KkpLiDYp9mE2LPYqNioINmB2Yog2KfZhNi62KfZhNioINio2LHZhtin2YXYrCDYrdmF2KfZitipINmK2YHYrdi1INin2KrY' +
+                            'tdin2YTYp9iqIEhUVFBT2Iwg2KPZiCDYqNix2YjZg9iz2Yog2YHZiiDYtNio2YPYqSDYp9mE2LTYsdmD2Kkg2YrZgdit2LUg2KfZhNin' +
+                            '2KrYtdin2YQuINmE2Kcg2YrZiNmC2YEgV2h5Tm90IEN1dCDYp9mE2KrYrdmC2YIg2YXZhiDYp9mE2LTZh9in2K/Yp9iqINij2KjYr9mL' +
+                            '2Kc6INin2LPYo9mEINmB2LHZitmCINiq2YLZhtmK2Kkg2KfZhNmF2LnZhNmI2YXYp9iqINi52YbYr9mDINij2Ygg2KfZhNiv2LnZhSDY' +
+                            'p9mE2YHZhtmKINmE2KjYsdmG2KfZhdisINin2YTYrdmF2KfZitipINmD2YrZgSDYqtmF2LEg2YfYsNmHINin2YTYqtmG2LLZitmE2KfY' +
+                            'qtiMINir2YUg2LTYutmR2YQg2KfZhNmF2KvYqNmR2Kog2YXYsdipINij2K7YsdmJLg=='))))
+                        break
+                    }
+                    $x = $x.InnerException
+                }
                 $code = 3
             }
         }

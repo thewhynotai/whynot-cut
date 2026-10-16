@@ -17,6 +17,7 @@ import os
 import platform as _platform
 import re
 import shutil
+import ssl
 import stat
 import subprocess
 import sys
@@ -934,6 +935,14 @@ CACHE_FAIL_AR = ("تعذّر حفظ ملفات WhyNot Cut في مجلد المح
 CACHE_LINK_AR = ("تعذّر حفظ ملفات WhyNot Cut في مجلد المحرك لأن المجلد "
                  "downloads فيه رابط، وWhyNot Cut لا يتبع الروابط، فلم يُثبَّت شيء. احذف الرابط أو انقله ثم "
                  "شغّل المثبّت مرة أخرى.")
+# (TLS-1) a download failed on a certificate check: the two likely causes, and who can help (never "turn it off")
+CERT_HINT = ('The secure connection could not be checked (a certificate problem). The usual cause is antivirus '
+             'software that scans HTTPS connections, or a company proxy that inspects traffic. WhyNot Cut never turns '
+             "certificate checking off: ask your IT team, or your antivirus vendor's support, how to let these "
+             'downloads through, then run the installer again.')
+CERT_HINT_AR = ('تعذّر التحقق من الاتصال الآمن (مشكلة في الشهادة). السبب في الغالب برنامج حماية يفحص اتصالات HTTPS، أو '
+                'بروكسي في شبكة الشركة يفحص الاتصال. لا يوقف WhyNot Cut التحقق من الشهادات أبدًا: اسأل فريق تقنية '
+                'المعلومات عندك أو الدعم الفني لبرنامج الحماية كيف تمر هذه التنزيلات، ثم شغّل المثبّت مرة أخرى.')
 # fix round 5 (N6): ~/.whynot-cut was pointed elsewhere while the uninstall ran
 LINK_MOVED_AR = ("تغيّر المجلد الذي يشير إليه الرابط ~/.whynot-cut أثناء الإلغاء، لذلك لم يُحذف شيء آخر. تحقّق من "
                  "الرابط ثم شغّل الإلغاء مرة أخرى.")
@@ -1191,9 +1200,11 @@ class Paths:
             env.update(HOME=str(self.home), USERPROFILE=str(self.home), APPDATA=str(self.appdata),
                        LOCALAPPDATA=str(self.localappdata), CLAUDE_CONFIG_DIR=str(self.claude_dir))
         # uv: our own python and cache folders, no uv.toml / pyproject config (same as setup/setup_env.py uv_env)
+        # (TLS-1) UV_SYSTEM_CERTS: uv trusts the OS certificate store (Windows CryptoAPI, the macOS Keychain), as an
+        # antivirus that scans HTTPS or a company proxy needs; the certificate-file variables are left as they are
         env.update(WHYNOT_HOME=str(self.whynot), UV_PYTHON_INSTALL_DIR=str(self.python_dir),
-                   UV_CACHE_DIR=str(self.cache_dir / "uv"), UV_NO_CONFIG="1", UV_HTTP_TIMEOUT="60",
-                   UV_HTTP_RETRIES="5", PYTHONUTF8="1")
+                   UV_CACHE_DIR=str(self.cache_dir / "uv"), UV_NO_CONFIG="1", UV_SYSTEM_CERTS="1",
+                   UV_HTTP_TIMEOUT="60", UV_HTTP_RETRIES="5", PYTHONUTF8="1")
         return env
 
 
@@ -1508,6 +1519,15 @@ class _CurlUnusable(OSError):
     """curl cannot do this request here (missing, TLS / certificate / revocation trouble, old build): use urllib."""
 
 
+class _CurlCert(_CurlUnusable):
+    """(TLS-1) curl's TLS / certificate exits: on macOS reported (urllib would trust less than /usr/bin/curl, which uses
+    the Keychain); elsewhere urllib gets its go (the Windows store)."""
+
+
+class _CertError(_Fatal):
+    """(TLS-1) the server's certificate could not be checked: never retried, reported with CERT_HINT (EN + AR)."""
+
+
 class _CurlNoRoute(OSError):
     """curl could not resolve the proxy / the host or could not connect (exit 5 / 6 / 7). On Windows that is often a
     proxy curl does not know about: urllib reads the system (registry) proxy settings, so it gets one go."""
@@ -1515,7 +1535,8 @@ class _CurlNoRoute(OSError):
 
 # curl exit codes meaning "this curl cannot do it" rather than "the transfer broke": switch to urllib for good.
 # 1 protocol, 2 init, 4 feature not built in; 35 51 53 54 58 59 60 66 77 80 82 83 90 91 TLS and certificates.
-_CURL_UNUSABLE = {1, 2, 4, 35, 51, 53, 54, 58, 59, 60, 66, 77, 80, 82, 83, 90, 91}
+_CURL_CERT = {35, 51, 53, 54, 58, 59, 60, 66, 77, 80, 82, 83, 90, 91}
+_CURL_UNUSABLE = {1, 2, 4} | _CURL_CERT
 _CURL_NO_ROUTE = {5, 6, 7}  # could not resolve proxy, could not resolve host, failed to connect
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 
@@ -1535,13 +1556,16 @@ def find_curl() -> Optional[str]:
     return shutil.which("curl")
 
 
-def _fetch_curl(curl: str, url: str, part: Path, loopback: bool) -> None:
+def _fetch_curl(curl: str, url: str, part: Path, loopback: bool, proxy: Optional[str] = None) -> None:
     """curl writes to stdout into a file Python opened, so no non-ASCII path reaches curl's argv. A body shorter than
-    its Content-Length is curl exit 18 (OSError: retried); HTTP 4xx is _Fatal; a TLS-type failure is _CurlUnusable."""
+    its Content-Length is curl exit 18 (OSError: retried); HTTP 4xx is _Fatal; a TLS-type failure is _CurlCert, another
+    "cannot do it" exit _CurlUnusable. `proxy` (TLS-1, macOS): the system proxy, given to curl itself."""
     cmd = [curl, "--fail", "--location", "--silent", "--show-error", "--proto", "=http,https",
            "--connect-timeout", "30", "--speed-limit", "1024", "--speed-time", "60"]
     if loopback:
         cmd += ["--noproxy", "*"]  # a proxy in the environment must never sit between us and 127.0.0.1
+    elif proxy:
+        cmd += ["--proxy", proxy]
     try:
         with open(part, "wb") as fh:
             r = subprocess.run(cmd + [url], stdout=fh, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
@@ -1556,6 +1580,8 @@ def _fetch_curl(curl: str, url: str, part: Path, loopback: bool) -> None:
         m = re.search(r"error:? (\d{3})", last)
         if m and 400 <= int(m.group(1)) < 500:
             raise _Fatal(f"HTTP {m.group(1)}")
+    if r.returncode in _CURL_CERT:
+        raise _CurlCert(msg)
     if r.returncode in _CURL_UNUSABLE:
         raise _CurlUnusable(msg)
     if r.returncode in _CURL_NO_ROUTE:
@@ -1582,8 +1608,28 @@ def _fetch_urllib(url: str, part: Path, loopback: bool) -> None:
         if 400 <= e.code < 500:
             raise _Fatal(f"HTTP {e.code} {e.reason}") from None
         raise OSError(f"HTTP {e.code} {e.reason}") from None
+    except ssl.SSLError as e:  # (TLS-1) Python's own store (the Windows ROOT / CA stores) did not trust it
+        raise _CertError(f"certificate problem: {e}") from None
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, ssl.SSLError):
+            raise _CertError(f"certificate problem: {e.reason}") from None
+        raise
     except http.client.HTTPException as e:  # IncompleteRead, RemoteDisconnected ... are not OSError
         raise OSError(f"transfer interrupted: {type(e).__name__}: {e}") from None
+
+
+def _macos() -> bool:
+    return sys.platform == "darwin"
+
+
+def _system_proxy(scheme: str) -> Optional[str]:
+    """(TLS-1) the proxy the system names for `scheme` (macOS: SystemConfiguration through urllib's _scproxy; Windows:
+    the registry; elsewhere the environment), or None."""
+    try:
+        proxies = urllib.request.getproxies()
+    except Exception:  # noqa: BLE001 - a broken proxy setting is "no proxy", never a crash
+        return None
+    return proxies.get(scheme) or proxies.get("https") or proxies.get("http") or None
 
 
 def download(url, sha256, dest_dir, log: Log, *, name: Optional[str] = None, retries: int = 3) -> Path:
@@ -1595,8 +1641,11 @@ def download(url, sha256, dest_dir, log: Log, *, name: Optional[str] = None, ret
     `retries` tries and the final failure says it was the transfer; HTTP 4xx fails at once. A complete file whose
     sha256 does not match is deleted and raises DownloadError (not retried: the pin or the server is wrong). curl goes
     first; urllib takes over for good when curl is missing or cannot do the request (TLS, certificates), and for that
-    attempt when curl cannot reach the server (exit 5 / 6 / 7: urllib reads the system proxy settings). Placeholder pins
-    are refused before any request. http(s):// and file:// only."""
+    attempt when curl cannot reach the server (exit 5 / 6 / 7: urllib reads the system proxy settings). On macOS
+    (TLS-1) /usr/bin/curl uses the Keychain, so a certificate error is reported (never urllib, which trusts less), and a
+    curl that cannot reach the server is tried again through the system proxy only when one is set. A certificate error
+    anywhere is never retried and says why (CERT_HINT, English and Arabic). Certificate checking is never turned off.
+    Placeholder pins are refused before any request. http(s):// and file:// only."""
     if is_placeholder(url) or is_placeholder(sha256):
         raise DownloadError(f"not available in this build (placeholder pin): {url!r} sha256={sha256!r}")
     if not isinstance(sha256, str) or not _HEX64.match(sha256):
@@ -1636,14 +1685,28 @@ def download(url, sha256, dest_dir, log: Log, *, name: Optional[str] = None, ret
             elif curl:
                 try:
                     _fetch_curl(curl, url, part, loopback)
+                except _CurlCert as e:
+                    if _macos():  # (TLS-1) /usr/bin/curl trusts the Keychain; urllib would trust less: report it
+                        raise _CertError(f"certificate problem: {e}") from None
+                    log.warn(f"curl cannot do this here ({e}); using Python's downloader from now on")
+                    curl = None
+                    _fetch_urllib(url, part, loopback)
                 except _CurlUnusable as e:
                     log.warn(f"curl cannot do this here ({e}); using Python's downloader from now on")
                     curl = None
                     _fetch_urllib(url, part, loopback)
                 except _CurlNoRoute as e:  # this attempt only: the next one tries curl again
-                    log.warn(f"curl could not reach the server ({e}); trying Python's downloader, which uses the "
-                             "system proxy settings")
-                    _fetch_urllib(url, part, loopback)
+                    if _macos():  # (TLS-1) curl again, through the system proxy, and only when one is set
+                        proxy = None if loopback else _system_proxy(parsed.scheme)
+                        if not proxy:
+                            raise OSError(str(e)) from None
+                        log.warn(f"curl could not reach the server ({e}); trying again through the system proxy "
+                                 f"{proxy}")
+                        _fetch_curl(curl, url, part, loopback, proxy=proxy)
+                    else:
+                        log.warn(f"curl could not reach the server ({e}); trying Python's downloader, which uses "
+                                 "the system proxy settings")
+                        _fetch_urllib(url, part, loopback)
             else:
                 _fetch_urllib(url, part, loopback)
             last = None
@@ -1651,7 +1714,8 @@ def download(url, sha256, dest_dir, log: Log, *, name: Optional[str] = None, ret
         except _Fatal as e:
             if part.exists():
                 part.unlink()
-            raise DownloadError(f"could not download {url}: {e}") from None
+            hint = f" {CERT_HINT} {CERT_HINT_AR}" if isinstance(e, _CertError) else ""
+            raise DownloadError(f"could not download {url}: {e}.{hint}") from None
         except (OSError, ValueError) as e:  # URLError is an OSError
             last = e
             if part.exists():

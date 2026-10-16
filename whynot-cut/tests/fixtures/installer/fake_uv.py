@@ -14,7 +14,7 @@ Behaviour:
                                   (it is created then), so the core goes on to `python install`
   venv <dir> [--python <py>] ...  `<py or sys.executable> -m venv --without-pip <dir>` (other flags ignored)
   pip sync ...                    exit 1 when FAKE_UV_FAIL=sync, else 0
-Every call appends {"argv": [...], "UV_NO_CONFIG": <env value or null>} as one JSON line to $FAKE_UV_LOG (when
+Every call appends {"argv": [...], "UV_NO_CONFIG": <env value or null>, "UV_SYSTEM_CERTS": ...} as one JSON line to $FAKE_UV_LOG (when
 set), so a test can assert "no uv call" and that the core switched uv's config files off.
 """
 import json
@@ -27,7 +27,8 @@ def main(argv):
     log = os.environ.get("FAKE_UV_LOG")
     if log:
         with open(log, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"argv": argv, "UV_NO_CONFIG": os.environ.get("UV_NO_CONFIG")},
+            f.write(json.dumps({"argv": argv, "UV_NO_CONFIG": os.environ.get("UV_NO_CONFIG"),
+                                "UV_SYSTEM_CERTS": os.environ.get("UV_SYSTEM_CERTS")},
                                ensure_ascii=False) + "\n")
     if argv[:1] == ["--version"]:
         print("uv " + os.environ.get("FAKE_UV_VERSION", "0.0.0"))

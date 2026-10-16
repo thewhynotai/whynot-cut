@@ -79,6 +79,7 @@ import math
 import os
 import re
 import shutil
+import ssl
 import stat
 import subprocess
 import sys
@@ -88,6 +89,7 @@ import threading
 import time
 import types
 import unittest
+import urllib.error
 import zipfile
 from pathlib import Path
 from unittest import mock
@@ -999,6 +1001,99 @@ class TestDownload(unittest.TestCase):
         self.assertEqual(len(self.srv.hits), 3)  # one urllib request per download; the fake curl made none
 
 
+    # ------------------------------------------------------------------ TLS-1
+    def mac(self):
+        return mock.patch.object(base.sys, "platform", "darwin")
+
+    def test_tls1_macos_never_falls_back_to_urllib_after_a_certificate_error(self):
+        # /usr/bin/curl uses the Keychain; urllib would trust LESS. A certificate error is reported, with the hint
+        for code in (35, 60, 77):
+            with self.subTest(curl_exit=code), self.mac(), \
+                    mock.patch.object(base, "find_curl", return_value=self.fake_curl(code)), \
+                    mock.patch.object(base, "_fetch_urllib", side_effect=AssertionError("urllib used")) as ul:
+                with self.assertRaises(base.DownloadError) as cm:
+                    base.download(self.url, sha(self.BODY), self.dl, Quiet(), retries=3)
+                ul.assert_not_called()
+                msg = str(cm.exception)
+                self.assertIn("certificate", msg)
+                self.assertIn(base.CERT_HINT, msg)
+                self.assertIn(base.CERT_HINT_AR, msg)
+        self.assertEqual(self.srv.hits, [])
+        self.assertEqual(os.listdir(self.dl), [])
+
+    def test_tls1_macos_retries_curl_through_the_system_proxy_only(self):
+        calls = []
+
+        def curl(path, url, part, loopback, proxy=None):
+            calls.append(proxy)
+            if proxy is None:
+                raise base._CurlNoRoute("curl exit 7: could not connect")
+            part.write_bytes(self.BODY)
+
+        with self.mac(), mock.patch.object(base, "find_curl", return_value="/usr/bin/curl"), \
+                mock.patch.object(base, "_fetch_curl", side_effect=curl), \
+                mock.patch.object(base, "_fetch_urllib", side_effect=AssertionError("urllib used")), \
+                mock.patch.object(base.urllib.request, "getproxies", return_value={"https": "http://p:8080"}):
+            out = base.download("https://example.invalid/a/tool.zip", sha(self.BODY), self.dl, Quiet())
+        self.assertEqual(out.read_bytes(), self.BODY)
+        self.assertEqual(calls, [None, "http://p:8080"])
+        out.unlink()
+        # no proxy configured: curl again on the next try (a transfer error), never urllib
+        calls.clear()
+        with self.mac(), mock.patch.object(base, "find_curl", return_value="/usr/bin/curl"), \
+                mock.patch.object(base, "_fetch_curl", side_effect=base._CurlNoRoute("curl exit 7")) as fc, \
+                mock.patch.object(base, "_fetch_urllib", side_effect=AssertionError("urllib used")) as ul, \
+                mock.patch.object(base.urllib.request, "getproxies", return_value={}):
+            with self.assertRaises(base.DownloadError):
+                base.download("https://example.invalid/a/tool.zip", sha(self.BODY), self.dl, Quiet(), retries=2)
+        self.assertEqual(fc.call_count, 2)
+        ul.assert_not_called()
+
+    def test_tls1_curl_gets_the_proxy_on_its_command_line(self):
+        seen = []
+
+        def run(cmd, **kw):
+            seen.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+        self.dl.mkdir(parents=True, exist_ok=True)
+        with mock.patch.object(base.subprocess, "run", side_effect=run):
+            base._fetch_curl("/usr/bin/curl", "https://example.invalid/x", self.dl / "x.part", False,
+                             proxy="http://p:8080")
+        i = seen[0].index("--proxy")
+        self.assertEqual(seen[0][i + 1], "http://p:8080")
+        self.assertNotIn("-k", seen[0])
+        self.assertNotIn("--insecure", seen[0])
+
+    def test_tls1_windows_keeps_the_os_store_and_says_why_on_a_certificate_error(self):
+        # urllib without a context= / cafile= keeps the Windows ROOT and CA stores (create_default_context)
+        seen = {}
+
+        def urlopen(req, **kw):
+            seen.update(kw)
+            raise urllib.error.URLError(ssl.SSLCertVerificationError(1, "certificate verify failed"))
+
+        with mock.patch.object(base, "find_curl", return_value=None), \
+                mock.patch.object(base.urllib.request, "urlopen", side_effect=urlopen) as uo:
+            with self.assertRaises(base.DownloadError) as cm:
+                base.download("https://example.invalid/a/tool.zip", sha(self.BODY), self.dl, Quiet(), retries=3)
+        self.assertEqual(set(seen), {"timeout"})  # no context=, no cafile=
+        self.assertEqual(uo.call_count, 1)  # a certificate error is not retried
+        self.assertIn(base.CERT_HINT, str(cm.exception))
+        self.assertIn(base.CERT_HINT_AR, str(cm.exception))
+        if IS_WIN:
+            self.assertGreater(ssl.create_default_context().cert_store_stats()["x509_ca"], 0)
+
+    def test_tls1_the_hint_never_says_to_turn_protection_off(self):
+        for text in (base.CERT_HINT.lower(), base.CERT_HINT_AR):
+            for bad in ("disable", "turn off your", "exclusion", "exception", "allow list", "whitelist",
+                        "عطّل", "أوقف برنامج", "استثناء"):
+                self.assertNotIn(bad, text)
+        self.assertIn("antivirus", base.CERT_HINT)
+        self.assertIn("proxy", base.CERT_HINT)
+        self.assertIn("IT", base.CERT_HINT)
+
+
 # --------------------------------------------------------------------------------------------- extract
 class TestExtract(unittest.TestCase):
     def setUp(self):
@@ -1476,6 +1571,8 @@ class TestRuntime(unittest.TestCase):
         self.assertIn(str(self.lock), sync[0])
         self.assertNotIn("--index-url", sync[0])
         self.assertTrue(all(c["UV_NO_CONFIG"] == "1" for c in self.uv_log_lines()))  # uv never reads uv.toml
+        # (TLS-1) every uv call trusts the OS certificate store: python install, venv, pip sync
+        self.assertTrue(all(c.get("UV_SYSTEM_CERTS") == "1" for c in self.uv_log_lines()), self.uv_log_lines())
         self.assertEqual(ctx.state.data["runtime"]["id"], rid)
         # (c) a second run finds the stamped runtime and its smoke import passing: no uv call at all
         self.uv_log.unlink()
@@ -1498,6 +1595,14 @@ class TestRuntime(unittest.TestCase):
     def test_uv_child_env(self):
         env = base.Paths.from_env(str(self.home), env={}).child_env({})
         self.assertEqual((env["UV_NO_CONFIG"], env["UV_HTTP_TIMEOUT"], env["UV_HTTP_RETRIES"]), ("1", "60", "5"))
+        # (TLS-1) the OS certificate store (antivirus HTTPS scanning, company proxies); SSL_CERT_FILE / SSL_CERT_DIR
+        # are never set or cleared: absent stays absent, a value IT set passes through unchanged
+        self.assertEqual(env["UV_SYSTEM_CERTS"], "1")
+        self.assertNotIn("SSL_CERT_FILE", env)
+        self.assertNotIn("SSL_CERT_DIR", env)
+        mine = {"SSL_CERT_FILE": "C:/it/corp.pem", "SSL_CERT_DIR": "/etc/it/certs"}
+        env = base.Paths.from_env(str(self.home), env={}).child_env(dict(mine))
+        self.assertEqual({k: env[k] for k in mine}, mine)
 
     def test_index_url_is_passed_when_pinned(self):
         self.comp["runtime"]["index_url"] = "https://mirror.example/simple"
@@ -3755,6 +3860,7 @@ class TestShellScripts(unittest.TestCase):
         for name in ("bootstrap.ps1", "bootstrap.sh"):
             text = SHELL_FILES[name].read_text(encoding="utf-8")
             for needle in ("--no-bin", "--no-registry", "only-managed", "UV_NO_MODIFY_PATH", "UV_NO_CONFIG",
+                           "UV_SYSTEM_CERTS",
                            "UV_PYTHON_INSTALL_DIR", "UV_CACHE_DIR", "UV_PYTHON_PREFERENCE", "utf8", "wnc_install.py"):
                 self.assertIn(needle, text, f"{name}: {needle}")
 
@@ -3862,6 +3968,39 @@ class TestPowerShellFrontEnd(_ShellCase):
 
     def front(self) -> Path:
         return self.fx.plugin_root / "installer" / "install.ps1"
+
+    def test_tls1_every_uv_call_uses_the_os_certificate_store(self):
+        log = self.tmp / "uv.jsonl"
+        r = self.ps(self.front(), "-Home", self.home, "-Yes", "-Skip", "model,launch",
+                    env=self.env(FAKE_UV_LOG=str(log)))
+        self.assert_installed(r, "win-x64")
+        calls = [json.loads(x) for x in log.read_text(encoding="utf-8").splitlines() if x.strip()]
+        self.assertTrue(any(c["argv"][:2] == ["python", "find"] for c in calls), calls)
+        self.assertTrue(all(c["UV_SYSTEM_CERTS"] == "1" for c in calls), calls)
+        self.assertNotIn("UV_SYSTEM_CERTS", os.environ)  # (the test's own process was never touched)
+
+    def test_tls1_a_trust_failure_says_why_and_never_to_turn_it_off(self):
+        # Invoke-WebRequest's TLS trust failure: the hint names antivirus HTTPS scanning or a company proxy (EN + AR)
+        boot = INSTALLER / "core" / "bootstrap.ps1"
+        arabic = re.search(r"(?ms)^    \$WncAr = @\{.*?^    \}\n", boot.read_text(encoding="utf-8")).group(0)
+        body = ("$S = @{ Utf8 = (New-Object System.Text.UTF8Encoding $false) }\n[Console]::OutputEncoding = $S.Utf8\n"
+                + arabic + shell_function(boot, "Get-WncArabic", True) + shell_function(boot, "Test-WncCertError", True)
+                + "$e = New-Object System.Net.WebException('The underlying connection was closed: Could not establish "
+                  "trust relationship for the SSL/TLS secure channel.', [System.Net.WebExceptionStatus]::TrustFailure)\n"
+                  "if (Test-WncCertError $e) { Write-WncCertHint } else { 'not a certificate error' }\n"
+                  "$o = New-Object System.Net.WebException('The operation has timed out',"
+                  " [System.Net.WebExceptionStatus]::Timeout)\n"
+                  "if (Test-WncCertError $o) { 'WRONG' } else { 'timeout is not a certificate error' }\n")
+        body = body.replace("Write-WncCertHint", "Write-Host $WncCertHint; Write-Host (Get-WncArabic 'CertHint')")
+        script = self.tmp / "cert.ps1"
+        script.write_text("$WncCertHint = '" + base.CERT_HINT.replace("'", "''") + "'\n" + body, encoding="utf-8-sig")
+        r = self.ps(script)
+        out = r.stdout + r.stderr
+        self.assertIn(base.CERT_HINT_AR, out)
+        self.assertIn("timeout is not a certificate error", out)
+        self.assertNotIn("WRONG", out)
+        self.assertRegex((CORE / "bootstrap.ps1").read_text(encoding="utf-8"),
+                         re.escape("'" + base.CERT_HINT.replace("'", "''") + "'"))
 
     def test_install_in_an_arabic_home_touches_nothing_outside(self):
         before = live_snapshot()
@@ -4195,6 +4334,33 @@ class TestBashFrontEnd(_ShellCase):
 
     def home_arg(self) -> str:
         return self.home.as_posix()
+
+    def test_tls1_every_uv_call_uses_the_os_certificate_store(self):
+        log = self.tmp / "uv.jsonl"
+        r = self.sh(self.front(), "--home", self.home_arg(), "--yes", "--skip", "model,launch",
+                    env=self.env(FAKE_UV_LOG=str(log)))
+        self.assert_installed(r, "mac-arm64")
+        calls = [json.loads(x) for x in log.read_text(encoding="utf-8").splitlines() if x.strip()]
+        self.assertTrue(any(c["argv"][:2] == ["python", "find"] for c in calls), calls)
+        self.assertTrue(all(c["UV_SYSTEM_CERTS"] == "1" for c in calls), calls)
+
+    def test_tls1_a_certificate_error_says_why_and_never_to_turn_it_off(self):
+        # the bootstrap's own download: a curl certificate error (exit 60) names antivirus HTTPS scanning or a company
+        # proxy, in English and Arabic, and stops (exit 3)
+        boot = INSTALLER / "core" / "bootstrap.sh"
+        names = ["download", "file_sha", "say", "log_line", "fail", "cert_hint"]
+        script = self.tmp / "dl.sh"
+        script.write_text('LOG=""; STEP=uv\n' + "".join(shell_function(boot, n, False) for n in names)
+                          + 'wnc_curl() { echo "curl: (60) SSL certificate problem: unable to get local issuer '
+                            'certificate" >&2; return 60; }\n'
+                            'download "https://example.invalid/a/uv.tar.gz" "' + "0" * 64 + '" "$1"\n',
+                          encoding="utf-8", newline="\n")
+        r = subprocess.run([find_bash(), str(script), (self.tmp / "dl").as_posix()], capture_output=True, timeout=60,
+                           env=self.env())
+        out = (r.stdout + r.stderr).decode("utf-8", "replace")
+        self.assertEqual(r.returncode, 3, out)
+        self.assertIn(base.CERT_HINT, out)
+        self.assertIn(base.CERT_HINT_AR, out)
 
     def test_install_in_an_arabic_home_touches_nothing_outside(self):
         before = live_snapshot()
@@ -8892,6 +9058,70 @@ class TestStaticChecks(unittest.TestCase):
         self._td = TempDir()
         self.addCleanup(self._td.cleanup)
         self.tmp = Path(self._td.name)
+
+    INSECURE = (r"--insecure\b", r"\bverify\s*=\s*False\b", r"\bCERT_NONE\b", r"_create_unverified_context",
+                r"SkipCertificateCheck", r"ServerCertificateValidationCallback", r"check_hostname\s*=\s*False",
+                r"--allow-insecure-host", r"\bUV_INSECURE_HOST\b", r"\bUV_NATIVE_TLS\b", r"--native-tls",
+                r"\bSSL_CERT_FILE\b", r"\bSSL_CERT_DIR\b")
+
+    @classmethod
+    def insecure_hits(cls, root: Path) -> list:
+        """(TLS-1) every way of turning certificate checking off, and every touch of SSL_CERT_FILE / SSL_CERT_DIR, in
+        the installer's own sources (code and comments alike); a curl `-k` (alone or in a short-flag cluster)."""
+        hits = []
+        for f in sorted(p for ext in ("*.py", "*.sh", "*.ps1") for p in root.rglob(ext)):
+            for i, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                for rx in cls.INSECURE:
+                    if re.search(rx, line):
+                        hits.append(f"{f.name}:{i}: {rx}")
+                if re.search(r"\bcurl\b", line) and re.search(r"(?:^|\s)-[A-Za-z]*k[A-Za-z]*(?=\s|$)", line):
+                    hits.append(f"{f.name}:{i}: curl -k")
+        return hits
+
+    def test_tls1_certificate_checking_is_never_turned_off(self):
+        self.assertEqual(self.insecure_hits(INSTALLER), [])
+        # mutation proof: each banned form, added to a copy, turns the scan red
+        forms = ["curl -fsSLk https://x", "curl -k https://x", "curl --insecure https://x", "requests.get(u, verify=False)",
+                 "ctx.verify_mode = ssl.CERT_NONE", "ssl._create_unverified_context()",
+                 "Invoke-WebRequest -SkipCertificateCheck -Uri $u",
+                 "[Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }",
+                 "ctx.check_hostname = False", "uv pip sync --allow-insecure-host x", "export UV_INSECURE_HOST=x",
+                 "export UV_NATIVE_TLS=1", "uv --native-tls", "export SSL_CERT_FILE=/x.pem", "os.environ['SSL_CERT_DIR'] = d"]
+        copy = self.tmp / "installer copy"
+        shutil.copytree(INSTALLER, copy)
+        self.assertEqual(self.insecure_hits(copy), [])
+        for form in forms:
+            for rel in ("core/bootstrap.sh", "core/wnc_installer/base.py", "core/bootstrap.ps1"):
+                with self.subTest(form=form, file=rel):
+                    target = copy / rel
+                    original = target.read_text(encoding="utf-8")
+                    target.write_text(original + "\n" + form + "\n", encoding="utf-8")
+                    try:
+                        self.assertNotEqual(self.insecure_hits(copy), [])
+                    finally:
+                        target.write_text(original, encoding="utf-8")
+        # a `-k` that is not curl's (ditto -x -k unzips on macOS) is fine
+        self.assertEqual(self.insecure_hits(copy), [])
+
+    def test_tls1_uv_system_certs_is_restored_after_the_run(self):
+        ps = (CORE / "bootstrap.ps1").read_text(encoding="utf-8")
+        m = re.search(r"(?s)\$EnvNames = @\((.*?)\)", ps)
+        self.assertIsNotNone(m)
+        self.assertIn("'UV_SYSTEM_CERTS'", m.group(1))
+        self.assertRegex(ps, r"\$env:UV_SYSTEM_CERTS = '1'")
+        self.assertRegex((CORE / "bootstrap.sh").read_text(encoding="utf-8"), r"(?m)^export [^\n]*\bUV_SYSTEM_CERTS=1\b")
+
+    def test_tls1_macos_shells_call_the_system_curl(self):
+        # /usr/bin/curl (sealed system volume, uses the Keychain), never a curl found on PATH (conda, Homebrew)
+        for name in ("bootstrap.sh", "install.sh"):
+            text = SHELL_FILES[name].read_text(encoding="utf-8")
+            code = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+            bare = [ln for ln in code if re.search(r"(?:^|[\s;&|(`])curl\s+-", ln)]
+            self.assertEqual(bare, [], name)  # every call goes through wnc_curl
+            m = re.search(r"(?ms)^wnc_curl\(\) \{.*?^\}", text)
+            self.assertIsNotNone(m, name)
+            self.assertIn('Darwin) /usr/bin/curl "$@"', m.group(0), name)
+            self.assertRegex(text, r"wnc_curl\s+-", name)
 
     def test_the_one_liners_use_the_dl_host(self):
         # Addendum F: the scripts are served from dl.thewhynot.ai, never from the root site
