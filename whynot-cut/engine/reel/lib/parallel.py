@@ -12,6 +12,7 @@ children), and `cancelled()` turns true inside the workers so they stop at their
 from __future__ import annotations
 
 import contextvars
+import os
 import subprocess
 import sys
 import threading
@@ -82,8 +83,10 @@ def kill_tree(proc) -> None:
         return
     if sys.platform == "win32":
         try:
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=5,
+            # full path: CreateProcess would also look for a bare "taskkill" in the current folder
+            root = os.environ.get("SystemRoot") or os.environ.get("windir") or r"C:\Windows"
+            subprocess.run([root.rstrip("\\/") + "\\System32\\taskkill.exe", "/F", "/T", "/PID", str(proc.pid)],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except (OSError, subprocess.SubprocessError):
             pass

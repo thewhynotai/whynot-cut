@@ -12,7 +12,6 @@ The newest version wins. The installer (installer/core) uses the same rules.
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,16 +24,35 @@ def _ver_key(p: Path):
     return (0,)
 
 
+def _on_path(env, platform):
+    """`claude` on PATH, searching only ABSOLUTE PATH folders. Not shutil.which: on Windows it looks in the current
+    folder first (unless NoDefaultCurrentDirectoryInExePath is set), so a claude.exe planted in a client folder would
+    run, or hide the real CLI. `Path.is_absolute` also refuses a drive-less `\\dir` (os.path.isabs accepts it)."""
+    if platform == "win32":
+        exts = [e for e in (env.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(";") if e]
+    else:
+        exts = [""]
+    for d in (env.get("PATH") or "").split(os.pathsep):
+        d = d.strip().strip('"')
+        if not d or not Path(d).is_absolute():
+            continue
+        for e in exts:
+            p = Path(d) / ("claude" + e.lower())
+            if p.is_file() and (platform == "win32" or os.access(p, os.X_OK)):
+                return p
+    return None
+
+
 def candidates(env=None, home=None, platform=None):
     env = os.environ if env is None else env
     home = Path(home or Path.home())
     platform = platform or sys.platform
     out = []
-    if env.get("CLAUDE_CLI"):
+    if env.get("CLAUDE_CLI") and Path(env["CLAUDE_CLI"]).is_absolute():
         out.append(Path(env["CLAUDE_CLI"]))
-    which = shutil.which("claude")
-    if which:
-        out.append(Path(which))
+    on_path = _on_path(env, platform)
+    if on_path:
+        out.append(on_path)
     exe = "claude.exe" if platform == "win32" else "claude"
     bundles = []
     if platform == "win32":
