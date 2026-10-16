@@ -283,7 +283,9 @@ class Approval(Base):
         self.assertIsNone(a["preview_mp4"])
         self.assertEqual(a["flagged"], [])
         pv = write(self.p("08_quality_control/preview/C0239_preview.mp4"), b"\x00\x00")
-        self.assertEqual(Path(self.fields()["approval"]["preview_mp4"]), pv)
+        # engine_state hands out the RESOLVED path (_check: resolve(strict=True), base resolved too); a temp root behind
+        # a link (macOS /var -> /private/var) differs only by that, so both sides are resolved (macOS CI, v3.0.0-p3)
+        self.assertEqual(Path(self.fields()["approval"]["preview_mp4"]).resolve(), pv.resolve())
         self.assert_valid_state(f)
 
     def test_a_current_approval_clears_the_card_and_a_changed_plan_brings_it_back(self):
@@ -323,15 +325,18 @@ class QcTiles(Base):
         write(self.run2 / "notes.png", b"")                              # no milliseconds in the name: skipped
 
     def record(self, sheet, verdict="pass", **over):
+        """visual-verification.json as verify.py writes it: its `sheet` comes from common.Paths, so it is resolved (a
+        temp root behind a link, macOS /var -> /private/var, would otherwise never match the run's sheet)."""
         rec = {"verdict": verdict, "notes": "", "by": "claude", "at": iso(NOW), "recorded_epoch": time.time(),
-               "sheet": str(sheet), "sheet_mtime": sheet.stat().st_mtime}
+               "sheet": str(sheet.resolve()), "sheet_mtime": sheet.stat().st_mtime}
         rec.update(over)
         write(self.p("08_quality_control/visual-verification.json"), rec)
 
     def test_tiles_come_from_the_newest_run_pending_until_its_sheet_is_verified(self):
         f = self.fields()
         self.assertEqual([(q["t_s"], q["verdict"]) for q in f["qc"]], [(2.5, "pending"), (15.0, "pending")])
-        self.assertEqual(Path(f["qc"][0]["file"]), self.run2 / "frame_002500.png")
+        self.assertEqual(Path(f["qc"][0]["file"]).resolve(),                 # the resolved path: see Approval
+                         (self.run2 / "frame_002500.png").resolve())
         self.assertEqual(f["qc"][0]["label"], "")                       # the engine stores no per-frame label
         self.assertRegex(f["qc"][0]["tc"], r"^[0-9]{2}:[0-9]{2}:[0-9]{2}:[0-9]{2}$")
         self.assert_valid_state(f)

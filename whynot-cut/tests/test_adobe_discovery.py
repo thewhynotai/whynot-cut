@@ -22,6 +22,11 @@ from lib import plat  # noqa: E402
 from lib.errors import Guidance  # noqa: E402
 
 APP_PATHS = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\"
+# Real registry folder values end in a separator ("C:\\...\\Adobe Photoshop 2026\\"). The fixtures add the NATIVE one:
+# "\\" on Windows (exactly what Adobe writes, so the trailing-backslash case stays covered there) and "/" on POSIX,
+# where a "\\" is an ordinary filename character: the value would name a folder "...\" that does not exist and the
+# registry hit would be lost (macOS CI, v3.0.0-p3). A real Mac never reads the registry (NoRegistry below).
+TRAIL = os.sep
 
 
 class FakeRegistry:
@@ -107,7 +112,7 @@ class WindowsRegistry(WindowsLayout):
 
     def test_after_effects_install_path_is_the_support_files_folder(self):
         exe = self.ae()
-        reg = FakeRegistry({"SOFTWARE\\Adobe\\After Effects\\26.0": {"InstallPath": str(exe.parent) + "\\"}})
+        reg = FakeRegistry({"SOFTWARE\\Adobe\\After Effects\\26.0": {"InstallPath": str(exe.parent) + TRAIL}})
         a = plat.newest_app("after_effects", win_sources(registry=reg))
         self.assertEqual(Path(a["exe"]), exe)
         self.assertEqual(Path(a["folder"]), exe.parent.parent)
@@ -115,7 +120,7 @@ class WindowsRegistry(WindowsLayout):
 
     def test_photoshop_application_path(self):
         exe = self.photoshop()
-        reg = FakeRegistry({"SOFTWARE\\Adobe\\Photoshop\\200.0": {"ApplicationPath": str(exe.parent) + "\\"}})
+        reg = FakeRegistry({"SOFTWARE\\Adobe\\Photoshop\\200.0": {"ApplicationPath": str(exe.parent) + TRAIL}})
         a = plat.newest_app("photoshop", win_sources(registry=reg))
         self.assertEqual((Path(a["exe"]), a["source"]), (exe, "registry"))
 
@@ -143,13 +148,13 @@ class WindowsRegistry(WindowsLayout):
 class WindowsAppPathsAndScan(WindowsLayout):
     def test_app_paths_default_value_is_read_with_its_quotes_removed(self):
         exe = self.premiere()
-        reg = FakeRegistry({APP_PATHS + "Adobe Premiere Pro.exe": {"": f'"{exe}"', "Path": str(exe.parent) + "\\"}})
+        reg = FakeRegistry({APP_PATHS + "Adobe Premiere Pro.exe": {"": f'"{exe}"', "Path": str(exe.parent) + TRAIL}})
         a = plat.newest_app("premiere", win_sources(registry=reg))
         self.assertEqual((Path(a["exe"]), a["source"]), (exe, "app-paths"))
 
     def test_app_paths_for_after_effects_resolves_the_app_folder(self):
         exe = self.ae()
-        reg = FakeRegistry({APP_PATHS + "AfterFX.exe": {"": str(exe), "Path": str(exe.parent) + "\\"}})
+        reg = FakeRegistry({APP_PATHS + "AfterFX.exe": {"": str(exe), "Path": str(exe.parent) + TRAIL}})
         a = plat.newest_app("after_effects", win_sources(registry=reg))
         self.assertEqual((Path(a["exe"]), Path(a["folder"]), a["source"]), (exe, exe.parent.parent, "app-paths"))
 
@@ -431,7 +436,7 @@ class RealVersion(WindowsLayout):
         reg = FakeRegistry({
             "SOFTWARE\\Adobe\\Premiere Pro\\26.0": {"InstallPath": str(pre.parent)},
             "SOFTWARE\\Adobe\\After Effects\\26.0": {"InstallPath": str(ae.parent)},
-            "SOFTWARE\\Adobe\\Photoshop\\200.0": {"ApplicationPath": str(ps.parent) + "\\"}})
+            "SOFTWARE\\Adobe\\Photoshop\\200.0": {"ApplicationPath": str(ps.parent) + TRAIL}})
         fv = {"Adobe Premiere Pro.exe": "26.5.2.5", "AfterFX.exe": "26.5.0.89", "Photoshop.exe": "27.11.0.26",
               "Adobe Media Encoder.exe": "26.5.2.2"}
         src = win_sources(registry=reg, program_dirs=[self.pf], file_version=fv)
@@ -521,7 +526,7 @@ class RankingByVersion(WindowsLayout):
 
     def test_photoshop_year_follows_its_own_version_numbering(self):
         ps = touch(self.tmp / "tools" / "PS" / "Photoshop.exe")
-        reg = FakeRegistry({"SOFTWARE\\Adobe\\Photoshop\\200.0": {"ApplicationPath": str(ps.parent) + "\\"}})
+        reg = FakeRegistry({"SOFTWARE\\Adobe\\Photoshop\\200.0": {"ApplicationPath": str(ps.parent) + TRAIL}})
         a = plat.newest_app("photoshop", win_sources(registry=reg, file_version={"Photoshop.exe": "27.11.0.26"}))
         self.assertEqual(a["year"], 2026)                                     # Photoshop 27 = 2026; "200.0" is no year
         b = plat.newest_app("photoshop", win_sources(registry=reg))

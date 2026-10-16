@@ -230,8 +230,11 @@ class TestSetup(_Base):
         self.assertEqual((self.sdir / "ZXPSignCmd.exe").read_bytes(), TOOL_BYTES)
         (call,) = runner.calls
         secret = store.data[sign_zxp.CRED_TARGET]
-        self.assertEqual(call, [str(self.sdir / "ZXPSignCmd.exe"), "-selfSignedCert", "EG", "Cairo", "The Why Not AI",
-                                "WhyNot Cut", secret, str(self.sdir / "whynot-cut.p12"), "-validityDays", "3650"])
+        # sign_zxp.real() resolves every path it hands ZXPSignCmd, on purpose (it cannot open through a junction): a
+        # temp root behind a link (macOS /var -> /private/var) shows up resolved (macOS CI, v3.0.0-p3)
+        sdir = self.sdir.resolve()
+        self.assertEqual(call, [str(sdir / "ZXPSignCmd.exe"), "-selfSignedCert", "EG", "Cairo", "The Why Not AI",
+                                "WhyNot Cut", secret, str(sdir / "whynot-cut.p12"), "-validityDays", "3650"])
         self.assertGreaterEqual(len(secret), 43)
         cert = (self.sdir / "whynot-cut.p12").read_bytes()
         r2 = sign_zxp.setup(home=self.sdir, runner=runner, store=store, key="test-x64", log=self.log,
@@ -473,7 +476,7 @@ class TestBuild(_Base):
         self.assertEqual(sorted(r["removed"]), ["WhyNotCut-Bridge-2.9.0.zxp", "stray.zxp"])
         self.assertEqual(runner.ops(), ["-sign", "-verify"])
         sign, ver = runner.calls
-        self.assertEqual(sign[1:2] + sign[4:], ["-sign", str(self.sdir / "whynot-cut.p12"),
+        self.assertEqual(sign[1:2] + sign[4:], ["-sign", str(self.sdir.resolve() / "whynot-cut.p12"),   # real()
                                                 store.data[sign_zxp.CRED_TARGET], "-tsa", "http://timestamp.digicert.com"])
         self.assertEqual(Path(sign[2]).name, cep_bundle.EXT_ID)
         self.assertEqual(ver[1:], ["-verify", sign[3], "-certinfo"])

@@ -1074,13 +1074,31 @@ class TestEngineStart(_NodeBridge):
     <engine home>/bin/wnc-engine(.cmd), never from the panel, at most once per 30 s, and after 5 failures only once per 5 minutes (the slow
     retry)."""
 
+    def node_realpath(self, p: Path) -> str:
+        """fs.realpathSync(p), the very call bridge.js makes (bridge.js launcherFrom). Python's realpath is not the
+        same string on Windows: it expands 8.3 names and takes the on-disk case (C:\\PROGRA~1 -> C:\\Program Files,
+        d:\\x -> D:\\X), node keeps both. On POSIX they agree, and that is checked: a temp root behind a link (macOS
+        /var -> /private/var) comes back resolved."""
+        import subprocess
+        r = subprocess.run([NODE, "-e", "process.stdout.write(require('fs').realpathSync(process.argv[1]))", str(p)],
+                           capture_output=True, text=True, encoding="utf-8", timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr[-2000:])
+        self.assertTrue(os.path.samefile(r.stdout, p), (r.stdout, str(p)))
+        if os.name != "nt":
+            self.assertEqual(r.stdout, os.path.realpath(p))
+        return r.stdout
+
     def expected_spawn(self, launcher: Path, platform: str, home: Path = None):
+        """bridge.js spawns the CHECKED realpaths of the launcher and the engine home (its cwd), by design (bridge.js
+        header, launcherFrom), never the configured strings: on macOS CI the temp root is /var -> /private/var, so the
+        unresolved paths were wrong (v3.0.0-p3)."""
         home = home or self.home
-        opts = {"detached": True, "windowsHide": True, "stdio": "ignore", "cwd": str(home)}
+        launcher, home = self.node_realpath(launcher), self.node_realpath(home)
+        opts = {"detached": True, "windowsHide": True, "stdio": "ignore", "cwd": home}
         if platform == "win32":
-            return {"file": "C:\\Windows\\System32\\cmd.exe", "args": ["/d", "/s", "/c", '""' + str(launcher) + '""'],
+            return {"file": "C:\\Windows\\System32\\cmd.exe", "args": ["/d", "/s", "/c", '""' + launcher + '""'],
                     "opts": dict(opts, windowsVerbatimArguments=True)}
-        return {"file": str(launcher), "args": [], "opts": opts}
+        return {"file": launcher, "args": [], "opts": opts}
 
     # ---------------------------------------------------------------- no spawn
     def test_no_config_or_no_launcher_never_spawns(self):

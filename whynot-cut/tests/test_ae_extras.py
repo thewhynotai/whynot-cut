@@ -47,6 +47,24 @@ def nh_data(jsx: Path) -> dict:
     return json.JSONDecoder().raw_decode(text[start:])[0]
 
 
+FAKE_AE = {"name": "AE", "exe": "AfterFX.exe"}       # plat.newest_app("after_effects") in the launch tests
+_REAL_POPEN = subprocess.Popen
+
+
+def ae_launch_stub(on_launch):
+    """A stand-in for subprocess.Popen that catches ONLY an After Effects launch and hands every other argv to the real
+    Popen. `adobe_run.subprocess` IS the global subprocess module, so a blanket Popen patch also breaks every other
+    subprocess.run in the process: on macOS the build lock itself runs `ioreg`/`scutil` (writer_lock.host_id) and `ps`
+    (writer_lock.process_created) through it, which errored before any AE launch (macOS CI, v3.0.0-p3; Windows reads
+    both through ctypes/gethostname and never noticed). Both launch routes count: Popen of the AE exe (Windows) and
+    `osascript` (macOS, adobe_run.run -> subprocess.run -> Popen), so the guard holds whatever plat.IS_MAC says."""
+    def popen(argv, *a, **kw):
+        if isinstance(argv, (list, tuple)) and argv and os.path.basename(str(argv[0])) in (FAKE_AE["exe"], "osascript"):
+            return on_launch(list(argv), **kw)
+        return _REAL_POPEN(argv, *a, **kw)
+    return popen
+
+
 class TempDir(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="t218_"))
@@ -333,13 +351,28 @@ class TestScriptDriverLock(TempDir):
         from lib import adobe_run
         self.adobe_run = adobe_run
         self.launched = []
-        patches = [mock.patch.object(plat, "newest_app", lambda key: {"name": "AE", "exe": "AfterFX.exe"}),
+        patches = [mock.patch.object(plat, "newest_app", lambda key: FAKE_AE),
                    mock.patch.object(plat, "sandbox_refusal", lambda what, *t: None),
                    mock.patch.object(plat, "IS_MAC", False),
-                   mock.patch.object(adobe_run.subprocess, "Popen", lambda argv, **kw: self.launched.append(argv))]
+                   mock.patch.object(adobe_run.subprocess, "Popen",
+                                     ae_launch_stub(lambda argv, **kw: self.launched.append(argv)))]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
+
+    def test_the_locks_own_host_probes_still_run_beside_the_launch_stub(self):
+        """The macOS route of the build lock, on any OS: writer_lock asks `ioreg`/`scutil` for the host id through
+        subprocess.run. Those must reach the real Popen (absent tools are an OSError the lock already handles), and
+        only the After Effects launch is caught. With a blanket Popen patch this errored on macOS CI (v3.0.0-p3)."""
+        from lib import writer_lock
+        writer_lock._host_ids.cache_clear()
+        self.addCleanup(writer_lock._host_ids.cache_clear)          # never leave a host id cached under the patch
+        with mock.patch.object(writer_lock, "IS_MAC", True):
+            res = self.adobe_run.run_after_effects(self.tmp / "x.jsx", 5, done=lambda: True)
+            self.assertTrue(writer_lock.host_id())
+        self.assertEqual(self.launched, [[FAKE_AE["exe"], "-r", str(self.tmp / "x.jsx")]], res)
+        out = subprocess.run([sys.executable, "-c", "print('real')"], capture_output=True, text=True).stdout
+        self.assertEqual(out.strip(), "real")                       # any other process: the real Popen
 
     def test_the_script_runs_under_the_lock(self):
         from lib import ae_bridge, cep_queue
@@ -624,8 +657,21 @@ class TestExitCodes(AerenderCase):
         """Gate 2 tail: the refusal's `blocked` reaches the top-level document, so the exit code is 2, not 1."""
         from lib import adobe_run, ae_bridge, cep_queue
         self.build_cmd(rebuilds=False)          # lays out the plan and the paths
-        with mock.patch.object(self.cli, "refuse_stale_window"), mock.patch.object(self.cli, "require_plan_approval"),                 mock.patch.object(plat, "newest_app", lambda key: {"name": "AE", "exe": "AfterFX.exe"}),                 mock.patch.object(plat, "sandbox_refusal", lambda what, *t: None),                 mock.patch.object(adobe_run.subprocess, "Popen", side_effect=AssertionError("must not launch")),                 mock.patch.object(cep_queue, "LOCK_WAIT_S", 0.2),                 common.use_context(common.Context(self.paths.root)),                 ae_bridge.build_lock("motion-build other"):
+        launched = []
+
+        def must_not_launch(argv, **_):
+            launched.append(argv)
+            raise AssertionError("must not launch")
+        # Only the After Effects launch is stubbed (either route, see ae_launch_stub): the lock's own probes run.
+        with mock.patch.object(self.cli, "refuse_stale_window"), mock.patch.object(self.cli, "require_plan_approval"), \
+                mock.patch.object(plat, "newest_app", lambda key: FAKE_AE), \
+                mock.patch.object(plat, "sandbox_refusal", lambda what, *t: None), \
+                mock.patch.object(adobe_run.subprocess, "Popen", ae_launch_stub(must_not_launch)), \
+                mock.patch.object(cep_queue, "LOCK_WAIT_S", 0.2), \
+                common.use_context(common.Context(self.paths.root)), \
+                ae_bridge.build_lock("motion-build other"):
             code, doc = run_cmd(self.cli.cmd_ae_build, self.args)
+        self.assertEqual(launched, [])
         self.assertEqual(code, 2, doc)
         self.assertIn("another build", doc["blocked"])
         self.assertEqual((doc["ok"], doc["status"]), (False, "REFUSED"))

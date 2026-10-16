@@ -525,17 +525,48 @@ class AdapterRun(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(contract.validate_result(res), [])
 
     async def test_a_result_that_lands_while_the_job_files_go_away_is_still_the_result(self):
+        """cep_queue reads the result and removes the job's files, then returns: for that moment the tracker sees a job
+        it saw, with no file and no result, which is what a vanished job looks like. Within the grace (fewer than
+        VANISHED_POLLS such polls in a row) the queue's own answer must be the answer.
+        Ordered by events, never by the wall clock (macOS CI v3.0.0-p3: a 0.05 s sleep against a 3 x 0.04 s grace lost
+        the race on a slower runner): the files go only after the tracker has seen the job claimed; the result is
+        returned only after the tracker has counted VANISHED_POLLS - 1 polls with no file of it; and the tracker's
+        next look (the one that would call it vanished) waits until the command has answered."""
+        jid, grace = "jd1", adapters.VANISHED_POLLS - 1
+        claimed_seen, misses_seen, answered = threading.Event(), threading.Event(), threading.Event()
+        self.addCleanup(answered.set)
+        real_state, looks = jobs.job_state, []                               # what the tracker saw of jd1, in order
+
+        def job_state(queue, j):
+            st = real_state(queue, j)
+            if j == jid and (st is not None or claimed_seen.is_set()):
+                if st == "claimed":
+                    claimed_seen.set()
+                if st is None and looks.count(None) >= grace:
+                    answered.wait(T)                                          # the look past the grace: after the answer
+                looks.append(st)
+                if looks.count(None) >= grace and claimed_seen.is_set() and st is None:
+                    misses_seen.set()
+            return st
+
         def submit(action, data=None, timeout=600):
-            queue_job(self.queue, "jd1", data)
-            time.sleep(0.15)
-            claim(self.queue, "jd1")
-            time.sleep(0.15)
-            (self.queue / "jd1.running").unlink()                             # cep_queue reads and removes the files
-            time.sleep(0.05)
+            queue_job(self.queue, jid, data)
+            claim(self.queue, jid)
+            if not claimed_seen.wait(T):
+                raise AssertionError("the tracker never saw the job claimed")
+            (self.queue / f"{jid}.running").unlink()                          # cep_queue read the result, removed the files
+            if grace and not misses_seen.wait(T):
+                raise AssertionError(f"the tracker never counted {grace} polls with no file: {looks}")
             return cep_ok("ping", PING_READBACK)
 
-        res, _ = await self.run_adapter(request("ping", id="d-1"), submit)
-        self.assertTrue(res["ok"])
+        with mock.patch.object(jobs, "job_state", job_state):
+            res, _ = await self.run_adapter(request("ping", id="d-1"), submit)
+            missed = looks.count(None)
+            answered.set()
+        self.assertTrue(res["ok"], res)
+        self.assertEqual(res["id"], "d-1")
+        self.assertIn("claimed", looks)
+        self.assertEqual(missed, grace, looks)                               # it did see the files gone, and waited
 
     async def test_a_safe_build_with_several_queue_jobs_is_not_called_vanished(self):
         """Review 1: motion_build runs a build job, cleans it up, then a readback job (up to 300 s): the gap between
