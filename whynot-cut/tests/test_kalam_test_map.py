@@ -29,12 +29,12 @@ MAPPING = {
     "test_captions.py": "test_kalam_engine_pure.py",
     "test_clean.py": "test_kalam_engine_pure.py",
     "test_units.py": "test_kalam_engine_pure.py",
+    "test_correct.py": "test_kalam_engine_correct.py",      # Task 10
+    "test_platform.py": "test_kalam_engine_correct.py",
 }
 
 # upstream test file -> the task that ports it (not mapped yet). Task 11 must empty this.
 PENDING = {
-    "test_correct.py": "Task 10",
-    "test_platform.py": "Task 10",
     "test_align.py": "Task 11",
     "test_doctor.py": "Task 11",
     "test_portable.py": "Task 11",
@@ -67,10 +67,21 @@ def test_names(path: Path) -> list:
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_")]
 
 
+def _is_testcase(c: ast.ClassDef) -> bool:
+    """a class that derives from unittest.TestCase (`TestCase` or `unittest.TestCase`): only those run as tests"""
+    return any((isinstance(b, ast.Name) and b.id == "TestCase") or (isinstance(b, ast.Attribute) and b.attr == "TestCase")
+               for b in c.bases)
+
+
 def port_methods(name: str) -> list:
-    """the test methods (inside a class) of a port test file"""
-    tree = ast.parse((HERE / name).read_text(encoding="utf-8"), filename=name)
-    return [f.name for c in ast.walk(tree) if isinstance(c, ast.ClassDef) for f in c.body
+    """the test methods of the unittest.TestCase classes of a port test file (a same-named method in any other
+    class never runs, so it must not hide a dropped test)"""
+    return _testcase_methods((HERE / name).read_text(encoding="utf-8"), name)
+
+
+def _testcase_methods(source: str, filename: str) -> list:
+    tree = ast.parse(source, filename=filename)
+    return [f.name for c in ast.walk(tree) if isinstance(c, ast.ClassDef) and _is_testcase(c) for f in c.body
             if isinstance(f, ast.FunctionDef) and f.name.startswith("test_")]
 
 
@@ -91,12 +102,21 @@ class TestMapsThemselves(unittest.TestCase):
     def test_pending_names_a_task_for_every_file(self):
         for f, task in PENDING.items():
             self.assertTrue(f.startswith("test_") and f.endswith(".py"), f)
-            self.assertIn(task, ("Task 10", "Task 11"), f)
+            self.assertEqual(task, "Task 11", f)
 
     def test_not_ported_gives_a_reason_for_every_name(self):
         for name, reason in NOT_PORTED.items():
             self.assertTrue(name.startswith("test_"), name)
             self.assertTrue(reason.startswith("obsolete:") or len(reason) > 20, (name, reason))
+
+    def test_only_methods_of_testcase_classes_count(self):
+        src = "\n".join([
+            "import unittest",
+            "class Helper:", "    def test_hidden(self): pass",
+            "class A(unittest.TestCase):", "    def test_a(self): pass", "    def helper(self): pass",
+            "class B(TestCase):", "    def test_b(self): pass",
+            "def test_module_level(): pass"])
+        self.assertEqual(sorted(_testcase_methods(src, "x.py")), ["test_a", "test_b"])
 
     def test_port_method_names_are_unique_per_port_file(self):
         for port in sorted(set(MAPPING.values())):
