@@ -529,8 +529,10 @@ def models_usage(models_dir, ours: Iterable, theirs: Iterable) -> dict:
     R7-1, R7-3, R7-5). Every link is resolved inside models/ only (resolve_inside); nothing outside it is followed.
     {"ambiguous": a link in the editor's entries could not be resolved inside models/ for sure (unreadable, out of
      models/ - maybe models/ itself spelled another way -, a loop, missing, a folder link over the shared store, or a
-     walk that could not be completed): then NOTHING in models/ may be deleted (R7-5),
-     "used": {our store names a link of the editor's leads into or through},
+     walk that could not be completed): then NOTHING in models/ may be deleted (R7-5); "unsure" / "unread": the
+     editor's entries that made it so - a link / a folder that could not be read completely (round 9, R8-2),
+     "used": {our store names a link of the editor's leads into or through, or that lie below a folder it leads
+     to (round 9, R8-1)},
      "their_blobs": {keys of shared-store files a link of the editor's leads to},
      "refs": {our store name: ({key: path of a shared-store file it links to}, complete?)},
      "shared": models/blobs is Hugging Face's marked shared store}."""
@@ -549,21 +551,28 @@ def models_usage(models_dir, ours: Iterable, theirs: Iterable) -> dict:
         k = _fold(os.path.normcase(p))
         return shared and (_inside(k, blobs_key) or _inside(blobs_key, k))
 
-    their_blobs, used, ambiguous = set(), set(), False
+    their_blobs, used, unsure, unread = set(), set(), [], []
     for name in theirs:
         links, complete = _links_below(os.path.join(models, name))
-        ambiguous = ambiguous or not complete
+        if not complete:
+            unread.append(name)  # (round 9, R8-2) a folder that could not be read completely: not "a link"
         for q in links:
             final, passed = resolve_inside(models, q)
             for p in passed[1:] + ([final] if final else []):
                 k = _fold(os.path.normcase(p))
                 used.update(n for n, sk in store_keys.items() if _inside(k, sk))
             if final is None:
-                ambiguous = True
+                unsure.append(name)
             elif os.path.isdir(final):
-                ambiguous = ambiguous or over_blobs(final)
+                if over_blobs(final):
+                    unsure.append(name)
+                # (round 9, R8-1) a folder link onto models/ or above a store reaches every store below it: kept
+                kf = _fold(os.path.normcase(final))
+                used.update(n for n, sk in store_keys.items() if _inside(sk, kf))
             elif in_blobs(final):
                 their_blobs.add(_fold(os.path.normcase(final)))
+    unsure, unread = sorted(set(unsure)), sorted(set(unread))
+    ambiguous = bool(unsure or unread)
     refs = {}
     for name in ours:
         links, complete = _links_below(os.path.join(models, name))
@@ -575,7 +584,8 @@ def models_usage(models_dir, ours: Iterable, theirs: Iterable) -> dict:
             elif in_blobs(final) and os.path.isfile(final) and not is_link(final):
                 found.setdefault(_fold(os.path.normcase(final)), final)
         refs[name] = (found, complete)
-    return {"ambiguous": ambiguous, "used": used, "their_blobs": their_blobs, "refs": refs, "shared": shared}
+    return {"ambiguous": ambiguous, "unsure": unsure, "unread": unread, "used": used, "their_blobs": their_blobs,
+            "refs": refs, "shared": shared}
 
 
 def blobs_to_delete(usage: dict, gone: Iterable) -> list:
@@ -785,7 +795,9 @@ def choose_engine_home(path, *, home, plugin_root, clients_roots: Iterable = (),
         return None, "", f"{final} is your user folder or holds it; choose a folder of its own"
     if _within(f, _norm(Path(home) / ".claude"), strict=False):
         return None, "", f"{final} is inside Claude's folder {Path(home) / '.claude'}"
-    if final != Path(p) and not is_our_home(final) and occupied_entries(final):
+    # (round 9, R8-3) our own WhyNotCut subfolder that kept only the editor's view files (an icon's desktop.ini, never
+    # deleted by the uninstall) is used again; anything else in it is the editor's
+    if final != Path(p) and not is_our_home(final) and occupied_entries(final, ignore_view=final.name == SUBFOLDER):
         return None, "", f"{final} already holds other files; choose an empty folder or one of its own"
     if sandbox_home is not None and not _within(f, _norm(sandbox_home), strict=True):
         return None, "", f"{final} is outside the sandbox home {sandbox_home} (--home: nothing outside it is used)"
@@ -881,6 +893,10 @@ MODELS_BLOBS_DELETED_AR = "وحُذفت من blobs الملفات التي كا�
 MODELS_STORE_USED_AR = "وبقي نموذج من نماذج WhyNot Cut لأن ملفًا من ملفاتك يشير إليه."
 MODELS_NONE_DELETED_AR = ("لم يُحذف أي نموذج من نماذج WhyNot Cut من المجلد models. بقي المجلد لأن فيه ملفات ليست من "
                           "WhyNot Cut، ولم يُلمس منها شيء.")
+# (round 9, R8-2) a folder of the editor's in models/ could not be read completely: nothing in models/ was deleted
+MODELS_UNREAD_AR = ("لم يُحذف شيء من المجلد models: فيه مجلد من مجلداتك لم نستطع قراءته كاملًا (ملفات كثيرة جدًا "
+                    "أو جزء لا يمكن قراءته)، فلم نعرف بيقين أي الملفات تستخدمها نماذجك، لذلك بقيت كلها في مكانها "
+                    "(نماذجك ونماذج WhyNot Cut).")
 # (round 8, R7-5) a link of the editor's in models/ could not be followed for sure: nothing in models/ was deleted
 MODELS_UNSURE_AR = ("لم يُحذف شيء من المجلد models: فيه رابط من روابطك لم نستطع التأكد إلى أين يشير، فلم نعرف بيقين "
                     "أي الملفات تستخدمها نماذجك، لذلك بقيت كلها في مكانها (نماذجك ونماذج WhyNot Cut).")

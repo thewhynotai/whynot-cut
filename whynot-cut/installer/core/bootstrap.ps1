@@ -415,8 +415,9 @@ param(
             $now = Get-WncRealPath $root
             $then = $null
             if ($LinkReal) {
-                # (round 8, MAC-1) both sides through Get-WncRealPath: the same folder spelled through another prefix
-                try { $then = Get-WncRealPath $LinkReal } catch { $then = $null }
+                # the start AS RECORDED (Get-WncRealPath when it was recorded: one canonical form); never resolved
+                # again - a recorded target replaced by a link must read as "moved" (round 9, R8-4)
+                try { $then = Get-WncNormPath $LinkReal } catch { $then = $null }
             }
             if ((-not $now) -or (-not $then) -or ($now -ine $then)) {
                 Write-Host ("WARNING: $root now points to $now, not to $LinkReal as when this uninstall started; the " +
@@ -959,8 +960,11 @@ param(
         if (Test-WncWithin $final (Get-WncNormPath (Join-Path $UserHome '.claude'))) {
             return @{ Problem = "$final is inside Claude's folder $(Join-Path $UserHome '.claude')" }
         }
+        # (round 9, R8-3) our own WhyNotCut subfolder that kept only the editor's view files (an icon's desktop.ini,
+        # never deleted by the uninstall) is used again; anything else in it is the editor's
+        $ownSub = (Split-Path $final -Leaf) -ceq 'WhyNotCut'
         if (($final -ine $n) -and (-not (Test-WncOurHome $final $false)) -and
-            ((Get-WncOccupiedEntry -Path $final -PointerOk $false).Count -gt 0)) {
+            ((Get-WncOccupiedEntry -Path $final -PointerOk $false -IgnoreView $ownSub).Count -gt 0)) {
             return @{ Problem = "$final already holds other files; choose an empty folder or one of its own" }
         }
         if ($SandboxRoot -and (-not (Test-WncWithin $final (Get-WncNormPath $SandboxRoot) -Strict))) {

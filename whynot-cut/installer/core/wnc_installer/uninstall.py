@@ -342,7 +342,9 @@ def _pinned_root(ctx: base.Ctx) -> tuple:
     paths = ctx.paths
     if not base.linked_default_home(paths.whynot, paths.home):
         return paths.whynot, None, None
-    pinned = os.path.realpath(ctx.facts.get("link_target") or paths.whynot)  # (round 8, MAC-1: canonical)
+    # the target as the core's guard recorded it (cli.py: realpath, already canonical); never resolved again (round 9,
+    # R8-4: a recorded target replaced by a link must read as "moved")
+    pinned = ctx.facts.get("link_target") or os.path.realpath(paths.whynot)
     moved = _link_moved(ctx, pinned)
     return (None, pinned, moved) if moved else (Path(pinned), pinned, None)
 
@@ -405,10 +407,10 @@ def _link_moved(ctx: base.Ctx, pinned: Optional[str]) -> Optional[str]:
     why nothing more may be deleted, else None."""
     if pinned is None:
         return None
-    # (round 8, MAC-1) both sides in ONE canonical form: a target recorded through a symlinked prefix (/var vs
-    # /private/var on macOS) is the same folder, not a moved link
+    # the link resolved NOW against the target AS RECORDED (it was resolved when it was recorded: one canonical form,
+    # /private/var on macOS too); re-resolving the recorded value would hide a target replaced by a link (round 9, R8-4)
     now = os.path.realpath(ctx.paths.whynot)
-    if base._fold(os.path.normcase(now)) == base._fold(os.path.normcase(os.path.realpath(pinned))):
+    if base._fold(os.path.normcase(now)) == base._fold(os.path.normcase(pinned)):
         return None
     return (f"{ctx.paths.whynot} now points to {now}, not to {pinned} as when this uninstall checked it; nothing more "
             "was deleted. Check the link, then run the uninstall again")
@@ -491,11 +493,18 @@ def _delete_models(ctx: base.Ctx, models: Path, protected: list, removed: list, 
         return
     shown = ", ".join(theirs[:5]) + (", ..." if len(theirs) > 5 else "")
     usage = base.models_usage(models, stores, theirs)
-    if usage["ambiguous"]:
-        notes.append(f"nothing in {models} was deleted: a link of yours there ({shown}) could not be followed for "
-                     "sure, so WhyNot Cut could not tell which files your models use; your files and WhyNot Cut's "
-                     f"models all stay in {models}")
-        notes.append(base.MODELS_UNSURE_AR)
+    if usage["ambiguous"]:  # (round 9, R8-2) the real cause, naming only the entries that caused it
+        if usage["unsure"]:
+            notes.append(f"nothing in {models} was deleted: a link of yours there ({', '.join(usage['unsure'])}) could "
+                         "not be followed for sure, so WhyNot Cut could not tell which files your models use; your "
+                         f"files and WhyNot Cut's models all stay in {models}")
+            notes.append(base.MODELS_UNSURE_AR)
+        if usage["unread"]:
+            notes.append(f"nothing in {models} was deleted: a folder of yours there ({', '.join(usage['unread'])}) "
+                         "could not be read completely (too many files, or a part that cannot be read), so WhyNot Cut "
+                         f"could not tell which files your models use; your files and WhyNot Cut's models all stay in "
+                         f"{models}")
+            notes.append(base.MODELS_UNREAD_AR)
         return
     gone = [n for n in stores if n not in usage["used"] and rm(models / n, f"models/{n}", models)]
     blobs, n_blobs = models / base.HF_BLOBS, 0
@@ -636,13 +645,20 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         foreign = [n for n in foreign if n in left or not base.transient_copy(n)]
         # anything not ours that is there now (a scanner's copy that appeared after the scan and stayed) is named too
         foreign += sorted(n for n in left if n not in foreign and not _ours_at_top(n))
-    names = set(os.listdir(paths.whynot))  # exact names: lexists would also match the editor's `Bin` on NTFS
+    try:  # (round 9, NIT-2) a folder that cannot be listed now: said so, and nothing more is deleted
+        listing = os.listdir(paths.whynot)
+    except OSError as e:
+        listing = None
+        failed.append(f"{paths.whynot} (cannot list it after the deletes: {e}; nothing more was deleted)")
+    names = set(listing or ())  # exact names: lexists would also match the editor's `Bin` on NTFS
     later = [paths.whynot / n for n in DEFERRED if n in names]
-    rest = [n for n in os.listdir(paths.whynot) if n not in DEFERRED and n != DEFER_LIST]
+    rest = [n for n in (listing or ()) if n not in DEFERRED and n != DEFER_LIST]
     linked = base.linked_default_home(paths.whynot, paths.home)  # the link and its target folder always stay
     defer_file = paths.whynot / DEFER_LIST
     try:
-        if later:
+        if listing is None:
+            pass
+        elif later:
             lines = [str(p) for p in later] + ([str(paths.whynot)] if not rest and not linked else [])
             base.atomic_write_text(defer_file, "\n".join(lines) + "\n")
         else:

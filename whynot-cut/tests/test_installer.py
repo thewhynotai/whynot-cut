@@ -7087,6 +7087,29 @@ class TestRound8(unittest.TestCase):
                 self.assertFalse(os.path.lexists(m / HF_STORE), r.detail)
                 self.assertFalse(os.path.lexists(gone_only), r.detail)
 
+    def test_r8_3_our_whynotcut_folder_keeping_only_desktop_ini_is_used_again(self):
+        # round 9, R8-3 (the review's Q3): the editor gave Videos/WhyNotCut an icon (its desktop.ini), the uninstall
+        # kept that desktop.ini; a reinstall into Videos uses Videos/WhyNotCut again - only that subfolder, only when it
+        # holds nothing but view files
+        h = self.home
+        vids = h / "Videos"
+        touch(vids / "desktop.ini", b"[.ShellClassInfo]\r\n")
+        final, _n, prob = base.choose_engine_home(str(vids), home=h, plugin_root=SK)
+        self.assertEqual((final, prob), (vids / "WhyNotCut", None))
+        touch(final / "state.json", GENUINE_STATE)
+        touch(final / "runtimes" / "r-1" / "pyvenv.cfg", b"")
+        icon = touch(final / "desktop.ini", b"[.ShellClassInfo]\r\nIconResource=x\r\n")
+        r = self.remove(final, remove_engine=True)
+        self.assertEqual(os.listdir(final), ["desktop.ini"], r.detail)
+        final2, _n2, prob2 = base.choose_engine_home(str(vids), home=h, plugin_root=SK)
+        self.assertIsNone(prob2)
+        self.assertEqual(final2, vids / "WhyNotCut")
+        self.assertEqual(icon.read_bytes(), b"[.ShellClassInfo]\r\nIconResource=x\r\n")
+        # anything else in it is the editor's: refused, as before
+        touch(final / "my notes.txt", b"mine")
+        _f3, _n3, prob3 = base.choose_engine_home(str(vids), home=h, plugin_root=SK)
+        self.assertIn("already holds other files", prob3 or "")
+
     def test_r7_2_a_folder_holding_only_desktop_ini_gets_its_own_subfolder(self):
         # the review's P3: an otherwise empty known folder (Videos, Music) carries a hidden desktop.ini; it is not
         # empty for placement, so the engine goes to Videos/WhyNotCut, and --remove-engine never touches desktop.ini
@@ -7161,9 +7184,9 @@ class TestRound8(unittest.TestCase):
         self.assertNotIn(base.MODELS_HF_KEPT_AR, r.detail)
 
     def test_mac1_the_pinned_target_is_compared_in_one_canonical_form(self):
-        # MAC-1 (a real Mac CI failure): the target recorded as written through a symlinked prefix (/var -> /private/var
-        # on macOS; here a directory link "var" -> "private var" in the sandbox) and the target resolved now are the
-        # same folder: not "the link moved", so the uninstall goes on
+        # MAC-1 (a real Mac CI failure): the link reached through a symlinked prefix (/var -> /private/var on macOS; here a
+        # directory link "var" -> "private var" in the sandbox). The target is recorded as cli.py records it (realpath,
+        # round 9, R8-4) and compared AS RECORDED with the link resolved now: the same folder, not "the link moved"
         h = self.home
         real = h.parent / "private var"
         target = real / "drive B" / "home"
@@ -7175,16 +7198,46 @@ class TestRound8(unittest.TestCase):
         self.addCleanup(drop_dir_link, alias)
         self.link(alias / "drive B" / "home")
         ctx = make_ctx(h, {"schema": 1}, SK)
-        ctx.facts["link_target"] = str(alias / "drive B" / "home")  # recorded as written, not resolved
+        ctx.facts["link_target"] = os.path.realpath(h / ".whynot-cut")  # as cli.py records it
         um = uninstall_module()
-        self.assertIsNone(um._link_moved(ctx, str(alias / "drive B" / "home")))
+        self.assertIsNone(um._link_moved(ctx, ctx.facts["link_target"]))
         r = um.step_marketplace(ctx)
         self.assertEqual(r.status, "ok", r.detail)
         self.assertFalse((target / "marketplace").exists(), r.detail)
         # a real move is still caught, whatever the spelling
         other = touch(real / "drive A" / "home" / "state.json", GENUINE_STATE).parent
-        self.assertIsNotNone(um._link_moved(ctx, str(alias / "drive A" / "home")))
+        self.assertIsNotNone(um._link_moved(ctx, os.path.realpath(real / "drive A" / "home")))
         self.assertTrue(other.is_dir())
+
+    def test_r8_4_a_target_replaced_by_a_link_is_a_moved_link(self):
+        # round 9, R8-4 (the review's Q4): the recorded target folder is moved away and a link to another folder takes
+        # its place during the uninstall. Compared AS RECORDED, that is "the link moved": nothing is deleted, the
+        # marketplace step included, and the other folder (never checked by content) is untouched
+        h = self.home
+        t_ = h.parent / "drive T" / "home"
+        touch(t_ / "state.json", GENUINE_STATE)
+        touch(t_ / "marketplace" / "m.txt", b"ours")
+        u = h.parent / "drive U" / "someone"
+        notes = touch(u / "marketplace" / "notes.txt", b"not checked by content")
+        touch(u / "runtimes" / "r-1" / "x.txt", b"theirs")
+        self.link(t_)
+        ctx = make_ctx(h, {"schema": 1}, SK, remove_engine=True, remove_models=False)
+        ctx.log.path = None
+        ctx.facts["link_target"] = os.path.realpath(h / ".whynot-cut")  # as cli.py records it after the guard
+        os.rename(t_, t_.with_name("home moved"))
+        if not make_dir_link(t_, u):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, t_)
+        before = snapshot_tree(u)
+        um = uninstall_module()
+        self.assertIsNotNone(um._link_moved(ctx, ctx.facts["link_target"]))
+        r = um.step_marketplace(ctx)
+        self.assertEqual(r.status, "red", r.detail)
+        self.assertIn("now points", r.detail)
+        r = um.step_engine(ctx)
+        self.assertEqual(r.status, "red", r.detail)
+        self.assertEqual(snapshot_tree(u), before)
+        self.assertEqual(notes.read_bytes(), b"not checked by content")
 
     def test_mac1_a_mount_point_is_found_by_its_real_spelling(self):
         # MAC-1 hardening (triage 3a): the guard's keys are case-folded (macOS) or normcased (Windows); on a
@@ -7198,6 +7251,66 @@ class TestRound8(unittest.TestCase):
         with mock.patch("os.path.ismount", side_effect=lambda q: str(q) == real):
             why = base.resolved_home_problem(link, home=h, mode="install")
         self.assertIn("a drive root or a mount point", why or "")
+
+    def test_r8_1_a_folder_link_onto_models_keeps_every_store_it_reaches(self):
+        # round 9, R8-1 (the review's Q1): copy layout (no shared blobs/), the editor's folder link onto models/ itself:
+        # every store it reaches stays, so the editor's path through it reads back
+        self.need_symlinks()
+        eng = self.engine("Engine")
+        m = eng / "models"
+        mine = m / "mine"
+        mine.mkdir()
+        os.symlink("..", mine / "all", target_is_directory=True)
+        through = mine / "all" / HF_STORE / "snapshots" / "abc" / "model.bin"
+        r = self.remove(eng, remove_models=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(through.read_bytes(), b"weights", r.detail)
+        self.assertTrue((m / HF_STORE).is_dir(), r.detail)
+        self.assertIn(base.MODELS_STORE_USED_AR, r.detail)
+        self.assertIn(base.MODELS_NONE_DELETED_AR, r.detail)
+        # a folder link onto a folder ABOVE a store inside an editor's own entry reaches only what is below it
+        eng2 = self.engine("Engine2")
+        m2 = eng2 / "models"
+        touch(m2 / TURBO_STORE / "snapshots" / "def" / "model.bin", b"turbo")
+        (m2 / "mine").mkdir()
+        os.symlink(os.path.join("..", TURBO_STORE), m2 / "mine" / "turbo", target_is_directory=True)
+        r = self.remove(eng2, remove_models=True)
+        self.assertTrue((m2 / TURBO_STORE).is_dir(), r.detail)
+        self.assertFalse(os.path.lexists(m2 / HF_STORE), r.detail)  # not reached by the link: ours, gone
+        self.assertEqual((m2 / "mine" / "turbo" / "snapshots" / "def" / "model.bin").read_bytes(), b"turbo")
+
+    def test_r8_2_the_nothing_deleted_note_gives_the_real_cause(self):
+        # round 9, R8-2 (the review's Q2): a folder of the editor's that cannot be read completely (here the walk limit,
+        # standing in for a dataset of 200,000 files or an unreadable sub-folder) is not "a link of yours"; and only the
+        # entry that caused it is named
+        eng = self.engine("Engine")
+        m = eng / "models"
+        for i in range(5):
+            touch(m / "dataset" / f"f{i}.wav", b"x")
+        touch(m / "notes.txt", b"mine")
+        with mock.patch.object(base, "_WALK_LIMIT", 3):
+            r = self.remove(eng, remove_models=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertTrue((m / HF_STORE).is_dir(), r.detail)
+        self.assertIn("a folder of yours there (dataset) could not be read completely", r.detail)
+        self.assertIn(base.MODELS_UNREAD_AR, r.detail)
+        self.assertNotIn("a link of yours", r.detail)
+        self.assertNotIn(base.MODELS_UNSURE_AR, r.detail)
+        self.assertNotIn("notes.txt", r.detail)
+        # a link that cannot be followed: the link wording, naming only its entry
+        self.need_symlinks()
+        eng2 = self.engine("Engine2")
+        m2 = eng2 / "models"
+        touch(m2 / "notes.txt", b"mine")
+        (m2 / "loopy").mkdir()
+        os.symlink("b", m2 / "loopy" / "a")
+        os.symlink("a", m2 / "loopy" / "b")
+        r = self.remove(eng2, remove_models=True)
+        self.assertTrue((m2 / HF_STORE).is_dir(), r.detail)
+        self.assertIn("a link of yours there (loopy) could not be followed for sure", r.detail)
+        self.assertIn(base.MODELS_UNSURE_AR, r.detail)
+        self.assertNotIn(base.MODELS_UNREAD_AR, r.detail)
+        self.assertNotIn("notes.txt", r.detail)
 
     def test_r7_5_an_editor_link_we_cannot_be_sure_of_keeps_everything(self):
         # an absolute link of the editor's spelled through another name of the same folder (here a directory link
@@ -7331,6 +7444,35 @@ class TestF1(unittest.TestCase):
             eng, r, clock = self.remove_engine_with(Path(td), "STATE.JSON.tmp", late=True, vanish_at=2)
             self.assertFalse(eng.exists(), r.detail)
             self.assertNotIn("STATE.JSON.tmp", r.detail)
+
+    def test_nit2_a_listing_that_fails_after_the_wait_is_not_a_crash(self):
+        # round 9, NIT-2: the folder cannot be listed after a failed re-list: the step says so (amber), it does not
+        # raise, and nothing more is deleted
+        with TempDir() as td:
+            h = Path(td)
+            eng = h / "Engine"
+            touch(eng / "state.json", GENUINE_STATE)
+            touch(eng / "runtimes" / "r-1" / "pyvenv.cfg", b"")
+            gone = {"wait": False}
+            real_listdir = os.listdir
+
+            def relist(*a, **k):
+                gone["wait"] = True
+                return None
+
+            def listdir(p="."):
+                if gone["wait"] and os.path.normcase(str(p)) == os.path.normcase(str(eng)):
+                    raise PermissionError(13, "cannot list", str(p))
+                return real_listdir(p)
+
+            ctx = make_ctx(h, {"schema": 1}, SK, engine_home=eng, remove_engine=True, remove_models=False)
+            ctx.log.path = None
+            with mock.patch.object(base, "wait_for_transients", relist), \
+                    mock.patch.object(uninstall_module().os, "listdir", listdir):
+                r = uninstall_module().step_engine(ctx)
+            self.assertEqual(r.status, "amber", r.detail)
+            self.assertIn("cannot list", r.detail)
+            self.assertTrue(eng.is_dir())
 
     def test_f1a_a_failed_relist_keeps_what_was_listed(self):
         # (round 8, F1-a) the re-list cannot read the folder: the entries seen before stay named in the summary
@@ -7719,7 +7861,8 @@ class _CountdownCases:
         self.assertTrue(base.is_link(link))
 
     def wait_gone(self, p: Path) -> None:
-        for _ in range(50):  # (the bootstrap deletes python/ and bin/ right after the core exits)
+        # (the bootstrap deletes python/ and bin/ right after the core exits; round 9, NIT-1: 10 s, >= 5x its 2 s wait)
+        for _ in range(100):
             if not p.exists():
                 return
             time.sleep(0.1)
@@ -8080,13 +8223,42 @@ class _CountdownCases:
         self.addCleanup(drop_dir_link, h / ".whynot-cut")
         listed = self.native(h / ".whynot-cut")
         (b / DEFER_LIST).write_text(listed + self.SEP + "python\n" + listed + self.SEP + "bin\n", encoding="utf-8")
-        r = self.run_deferred(h, link_real=alias / "drive B" / "home")  # as written, not resolved
+        # (round 9, R8-4) recorded as the bootstrap records it: resolved (real_path / Get-WncRealPath)
+        r = self.run_deferred(h, link_real=os.path.realpath(h / ".whynot-cut"))
         out = r.stdout + r.stderr
         self.assertNotIn("left alone", out)
         self.assertFalse((b / "python").exists(), out)
         self.assertFalse((b / "bin").exists(), out)
         self.assertEqual(sorted(os.listdir(b)), ["state.json"], out)
         self.assertTrue(base.is_link(h / ".whynot-cut"))
+
+    def test_r8_4_the_deferred_delete_sees_a_target_replaced_by_a_link(self):
+        # round 9, R8-4 (the review's Q4 in the shells): the recorded target is moved away and replaced by a link to
+        # another folder that also holds python/, bin/ and a list: compared AS RECORDED that is "the link moved", and
+        # nothing there is deleted
+        h = self.home
+        t_ = self.tmp / "drive T" / "home"
+        touch(t_ / "state.json", GENUINE_STATE)
+        u = self.tmp / "drive U" / "someone"
+        touch(u / "python" / "p.txt", b"theirs")
+        touch(u / "bin" / "uv", b"theirs")
+        h.mkdir()
+        if not make_dir_link(h / ".whynot-cut", t_):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, h / ".whynot-cut")
+        recorded = os.path.realpath(h / ".whynot-cut")  # what the bootstrap records at the start
+        os.rename(t_, t_.with_name("home moved"))
+        if not make_dir_link(t_, u):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, t_)
+        listed = self.native(h / ".whynot-cut")
+        (u / DEFER_LIST).write_text(listed + self.SEP + "python\n" + listed + self.SEP + "bin\n", encoding="utf-8")
+        before = snapshot_tree(u)
+        r = self.run_deferred(h, link_real=recorded)
+        out = r.stdout + r.stderr
+        self.assertIn("left alone", out)
+        self.assertIn(base.LINK_MOVED_AR, out)
+        self.assertEqual(snapshot_tree(u), before, out)
 
     def test_mac1_the_release_stage_is_compared_in_one_canonical_form(self):
         # MAC-1 audit (-Source): the stage and the plugin root spelled through different prefixes of the same folder
@@ -8110,6 +8282,31 @@ class _CountdownCases:
         self.assertEqual(r.returncode, 0, out)
         self.assertNotIn("is not the folder of this run", out)
         self.assertNotIn("Traceback", out)
+
+    def test_r8_3_a_whynotcut_folder_keeping_its_desktop_ini_is_used_again(self):
+        # round 9, R8-3 end to end: Videos/WhyNotCut got an icon (desktop.ini) from the editor; the uninstall keeps it;
+        # a reinstall naming Videos uses Videos/WhyNotCut again, and both desktop.ini files stay byte for byte
+        h = self.home
+        vids = h / "Videos"
+        data = b"[.ShellClassInfo]\r\nIconResource=%SystemRoot%\\system32\\imageres.dll,-189\r\n"
+        ini = touch(vids / "desktop.ini", data)
+        r = self.inst(h, "yes", "skip", extra=(self.ENGINE_FLAG, self.native(vids)))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        icon = touch(vids / "WhyNotCut" / "desktop.ini", b"[.ShellClassInfo]\r\nIconResource=mine\r\n")
+        r = self.inst(h, "uninstall", "remove-engine", "yes", extra=(self.ENGINE_FLAG, self.native(vids)))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        for _ in range(100):  # the bootstrap's python/ and bin/ go right after the core exits (10 s, >= 5x its wait)
+            if os.listdir(vids / "WhyNotCut") == ["desktop.ini"]:
+                break
+            time.sleep(0.1)
+        self.assertEqual(os.listdir(vids / "WhyNotCut"), ["desktop.ini"], out)
+        r = self.inst(h, "yes", "skip", extra=(self.ENGINE_FLAG, self.native(vids)))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertTrue((vids / "WhyNotCut" / "current").is_file(), out)
+        self.assertEqual(ini.read_bytes(), data)
+        self.assertEqual(icon.read_bytes(), b"[.ShellClassInfo]\r\nIconResource=mine\r\n")
 
     def test_round8_a_folder_holding_only_desktop_ini_gets_a_subfolder(self):
         # R7-2, the review's P3 end to end: -EngineHome Videos (empty but for its desktop.ini) installs into

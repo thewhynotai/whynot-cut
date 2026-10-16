@@ -377,9 +377,9 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
     real_path "$root"; now_real="$REAL"
     guard_norm "${now_real:-?}"; n_now="$NORM"
     n_then=""
-    # (round 8, MAC-1) both sides through the same real_path: a start recorded through a symlinked prefix (/var vs
-    # /private/var on macOS) is the same folder
-    if [ -n "${LINK_REAL:-}" ]; then real_path "$LINK_REAL"; guard_norm "${REAL:-$LINK_REAL}"; n_then="$NORM"; fi
+    # the start AS RECORDED (real_path when it was recorded: one canonical form, /private/var on macOS too); never
+    # resolved again - a recorded target replaced by a link must read as "moved" (round 9, R8-4)
+    if [ -n "${LINK_REAL:-}" ]; then guard_norm "$LINK_REAL"; n_then="$NORM"; fi
     if [ -z "$now_real" ] || [ -z "$n_then" ] || [ "$n_now" != "$n_then" ]; then
       printf 'WARNING: %s now points to %s, not to %s as when this uninstall started; the paths in %s were left alone (nothing was deleted). Check the link, then run the uninstall again.\n' \
         "$root" "${now_real:-a folder that cannot be read}" "${LINK_REAL:-(unknown)}" "$list"
@@ -725,8 +725,9 @@ occupied_list() { # dir [pointer-ok] [ignore-view] -> OCCUPIED (one per line): e
   return 0
 }
 
-has_occupied() { # dir [pointer-ok]: status 0 when it holds anything that makes it the editor's (occupied_list)
-  occupied_list "$1" "${2:-}"
+has_occupied() { # dir [pointer-ok] [ignore-view]: status 0 when it holds anything that makes it the editor's
+  # (occupied_list)
+  occupied_list "$1" "${2:-}" "${3:-}"
   [ -n "$OCCUPIED" ]
 }
 
@@ -966,7 +967,11 @@ EOF
   if within "$NORM" "$nf"; then PROBLEM="$f is your user folder or holds it; choose a folder of its own"; return 0; fi
   norm_path "$HOME/.claude"
   if within "$nf" "$NORM"; then PROBLEM="$f is inside Claude's folder $HOME/.claude"; return 0; fi
-  if [ "$f" != "$p" ] && ! our_home "$f" && has_occupied "$f"; then
+  # (round 9, R8-3) our own WhyNotCut subfolder that kept only the editor's view files (an icon's desktop.ini, never
+  # deleted by the uninstall) is used again; anything else in it is the editor's
+  local own_sub=""
+  [ "${f##*/}" = "WhyNotCut" ] && own_sub=1
+  if [ "$f" != "$p" ] && ! our_home "$f" && has_occupied "$f" "" "$own_sub"; then
     PROBLEM="$f already holds other files; choose an empty folder or one of its own"; return 0
   fi
   if [ -n "$HOME_OVR" ]; then
