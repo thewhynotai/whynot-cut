@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // © 2026 The Why Not AI (thewhynot.ai)
-// Ported unchanged from the owner's Hush fillers.js; see adobe/tools/README.md.
+// Ported unchanged from the owner's Hush fillers.js; see adobe/tools/hush/src/README.md.
 /* Hush - filler-word matching (pure). Words come from Whisper: [{w, s, e, p}] in range seconds. */
 (function (root) {
     'use strict';

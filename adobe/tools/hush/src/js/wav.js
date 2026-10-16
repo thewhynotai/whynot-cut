@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // © 2026 The Why Not AI (thewhynot.ai)
-// Ported unchanged from the owner's Hush wav.js; see adobe/tools/README.md.
+// Ported unchanged from the owner's Hush wav.js; see adobe/tools/hush/src/README.md.
 /* Hush - WAV reader (pure). Uint8Array of a .wav file -> {sampleRate, samples: Float32Array (mono mix)} */
 (function (root) {
     'use strict';

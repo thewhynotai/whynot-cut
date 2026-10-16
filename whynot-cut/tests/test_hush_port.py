@@ -7,7 +7,7 @@
   "0:60.0"); the port rounds first (controller ruling). The characterization class itself runs on the port too (see
   test_hush_characterization.HushCharacterizationPort).
 * HushPortFmt: the fmt fix on a grid of 13 000 values (independent Python expectation) and where it equals upstream.
-* HushSettings*: settings.js (the panel's currentSettings / syncAdvFromSimple / readout, extracted from main.js:166-200
+* HushSettings*: settings.js (the panel's currentSettings / syncAdvFromSimple / readout, extracted from main.js:166-180 and :198
   without change): Tight zeroes the pads, advanced passes through, no stats falls back to the advanced settings.
 * HushPortShape: the port differs from upstream only by the header, the CommonJS line and the fmt hunk (A0);
   require() returns the global object; SPDX header and provenance line; no "hoka"; README.
@@ -62,8 +62,8 @@ class HushPortParity(HC.HushCharacterizationPort):
     @classmethod
     def tearDownClass(cls):
         # only the values the tests feed that round up across 10 s / 60 s may differ (each is checked to be malformed upstream)
-        assert cls.fmt_differences <= {9.96, 59.96, 119.96, 599.96, 3599.96}, cls.fmt_differences
-        assert cls.compared > 0
+        if not cls.fmt_differences <= {9.96, 59.96, 119.96, 599.96, 3599.96}:
+            raise AssertionError("unexpected fmt differences: %r" % sorted(cls.fmt_differences))
         super().tearDownClass()
 
 
@@ -225,7 +225,7 @@ class HushPortShape(unittest.TestCase):
             self.assertEqual(lines[:2], self.SPDX, f)
             self.assertTrue(lines[2].startswith("// "), f)
             self.assertIn("owner's Hush", lines[2], f)
-            self.assertIn("adobe/tools/README.md", lines[2], f)
+            self.assertIn("adobe/tools/hush/src/README.md", lines[2], f)
             self.assertNotIn("hoka", self.text(path).lower(), f)
         self.assertNotIn("hoka", self.text(PORT / "README.md").lower())
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // © 2026 The Why Not AI (thewhynot.ai)
-// Extracted unchanged from the owner's Hush main.js:166-180 and :198 (currentSettings, syncAdvFromSimple, readout); see adobe/tools/README.md.
+// Extracted unchanged from the owner's Hush main.js:166-180 and :198 (currentSettings, syncAdvFromSimple, readout); see adobe/tools/hush/src/README.md.
 /* Hush - which detection settings are in force (pure). The panel keeps cfg = {tab, intensity, tight, adv} and the clip
    stats {floor, speech}; these functions are the panel's own rules, moved out of the UI file so they can be tested. */
 (function (root) {

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // © 2026 The Why Not AI (thewhynot.ai)
-// Ported from the owner's Hush detect.js; the only logic change is the fmt rounding fix, see adobe/tools/README.md.
+// Ported from the owner's Hush detect.js; the only logic change is the fmt rounding fix, see adobe/tools/hush/src/README.md.
 /* Hush - pure detection maths (no DOM, no Node). Loaded by the panel and by the tests.
    All times are seconds relative to the start of the analysed range. */
 (function (root) {
