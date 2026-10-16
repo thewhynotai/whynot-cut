@@ -251,6 +251,10 @@ SUBFOLDER = "WhyNotCut"
 
 
 TRANSIENT_WAIT_S = 2.0
+TRANSIENT_STEP_S = 0.1
+# (task 9 round 8, F1-b) the clock and the pause of the F1 waits: the tests swap them for a deterministic stand-in
+_clock = time.monotonic
+_sleep = time.sleep
 
 
 def transient_copy(name: str) -> bool:
@@ -261,31 +265,31 @@ def transient_copy(name: str) -> bool:
     return low.endswith(".tmp") and low[:-4] in {n.lower() for n in ENGINE_LAYOUT + ENGINE_KEPT + (OPTIONS_FILE,)}
 
 
-def wait_for_transients(folder, limit: float = TRANSIENT_WAIT_S) -> list:
+def wait_for_transients(folder, limit: Optional[float] = None) -> Optional[list]:
     """The entries of `folder` (task F1: the uninstall's final "what is left" check), listed again every 0.1 s while
-    one of them looks like a transient copy of one of our names (transient_copy), at most `limit` seconds. [] when
-    the folder cannot be read."""
-    deadline = time.monotonic() + limit
+    one of them looks like a transient copy of one of our names (transient_copy), at most `limit` seconds (default
+    TRANSIENT_WAIT_S). None when the folder cannot be read (round 8, F1-a: the caller then keeps what it had)."""
+    deadline = _clock() + (TRANSIENT_WAIT_S if limit is None else limit)
     while True:
         try:
             names = os.listdir(folder)
         except OSError:
-            return []
-        if not any(transient_copy(n) for n in names) or time.monotonic() >= deadline:
+            return None
+        if not any(transient_copy(n) for n in names) or _clock() >= deadline:
             return names
-        time.sleep(0.1)
+        _sleep(TRANSIENT_STEP_S)
 
 
 
-def wait_gone(path, limit: float = TRANSIENT_WAIT_S) -> bool:
+def wait_gone(path, limit: Optional[float] = None) -> bool:
     """Task F1: after a delete that succeeded, Windows keeps listing the name until the last program holding it (an
-    antivirus or indexer scanning what was just deleted) lets go. Wait for that, at most `limit` seconds; True once
-    the name is gone."""
-    deadline = time.monotonic() + limit
+    antivirus or indexer scanning what was just deleted) lets go. Wait for that, at most `limit` seconds (default
+    TRANSIENT_WAIT_S); True once the name is gone."""
+    deadline = _clock() + (TRANSIENT_WAIT_S if limit is None else limit)
     while os.path.lexists(path):
-        if time.monotonic() >= deadline:
+        if _clock() >= deadline:
             return False
-        time.sleep(0.1)
+        _sleep(TRANSIENT_STEP_S)
     return True
 
 
@@ -498,6 +502,8 @@ def _links_below(top: str) -> tuple:
     walk passes _WALK_LIMIT entries."""
     if is_link(top):
         return [top], True
+    if not os.path.isdir(top):  # (round 8) a plain file holds no link (os.walk would report it as unreadable)
+        return [], os.path.isfile(top)
     out, seen, ok = [], 0, [True]
 
     def err(_e):
@@ -517,12 +523,17 @@ def _links_below(top: str) -> tuple:
 
 
 def models_usage(models_dir, ours: Iterable, theirs: Iterable) -> dict:
-    """What the editor's own entries of <engine home>/models use of ours, and which files of Hugging Face's shared Xet
-    store (models/blobs/<2 hex>/<hash>, huggingface_hub 1.33 utils/_shared_blobs.py: the REAL bytes; a repo's
-    blobs/<etag> and snapshots/<file> are relative symlinks to them) only our stores use (fix round 7, R6-1). Every link
-    is resolved inside models/ only (resolve_inside); nothing outside it is ever followed.
-    {"blobs": [shared-store files that ONLY `ours` link to - empty when anything of the editor's is ambiguous],
-     "used": {our store names a link of the editor's leads into or through}, "ambiguous": bool}."""
+    """What the editor's own entries of <engine home>/models use, and which files of Hugging Face's shared Xet store
+    (models/blobs/<2 hex>/<hash>, huggingface_hub 1.33 utils/_shared_blobs.py: the REAL bytes; a repo's blobs/<etag>
+    and snapshots/<file> are relative symlinks to them) each of our stores links to (fix round 7, R6-1; round 8,
+    R7-1, R7-3, R7-5). Every link is resolved inside models/ only (resolve_inside); nothing outside it is followed.
+    {"ambiguous": a link in the editor's entries could not be resolved inside models/ for sure (unreadable, out of
+     models/ - maybe models/ itself spelled another way -, a loop, missing, a folder link over the shared store, or a
+     walk that could not be completed): then NOTHING in models/ may be deleted (R7-5),
+     "used": {our store names a link of the editor's leads into or through},
+     "their_blobs": {keys of shared-store files a link of the editor's leads to},
+     "refs": {our store name: ({key: path of a shared-store file it links to}, complete?)},
+     "shared": models/blobs is Hugging Face's marked shared store}."""
     models = os.path.normpath(os.path.abspath(str(models_dir)))
     blobs = os.path.join(models, HF_BLOBS)
     shared = model_entry_kind(models, HF_BLOBS) == "bookkeeping"
@@ -533,6 +544,10 @@ def models_usage(models_dir, ours: Iterable, theirs: Iterable) -> dict:
     def in_blobs(p: str) -> bool:
         k = _fold(os.path.normcase(p))
         return shared and k != blobs_key and _inside(k, blobs_key)
+
+    def over_blobs(p: str) -> bool:  # a folder that is, or holds, or lies inside the shared store
+        k = _fold(os.path.normcase(p))
+        return shared and (_inside(k, blobs_key) or _inside(blobs_key, k))
 
     their_blobs, used, ambiguous = set(), set(), False
     for name in theirs:
@@ -545,22 +560,40 @@ def models_usage(models_dir, ours: Iterable, theirs: Iterable) -> dict:
                 used.update(n for n, sk in store_keys.items() if _inside(k, sk))
             if final is None:
                 ambiguous = True
-            elif os.path.isdir(final):  # a link to a folder: ambiguous when the shared store is, or is in, it
-                k = _fold(os.path.normcase(final))
-                ambiguous = ambiguous or (shared and (_inside(k, blobs_key) or _inside(blobs_key, k)))
+            elif os.path.isdir(final):
+                ambiguous = ambiguous or over_blobs(final)
             elif in_blobs(final):
                 their_blobs.add(_fold(os.path.normcase(final)))
-    our_blobs = {}
+    refs = {}
     for name in ours:
-        if name in used:
-            continue
-        links, _complete = _links_below(os.path.join(models, name))
+        links, complete = _links_below(os.path.join(models, name))
+        found = {}
         for q in links:
             final, _passed = resolve_inside(models, q)
-            if final and in_blobs(final) and os.path.isfile(final) and not is_link(final):
-                our_blobs.setdefault(_fold(os.path.normcase(final)), final)
-    out = [] if ambiguous else sorted(p for k, p in our_blobs.items() if k not in their_blobs)
-    return {"blobs": out, "used": used, "ambiguous": ambiguous}
+            if final is None or (os.path.isdir(final) and over_blobs(final)):
+                complete = False  # where this one leads is not known for sure
+            elif in_blobs(final) and os.path.isfile(final) and not is_link(final):
+                found.setdefault(_fold(os.path.normcase(final)), final)
+        refs[name] = (found, complete)
+    return {"ambiguous": ambiguous, "used": used, "their_blobs": their_blobs, "refs": refs, "shared": shared}
+
+
+def blobs_to_delete(usage: dict, gone: Iterable) -> list:
+    """The shared-store files to delete once our stores `gone` were REALLY deleted (fix round 8, R7-1 / R7-3): those
+    the gone stores link to, minus every file anything that stays links to - the editor's entries, our stores kept
+    because the editor links into them, our stores whose delete was refused or failed. Nothing when the editor's side
+    is ambiguous or where a staying store leads is not fully known."""
+    gone = set(gone)
+    staying = [n for n in usage["refs"] if n not in gone]
+    if usage["ambiguous"] or any(not usage["refs"][n][1] for n in staying):
+        return []
+    keep = set(usage["their_blobs"])
+    for n in staying:
+        keep.update(usage["refs"][n][0])
+    cand = {}
+    for n in gone:
+        cand.update(usage["refs"].get(n, ({}, True))[0])
+    return sorted(p for k, p in cand.items() if k not in keep)
 
 
 def library_state(lib) -> Optional[str]:
@@ -592,7 +625,9 @@ def is_kept_leftover(path, *, pointer_ok: bool = False) -> bool:
     the -Source cache and, with `pointer_ok`, the pointer do not count) are the kept names - models/ that is ours
     (is_our_models) and/or library/. library/ counts by its own content (pack manifests: library_state "packs"); an
     empty one only beside our models/, never alone. Never by the names alone, and a link is never ours."""
-    occupied = occupied_entries(path, pointer_ok=pointer_ok)
+    # (round 8, R7-2) Finder's / Explorer's own view files do not count HERE only: a leftover of ours still needs one
+    # recognised entry besides them; placement counts them (a folder holding only desktop.ini is not empty)
+    occupied = occupied_entries(path, pointer_ok=pointer_ok, ignore_view=True)
     if not occupied or not set(occupied) <= set(ENGINE_KEPT):
         return False
     p = Path(path)
@@ -611,12 +646,14 @@ def is_our_home(path, *, pointer_ok: bool = False) -> bool:
     return is_engine_home(path) or is_kept_leftover(path, pointer_ok=pointer_ok)
 
 
-def occupied_entries(path, *, pointer_ok: bool = False) -> list:
+def occupied_entries(path, *, pointer_ok: bool = False, ignore_view: bool = False) -> list:
     """What makes an existing folder the editor's for the placement rule (controller ruling, fix round 2): every entry
     except the bootstraps' write probe (.wnc-write-test*), the -Source cache (a `downloads` folder holding only
     `release-*` folders) and, at the pointer's own place (`pointer_ok`: ~/.whynot-cut), the pointer
-    plugin-options.json, and (fix round 7, M6-2) the OS folder-view files .DS_Store / Thumbs.db / desktop.ini when they are
-    real files. Names compare exactly. [] when the folder is missing or empty of anything else."""
+    plugin-options.json, and - only with `ignore_view`, when recognising a leftover that is already ours (fix round 8,
+    R7-2; round 7, M6-2) - the OS folder-view files .DS_Store / Thumbs.db / desktop.ini when they are real files. For
+    placement a folder holding only those is NOT empty (a known folder's desktop.ini: it gets its WhyNotCut subfolder).
+    Names compare exactly. [] when the folder is missing or empty of anything else."""
     try:
         names = os.listdir(path)
     except OSError:
@@ -625,7 +662,7 @@ def occupied_entries(path, *, pointer_ok: bool = False) -> list:
     for n in names:
         if n.startswith(".wnc-write-test") or (pointer_ok and n == OPTIONS_FILE):
             continue
-        if is_view_file(Path(path) / n):  # (fix round 7, M6-2) Finder's / Explorer's own file, a real file only
+        if ignore_view and is_view_file(Path(path) / n):  # (rounds 7-8) Finder's / Explorer's file, a real file only
             continue
         if n == "downloads" and not is_link(Path(path) / n) and os.path.isdir(Path(path) / n):
             try:
@@ -836,13 +873,25 @@ UNINSTALL_SUBFOLDER_AR = ("هذا المجلد ليس مجلد WhyNot Cut، لك
 MODELS_KEPT_AR = ("حُذفت نماذج WhyNot Cut وحدها. بقي المجلد models لأن فيه ملفات ليست من WhyNot Cut (نماذجك أنت "
                   "مثلًا)، ولم يُلمس منها شيء.")
 # fix round 7 (R6-1): the editor's model beside ours uses Hugging Face's shared files (blobs/, .locks, CACHEDIR.TAG)
-MODELS_SHARED_KEPT_AR = ("بقيت ملفات Hugging Face المشتركة في المجلد models (مثل blobs و.locks وCACHEDIR.TAG) لأن "
-                         "نماذجك تستخدمها، ولم يُحذف منها إلا ما كانت تستخدمه نماذج WhyNot Cut وحدها.")
-MODELS_STORE_USED_AR = "وبقي أيضًا نموذج من نماذج WhyNot Cut لأن ملفًا من ملفاتك يشير إليه."
+# (round 8, R7-4: every note says what really happened)
+MODELS_SHARED_KEPT_AR = "بقيت ملفات Hugging Face المشتركة في المجلد models (المجلد blobs) لأن نماذجك تشير إليها."
+MODELS_HF_KEPT_AR = ("بقيت ملفات Hugging Face الخاصة (مثل .locks وCACHEDIR.TAG وblobs) في المجلد models لأن فيه "
+                     "ملفات لك، فبقيت معها.")
+MODELS_BLOBS_DELETED_AR = "وحُذفت من blobs الملفات التي كانت تستخدمها نماذج WhyNot Cut المحذوفة وحدها."
+MODELS_STORE_USED_AR = "وبقي نموذج من نماذج WhyNot Cut لأن ملفًا من ملفاتك يشير إليه."
+MODELS_NONE_DELETED_AR = ("لم يُحذف أي نموذج من نماذج WhyNot Cut من المجلد models. بقي المجلد لأن فيه ملفات ليست من "
+                          "WhyNot Cut، ولم يُلمس منها شيء.")
+# (round 8, R7-5) a link of the editor's in models/ could not be followed for sure: nothing in models/ was deleted
+MODELS_UNSURE_AR = ("لم يُحذف شيء من المجلد models: فيه رابط من روابطك لم نستطع التأكد إلى أين يشير، فلم نعرف بيقين "
+                    "أي الملفات تستخدمها نماذجك، لذلك بقيت كلها في مكانها (نماذجك ونماذج WhyNot Cut).")
 # fix round 7 (M6-4): --remove-models on a models/ that is itself a link
 MODELS_LINK_AR = "كان المجلد models رابطًا: حُذف الرابط وحده، ولم يُلمس المجلد الذي يشير إليه."
 # fix round 7 (M6-3): the -Source release could not be kept in the engine home (the bootstraps print the same line)
 CACHE_FAIL_AR = ("تعذّر حفظ ملفات WhyNot Cut في مجلد المحرك (غالبًا لأن القرص ممتلئ)، فلم يُثبَّت شيء. وفّر مساحة ثم "
+                 "شغّل المثبّت مرة أخرى.")
+# fix round 8 (N-4): <engine home>/downloads is a link: the -Source release is not kept through it
+CACHE_LINK_AR = ("تعذّر حفظ ملفات WhyNot Cut في مجلد المحرك لأن المجلد "
+                 "downloads فيه رابط، وWhyNot Cut لا يتبع الروابط، فلم يُثبَّت شيء. احذف الرابط أو انقله ثم "
                  "شغّل المثبّت مرة أخرى.")
 # fix round 5 (N6): ~/.whynot-cut was pointed elsewhere while the uninstall ran
 LINK_MOVED_AR = ("تغيّر المجلد الذي يشير إليه الرابط ~/.whynot-cut أثناء الإلغاء، لذلك لم يُحذف شيء آخر. تحقّق من "
@@ -971,7 +1020,9 @@ def _place_problem(p: str, h: Path, clients_roots: Iterable, known: Iterable,
                    client_checks: bool = True) -> Optional[str]:
     """resolved_home_problem's checks of where `p` really is (as written and with links resolved)."""
     keys = _place_keys(p)
-    if _is_drive_root(p) or any(_is_drive_root(k) for k in keys):
+    # (round 8, MAC-1 hardening) the keys are case-folded (macOS) / normcased: os.path.ismount is asked about the real
+    # path as it is spelled too, so a mount point on a case-sensitive volume is not missed
+    if _is_drive_root(p) or _is_drive_root(os.path.realpath(p)) or any(_is_drive_root(k) for k in keys):
         return "a drive root or a mount point"
     if keys & _place_keys(h):
         return "your user folder itself"

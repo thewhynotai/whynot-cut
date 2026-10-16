@@ -131,6 +131,10 @@ param(
     $WncModelSizes = @{ 'large-v3' = 2.9; 'large-v3-turbo' = 1.6; 'medium' = 1.5; 'small' = 0.5 }
     # the Arabic lines, UTF-8 in base64 (this file stays ASCII)
     $WncAr = @{
+        CacheLink = ('2KrYudiw2ZHYsSDYrdmB2Lgg2YXZhNmB2KfYqiBXaHlOb3QgQ3V0INmB2Yog2YXYrNmE2K8g2KfZhNmF2K3YsdmDINmE2KPZhiDYp9mE' +
+            '2YXYrNmE2K8gZG93bmxvYWRzINmB2YrZhyDYsdin2KjYt9iMINmIV2h5Tm90IEN1dCDZhNinINmK2KrYqNi5INin2YTYsdmI2KfYqNi3' +
+            '2Iwg2YHZhNmFINmK2Y/Yq9io2Y7ZkdiqINi02YrYoS4g2KfYrdiw2YEg2KfZhNix2KfYqNi3INij2Ygg2KfZhtmC2YTZhyDYq9mFINi0' +
+            '2LrZkdmEINin2YTZhdir2KjZkdiqINmF2LHYqSDYo9iu2LHZiS4=')
         CacheFail = ('2KrYudiw2ZHYsSDYrdmB2Lgg2YXZhNmB2KfYqiBXaHlOb3QgQ3V0INmB2Yog2YXYrNmE2K8g2KfZhNmF2K3YsdmDICjYutin2YTYqNmL' +
             '2Kcg2YTYo9mGINin2YTZgtix2LUg2YXZhdiq2YTYpinYjCDZgdmE2YUg2YrZj9ir2KjZjtmR2Kog2LTZitihLiDZiNmB2ZHYsSDZhdiz' +
             '2KfYrdipINir2YUg2LTYutmR2YQg2KfZhNmF2KvYqNmR2Kog2YXYsdipINij2K7YsdmJLg==')
@@ -411,7 +415,8 @@ param(
             $now = Get-WncRealPath $root
             $then = $null
             if ($LinkReal) {
-                try { $then = Get-WncNormPath $LinkReal } catch { $then = $null }
+                # (round 8, MAC-1) both sides through Get-WncRealPath: the same folder spelled through another prefix
+                try { $then = Get-WncRealPath $LinkReal } catch { $then = $null }
             }
             if ((-not $now) -or (-not $then) -or ($now -ine $then)) {
                 Write-Host ("WARNING: $root now points to $now, not to $LinkReal as when this uninstall started; the " +
@@ -495,7 +500,7 @@ param(
                     'marketplace', 'marketplace.new', 'marketplace.prev', 'models', 'plugin-options.json',
                     'ppro-queue', 'ppro-scripts', 'python', 'runtimes', 'serve', 'state', 'state.json', 'tmp',
                     'venv')
-                for ($i = 0; $i -lt 10; $i++) {
+                for ($i = 0; $i -lt 10; $i++) {  # x 200 ms = 2 s, as the core
                     $left = @([IO.Directory]::GetFileSystemEntries($root) | ForEach-Object { [IO.Path]::GetFileName($_) })
                     $copies = @($left | Where-Object {
                             $_.ToLowerInvariant().EndsWith('.tmp') -and
@@ -508,8 +513,9 @@ param(
                 (@([IO.Directory]::GetFileSystemEntries($root)).Count -eq 0)) {
                 [IO.Directory]::Delete($root, $false)
                 # a program that still has the folder open (an antivirus or indexer scanning what was just deleted)
-                # can keep its name listed for a moment after the delete succeeded: wait for it, briefly
-                for ($i = 0; ($i -lt 30) -and [IO.Directory]::Exists($root); $i++) { Start-Sleep -Milliseconds 100 }
+                # can keep its name listed for a moment after the delete succeeded: wait for it, at most 2 s (as the
+                # core's base.wait_gone and bash; round 8, F1-b)
+                for ($i = 0; ($i -lt 20) -and [IO.Directory]::Exists($root); $i++) { Start-Sleep -Milliseconds 100 }
                 if ([IO.Directory]::Exists($root)) {
                     Write-Host "WARNING: $root is still listed; Windows removes it once the program holding it lets go"
                 } else {
@@ -698,18 +704,19 @@ param(
         return ($id.Found -and ($id.Value -is [string]) -and ($id.Value -ceq $rid))
     }
 
-    function Get-WncOccupiedEntry([string]$Path, [bool]$PointerOk) {
+    function Get-WncOccupiedEntry([string]$Path, [bool]$PointerOk, [bool]$IgnoreView = $false) {
         # what makes an existing folder the editor's (the core's base.occupied_entries): every entry except the write
-        # probe (.wnc-write-test*), the -Source cache (a `downloads` folder holding only `release-*` folders) and, in
-        # ~\.whynot-cut, the pointer plugin-options.json, and (fix round 7, M6-2) the OS folder-view files .DS_Store,
-        # Thumbs.db, desktop.ini when they are real files (Test-WncViewFile). Names compare EXACTLY (case too).
+        # probe (.wnc-write-test*), the -Source cache (a `downloads` folder holding only `release-*` folders), in
+        # ~\.whynot-cut the pointer plugin-options.json, and - only with -IgnoreView, when recognising a leftover that
+        # is already ours (fix round 8, R7-2) - the OS folder-view files .DS_Store, Thumbs.db, desktop.ini when they are
+        # real files (Test-WncViewFile). For placement a folder holding only those is NOT empty. Names compare EXACTLY.
         $out = @()
         if (-not [IO.Directory]::Exists($Path)) { return ,$out }
         foreach ($e in [IO.Directory]::GetFileSystemEntries($Path)) {
             $n = [IO.Path]::GetFileName($e)
             if ($n.StartsWith('.wnc-write-test', [StringComparison]::Ordinal)) { continue }
             if ($PointerOk -and ($n -ceq 'plugin-options.json')) { continue }
-            if (Test-WncViewFile $e) { continue }
+            if ($IgnoreView -and (Test-WncViewFile $e)) { continue }
             if (($n -ceq 'downloads') -and [IO.Directory]::Exists($e) -and (-not (Test-WncReparse $e))) {
                 $kids = @([IO.Directory]::GetFileSystemEntries($e) | ForEach-Object { [IO.Path]::GetFileName($_) })
                 if (@($kids | Where-Object { -not $_.StartsWith('release-', [StringComparison]::Ordinal) }).Count -eq 0) {
@@ -837,7 +844,8 @@ param(
         # 6: the core's base.is_kept_leftover): its only entries (Get-WncOccupiedEntry) are models\ that is ours
         # (Test-WncOurModels) and/or library\ - recognised by its pack manifests, or empty beside our models\ (never
         # alone). Never by the names alone; a link is never ours.
-        $occupied = Get-WncOccupiedEntry -Path $Path -PointerOk $PointerOk  # (an array already: no @() around it)
+        # (round 8, R7-2) view files are ignored HERE only; a leftover still needs one recognised entry besides them
+        $occupied = Get-WncOccupiedEntry -Path $Path -PointerOk $PointerOk -IgnoreView $true  # (an array already)
         if ($occupied.Count -eq 0) { return $false }
         foreach ($n in $occupied) {
             if (@('models', 'library') -cnotcontains $n) { return $false }
@@ -1037,6 +1045,13 @@ param(
         $tmp = "$dest.tmp"
         $madeEngine = -not [IO.Directory]::Exists($Engine)
         $madeDownloads = -not [IO.Directory]::Exists($downloads)
+        if (Test-WncReparse $downloads) {
+            # (fix round 8, N-4) a downloads that is a link is never written through (nor cleaned up inside)
+            Write-Host ("ERROR: could not keep the release in ${dest}: $downloads is a link, which WhyNot Cut does not " +
+                'follow. Nothing was installed: remove or move the link, then run the installer again.')
+            Write-Host (Get-WncArabic 'CacheLink')
+            return $null
+        }
         try {
             $zips = @([IO.Directory]::GetFiles($Stage))
             $same = ($zips.Count -gt 0) -and [IO.Directory]::Exists($dest) -and (-not (Test-WncReparse $dest)) -and
@@ -1609,7 +1624,7 @@ param(
             try {
                 $st = Get-WncFullPath $ReleaseStage
                 $ok = ((Split-Path $st -Leaf) -cmatch '^release-[0-9a-f]{8}$') -and
-                    ((Get-WncNormPath (Join-Path $st 'x\whynot-cut-marketplace\whynot-cut')) -ieq (Get-WncNormPath $root))
+                    ((Get-WncRealPath (Join-Path $st 'x\whynot-cut-marketplace\whynot-cut')) -ieq (Get-WncRealPath $root))
             } catch {
                 $ok = $false
             }

@@ -4095,6 +4095,29 @@ class TestPowerShellOneLiner(TestPowerShellFrontEnd):
                 self.assertEqual(after, before, out)  # nothing of the copy stays; no log: the core never ran
                 self.assertEqual(os.listdir(ostmp), [], out)
 
+    def test_round8_a_downloads_link_is_never_written_through(self):
+        # N-4: <engine home>\downloads is a link: the release is not kept through it (exit 3, English and Arabic), and
+        # nothing is written or deleted in its target
+        ostmp, env = self.os_temp_env()
+        r = self.ps(self.lone, "-Home", self.home, "-Yes", "-Skip", "model,launch", "-Source", self.zip,
+                    "-SourceSha256", self.zip_sha, env=env)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        shutil.rmtree(self.paths.downloads_dir)
+        elsewhere = touch(self.tmp / "elsewhere" / "mine.txt", b"mine").parent
+        if not make_dir_link(self.paths.downloads_dir, elsewhere):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, self.paths.downloads_dir)
+        before = snapshot_tree(elsewhere)
+        r = self.ps(self.lone, "-Home", self.home, "-Yes", "-Skip", "model,launch", "-Source", self.zip,
+                    "-SourceSha256", self.zip_sha, env=env)
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 3, out)
+        self.assertIn("is a link, which WhyNot Cut does not follow", out)
+        self.assertIn(base.CACHE_LINK_AR, out)
+        self.assertEqual(snapshot_tree(elsewhere), before, out)
+        self.assertTrue(base.is_link(self.paths.downloads_dir))
+        self.assertEqual(os.listdir(ostmp), [], out)
+
     def test_round7_the_stage_is_deleted_in_a_finally_block(self):
         # M6-3: the per-run stage goes in `finally`, which PowerShell 5.1 runs on Ctrl+C too (the pipeline stops)
         text = (INSTALLER / "install.ps1").read_text(encoding="ascii")
@@ -5478,6 +5501,48 @@ class TestBashEngineHome(TestBashFrontEnd):
                 self.assertEqual(after, before, out)  # nothing of the copy stays; no log: the core never ran
                 self.assertEqual(os.listdir(ostmp), [], out)
 
+    def test_round8_a_piped_downloads_link_is_never_written_through(self):
+        # N-4: as in PowerShell
+        zf = self.tmp / "WhyNotCut-3.0.0.zip"
+        zsha = release_zip(self.fx, zf)
+        ostmp, env = self.os_temp_env()
+
+        def run():
+            return self.sh("-s", "--", "--home", self.home_arg(), "--yes", "--skip", "model,launch", "--source",
+                           zf.as_posix(), "--source-sha256", zsha, script=(INSTALLER / "install.sh").read_bytes(),
+                           env=env)
+
+        r = run()
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        shutil.rmtree(self.paths.downloads_dir)
+        elsewhere = touch(self.tmp / "elsewhere" / "mine.txt", b"mine").parent
+        if not make_dir_link(self.paths.downloads_dir, elsewhere):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, self.paths.downloads_dir)
+        before = snapshot_tree(elsewhere)
+        r = run()
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 3, out)
+        self.assertIn("is a link, which WhyNot Cut does not follow", out)
+        self.assertIn(base.CACHE_LINK_AR, out)
+        self.assertEqual(snapshot_tree(elsewhere), before, out)
+        self.assertEqual(os.listdir(ostmp), [], out)
+
+    def test_round8_the_stage_is_dropped_once(self):
+        # N-2: the first attempt clears WNC_TEMP, so the EXIT trap neither tries nor warns again
+        stage = self.tmp / "stage" / "release-x"
+        touch(stage / "a.zip", b"x")
+        script = self.tmp / "drop.sh"
+        script.write_text(shell_function(INSTALLER / "install.sh", "wnc_drop_stage", False)
+                          + 'WNC_TEMP="$1"\nwnc_drop_stage\nprintf "[%s]\\n" "$WNC_TEMP"\nwnc_drop_stage\n',
+                          encoding="utf-8", newline="\n")
+        r = subprocess.run([find_bash(), script.as_posix(), (self.tmp / "stage").as_posix()], capture_output=True,
+                           timeout=60)
+        out = (r.stdout + r.stderr).decode("utf-8", "replace")
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn("[]", out)
+        self.assertFalse((self.tmp / "stage").exists(), out)
+
     def test_round7_an_interrupt_deletes_the_source_stage(self):
         # M6-3 (b): Ctrl+C (INT) or TERM while install.sh runs: its trap deletes the per-run stage
         zf = self.tmp / "WhyNotCut-3.0.0.zip"
@@ -5857,7 +5922,8 @@ class TestResolvedHomeGuard(unittest.TestCase):
                 try:
                     real_root = base._real(stand_in)
                     with mock.patch.object(base, "_is_drive_root",
-                                           side_effect=lambda q, _o=base._is_drive_root: _o(q) or q == real_root):
+                                           side_effect=lambda q, _o=base._is_drive_root: (
+                                               _o(q) or base._fold(q) == base._fold(real_root))):  # (MAC-1: darwin folds)
                         why = self.problem(link)
                         self.assertIn(needle, why or "")
                         self.assertIn("a link to", why)
@@ -5969,7 +6035,9 @@ class TestResolvedHomeGuard(unittest.TestCase):
             self.skipTest("cannot make a directory link here")
         self.addCleanup(drop_dir_link, h / ".whynot-cut")
         real = os.path.realpath(usb)
-        with mock.patch("os.path.ismount", side_effect=lambda q: os.path.normcase(str(q)) == os.path.normcase(real)):
+        # (MAC-1) the guard's keys are case-folded on macOS (base._fold): compare folded on both sides
+        with mock.patch("os.path.ismount", side_effect=lambda q: base._fold(os.path.normcase(str(q)))
+                        == base._fold(os.path.normcase(real))):
             self.assertIn("mount point", self.problem(h / ".whynot-cut") or "")
 
     def test_uninstall_keeps_client_folders_inside_a_genuine_home_allowed(self):
@@ -6426,13 +6494,18 @@ class TestRound6(unittest.TestCase):
         ctx = make_ctx(h, {"schema": 1}, SK, engine_home=eng, remove_engine=False, remove_models=True)
         r = uninstall_module().step_engine(ctx)
         self.assertEqual(r.status, "ok", r.detail)
-        # (round 7, R6-1: with the editor's model there, Hugging Face's .locks / CACHEDIR.TAG stay as well)
-        self.assertEqual(sorted(os.listdir(eng / "models")),
-                         sorted([".locks", "CACHEDIR.TAG", LLAMA] + ([small.name] if linked else [])), r.detail)
+        # (round 7, R6-1: with the editor's model there, Hugging Face's .locks / CACHEDIR.TAG stay as well; round 8,
+        # R7-5: a link there that leads out of models/ may be models/ itself spelled another way - nothing is deleted)
+        if linked:
+            self.assertEqual(sorted(os.listdir(eng / "models")),
+                             sorted([".locks", "CACHEDIR.TAG", HF_STORE, LLAMA, small.name]), r.detail)
+            self.assertIn(base.MODELS_UNSURE_AR, r.detail)
+        else:
+            self.assertEqual(sorted(os.listdir(eng / "models")), sorted([".locks", "CACHEDIR.TAG", LLAMA]), r.detail)
+            self.assertIn(base.MODELS_KEPT_AR, r.detail)
         self.assertEqual(mine.read_bytes(), b"mine")
         self.assertEqual(theirs.read_bytes(), b"theirs")  # never entered through the link
         self.assertIn(LLAMA, r.detail)
-        self.assertIn(base.MODELS_KEPT_AR, r.detail)
         # with --remove-engine too, and nothing of the editor's in models/: models/ goes as well
         eng2 = h / "Engine2"
         touch(eng2 / "state.json", GENUINE_STATE)
@@ -6701,10 +6774,11 @@ class TestRound7(unittest.TestCase):
                 self.assertIn(base.MODELS_KEPT_AR, r.detail)
                 self.assertIn(base.MODELS_SHARED_KEPT_AR, r.detail)  # what was kept, and why
                 self.assertIn("1 file of blobs", r.detail)  # what was removed of the shared store
+                self.assertIn(base.MODELS_BLOBS_DELETED_AR, r.detail)
                 if flags.get("remove_engine"):
                     self.assertEqual(os.listdir(eng), ["models"], r.detail)
 
-    def test_r6_1_anything_ambiguous_keeps_the_shared_blobs(self):
+    def test_r6_1_anything_ambiguous_keeps_everything(self):
         self.need_symlinks()
         outside = touch(self.home.parent / "editor elsewhere" / "w.bin", b"outside models")
 
@@ -6731,9 +6805,11 @@ class TestRound7(unittest.TestCase):
                 eng, ours_only = case(name, editor_link)
                 r = self.remove(eng, remove_models=True)
                 self.assertEqual(r.status, "ok", r.detail)
-                self.assertFalse(os.path.lexists(eng / "models" / HF_STORE), r.detail)
-                self.assertTrue(ours_only.is_file(), r.detail)  # ambiguous: the blob stays
-                self.assertIn(base.MODELS_SHARED_KEPT_AR, r.detail)
+                # (round 8, R7-5) ambiguous: NOTHING in models/ goes, neither our store nor a blob
+                self.assertTrue((eng / "models" / HF_STORE / "snapshots" / "abc" / "turbo.bin").is_file(), r.detail)
+                self.assertTrue(ours_only.is_file(), r.detail)
+                self.assertIn(base.MODELS_UNSURE_AR, r.detail)
+                self.assertNotIn(base.MODELS_KEPT_AR, r.detail)
                 self.assertEqual(outside.read_bytes(), b"outside models")
         # a link of OUR store that points out of models/: removed as a link, its target never entered
         eng = self.engine("ours out")
@@ -6746,6 +6822,7 @@ class TestRound7(unittest.TestCase):
         self.assertFalse(os.path.lexists(m / HF_STORE), r.detail)
         self.assertEqual(outside.read_bytes(), b"outside models")
         self.assertEqual(w.read_bytes(), b"the editor's weights")
+        self.assertIn(base.MODELS_KEPT_AR, r.detail)
         # a link of the editor's INTO one of our stores: that store stays too (their file reads through it)
         eng = self.engine("borrowed")
         m = eng / "models"
@@ -6756,6 +6833,10 @@ class TestRound7(unittest.TestCase):
         self.assertEqual(r.status, "ok", r.detail)
         self.assertEqual((d / "borrowed.bin").read_bytes(), b"weights", r.detail)
         self.assertIn(HF_STORE, r.detail)
+        self.assertIn("no Whisper model of WhyNot Cut's was deleted", r.detail)  # (round 8, R7-4)
+        self.assertIn(base.MODELS_NONE_DELETED_AR, r.detail)
+        self.assertIn(base.MODELS_STORE_USED_AR, r.detail)
+        self.assertNotIn(base.MODELS_KEPT_AR, r.detail)
 
     def test_r6_1_with_nothing_of_the_editors_everything_goes_as_before(self):
         self.need_symlinks()
@@ -6786,7 +6867,10 @@ class TestRound7(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(m)), sorted([".locks", "CACHEDIR.TAG", HF_BLOBS, LLAMA]), r.detail)
         self.assertEqual(snapshot_tree(m / HF_BLOBS), blobs_before)
         self.assertEqual(mine.read_bytes(), b"the editor's Llama weights")
-        self.assertIn(base.MODELS_SHARED_KEPT_AR, r.detail)
+        # (round 8, R7-4) no link of the editor's leads into blobs/: not "your models link to them"
+        self.assertIn(base.MODELS_HF_KEPT_AR, r.detail)
+        self.assertNotIn(base.MODELS_SHARED_KEPT_AR, r.detail)
+        self.assertNotIn(base.MODELS_BLOBS_DELETED_AR, r.detail)
 
     def test_m6_1_an_empty_models_folder_is_ours(self):
         h = self.home
@@ -6842,17 +6926,21 @@ class TestRound7(unittest.TestCase):
             self.assertIsNone(base.resolved_home_problem(link, home=h, mode=mode), mode)
 
     def test_m6_2_view_files_at_the_top_are_not_the_editors(self):
+        # (round 8, R7-2) ignored ONLY when recognising a leftover that is already ours; placement counts them
         h = self.home
         for name in ("Thumbs.db", "desktop.ini", ".DS_Store"):
             with self.subTest(name):
                 p = h / ("view " + name)
                 make_model_leftover(p)
                 touch(p / name, b"x")
-                self.assertEqual(base.occupied_entries(p), ["models"])
+                self.assertEqual(base.occupied_entries(p, ignore_view=True), ["models"])
+                self.assertEqual(base.occupied_entries(p), sorted([name, "models"]))
                 self.assertTrue(base.is_kept_leftover(p))
         alone = h / "view only"
         touch(alone / ".DS_Store", b"x")
-        self.assertEqual(base.occupied_entries(alone), [])
+        self.assertEqual(base.occupied_entries(alone, ignore_view=True), [])
+        self.assertEqual(base.occupied_entries(alone), [".DS_Store"])
+        self.assertFalse(base.is_kept_leftover(alone))  # one recognised entry besides the view files is needed
         folder = h / "view folder"
         make_model_leftover(folder)
         (folder / ".DS_Store").mkdir()
@@ -6864,16 +6952,19 @@ class TestRound7(unittest.TestCase):
             self.addCleanup(drop_dir_link, linked / "Thumbs.db")
             self.assertEqual(base.occupied_entries(linked), ["Thumbs.db", "models"])
             self.assertFalse(base.is_kept_leftover(linked))
-        # --remove-engine deletes them with the layout (real files only); a folder of that name is the editor's
+        # --remove-engine deletes .DS_Store / Thumbs.db with the layout (real files only); a folder of that name is the
+        # editor's; a desktop.ini is never deleted (round 8, R7-2: it is the folder's customisation)
         eng = self.engine("Engine")
         touch(eng / ".DS_Store", b"x")
-        touch(eng / "desktop.ini", b"x")
+        ini = touch(eng / "desktop.ini", b"[.ShellClassInfo]\r\n")
         mine = touch(eng / "Thumbs.db" / "kept.txt", b"mine")
         r = self.remove(eng, remove_engine=True)
         self.assertEqual(r.status, "ok", r.detail)
-        self.assertEqual(sorted(os.listdir(eng)), ["Thumbs.db", "models"], r.detail)
+        self.assertEqual(sorted(os.listdir(eng)), ["Thumbs.db", "desktop.ini", "models"], r.detail)
         self.assertEqual(mine.read_bytes(), b"mine")
+        self.assertEqual(ini.read_bytes(), b"[.ShellClassInfo]\r\n")
         self.assertIn("Thumbs.db", r.detail)
+        self.assertIn("desktop.ini", r.detail)
 
     def test_m6_4_a_models_link_says_what_happened(self):
         eng = self.home / "Engine"
@@ -6892,6 +6983,264 @@ class TestRound7(unittest.TestCase):
         self.assertIn("was a link", r.detail)
         self.assertIn("not touched", r.detail)
         self.assertIn(base.MODELS_LINK_AR, r.detail)
+        self.assertIn(os.path.basename(str(target)), r.detail)  # (round 8, N-1: the target as readlink gives it)
+
+
+class FakeClock:
+    """(round 8, F1-b) stand-ins for base._clock / base._sleep: time moves only when the code pauses, and
+    `on_sleep(n)` runs at the nth pause (a scanner's copy that goes away on the Nth re-list). No real timer."""
+
+    def __init__(self, on_sleep=None):
+        self.t, self.sleeps, self.on_sleep = 1000.0, 0, on_sleep
+
+    def clock(self) -> float:
+        return self.t
+
+    def sleep(self, secs: float) -> None:
+        self.sleeps += 1
+        self.t += secs
+        if self.on_sleep:
+            self.on_sleep(self.sleeps)
+
+    def patch(self):
+        return mock.patch.multiple(base, _clock=self.clock, _sleep=self.sleep)
+
+
+TURBO_STORE = "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo"  # another store name of components.json
+
+
+def make_p1_models(m: Path) -> tuple:
+    """The review's P1: our stores A (large-v3) and B (turbo) dedupe vocabulary.json into ONE shared blob; the
+    editor's own entry my-whisper/large-v3 is a FOLDER link onto A's snapshot. Returns (editor folder, B's blob)."""
+    vocab = make_shared_blob(m, b"the vocabulary both of our stores share")
+    wa = make_shared_blob(m, b"large-v3 weights")
+    wb = make_shared_blob(m, b"turbo weights")
+    link_repo_file(m, HF_STORE, "abc/vocabulary.json", vocab, "a1")
+    link_repo_file(m, HF_STORE, "abc/model.bin", wa, "a2")
+    link_repo_file(m, TURBO_STORE, "def/vocabulary.json", vocab, "b1")
+    link_repo_file(m, TURBO_STORE, "def/model.bin", wb, "b2")
+    mine = m / "my-whisper"
+    mine.mkdir()
+    os.symlink(os.path.relpath(m / HF_STORE / "snapshots" / "abc", mine), mine / "large-v3", target_is_directory=True)
+    return mine / "large-v3", wb
+
+
+class TestRound8(unittest.TestCase):
+    """Task 9 fix round 8 (controller rulings on review round 7): R7-1 ... R7-5 in the core."""
+
+    setUp = TestRound7.setUp
+    need_symlinks = TestRound7.need_symlinks
+    engine = TestRound7.engine
+    remove = TestRound7.remove
+    link = TestRound5.link
+
+    def test_r7_1_a_store_kept_for_the_editor_keeps_the_blobs_it_shares(self):
+        # the review's P1: A is kept (the editor's folder link leads into it) and B goes; their shared vocabulary.json
+        # blob is still needed by A, so it stays: the editor's file reads back byte for byte
+        self.need_symlinks()
+        eng = self.engine("Engine")
+        m = eng / "models"
+        os.unlink(m / HF_STORE / "snapshots" / "abc" / "model.bin")  # (make_model_leftover's plain file: A is P1's)
+        mine, wb = make_p1_models(m)
+        r = self.remove(eng, remove_models=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual((mine / "vocabulary.json").read_bytes(), b"the vocabulary both of our stores share", r.detail)
+        self.assertEqual((mine / "model.bin").read_bytes(), b"large-v3 weights", r.detail)
+        self.assertTrue((m / HF_STORE).is_dir(), r.detail)
+        self.assertFalse(os.path.lexists(m / TURBO_STORE), r.detail)
+        self.assertFalse(os.path.lexists(wb), r.detail)  # only B used it: gone
+        self.assertIn(base.MODELS_KEPT_AR, r.detail)
+        self.assertIn(base.MODELS_STORE_USED_AR, r.detail)
+
+    def test_r7_3_a_refused_or_failed_store_keeps_its_blobs(self):
+        # the review's P2: a store whose delete is refused (a .whynot-client marker inside) or fails (a locked file)
+        # stays, so every blob it links to stays - also one it shares with a store that did go
+        self.need_symlinks()
+        for how in ("refused", "failed"):
+            with self.subTest(how):
+                eng = self.engine("Engine " + how)
+                m = eng / "models"
+                own = make_shared_blob(m, b"blob only the kept store uses " + how.encode())
+                both = make_shared_blob(m, b"blob both stores use " + how.encode())
+                gone_only = make_shared_blob(m, b"blob only the deleted store uses " + how.encode())
+                snap = link_repo_file(m, TURBO_STORE, "def/model.bin", own, "b1")
+                snap2 = link_repo_file(m, TURBO_STORE, "def/vocabulary.json", both, "b2")
+                link_repo_file(m, HF_STORE, "abc/vocabulary.json", both, "a1")
+                link_repo_file(m, HF_STORE, "abc/turbo.bin", gone_only, "a2")
+                touch(m / "notes.txt", b"the editor's note")  # one entry of the editor's: the selective path
+                real = base.safe_rmtree
+                if how == "refused":
+                    touch(m / TURBO_STORE / "snapshots" / "def" / base.CLIENT_MARKER, b"")
+                    patch = contextlib.nullcontext()
+                else:
+                    def locked(p, *a, **k):
+                        if Path(p).name == TURBO_STORE:
+                            raise PermissionError(13, "in use by another process", str(p))
+                        return real(p, *a, **k)
+                    patch = mock.patch.object(base, "safe_rmtree", locked)
+                with patch:
+                    r = self.remove(eng, remove_models=True)
+                self.assertEqual(r.status, "ok" if how == "refused" else "amber", r.detail)
+                self.assertTrue((m / TURBO_STORE).is_dir(), r.detail)
+                self.assertEqual(snap.read_bytes(), b"blob only the kept store uses " + how.encode(), r.detail)
+                self.assertEqual(snap2.read_bytes(), b"blob both stores use " + how.encode(), r.detail)
+                self.assertFalse(os.path.lexists(m / HF_STORE), r.detail)
+                self.assertFalse(os.path.lexists(gone_only), r.detail)
+
+    def test_r7_2_a_folder_holding_only_desktop_ini_gets_its_own_subfolder(self):
+        # the review's P3: an otherwise empty known folder (Videos, Music) carries a hidden desktop.ini; it is not
+        # empty for placement, so the engine goes to Videos/WhyNotCut, and --remove-engine never touches desktop.ini
+        h = self.home
+        vids = h / "Videos"
+        data = (b"[.ShellClassInfo]\r\nLocalizedResourceName=@%SystemRoot%\\system32\\shell32.dll,-21791\r\n")
+        ini = touch(vids / "desktop.ini", data)
+        self.assertFalse(base.is_kept_leftover(vids))
+        self.assertFalse(base.is_our_home(vids))
+        final, _note, problem = base.choose_engine_home(str(vids), home=h, plugin_root=SK)
+        self.assertIsNone(problem)
+        self.assertEqual(final, vids / "WhyNotCut")
+        eng = final  # what an install there leaves, then the uninstall
+        touch(eng / "state.json", GENUINE_STATE)
+        touch(eng / "logs" / "install-1.log", b"x")
+        touch(eng / "runtimes" / "r-1" / "pyvenv.cfg", b"")
+        r = self.remove(eng, remove_engine=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(os.listdir(vids), ["desktop.ini"], r.detail)
+        self.assertEqual(ini.read_bytes(), data)
+
+    def test_r7_4_the_notes_without_links_say_what_happened(self):
+        # the editor's note and Hugging Face's .locks / CACHEDIR.TAG beside our store (real files, no links)
+        eng = self.engine("Engine")
+        m = eng / "models"
+        touch(m / "notes.txt", b"mine")
+        touch(m / ".locks" / HF_STORE / "x.lock", b"")
+        touch(m / "CACHEDIR.TAG", HF_TAG)
+        r = self.remove(eng, remove_models=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(sorted(os.listdir(m)), [".locks", "CACHEDIR.TAG", "notes.txt"], r.detail)
+        self.assertIn(f"deleted WhyNot Cut's own Whisper models in {m} ({HF_STORE})", r.detail)
+        self.assertIn(base.MODELS_KEPT_AR, r.detail)
+        self.assertIn("files of yours are there, so they stay with them", r.detail)
+        self.assertIn(base.MODELS_HF_KEPT_AR, r.detail)
+        for absent in (base.MODELS_SHARED_KEPT_AR, base.MODELS_BLOBS_DELETED_AR, base.MODELS_NONE_DELETED_AR,
+                       base.MODELS_STORE_USED_AR, base.MODELS_UNSURE_AR, "your models link to them"):
+            self.assertNotIn(absent, r.detail)
+        # nothing of ours there at all: "no Whisper model of WhyNot Cut's was deleted", never "only ours were deleted"
+        eng2 = self.home / "Engine2"
+        touch(eng2 / "state.json", GENUINE_STATE)
+        touch(eng2 / "models" / "notes.txt", b"mine")
+        r = self.remove(eng2, remove_models=True)
+        self.assertIn("no Whisper model of WhyNot Cut's was deleted", r.detail)
+        self.assertIn(base.MODELS_NONE_DELETED_AR, r.detail)
+        self.assertNotIn(base.MODELS_KEPT_AR, r.detail)
+        self.assertNotIn(base.MODELS_HF_KEPT_AR, r.detail)
+
+    def test_r7_4_the_notes_with_links_say_what_happened(self):
+        self.need_symlinks()
+        # our store's own blob goes; the editor's note does not link into blobs/: no "your models link to them"
+        eng = self.engine("Engine")
+        m = eng / "models"
+        ours = make_shared_blob(m, b"ours only")
+        link_repo_file(m, HF_STORE, "abc/turbo.bin", ours, "e1")
+        touch(m / "notes.txt", b"mine")
+        r = self.remove(eng, remove_models=True)
+        self.assertFalse(os.path.lexists(ours), r.detail)
+        self.assertIn("deleted 1 file of blobs/ that only the deleted WhyNot Cut models used", r.detail)
+        self.assertIn(base.MODELS_BLOBS_DELETED_AR, r.detail)
+        self.assertIn(base.MODELS_HF_KEPT_AR, r.detail)
+        self.assertNotIn(base.MODELS_SHARED_KEPT_AR, r.detail)
+        # the editor's model links into blobs/: "your models link to them", and nothing of blobs/ went
+        eng2 = self.engine("Engine2")
+        m2 = eng2 / "models"
+        theirs = make_shared_blob(m2, b"theirs")
+        link_repo_file(m2, LLAMA, "rev/w.bin", theirs, "l1")
+        r = self.remove(eng2, remove_models=True)
+        self.assertIn("your models link to them", r.detail)
+        self.assertIn(base.MODELS_SHARED_KEPT_AR, r.detail)
+        self.assertNotIn(base.MODELS_BLOBS_DELETED_AR, r.detail)
+        self.assertNotIn(base.MODELS_HF_KEPT_AR, r.detail)
+
+    def test_mac1_the_pinned_target_is_compared_in_one_canonical_form(self):
+        # MAC-1 (a real Mac CI failure): the target recorded as written through a symlinked prefix (/var -> /private/var
+        # on macOS; here a directory link "var" -> "private var" in the sandbox) and the target resolved now are the
+        # same folder: not "the link moved", so the uninstall goes on
+        h = self.home
+        real = h.parent / "private var"
+        target = real / "drive B" / "home"
+        touch(target / "state.json", GENUINE_STATE)
+        touch(target / "marketplace" / "m.txt", b"x")
+        alias = h.parent / "var"
+        if not make_dir_link(alias, real):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, alias)
+        self.link(alias / "drive B" / "home")
+        ctx = make_ctx(h, {"schema": 1}, SK)
+        ctx.facts["link_target"] = str(alias / "drive B" / "home")  # recorded as written, not resolved
+        um = uninstall_module()
+        self.assertIsNone(um._link_moved(ctx, str(alias / "drive B" / "home")))
+        r = um.step_marketplace(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertFalse((target / "marketplace").exists(), r.detail)
+        # a real move is still caught, whatever the spelling
+        other = touch(real / "drive A" / "home" / "state.json", GENUINE_STATE).parent
+        self.assertIsNotNone(um._link_moved(ctx, str(alias / "drive A" / "home")))
+        self.assertTrue(other.is_dir())
+
+    def test_mac1_a_mount_point_is_found_by_its_real_spelling(self):
+        # MAC-1 hardening (triage 3a): the guard's keys are case-folded (macOS) or normcased (Windows); on a
+        # case-sensitive volume os.path.ismount of a folded key can miss the mount point, so the real path is asked as
+        # it is too. The stand-in mount answers only for the exact spelling.
+        h = self.home
+        mnt = h.parent / "Mounted Drive"
+        mnt.mkdir()
+        link = self.link(mnt)
+        real = os.path.realpath(mnt)
+        with mock.patch("os.path.ismount", side_effect=lambda q: str(q) == real):
+            why = base.resolved_home_problem(link, home=h, mode="install")
+        self.assertIn("a drive root or a mount point", why or "")
+
+    def test_r7_5_an_editor_link_we_cannot_be_sure_of_keeps_everything(self):
+        # an absolute link of the editor's spelled through another name of the same folder (here a directory link
+        # "alias" -> the engine home; on the owner's PC ~/.whynot-cut -> D:\...; on a Mac /var -> /private/var), and a
+        # link that cannot be read: nothing in models/ goes - neither a store nor a blob - and the note says so
+        self.need_symlinks()
+        for how, flags in (("alias", {"remove_models": True}),
+                           ("alias", {"remove_engine": True, "remove_models": True}),
+                           ("unreadable", {"remove_models": True})):
+            with self.subTest(how=how, flags=sorted(flags)):
+                eng = self.engine(f"Engine {how} {len(flags)}")
+                m = eng / "models"
+                blob = make_shared_blob(m, b"our blob")
+                link_repo_file(m, HF_STORE, "abc/turbo.bin", blob, "e1")
+                d = m / LLAMA / "snapshots" / "rev"
+                d.mkdir(parents=True)
+                patch = contextlib.nullcontext()
+                if how == "alias":
+                    alias = self.home / f"alias {len(flags)}"
+                    if not make_dir_link(alias, eng):
+                        self.skipTest("cannot make a directory link here")
+                    self.addCleanup(drop_dir_link, alias)
+                    os.symlink(str(alias / "models" / HF_STORE / "snapshots" / "abc" / "model.bin"), d / "w.bin")
+                else:
+                    os.symlink(os.path.relpath(m / HF_STORE / "snapshots" / "abc" / "model.bin", d), d / "w.bin")
+                    real = os.readlink
+
+                    def unreadable(p, *a, **k):
+                        if os.path.basename(str(p)) == "w.bin":
+                            raise PermissionError(13, "cannot read the link", str(p))
+                        return real(p, *a, **k)
+                    patch = mock.patch.object(base.os, "readlink", unreadable)
+                with patch:
+                    r = self.remove(eng, **flags)
+                self.assertEqual(r.status, "ok", r.detail)
+                self.assertEqual((d / "w.bin").read_bytes(), b"weights", r.detail)
+                self.assertEqual((m / HF_STORE / "snapshots" / "abc" / "turbo.bin").read_bytes(), b"our blob")
+                self.assertTrue(blob.is_file())
+                self.assertIn(f"nothing in {m} was deleted", r.detail)
+                self.assertIn(base.MODELS_UNSURE_AR, r.detail)
+                self.assertNotIn(base.MODELS_KEPT_AR, r.detail)
+                if flags.get("remove_engine"):
+                    self.assertEqual(os.listdir(eng), ["models"], r.detail)
 
 
 class TestF1(unittest.TestCase):
@@ -6917,86 +7266,106 @@ class TestF1(unittest.TestCase):
             self.assertEqual(held["n"], 3)
             self.assertEqual(os.listdir(td), [])
 
-    def remove_engine_with(self, home: Path, extra: str, gone_after) -> tuple:
+    def remove_engine_with(self, home: Path, extra: str, vanish_at=None, late=False, relist=None) -> tuple:
+        """--remove-engine on a home holding `extra` (from the start, or `late`: made when state.json goes, as a
+        scanner's copy would be). The F1 wait runs on a FakeClock: `vanish_at` = the pause after which `extra` goes."""
         eng = home / "Engine"
         touch(eng / "state.json", GENUINE_STATE)
         touch(eng / "runtimes" / "r-1" / "pyvenv.cfg", b"")
-        tmpf = touch(eng / extra, b'{"schema": 1}')
-        if gone_after is not None:  # vanishes on its own a moment after the step listed it (a scanner's copy)
-            t = threading.Timer(gone_after, lambda: os.path.lexists(tmpf) and os.unlink(tmpf))
-            self.addCleanup(t.cancel)
-            real = uninstall_module()._delete_child
+        tmpf = eng / extra
+        if not late:
+            touch(tmpf, b'{"schema": 1}')
+        clock = FakeClock(lambda n: n == vanish_at and os.path.lexists(tmpf) and os.unlink(tmpf))
+        um = uninstall_module()
+        real = um._delete_child
 
-            def delete_child(*a, **k):
-                if not t.is_alive() and not t.finished.is_set():
-                    t.start()
-                return real(*a, **k)
+        def delete_child(ctx, p, *a, **k):
+            out = real(ctx, p, *a, **k)
+            if late and p.name == "state.json":
+                touch(tmpf, b"{}")
+            return out
 
-            patch = mock.patch.object(uninstall_module(), "_delete_child", delete_child)
-        else:
-            patch = contextlib.nullcontext()
         ctx = make_ctx(home, {"schema": 1}, SK, engine_home=eng, remove_engine=True, remove_models=False)
         ctx.log.path = None
-        t0 = time.monotonic()
-        with patch:
-            r = uninstall_module().step_engine(ctx)
-        return eng, r, time.monotonic() - t0
+        with clock.patch(), mock.patch.object(um, "_delete_child", delete_child), \
+                (mock.patch.object(base, "wait_for_transients", relist) if relist else contextlib.nullcontext()):
+            r = um.step_engine(ctx)
+        return eng, r, clock
 
     def test_a_transient_copy_of_our_name_is_waited_for_and_never_deleted(self):
         # (2) STATE.JSON.tmp: the name of one of ours, `.tmp`, case ignored - an antivirus or indexer copy that goes
-        # away on its own: the final "what is left" check waits for it (at most 2 s) instead of keeping the folder
+        # away on its own: the final "what is left" check waits for it (at most 2 s) instead of keeping the folder.
+        # (round 8, F1-b) on a fake clock: no timer races the wait
         with TempDir() as td:
-            h = Path(td)
-            eng, r, _s = self.remove_engine_with(h, "STATE.JSON.tmp", 0.5)
+            eng, r, clock = self.remove_engine_with(Path(td), "STATE.JSON.tmp", vanish_at=3)
             self.assertEqual(r.status, "ok", r.detail)
             self.assertFalse(eng.exists(), r.detail)
             self.assertNotIn("STATE.JSON.tmp", r.detail)
-        # one that stays is never deleted: kept and listed, after at most about 2 s
+            self.assertEqual(clock.sleeps, 3)
+        # one that stays is never deleted: kept and listed, after the whole 2 s and no more
         with TempDir() as td:
-            h = Path(td)
-            eng, r, secs = self.remove_engine_with(h, "Current.TMP", None)
+            eng, r, clock = self.remove_engine_with(Path(td), "Current.TMP")
             self.assertEqual(os.listdir(eng), ["Current.TMP"], r.detail)
             self.assertIn("Current.TMP", r.detail)
-            self.assertLess(secs, 4)
+            self.assertTrue(19 <= clock.sleeps <= 21, clock.sleeps)
         # any other name is not waited for
         with TempDir() as td:
-            h = Path(td)
-            eng, r, secs = self.remove_engine_with(h, "notes.tmp", None)
+            eng, r, clock = self.remove_engine_with(Path(td), "notes.tmp")
             self.assertEqual(os.listdir(eng), ["notes.tmp"], r.detail)
-            self.assertLess(secs, 1.5)
+            self.assertEqual(clock.sleeps, 0)
         for name in ("STATE.JSON.tmp", "state.json.tmp", "Current.tmp", "models.TMP", "plugin-options.json.tmp"):
             self.assertTrue(base.transient_copy(name), name)
         for name in ("notes.tmp", ".state.json.123.tmp", "state.json", "state.json.tmp.bak", "x.state.json.tmp"):
             self.assertFalse(base.transient_copy(name), name)
 
+    def test_f1a_a_copy_that_appears_after_the_scan_and_stays_is_named(self):
+        # (round 8, F1-a; the review's P4) made when our state.json goes, still there after the wait: kept, never
+        # deleted, AND named in the summary
+        with TempDir() as td:
+            eng, r, clock = self.remove_engine_with(Path(td), "STATE.JSON.tmp", late=True)
+            self.assertEqual(os.listdir(eng), ["STATE.JSON.tmp"], r.detail)
+            self.assertIn("STATE.JSON.tmp", r.detail)
+            self.assertTrue(19 <= clock.sleeps <= 21, clock.sleeps)
+        # the same copy made late that goes away during the wait: not named, the folder goes
+        with TempDir() as td:
+            eng, r, clock = self.remove_engine_with(Path(td), "STATE.JSON.tmp", late=True, vanish_at=2)
+            self.assertFalse(eng.exists(), r.detail)
+            self.assertNotIn("STATE.JSON.tmp", r.detail)
+
+    def test_f1a_a_failed_relist_keeps_what_was_listed(self):
+        # (round 8, F1-a) the re-list cannot read the folder: the entries seen before stay named in the summary
+        with TempDir() as td:
+            self.assertIsNone(base.wait_for_transients(Path(td) / "missing"))
+            eng, r, _clock = self.remove_engine_with(Path(td), "STATE.JSON.tmp", relist=lambda *a, **k: None)
+            self.assertIn("STATE.JSON.tmp", r.detail)
+            self.assertEqual(os.listdir(eng), ["STATE.JSON.tmp"], r.detail)
+
     def test_an_engine_home_still_listed_after_its_delete_is_waited_for(self):
         # the same family, seen in a full run under load: os.rmdir succeeded, but Windows still lists the folder until
-        # the program holding it (an antivirus or indexer) lets go; the step waits for that (at most 2 s)
+        # the program holding it (an antivirus or indexer) lets go; the step waits for that (at most 2 s).
+        # (round 8, F1-b) deterministic: the name goes after the 3rd pause of a fake clock
         with TempDir() as td:
             h = Path(td)
             eng = h / "Engine"
             touch(eng / "state.json", GENUINE_STATE)
             touch(eng / "logs" / "install-1.log", b"x")
             real_rmdir = os.rmdir
-            timers = []
+            pending_calls = []
 
             def pending(p, *a, **k):
                 if os.path.normcase(str(p)) != os.path.normcase(str(eng)):
                     return real_rmdir(p, *a, **k)
-                t = threading.Timer(0.5, real_rmdir, [p])  # the name goes a moment after the delete succeeded
-                timers.append(t)
-                t.start()
+                pending_calls.append(p)  # deleted, but still listed: it goes at the 3rd pause below
 
+            clock = FakeClock(lambda n: n == 3 and real_rmdir(eng))
             ctx = make_ctx(h, {"schema": 1}, SK, engine_home=eng, remove_engine=True, remove_models=False)
             ctx.log.path = None
-            with mock.patch.object(uninstall_module().os, "rmdir", pending):
+            with clock.patch(), mock.patch.object(uninstall_module().os, "rmdir", pending):
                 r = uninstall_module().step_engine(ctx)
-            listed = os.listdir(h)
-            for t in timers:
-                t.join(5)
             self.assertEqual(r.status, "ok", r.detail)
-            self.assertEqual(len(timers), 1)
-            self.assertEqual(listed, [], r.detail)
+            self.assertEqual(len(pending_calls), 1)
+            self.assertEqual(clock.sleeps, 3)
+            self.assertEqual(os.listdir(h), [], r.detail)
 
     def test_the_bootstraps_know_the_same_names(self):
         want = {n.lower() for n in base.ENGINE_LAYOUT + base.ENGINE_KEPT + (base.OPTIONS_FILE,)}
@@ -7489,13 +7858,14 @@ class _CountdownCases:
         listed = self.native(h / ".whynot-cut")
         (b / DEFER_LIST).write_text(listed + self.SEP + "python\n" + listed + self.SEP + "bin\n", encoding="utf-8")
         before_a, before_b = snapshot_tree(a), snapshot_tree(b)
-        r = self.run_deferred(h, link_real=a)  # checked at the start: drive A; now it points at drive B
+        # (MAC-1) the start as the bootstrap records it: resolved (real_path / Get-WncRealPath; /private/var on macOS)
+        r = self.run_deferred(h, link_real=os.path.realpath(a))  # checked at the start: drive A; now drive B
         out = r.stdout + r.stderr
         self.assertIn("left alone", out)
         self.assertIn(base.LINK_MOVED_AR, out)
         self.assertEqual(snapshot_tree(b), before_b, out)
         self.assertEqual(snapshot_tree(a), before_a, out)
-        r = self.run_deferred(h, link_real=b)  # unchanged: python/ and bin/ go, through the link, nothing else
+        r = self.run_deferred(h, link_real=os.path.realpath(b))  # unchanged: python/ and bin/ go, nothing else
         out = r.stdout + r.stderr
         self.assertFalse((b / "python").exists(), out)
         self.assertFalse((b / "bin").exists(), out)
@@ -7626,40 +7996,139 @@ class _CountdownCases:
         self.assertIn("already holds other files", out)
         self.assertEqual(snapshot_tree(target), before, out)
 
+    # (round 8, F1-b) the deferred delete's pauses, counted by a stand-in that never sleeps; at its WNC_T_VANISH_AT-th
+    # call it removes WNC_T_VANISH (a scanner's copy going away on the Nth re-list): no real timer races the wait
+    SLEEP_PS = ("function Start-Sleep { param([int]$Milliseconds, [int]$Seconds)\n"
+                "    $script:WncSleeps++\n"
+                "    Add-Content -LiteralPath $env:WNC_T_SLEEPLOG -Value 'sleep'\n"
+                "    if ($env:WNC_T_VANISH -and ($script:WncSleeps -eq [int]$env:WNC_T_VANISH_AT)) {\n"
+                "        [IO.File]::Delete($env:WNC_T_VANISH) }\n}\n$script:WncSleeps = 0\n")
+    SLEEP_SH = ('WNC_SLEEPS=0\nsleep() { WNC_SLEEPS=$((WNC_SLEEPS + 1)); echo sleep >> "$WNC_T_SLEEPLOG"\n'
+                '  if [ -n "${WNC_T_VANISH:-}" ] && [ "$WNC_SLEEPS" = "${WNC_T_VANISH_AT:-0}" ]; then rm -f "$WNC_T_VANISH"; fi\n}\n')
+
+    def deferred_with(self, extra: str, vanish_at: int = 0, prelude_more: str = "") -> tuple:
+        h = self.home
+        eng = h / ".whynot-cut"
+        touch(eng / "python" / "p.txt", b"x")
+        touch(eng / "bin" / "uv", b"x")
+        tmpf = touch(eng / extra, b"{}")
+        listed = self.native(eng)
+        (eng / DEFER_LIST).write_text(listed + self.SEP + "python\n" + listed + self.SEP + "bin\n" + listed + "\n",
+                                      encoding="utf-8")
+        log = self.tmp / f"sleeps-{len(list(self.tmp.glob('sleeps-*')))}.txt"
+        log.write_text("", encoding="utf-8")
+        prelude = (self.SLEEP_PS if self.SEP == "\\" else self.SLEEP_SH) + prelude_more
+        r = self.run_deferred(h, prelude=prelude, env_extra={"WNC_T_SLEEPLOG": str(log), "WNC_T_VANISH": str(tmpf),
+                                                             "WNC_T_VANISH_AT": str(vanish_at)})
+        return eng, r, len(log.read_text(encoding="utf-8").split())
+
     def test_f1_the_deferred_delete_waits_for_a_transient_copy(self):
         # task F1 (2): STATE.JSON.tmp (a scanner's copy of one of our names) still there when python/ and bin/ are
-        # gone: the emptiness check waits for it (at most 2 s); it is never deleted, and nothing else is waited for
-        for extra, gone in (("STATE.JSON.tmp", True), ("STATE.JSON.tmp", False), ("notes.tmp", False)):
-            with self.subTest(extra=extra, gone=gone):
-                h = self.home
-                eng = h / ".whynot-cut"
-                touch(eng / "python" / "p.txt", b"x")
-                touch(eng / "bin" / "uv", b"x")
-                tmpf = touch(eng / extra, b"{}")
-                listed = self.native(eng)
-                (eng / DEFER_LIST).write_text(listed + self.SEP + "python\n" + listed + self.SEP + "bin\n" + listed
-                                              + "\n", encoding="utf-8")
-                stop = threading.Event()
-
-                def vanish():  # a moment after python/ and bin/ went, as a scanner's copy would
-                    while not stop.is_set() and (eng / "bin").exists():
-                        time.sleep(0.02)
-                    time.sleep(0.4)
-                    if not stop.is_set() and gone and os.path.lexists(tmpf):
-                        os.unlink(tmpf)
-
-                th = threading.Thread(target=vanish, daemon=True)
-                th.start()
-                r = self.run_deferred(h)
-                stop.set()
-                th.join(5)
+        # gone: the emptiness check waits for it (10 pauses, 2 s); it is never deleted, and nothing else is waited for
+        # (round 8, N-3: only the exact name - "cuda current.tmp" is not "current.tmp")
+        for extra, vanish_at, sleeps in (("STATE.JSON.tmp", 3, 3), ("STATE.JSON.tmp", 0, 10), ("notes.tmp", 0, 0),
+                                         ("cuda current.tmp", 0, 0)):
+            with self.subTest(extra=extra, vanish_at=vanish_at):
+                eng, r, n = self.deferred_with(extra, vanish_at)
                 out = r.stdout + r.stderr
                 self.assertFalse((eng / "python").exists(), out)
-                if gone:
+                self.assertEqual(n, sleeps, out)
+                if vanish_at:
                     self.assertFalse(eng.exists(), out)
                 else:
                     self.assertEqual(os.listdir(eng), [extra], out)  # never deleted
                     shutil.rmtree(eng)
+
+    def test_round8_a_store_kept_for_the_editor_keeps_the_blobs_it_shares(self):
+        # R7-1, the review's P1 end to end: -RemoveModels keeps store A (the editor's folder link leads into it) and
+        # every blob A needs; B and its own blob go
+        h = self.home
+        h.mkdir()
+        if not symlinks_work(h):
+            self.skipTest("symlinks cannot be made here (Windows without Developer Mode)")
+        x = h / "AI3"
+        x.mkdir()
+        r = self.inst(h, "yes", "skip", extra=(self.ENGINE_FLAG, self.native(x)))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        mine, wb = make_p1_models(x / "models")
+        r = self.inst(h, "uninstall", "remove-models", "yes", extra=(self.ENGINE_FLAG, self.native(x)))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertEqual((mine / "vocabulary.json").read_bytes(), b"the vocabulary both of our stores share", out)
+        self.assertEqual((mine / "model.bin").read_bytes(), b"large-v3 weights", out)
+        self.assertFalse(os.path.lexists(x / "models" / TURBO_STORE), out)
+        self.assertFalse(os.path.lexists(wb), out)
+        self.assertIn(base.MODELS_STORE_USED_AR, out)
+
+    def test_mac1_the_deferred_delete_compares_one_canonical_form(self):
+        # MAC-1 (a real Mac CI failure, test_round5_the_deferred_delete_stops_when_the_link_moved on macOS): the start
+        # recorded through a symlinked prefix (/var/... while the OS resolves /private/var/...; here a directory link
+        # "var" -> "private var") is the same folder as the one resolved now: python/ and bin/ go, nothing "moved"
+        h = self.home
+        real = self.tmp / "private var"
+        b = real / "drive B" / "home"
+        touch(b / "state.json", GENUINE_STATE)
+        touch(b / "python" / "p.txt", b"x")
+        touch(b / "bin" / "uv", b"x")
+        alias = self.tmp / "var"
+        if not make_dir_link(alias, real):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, alias)
+        h.mkdir()
+        if not make_dir_link(h / ".whynot-cut", alias / "drive B" / "home"):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, h / ".whynot-cut")
+        listed = self.native(h / ".whynot-cut")
+        (b / DEFER_LIST).write_text(listed + self.SEP + "python\n" + listed + self.SEP + "bin\n", encoding="utf-8")
+        r = self.run_deferred(h, link_real=alias / "drive B" / "home")  # as written, not resolved
+        out = r.stdout + r.stderr
+        self.assertNotIn("left alone", out)
+        self.assertFalse((b / "python").exists(), out)
+        self.assertFalse((b / "bin").exists(), out)
+        self.assertEqual(sorted(os.listdir(b)), ["state.json"], out)
+        self.assertTrue(base.is_link(h / ".whynot-cut"))
+
+    def test_mac1_the_release_stage_is_compared_in_one_canonical_form(self):
+        # MAC-1 audit (-Source): the stage and the plugin root spelled through different prefixes of the same folder
+        # (/var vs /private/var) are the same release: it is kept, not refused as "not the folder of this run"
+        real = self.tmp / "private tmp"
+        stage = real / "release-0123abcd"
+        plugin = stage / "x" / "whynot-cut-marketplace" / "whynot-cut"
+        shutil.copytree(self.fx.plugin_root, plugin)
+        alias = self.tmp / "tmp alias"
+        if not make_dir_link(alias, real):
+            self.skipTest("cannot make a directory link here")
+        self.addCleanup(drop_dir_link, alias)
+        via = alias / "release-0123abcd" / "x" / "whynot-cut-marketplace" / "whynot-cut"
+        boot = via / "installer" / "core" / ("bootstrap.ps1" if self.SEP == "\\" else "bootstrap.sh")
+        if self.SEP == "\\":
+            r = self.ps(boot, "-PluginRoot", via, "-ReleaseStage", stage, "-SandboxHome", self.home, "-DryRun", "-Yes")
+        else:
+            r = self.sh(boot.as_posix(), "--plugin-root", via.as_posix(), "--release-stage", stage.as_posix(),
+                        "--home", self.home.as_posix(), "--dry-run", "--yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertNotIn("is not the folder of this run", out)
+        self.assertNotIn("Traceback", out)
+
+    def test_round8_a_folder_holding_only_desktop_ini_gets_a_subfolder(self):
+        # R7-2, the review's P3 end to end: -EngineHome Videos (empty but for its desktop.ini) installs into
+        # Videos/WhyNotCut; the uninstall naming Videos empties that, and desktop.ini stays byte for byte
+        h = self.home
+        vids = h / "Videos"
+        data = b"[.ShellClassInfo]\r\nIconResource=%SystemRoot%\\system32\\imageres.dll,-189\r\n"
+        ini = touch(vids / "desktop.ini", data)
+        r = self.inst(h, "yes", "skip", extra=(self.ENGINE_FLAG, self.native(vids)))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertTrue((vids / "WhyNotCut" / "current").is_file(), out)
+        self.assertEqual(sorted(os.listdir(vids)), ["WhyNotCut", "desktop.ini"], out)
+        r = self.inst(h, "uninstall", "remove-engine", "yes", extra=(self.ENGINE_FLAG, self.native(vids)))
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.wait_gone(vids / "WhyNotCut")
+        self.assertEqual(os.listdir(vids), ["desktop.ini"], out)
+        self.assertEqual(ini.read_bytes(), data)
 
     def test_a_bad_countdown_hook_value_is_ignored(self):
         r = self.inst(self.home, "dry", env=self.env(WNC_TEST_KEYS="x", WNC_TEST_COUNTDOWN_S="soon"))
@@ -7689,9 +8158,9 @@ class TestPowerShellCountdown(_CountdownCases, _ShellCase):
 
     ENGINE_FLAG = "-EngineHome"
 
-    def run_deferred(self, h: Path, link_real=None):
+    def run_deferred(self, h: Path, link_real=None, prelude: str = "", env_extra=None):
         """The deferred delete alone; `link_real`: where the link pointed when the run started (default: where it
-        points now)."""
+        points now); `prelude`: PowerShell defined before the call (round 8: a Start-Sleep stand-in)."""
         names = ["Test-WncReparse", "Invoke-WncDeleteTree", "Invoke-WncDeferredDelete", "Get-WncResolvedHomeProblem",
                  "Get-WncPlaceProblem", "Get-WncNormPath", "Get-WncRealPath", "Get-WncLinkTarget",
                  "Get-WncKnownFolderList", "Test-WncWithin", "Find-WncMarkerScan", "Get-WncClientRootList",
@@ -7703,7 +8172,7 @@ class TestPowerShellCountdown(_CountdownCases, _ShellCase):
         arabic = re.search(r"(?ms)^    \$WncAr = @\{.*?^    \}\n", boot.read_text(encoding="utf-8")).group(0)
         body = ("$S = @{ Utf8 = (New-Object System.Text.UTF8Encoding $false); CompPath = $null; ModelStores = $null }\n"
                 "[Console]::OutputEncoding = $S.Utf8\n"  # (as the bootstrap does: the Arabic lines)
-                + arabic + "".join(shell_function(boot, n, True) for n in names)
+                + arabic + "".join(shell_function(boot, n, True) for n in names) + prelude
                 + "Invoke-WncDeferredDelete -Engine $env:WNC_T_ENGINE -UserHome $env:WNC_T_HOME "
                   "-Pointer (Join-Path $env:WNC_T_HOME '.whynot-cut\\plugin-options.json') -Sandbox $true "
                   "-LinkReal $env:WNC_T_LINK_REAL\n")
@@ -7711,7 +8180,7 @@ class TestPowerShellCountdown(_CountdownCases, _ShellCase):
         script.write_text(body, encoding="utf-8-sig")
         real = link_real if link_real is not None else os.path.realpath(h / ".whynot-cut")
         return self.ps(script, env=self.env(WNC_T_ENGINE=str(h / ".whynot-cut"), WNC_T_HOME=str(h),
-                                            WNC_T_LINK_REAL=str(real)))
+                                            WNC_T_LINK_REAL=str(real), **(env_extra or {})))
 
     def dotdot_spelling(self, h: Path) -> str:
         return str(h) + "\\nope\\..\\.whynot-cut"
@@ -7780,9 +8249,9 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
 
     ENGINE_FLAG = "--engine-home"
 
-    def run_deferred(self, h: Path, link_real=None):
+    def run_deferred(self, h: Path, link_real=None, prelude: str = "", env_extra=None):
         """The deferred delete alone; `link_real`: where the link pointed when the run started (default: where it
-        points now)."""
+        points now); `prelude`: bash defined before the call (round 8: sleep / rmdir stand-ins)."""
         boot = INSTALLER / "core" / "bootstrap.sh"
         names = ["norm_path", "lex_path", "within", "is_mount", "guard_norm", "real_path", "place_keys",
                  "place_problem", "resolved_home_problem", "client_roots", "home_path", "abs_path", "json_get",
@@ -7792,11 +8261,11 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
         script = self.tmp / "deferred.sh"
         script.write_text("".join(shell_function(boot, n, False) for n in names)
                           + 'OS_NAME="$(uname -s)"; JSON_PY=""; HOME="$1"; ENGINE="$1/.whynot-cut"; LINK_REAL="$2"\n'
-                          'POINTER="$1/.whynot-cut/plugin-options.json"\ndelete_deferred\n',
+                          'POINTER="$1/.whynot-cut/plugin-options.json"\n' + prelude + 'delete_deferred\n',
                           encoding="utf-8", newline="\n")
         real = link_real if link_real is not None else os.path.realpath(h / ".whynot-cut")
         r = subprocess.run([find_bash(), str(script), h.as_posix(), Path(real).as_posix()], capture_output=True,
-                           env=self.env(), timeout=120)
+                           env=self.env(**(env_extra or {})), timeout=120)
         return subprocess.CompletedProcess(r.args, r.returncode, r.stdout.decode("utf-8", "replace"),
                                            r.stderr.decode("utf-8", "replace"))
 
@@ -7818,6 +8287,36 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
         for f in flags:
             args += names[f]
         return self.sh(self.front(), *args, *extra, env=env)
+
+    def test_round8_the_deferred_delete_waits_while_the_home_is_still_listed(self):
+        # F1-b: after its rmdir succeeded, a folder Windows still lists (a scanner holding it) is waited for, at most
+        # 2 s, as in the core and PowerShell; deterministic: rmdir is a stand-in that leaves the name, which goes at
+        # the 2nd pause (or never: then a warning, and nothing more is done)
+        still = ('rmdir() { command rmdir "$@" && mkdir "$1"; }\n'
+                 'sleep() { WNC_SLEEPS=$((WNC_SLEEPS + 1)); echo sleep >> "$WNC_T_SLEEPLOG"\n'
+                 '  if [ "$WNC_SLEEPS" = "${WNC_T_GONE_AT:-0}" ]; then command rmdir "$ENGINE"; fi\n}\nWNC_SLEEPS=0\n')
+        for gone_at, sleeps in ((2, 2), (0, 10)):
+            with self.subTest(gone_at=gone_at):
+                h = self.home
+                eng = h / ".whynot-cut"
+                touch(eng / "python" / "p.txt", b"x")
+                touch(eng / "bin" / "uv", b"x")
+                listed = self.native(eng)
+                (eng / DEFER_LIST).write_text(listed + "/python\n" + listed + "/bin\n" + listed + "\n",
+                                              encoding="utf-8")
+                log = self.tmp / f"rmdir-sleeps-{gone_at}.txt"
+                log.write_text("", encoding="utf-8")
+                r = self.run_deferred(h, prelude=still, env_extra={"WNC_T_SLEEPLOG": str(log),
+                                                                   "WNC_T_GONE_AT": str(gone_at)})
+                out = r.stdout + r.stderr
+                self.assertEqual(len(log.read_text(encoding="utf-8").split()), sleeps, out)
+                if gone_at:
+                    self.assertFalse(eng.exists(), out)
+                    self.assertIn("deleted " + listed, out)
+                else:
+                    self.assertIn("still listed", out)
+                    self.assertEqual(os.listdir(eng), [], out)
+                    os.rmdir(eng)
 
     def test_piped_without_a_terminal_has_no_countdown(self):
         zf = self.tmp / "WhyNotCut-3.0.0.zip"

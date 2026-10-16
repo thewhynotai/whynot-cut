@@ -377,7 +377,9 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
     real_path "$root"; now_real="$REAL"
     guard_norm "${now_real:-?}"; n_now="$NORM"
     n_then=""
-    if [ -n "${LINK_REAL:-}" ]; then guard_norm "$LINK_REAL"; n_then="$NORM"; fi
+    # (round 8, MAC-1) both sides through the same real_path: a start recorded through a symlinked prefix (/var vs
+    # /private/var on macOS) is the same folder
+    if [ -n "${LINK_REAL:-}" ]; then real_path "$LINK_REAL"; guard_norm "${REAL:-$LINK_REAL}"; n_then="$NORM"; fi
     if [ -z "$now_real" ] || [ -z "$n_then" ] || [ "$n_now" != "$n_then" ]; then
       printf 'WARNING: %s now points to %s, not to %s as when this uninstall started; the paths in %s were left alone (nothing was deleted). Check the link, then run the uninstall again.\n' \
         "$root" "${now_real:-a folder that cannot be read}" "${LINK_REAL:-(unknown)}" "$list"
@@ -435,13 +437,16 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
     # core's base.transient_copy; the same names, tests/test_installer.py)
     transient_names=".delete-after-exit ae-capabilities.json ae-probe ae-queue ae-scripts bench bin bridge cache cuda current downloads ffmpeg fonts library logs marketplace marketplace.new marketplace.prev models plugin-options.json ppro-queue ppro-scripts python runtimes serve state state.json tmp venv"
     i=0
-    while [ $i -lt 10 ]; do
+    while [ $i -lt 10 ]; do  # x 0.2 s = 2 s, as the core
       copies=""
       for e in "$root"/* "$root"/.[!.]* "$root"/..?*; do
         [ -e "$e" ] || [ -L "$e" ] || continue
         low="$(printf '%s' "${e##*/}" | tr 'A-Z' 'a-z')"
         case "$low" in
-          *.tmp) case " $transient_names " in *" ${low%.tmp} "*) copies=1 ;; esac ;;
+          *.tmp)
+            for t in $transient_names; do  # (round 8, N-3) the exact name, never a part of a longer one
+              [ "${low%.tmp}" = "$t" ] && copies=1
+            done ;;
         esac
       done
       [ -n "$copies" ] || break
@@ -450,7 +455,15 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
     done
   fi
   if [ -n "$home_too" ] && [ -z "$failed" ] && [ -z "$linked" ] && rmdir "$root" 2>/dev/null; then
-    printf 'deleted %s\n' "$root"
+    # a program still holding the folder (an antivirus or indexer) can keep its name listed for a moment after the
+    # delete succeeded: wait for it, at most 2 s (as the core's base.wait_gone and PowerShell; round 8, F1-b)
+    i=0
+    while { [ -e "$root" ] || [ -L "$root" ]; } && [ $i -lt 10 ]; do sleep 0.2; i=$((i + 1)); done
+    if [ -e "$root" ] || [ -L "$root" ]; then
+      printf 'WARNING: %s is still listed; it goes once the program holding it lets go\n' "$root"
+    else
+      printf 'deleted %s\n' "$root"
+    fi
   fi
   return 0
 }
@@ -685,10 +698,11 @@ is_engine_home() { # dir: status 0 when it is a GENUINE WhyNot Cut engine home (
   [ "$(json_get "$1/runtimes/$rid/WHYNOT_RUNTIME" id)" = "$rid" ]
 }
 
-occupied_list() { # dir [pointer-ok] -> OCCUPIED (one per line): every entry except the write probe, the -Source cache (a
-  # downloads folder holding only release-* folders) and, with pointer-ok (~/.whynot-cut), the pointer; names compare
-  # exactly; (fix round 7, M6-2) the OS folder-view files .DS_Store, Thumbs.db, desktop.ini do not count when they are real
-  # files (view_file) (the core's base.occupied_entries)
+occupied_list() { # dir [pointer-ok] [ignore-view] -> OCCUPIED (one per line): every entry except the write probe, the
+  # -Source cache (a downloads folder holding only release-* folders), with pointer-ok (~/.whynot-cut) the pointer, and
+  # - only with ignore-view, when recognising a leftover that is already ours (fix round 8, R7-2) - the OS folder-view
+  # files .DS_Store, Thumbs.db, desktop.ini when they are real files (view_file); for placement a folder holding only
+  # those is NOT empty. Names compare exactly (the core's base.occupied_entries)
   local e n k only
   OCCUPIED=""
   [ -d "$1" ] || return 0
@@ -697,7 +711,7 @@ occupied_list() { # dir [pointer-ok] -> OCCUPIED (one per line): every entry exc
     n="${e##*/}"
     case "$n" in .wnc-write-test*) continue ;; esac
     if [ -n "${2:-}" ] && [ "$n" = "plugin-options.json" ]; then continue; fi
-    view_file "$e" && continue
+    if [ -n "${3:-}" ] && view_file "$e"; then continue; fi
     if [ "$n" = "downloads" ] && [ -d "$e" ] && [ ! -L "$e" ]; then
       only=1
       for k in "$e"/* "$e"/.[!.]* "$e"/..?*; do
@@ -831,7 +845,7 @@ is_kept_leftover() { # dir [pointer-ok]: status 0 for what an uninstall keeps of
   # that is ours (our_models) and/or library/ - recognised by its pack manifests, or empty beside our models/ (never
   # alone). Never by the names alone; a link is never ours
   local n has_models="" models="" has_lib=""
-  occupied_list "$1" "${2:-}"
+  occupied_list "$1" "${2:-}" view  # (round 8, R7-2) view files are ignored HERE only
   [ -n "$OCCUPIED" ] || return 1
   while IFS= read -r n; do
     case "$n" in
@@ -975,6 +989,11 @@ keep_release() { # stage engine -> ROOT: --source (fix round 6, R5-5) - install.
   local stage="$1" dl="$2/downloads" dest plugin z same=1 zips="" made_engine="" made_dl=""
   dest="$dl/${stage##*/}"
   plugin="$dest/x/whynot-cut-marketplace/whynot-cut"
+  if [ -L "$dl" ]; then  # (fix round 8, N-4) a downloads that is a link is never written through (nor cleaned inside)
+    printf 'ERROR: %s\n' "could not keep the release in $dest: $dl is a link, which WhyNot Cut does not follow. Nothing was installed: remove or move the link, then run the installer again." >&2
+    printf '%s\n' "تعذّر حفظ ملفات WhyNot Cut في مجلد المحرك لأن المجلد downloads فيه رابط، وWhyNot Cut لا يتبع الروابط، فلم يُثبَّت شيء. احذف الرابط أو انقله ثم شغّل المثبّت مرة أخرى." >&2
+    exit 3
+  fi
   { [ -d "$dest" ] && [ ! -L "$dest" ] && [ -f "$plugin/installer/core/wnc_install.py" ]; } || same=""
   for z in "$stage"/*; do
     [ -f "$z" ] || continue
@@ -1545,8 +1564,10 @@ if [ -n "$RELEASE_STAGE" ]; then
   case "$OS_NAME" in
     MINGW*|MSYS*|CYGWIN*) if command -v cygpath >/dev/null 2>&1; then st="$(cygpath -m "$st")"; fi ;;
   esac
-  norm_path "$st/x/whynot-cut-marketplace/whynot-cut"; n_st="$NORM"
-  norm_path "$ROOT"
+  # (round 8, MAC-1) both through real_path: the same release spelled through another prefix (/var vs /private/var)
+  real_path "$st/x/whynot-cut-marketplace/whynot-cut"; norm_path "${REAL:-$st/x/whynot-cut-marketplace/whynot-cut}"
+  n_st="$NORM"
+  real_path "$ROOT"; norm_path "${REAL:-$ROOT}"
   case "${st##*/}" in
     release-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) [ "$n_st" = "$NORM" ] && STAGE="$st" ;;
   esac

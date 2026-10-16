@@ -84,11 +84,14 @@ main() {
 WNC_TEMP=""  # this run's release stage under the OS temp dir (--source), deleted when the run ends
 
 wnc_drop_stage() { # the per-run release stage (fix round 6, R5-5); rm -r removes a link inside as a link, never its
-  # target; a failure is only a warning
-  [ -n "$WNC_TEMP" ] && [ -d "$WNC_TEMP" ] || return 0
-  rm -rf "$WNC_TEMP" 2>/dev/null
-  if [ -e "$WNC_TEMP" ]; then
-    echo "WARNING: could not delete the temporary folder $WNC_TEMP; delete it yourself" >&2
+  # target; a failure is only a warning, given once (round 8, N-2: WNC_TEMP is cleared after the first attempt, so the
+  # EXIT trap does not try, nor warn, again)
+  local t="$WNC_TEMP"
+  WNC_TEMP=""
+  [ -n "$t" ] && [ -d "$t" ] || return 0
+  rm -rf "$t" 2>/dev/null
+  if [ -e "$t" ]; then
+    echo "WARNING: could not delete the temporary folder $t; delete it yourself" >&2
   fi
   return 0
 }
