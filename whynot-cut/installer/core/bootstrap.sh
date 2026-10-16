@@ -967,6 +967,12 @@ EOF
   if within "$NORM" "$nf"; then PROBLEM="$f is your user folder or holds it; choose a folder of its own"; return 0; fi
   norm_path "$HOME/.claude"
   if within "$nf" "$NORM"; then PROBLEM="$f is inside Claude's folder $HOME/.claude"; return 0; fi
+  # (round 10, M9-2) <chosen>/WhyNotCut that is itself a link (a symlink or junction): refused before anything is
+  # written (no bin/, downloads/, logs/, no state.json claim through it); the default ~/.whynot-cut link has its own rules
+  if [ "$f" != "$p" ] && [ -L "$f" ]; then
+    PROBLEM="$f is a link (a symlink or junction to another folder); WhyNot Cut never installs through a link. Nothing was written there or in the folder it points to: remove the link or choose a real folder"
+    return 0
+  fi
   # (round 9, R8-3) our own WhyNotCut subfolder that kept only the editor's view files (an icon's desktop.ini, never
   # deleted by the uninstall) is used again; anything else in it is the editor's
   local own_sub=""
@@ -1527,6 +1533,7 @@ select_engine_home() { # default with-model -> ENGINE, CHOSEN (exit 2 when no us
       return 0
     fi
     printf 'WhyNot Cut cannot use %s as its engine home: %s\n' "$p" "$PROBLEM"
+    case "$PROBLEM" in *"never installs through a link"*) printf '%s\n' "المجلد WhyNotCut هنا رابط (اختصار أو junction) إلى مجلد آخر، وWhyNot Cut لا يثبّت عبر رابط أبدًا، فلم يُكتب شيء فيه ولا في المجلد الذي يشير إليه. احذف الرابط أو اختر مجلدًا حقيقيًا." ;; esac
     printf '%s\n' "لا يمكن استخدام هذا المجلد؛ اختر مجلدًا آخر."
     if [ -z "$ask" ]; then
       printf 'Nothing was downloaded. Run the installer again with --engine-home <folder>.\n'

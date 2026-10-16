@@ -131,6 +131,10 @@ param(
     $WncModelSizes = @{ 'large-v3' = 2.9; 'large-v3-turbo' = 1.6; 'medium' = 1.5; 'small' = 0.5 }
     # the Arabic lines, UTF-8 in base64 (this file stays ASCII)
     $WncAr = @{
+        FinalLink = ('2KfZhNmF2KzZhNivIFdoeU5vdEN1dCDZh9mG2Kcg2LHYp9io2LcgKNin2K7Yqti12KfYsSDYo9mIIGp1bmN0aW9uKSDYpdmE2Ykg2YXY' +
+            'rNmE2K8g2KLYrtix2Iwg2YhXaHlOb3QgQ3V0INmE2Kcg2YrYq9io2ZHYqiDYudio2LEg2LHYp9io2Lcg2KPYqNiv2YvYp9iMINmB2YTZ' +
+            'hSDZitmP2YPYqtioINi02YrYoSDZgdmK2Ycg2YjZhNinINmB2Yog2KfZhNmF2KzZhNivINin2YTYsNmKINmK2LTZitixINil2YTZitmH' +
+            'LiDYp9it2LDZgSDYp9mE2LHYp9io2Lcg2KPZiCDYp9iu2KrYsSDZhdis2YTYr9mL2Kcg2K3ZgtmK2YLZitmL2Kcu')
         CacheLink = ('2KrYudiw2ZHYsSDYrdmB2Lgg2YXZhNmB2KfYqiBXaHlOb3QgQ3V0INmB2Yog2YXYrNmE2K8g2KfZhNmF2K3YsdmDINmE2KPZhiDYp9mE' +
             '2YXYrNmE2K8gZG93bmxvYWRzINmB2YrZhyDYsdin2KjYt9iMINmIV2h5Tm90IEN1dCDZhNinINmK2KrYqNi5INin2YTYsdmI2KfYqNi3' +
             '2Iwg2YHZhNmFINmK2Y/Yq9io2Y7ZkdiqINi02YrYoS4g2KfYrdiw2YEg2KfZhNix2KfYqNi3INij2Ygg2KfZhtmC2YTZhyDYq9mFINi0' +
@@ -960,6 +964,14 @@ param(
         if (Test-WncWithin $final (Get-WncNormPath (Join-Path $UserHome '.claude'))) {
             return @{ Problem = "$final is inside Claude's folder $(Join-Path $UserHome '.claude')" }
         }
+        # (round 10, M9-2) <chosen>\WhyNotCut that is itself a link (a symlink or junction): refused before anything
+        # is written (no bin\, downloads\, logs\, no state.json claim through it); the default ~\.whynot-cut link
+        # has its own rules
+        if (($final -ine $n) -and (Test-WncReparse $final)) {
+            return @{ Problem = ("$final is a link (a symlink or junction to another folder); WhyNot Cut never " +
+                    'installs through a link. Nothing was written there or in the folder it points to: remove the ' +
+                    'link or choose a real folder') }
+        }
         # (round 9, R8-3) our own WhyNotCut subfolder that kept only the editor's view files (an icon's desktop.ini,
         # never deleted by the uninstall) is used again; anything else in it is the editor's
         $ownSub = (Split-Path $final -Leaf) -ceq 'WhyNotCut'
@@ -1594,6 +1606,7 @@ param(
                 return @{ Code = 0; Path = $p; Chosen = $chosen }
             }
             Write-Host "WhyNot Cut cannot use $p as its engine home: $problem"
+            if ($problem -like '*never installs through a link*') { Write-Host (Get-WncArabic 'FinalLink') }
             Write-Host (Get-WncArabic 'Cannot')
             if (-not $ask) {
                 Write-Host 'Nothing was downloaded. Run the installer again with -EngineHome <folder>.'

@@ -268,7 +268,7 @@ again works (through the link too) and reuses the model: a folder holding only `
 (`.locks`, `CACHEDIR.TAG`, a `blobs/` store with its marker, and the system's `.DS_Store` / `Thumbs.db` /
 `desktop.ini`) - or `models/` is empty (no model was downloaded yet) - and `library/` holds only your motion packs
 (`library/motion/<pack>/pack.json`; an empty `library/` counts only next to such a `models/`). The system's own
-`.DS_Store` / `Thumbs.db` / `desktop.ini` files at the top of such a folder do not count against it; but a folder that holds only those (an empty `Videos` with its `desktop.ini`) is not empty: an install there goes into its `WhyNotCut` subfolder. That `WhyNotCut` subfolder is used again later even if it kept a `desktop.ini` of yours (a folder icon) after an uninstall; anything else in it makes it yours. A `models` folder with anything of your own in it (your own Hugging Face
+`.DS_Store` / `Thumbs.db` / `desktop.ini` files at the top of such a folder do not count against it; but a folder that holds only those (an empty `Videos` with its `desktop.ini`) is not empty: an install there goes into its `WhyNotCut` subfolder. An existing `WhyNotCut` subfolder there is used again if it holds only the system's `.DS_Store` / `Thumbs.db` / `desktop.ini` files (a folder icon, kept by an uninstall); anything else in it makes it yours, and one that is a link (a symlink or junction) is refused before anything is written. The next `-RemoveEngine` deletes a `.DS_Store` / `Thumbs.db` there, never a `desktop.ini`. A `models` folder with anything of your own in it (your own Hugging Face
 model next to ours, a note, a link) does not count, and neither does any other file or folder: the names alone are
 never trusted.
 

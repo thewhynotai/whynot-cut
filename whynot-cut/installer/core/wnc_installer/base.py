@@ -530,7 +530,9 @@ def models_usage(models_dir, ours: Iterable, theirs: Iterable) -> dict:
     {"ambiguous": a link in the editor's entries could not be resolved inside models/ for sure (unreadable, out of
      models/ - maybe models/ itself spelled another way -, a loop, missing, a folder link over the shared store, or a
      walk that could not be completed): then NOTHING in models/ may be deleted (R7-5); "unsure" / "unread": the
-     editor's entries that made it so - a link / a folder that could not be read completely (round 9, R8-2),
+     editor's entries that made it so - a link / a folder that could not be read completely (round 9, R8-2);
+     "peers": our stores holding a link that reaches another of our stores or the shared store (round 10, M9-1; it
+     makes "ambiguous" too),
      "used": {our store names a link of the editor's leads into or through, or that lie below a folder it leads
      to (round 9, R8-1)},
      "their_blobs": {keys of shared-store files a link of the editor's leads to},
@@ -573,19 +575,31 @@ def models_usage(models_dir, ours: Iterable, theirs: Iterable) -> dict:
                 their_blobs.add(_fold(os.path.normcase(final)))
     unsure, unread = sorted(set(unsure)), sorted(set(unread))
     ambiguous = bool(unsure or unread)
-    refs = {}
+    refs, peers = {}, []
     for name in ours:
         links, complete = _links_below(os.path.join(models, name))
         found = {}
+        others = {n: sk for n, sk in store_keys.items() if n != name}
         for q in links:
-            final, _passed = resolve_inside(models, q)
+            final, passed = resolve_inside(models, q)
+            # (round 10, M9-1) a link inside our store that reaches another of our stores (through it, to a file in it,
+            # or a folder holding it) or a folder over the shared store: not something WhyNot Cut writes - unsure
+            for p in passed[1:] + ([final] if final else []):
+                k = _fold(os.path.normcase(p))
+                if any(_inside(k, sk) for sk in others.values()):
+                    peers.append(name)
+            if final is not None and os.path.isdir(final):
+                kf = _fold(os.path.normcase(final))
+                if over_blobs(final) or any(_inside(sk, kf) for sk in others.values()):
+                    peers.append(name)
             if final is None or (os.path.isdir(final) and over_blobs(final)):
                 complete = False  # where this one leads is not known for sure
             elif in_blobs(final) and os.path.isfile(final) and not is_link(final):
                 found.setdefault(_fold(os.path.normcase(final)), final)
         refs[name] = (found, complete)
-    return {"ambiguous": ambiguous, "unsure": unsure, "unread": unread, "used": used, "their_blobs": their_blobs,
-            "refs": refs, "shared": shared}
+    peers = sorted(set(peers))
+    return {"ambiguous": ambiguous or bool(peers), "unsure": unsure, "unread": unread, "peers": peers, "used": used,
+            "their_blobs": their_blobs, "refs": refs, "shared": shared}
 
 
 def blobs_to_delete(usage: dict, gone: Iterable) -> list:
@@ -795,6 +809,10 @@ def choose_engine_home(path, *, home, plugin_root, clients_roots: Iterable = (),
         return None, "", f"{final} is your user folder or holds it; choose a folder of its own"
     if _within(f, _norm(Path(home) / ".claude"), strict=False):
         return None, "", f"{final} is inside Claude's folder {Path(home) / '.claude'}"
+    # (round 10, M9-2) <chosen>/WhyNotCut that is itself a link (a symlink or junction): its target is another folder,
+    # never written through; refused before anything is written (the default ~/.whynot-cut link has its own rules)
+    if final != Path(p) and is_link(final):
+        return None, "", f"{final} is a link (a symlink or junction to another folder); WhyNot Cut never installs through a link. Nothing was written there or in the folder it points to: remove the link or choose a real folder"
     # (round 9, R8-3) our own WhyNotCut subfolder that kept only the editor's view files (an icon's desktop.ini, never
     # deleted by the uninstall) is used again; anything else in it is the editor's
     if final != Path(p) and not is_our_home(final) and occupied_entries(final, ignore_view=final.name == SUBFOLDER):
@@ -893,6 +911,13 @@ MODELS_BLOBS_DELETED_AR = "وحُذفت من blobs الملفات التي كا�
 MODELS_STORE_USED_AR = "وبقي نموذج من نماذج WhyNot Cut لأن ملفًا من ملفاتك يشير إليه."
 MODELS_NONE_DELETED_AR = ("لم يُحذف أي نموذج من نماذج WhyNot Cut من المجلد models. بقي المجلد لأن فيه ملفات ليست من "
                           "WhyNot Cut، ولم يُلمس منها شيء.")
+# (round 10, N9-4) an entry of the editor's that is neither a folder nor a file (or went away while it was read)
+MODELS_UNREAD_ENTRY_AR = ("لم يُحذف شيء من المجلد models: فيه عنصر من عناصرك لم نستطع قراءته (ليس مجلدًا ولا ملفًا، أو اختفى "
+                          "أثناء القراءة)، فلم نعرف بيقين أي الملفات تستخدمها نماذجك، لذلك بقيت كلها في مكانها (نماذجك ونماذج "
+                          "WhyNot Cut).")
+# (round 10, M9-2) <chosen>/WhyNotCut is a link: refused before anything is written
+FINAL_LINK_AR = ("المجلد WhyNotCut هنا رابط (اختصار أو junction) إلى مجلد آخر، وWhyNot Cut لا يثبّت عبر رابط أبدًا، "
+                 "فلم يُكتب شيء فيه ولا في المجلد الذي يشير إليه. احذف الرابط أو اختر مجلدًا حقيقيًا.")
 # (round 9, R8-2) a folder of the editor's in models/ could not be read completely: nothing in models/ was deleted
 MODELS_UNREAD_AR = ("لم يُحذف شيء من المجلد models: فيه مجلد من مجلداتك لم نستطع قراءته كاملًا (ملفات كثيرة جدًا "
                     "أو جزء لا يمكن قراءته)، فلم نعرف بيقين أي الملفات تستخدمها نماذجك، لذلك بقيت كلها في مكانها "

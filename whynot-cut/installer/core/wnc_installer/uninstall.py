@@ -499,12 +499,25 @@ def _delete_models(ctx: base.Ctx, models: Path, protected: list, removed: list, 
                          "not be followed for sure, so WhyNot Cut could not tell which files your models use; your "
                          f"files and WhyNot Cut's models all stay in {models}")
             notes.append(base.MODELS_UNSURE_AR)
-        if usage["unread"]:
-            notes.append(f"nothing in {models} was deleted: a folder of yours there ({', '.join(usage['unread'])}) "
-                         "could not be read completely (too many files, or a part that cannot be read), so WhyNot Cut "
+        folders = [n for n in usage["unread"] if os.path.isdir(models / n)]
+        entries = [n for n in usage["unread"] if n not in folders]  # (round 10, N9-4) not a folder, or went away
+        if folders:
+            notes.append(f"nothing in {models} was deleted: a folder of yours there ({', '.join(folders)}) could not "
+                         "be read completely (too many files, or a part that cannot be read), so WhyNot Cut could not "
+                         f"tell which files your models use; your files and WhyNot Cut's models all stay in {models}")
+            notes.append(base.MODELS_UNREAD_AR)
+        if entries:
+            notes.append(f"nothing in {models} was deleted: an entry of yours there ({', '.join(entries)}) could not "
+                         "be read (it is neither a folder nor a file, or it went away while it was read), so WhyNot Cut "
                          f"could not tell which files your models use; your files and WhyNot Cut's models all stay in "
                          f"{models}")
-            notes.append(base.MODELS_UNREAD_AR)
+            notes.append(base.MODELS_UNREAD_ENTRY_AR)
+        if usage["peers"]:  # (round 10, M9-1)
+            notes.append(f"nothing in {models} was deleted: a link inside WhyNot Cut's own {', '.join(usage['peers'])} "
+                         "leads to another of its models or to blobs/ (WhyNot Cut never makes such a link), so WhyNot "
+                         f"Cut could not tell which files your models use; your files and WhyNot Cut's models all stay "
+                         f"in {models}")
+            notes.append(base.MODELS_UNSURE_AR)
         return
     gone = [n for n in stores if n not in usage["used"] and rm(models / n, f"models/{n}", models)]
     blobs, n_blobs = models / base.HF_BLOBS, 0
@@ -645,11 +658,11 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         foreign = [n for n in foreign if n in left or not base.transient_copy(n)]
         # anything not ours that is there now (a scanner's copy that appeared after the scan and stayed) is named too
         foreign += sorted(n for n in left if n not in foreign and not _ours_at_top(n))
+    list_err = None
     try:  # (round 9, NIT-2) a folder that cannot be listed now: said so, and nothing more is deleted
         listing = os.listdir(paths.whynot)
     except OSError as e:
-        listing = None
-        failed.append(f"{paths.whynot} (cannot list it after the deletes: {e}; nothing more was deleted)")
+        listing, list_err = None, e
     names = set(listing or ())  # exact names: lexists would also match the editor's `Bin` on NTFS
     later = [paths.whynot / n for n in DEFERRED if n in names]
     rest = [n for n in (listing or ()) if n not in DEFERRED and n != DEFER_LIST]
@@ -657,7 +670,17 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
     defer_file = paths.whynot / DEFER_LIST
     try:
         if listing is None:
-            pass
+            # (round 10, N9-3) a list from an earlier run would still let the installer delete python/ and bin/ (ours,
+            # by exact name) after it exits: removed, or said truthfully when it cannot be
+            stale = ""
+            if os.path.lexists(defer_file):
+                try:
+                    base._unlink(str(defer_file))
+                except OSError:
+                    stale = (f"; a list from an earlier run ({DEFER_LIST}) is still there, so the installer may still "
+                             "delete python/ and bin/ (WhyNot Cut's own) after it exits")
+            failed.append(f"{paths.whynot} (cannot list it after the deletes: {list_err}"
+                          + (stale or "; nothing more was deleted") + ")")
         elif later:
             lines = [str(p) for p in later] + ([str(paths.whynot)] if not rest and not linked else [])
             base.atomic_write_text(defer_file, "\n".join(lines) + "\n")

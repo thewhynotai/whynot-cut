@@ -6501,6 +6501,7 @@ class TestRound6(unittest.TestCase):
                              sorted([".locks", "CACHEDIR.TAG", HF_STORE, LLAMA, small.name]), r.detail)
             self.assertIn(base.MODELS_UNSURE_AR, r.detail)
             self.assertIn(small.name, r.detail)  # (round 9, R8-2: only the entry that caused it is named)
+            self.assertNotIn(LLAMA, r.detail)  # (round 10, N9-2: and nothing else)
         else:
             self.assertEqual(sorted(os.listdir(eng / "models")), sorted([".locks", "CACHEDIR.TAG", LLAMA]), r.detail)
             self.assertIn(base.MODELS_KEPT_AR, r.detail)
@@ -7088,6 +7089,25 @@ class TestRound8(unittest.TestCase):
                 self.assertFalse(os.path.lexists(m / HF_STORE), r.detail)
                 self.assertFalse(os.path.lexists(gone_only), r.detail)
 
+    def test_m9_2_a_whynotcut_that_is_a_link_is_refused(self):
+        # round 10, M9-2: <chosen>/WhyNotCut that is itself a symlink or junction is refused - its target is the
+        # editor's - whatever it holds (nothing, or only a desktop.ini); the default ~/.whynot-cut link stays allowed
+        h = self.home
+        for label, content in (("empty", None), ("ini", "desktop.ini")):
+            with self.subTest(label):
+                s = h / ("Stuff " + label)
+                touch(s / "my project.prproj", b"mine")
+                x = h.parent / ("X " + label)
+                x.mkdir()
+                if content:
+                    touch(x / content, b"[.ShellClassInfo]\r\n")
+                if not make_dir_link(s / "WhyNotCut", x):
+                    self.skipTest("cannot make a directory link here")
+                self.addCleanup(drop_dir_link, s / "WhyNotCut")
+                final, _n, prob = base.choose_engine_home(str(s), home=h, plugin_root=SK)
+                self.assertIsNone(final)
+                self.assertIn("is a link", prob or "")
+
     def test_r8_3_our_whynotcut_folder_keeping_only_desktop_ini_is_used_again(self):
         # round 9, R8-3 (the review's Q3): the editor gave Videos/WhyNotCut an icon (its desktop.ini), the uninstall
         # kept that desktop.ini; a reinstall into Videos uses Videos/WhyNotCut again - only that subfolder, only when it
@@ -7279,6 +7299,57 @@ class TestRound8(unittest.TestCase):
         self.assertTrue((m2 / TURBO_STORE).is_dir(), r.detail)
         self.assertFalse(os.path.lexists(m2 / HF_STORE), r.detail)  # not reached by the link: ours, gone
         self.assertEqual((m2 / "mine" / "turbo" / "snapshots" / "def" / "model.bin").read_bytes(), b"turbo")
+
+    def test_m9_1_a_link_between_our_own_stores_keeps_everything(self):
+        # round 10, M9-1 (the review's P2g): our store A holds a folder link onto our store B (not something
+        # huggingface_hub writes); the editor's link leads into A. Everything stays, with the real cause named
+        self.need_symlinks()
+        eng = self.engine("Engine")
+        m = eng / "models"
+        touch(m / TURBO_STORE / "snapshots" / "def" / "model.bin", b"turbo")
+        os.symlink(os.path.join("..", TURBO_STORE), m / HF_STORE / "peer", target_is_directory=True)
+        (m / "mine").mkdir()
+        os.symlink(os.path.join("..", HF_STORE), m / "mine" / "a", target_is_directory=True)
+        through = m / "mine" / "a" / "peer" / "snapshots" / "def" / "model.bin"
+        r = self.remove(eng, remove_models=True)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(through.read_bytes(), b"turbo", r.detail)
+        self.assertTrue((m / TURBO_STORE).is_dir(), r.detail)
+        self.assertTrue((m / HF_STORE).is_dir(), r.detail)
+        self.assertIn(f"a link inside WhyNot Cut's own {HF_STORE} leads to another of its models", r.detail)
+        self.assertIn(base.MODELS_UNSURE_AR, r.detail)
+        # the same with no editor entry linking in: still ours on both ends, but nothing is deleted on a guess either
+        eng2 = self.engine("Engine2")
+        m2 = eng2 / "models"
+        touch(m2 / TURBO_STORE / "snapshots" / "def" / "model.bin", b"turbo")
+        os.symlink(os.path.join("..", "..", "..", TURBO_STORE, "snapshots", "def", "model.bin"),
+                   m2 / HF_STORE / "snapshots" / "abc" / "peer.bin")
+        touch(m2 / "notes.txt", b"mine")
+        r = self.remove(eng2, remove_models=True)
+        self.assertTrue((m2 / TURBO_STORE).is_dir(), r.detail)
+        self.assertEqual((m2 / HF_STORE / "snapshots" / "abc" / "peer.bin").read_bytes(), b"turbo")
+        self.assertIn(f"a link inside WhyNot Cut's own {HF_STORE} leads to another of its models", r.detail)
+
+    def test_n9_4_an_entry_that_is_not_a_folder_is_named_as_an_entry(self):
+        # round 10, N9-4: an editor entry that is neither a folder nor a regular file (here: one that vanished between
+        # the listing and the walk) is "an entry of yours", not "a folder of yours"
+        eng = self.engine("Engine")
+        m = eng / "models"
+        touch(m / "ghost.bin", b"x")
+        real = base._links_below
+
+        def vanished(top):
+            if os.path.basename(top) == "ghost.bin":
+                os.unlink(top)
+            return real(top)
+
+        with mock.patch.object(base, "_links_below", vanished):
+            r = self.remove(eng, remove_models=True)
+        self.assertTrue((m / HF_STORE).is_dir(), r.detail)
+        self.assertIn("an entry of yours there (ghost.bin) could not be read", r.detail)
+        self.assertNotIn("a folder of yours", r.detail)
+        self.assertIn(base.MODELS_UNREAD_ENTRY_AR, r.detail)
+        self.assertNotIn(base.MODELS_UNREAD_AR, r.detail)
 
     def test_r8_2_the_nothing_deleted_note_gives_the_real_cause(self):
         # round 9, R8-2 (the review's Q2): a folder of the editor's that cannot be read completely (here the walk limit,
@@ -7474,6 +7545,51 @@ class TestF1(unittest.TestCase):
             self.assertEqual(r.status, "amber", r.detail)
             self.assertIn("cannot list", r.detail)
             self.assertTrue(eng.is_dir())
+
+    def test_n9_3_a_stale_deferred_list_is_handled_truthfully(self):
+        # round 10, N9-3 (the review's P5): the listing fails and a list from an earlier run (.delete-after-exit) is
+        # still there: it is removed (python/ stays: nothing more is deleted), or - when it cannot be removed - the
+        # note says the installer may still delete python/ and bin/ (WhyNot Cut's own) from it
+        for can_remove in (True, False):
+            with self.subTest(can_remove=can_remove), TempDir() as td:
+                h = Path(td)
+                eng = h / "Engine"
+                touch(eng / "state.json", GENUINE_STATE)
+                touch(eng / "runtimes" / "r-1" / "pyvenv.cfg", b"")
+                touch(eng / "python" / "p.txt", b"x")
+                stale = touch(eng / DEFER_LIST, (str(eng / "python") + "\n").encode())
+                gone = {"wait": False}
+                real_listdir, real_unlink = os.listdir, base._unlink
+
+                def relist(*a, **k):
+                    gone["wait"] = True
+                    return None
+
+                def listdir(p="."):
+                    if gone["wait"] and os.path.normcase(str(p)) == os.path.normcase(str(eng)):
+                        raise PermissionError(13, "cannot list", str(p))
+                    return real_listdir(p)
+
+                def unlink(p):
+                    if not can_remove and os.path.basename(str(p)) == DEFER_LIST:
+                        raise PermissionError(13, "in use", str(p))
+                    return real_unlink(p)
+
+                ctx = make_ctx(h, {"schema": 1}, SK, engine_home=eng, remove_engine=True, remove_models=False)
+                ctx.log.path = None
+                with mock.patch.object(base, "wait_for_transients", relist), \
+                        mock.patch.object(uninstall_module().os, "listdir", listdir), \
+                        mock.patch.object(base, "_unlink", unlink):
+                    r = uninstall_module().step_engine(ctx)
+                self.assertEqual(r.status, "amber", r.detail)
+                self.assertTrue((eng / "python").exists())
+                if can_remove:
+                    self.assertFalse(os.path.lexists(stale), r.detail)
+                    self.assertIn("nothing more was deleted", r.detail)
+                else:
+                    self.assertTrue(stale.exists())
+                    self.assertNotIn("nothing more was deleted", r.detail)
+                    self.assertIn("may still delete", r.detail)
 
     def test_f1a_a_failed_relist_keeps_what_was_listed(self):
         # (round 8, F1-a) the re-list cannot read the folder: the entries seen before stay named in the summary
@@ -8283,6 +8399,37 @@ class _CountdownCases:
         self.assertEqual(r.returncode, 0, out)
         self.assertNotIn("is not the folder of this run", out)
         self.assertNotIn("Traceback", out)
+
+    def test_m9_2_a_whynotcut_link_is_refused_before_anything_is_written(self):
+        # round 10, M9-2 (the review's S6 / S7): -EngineHome Stuff where Stuff/WhyNotCut is a symlink or a junction to
+        # the editor's folder X (empty, or holding only a desktop.ini): refused before anything is written - X stays
+        # byte for byte (no bin/, downloads/, logs/, no state.json claim), nothing is downloaded
+        h = self.home
+        kinds = [("symlink", make_dir_link)]
+        if IS_WIN:
+            kinds.append(("junction", lambda l, tg: subprocess.run(["cmd", "/c", "mklink", "/J", str(l), str(tg)],
+                                                                   capture_output=True).returncode == 0))
+        for kind, mk in kinds:
+            for label, content in (("empty", None), ("ini", "desktop.ini")):
+                with self.subTest(kind=kind, content=label):
+                    s = h / f"Stuff {kind} {label}"
+                    touch(s / "my project.prproj", b"mine")
+                    x = self.tmp / f"X {kind} {label}"
+                    x.mkdir()
+                    if content:
+                        touch(x / content, b"[.ShellClassInfo]\r\n")
+                    if not mk(s / "WhyNotCut", x):
+                        self.skipTest("cannot make a directory link here")
+                    self.addCleanup(drop_dir_link, s / "WhyNotCut")
+                    before, hits = snapshot_tree(x), list(self.srv.srv.hits)
+                    r = self.inst(h, "yes", "skip", extra=(self.ENGINE_FLAG, self.native(s)))
+                    out = r.stdout + r.stderr
+                    self.assertEqual(r.returncode, 2, out)
+                    self.assertIn("is a link", out)
+                    self.assertIn("Nothing was written", out)
+                    self.assertIn(base.FINAL_LINK_AR, out)
+                    self.assertEqual(snapshot_tree(x), before, out)
+                    self.assertEqual(self.srv.srv.hits, hits, out)
 
     def test_r8_3_a_whynotcut_folder_keeping_its_desktop_ini_is_used_again(self):
         # round 9, R8-3 end to end: Videos/WhyNotCut got an icon (desktop.ini) from the editor; the uninstall keeps it;
