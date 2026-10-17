@@ -39,7 +39,6 @@ import json
 import os
 import re
 import secrets
-import shutil
 import subprocess
 import threading
 import time
@@ -178,7 +177,7 @@ def _sid_from_token() -> str:
 
 
 def _sid_from_whoami() -> str:
-    exe = shutil.which("whoami") or os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "whoami.exe")
+    exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "whoami.exe")   # never PATH (L-G11)
     r = subprocess.run([exe, "/user", "/fo", "csv", "/nh"], capture_output=True, timeout=30)
     return r.stdout.decode("utf-8", "replace").strip().rsplit(",", 1)[-1].strip().strip('"')
 
@@ -207,7 +206,7 @@ def restrict_to_user(path) -> None:
         os.chmod(p, 0o600)
         return
     sid = current_user_sid()
-    exe = shutil.which("icacls") or os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "icacls.exe")
+    exe = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "icacls.exe")   # never PATH (L-G11)
     try:
         r = subprocess.run([exe, p, "/inheritance:r", "/grant:r", f"*{sid}:F"],
                            capture_output=True, timeout=30)     # bytes: only the return code is read
