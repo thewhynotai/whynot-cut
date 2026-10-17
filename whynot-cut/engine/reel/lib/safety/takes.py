@@ -6,8 +6,12 @@ Built on Task 25 (cut_proposals: the shared normaliser, the take similarity, the
 the sentences of a clip (1..N, from the words alone, so the same transcript always gives the same numbers), groups the
 sentences said more than once («٤ و ٥ نفس الجملة: الأفضل ٥ — كاملة ومن غير تلعثم») and proposes the better take from
 measured features only: closed by the transcript or not, covering the line, restarts and hesitation sounds inside,
-clipping and level (only when audio is given), mean word confidence; a tie keeps the later take. When the takes differ
-in a number, a dose, a negation or a content word, the line says so («⚠ النسختين مختلفين في: …»): the editor decides.
+clipping and level (only when audio is given), mean word confidence; a tie keeps the later take. The takes are read
+for meaning with the reader Task 25 uses (differences.py: numbers and doses, negation, timing). When they differ in
+meaning, NO take is proposed: the line names what differs, whatever else differs too («١ و ٢ نفس الجملة، بس مختلفين في
+المعنى — ⚠ نفي: … — اسمعهم واختار انت»), and the editor decides. A content word that differs («السكر» / «الضغط», up to
+four of them) is named with a ⚠ while the better take is still proposed (the same rule as Task 25: only the three
+meaning kinds block a proposal).
 
 `--drop 4,7 --keep 5` writes the choice into the plan's own cut list (edit-decisions.json global.cut_words, entries
 "TK-<n> …" with the take's range), `--undo` goes back one step, as many times as there are steps; an undo never
@@ -22,9 +26,12 @@ import json
 import math
 import os
 import re
+from collections import Counter
 
 from .. import cut_proposals as CP
-from .numbers import fold, values_in
+from . import differences as D
+from .numbers import fold
+from .risk_words import _negation
 
 FILE = "01_analysis/takes.json"
 HISTORY = "01_analysis/takes-history.json"
@@ -36,8 +43,6 @@ _TO_WESTERN = str.maketrans({**{chr(0x660 + i): str(i) for i in range(10)}, **{c
 CLIP_LEVEL = 0.99          # a sample at or above this (of full scale) is clipped
 CLIP_SHARE = 0.001         # a take clips when more than this share of its samples is clipped
 QUIET_DB = 10.0            # a take this many dB below the group's loudest is "too quiet"
-NEGATIONS = {"مش", "لا", "ما", "مفيش", "ممنوع", "بلاش", "لم", "لن", "ليس", "بدون", "no", "not", "never", "dont",
-             "don't", "without"}
 
 
 def _settings(cfg, ctx=None):
@@ -60,10 +65,16 @@ def sentences(words, cfg=None) -> list:
             out.append({"n": len(out) + 1, "word_ids": [x["id"] for x in cur],
                         "text": " ".join(x["word"].strip() for x in cur), "start_ms": cur[0]["start_ms"],
                         "end_ms": cur[-1]["end_ms"], "toks": [t for x in cur for t in [CP.norm_word(x["word"])] if t],
+                        "said": [_said(x["word"]) for x in cur if CP.norm_word(x["word"])],
                         "punct": bool(_PUNCT.search(cur[-1]["word"])), "speaker": cur[0].get("speaker"),
                         "probs": [x.get("probability") for x in cur]})
             cur = []
     return out
+
+
+def _said(word) -> str:
+    """A word as the transcript writes it, without the sentence's marks («الضغط». -> الضغط; "doesn't" stays)."""
+    return D._EDGE_PUNCT.sub("", str(word or "").strip())
 
 
 def _fragments(toks: list) -> set:
@@ -91,29 +102,71 @@ def _same(a: dict, b: dict, F: dict, V: dict) -> bool:
 
 
 def _differences(takes: list, F: dict) -> dict:
-    """What the takes do not share where they overlap: numbers and doses (by value), negations, content words."""
-    vals = [values_in(t["text"]) for t in takes]
-    negs = [{fold(w) for w in t["text"].split()} & NEGATIONS for t in takes]
-    n = min(len(t["toks"]) for t in takes)
+    """What the takes do not share. Meaning, always (the shared reader, every pair of takes): "numbers", "negation",
+    "timing" = the words that carry it, as said, and "pairs" = [{"takes": [n, m], kind: {"a": [...], "b": [...]}}].
+    An earlier take cut short (not closed, fewer words) is read only as far as it goes: «خدي الـ vitamin D» then «… ألف
+    وحدة كل يوم.» is not a difference ("cut_short" keeps that pair: the line names what it left out, and it counts
+    if the cut-off take would be the proposal). A later shorter take is always read whole.
+    Content words where the full takes overlap (an abandoned start is left out: it only stopped early), as said
+    ("words"), only when four or fewer differ: a longer list means a
+    reworded take, not a slip. A negation word is not a content word, and a negated verb is compared without its
+    negation («مبيقللش» = «بيقلل» + a negation, which the meaning reader already counts)."""
+    out, pairs, short, cut = {}, [], [], set()
+    for i in range(len(takes)):
+        for j in range(i + 1, len(takes)):
+            a, b = takes[i], takes[j]
+            d = D.compare(a["said"], b["said"])
+            # an abandoned start: the rest is unsaid, not said otherwise (read only as far as it goes)
+            stopped = _cut_short(a, b) is not None and not D.compare(a["said"], b["said"][:len(a["said"])])
+            if stopped:
+                cut.add(a["n"])
+            if not d:
+                continue
+            if stopped:
+                short.append({"takes": [a["n"], b["n"]], "cut_short": a["n"], **d})
+                continue
+            pairs.append({"takes": [a["n"], b["n"]], **d})
+    for kind in D._ORDER:
+        said = [w for p in pairs if kind in p for side in ("a", "b") for w in p[kind][side]]
+        if said:
+            out[kind] = list(dict.fromkeys(said))
+    meaning = {w for kind in D._ORDER for phrase in out.get(kind, []) + [x for p in short if kind in p
+                                                                           for side in ("a", "b") for x in p[kind][side]]
+               for w in phrase.split()}
+    full = [t for t in takes if t["n"] not in cut]       # an abandoned start's words are a start of the others'
+    n = min((len(t["toks"]) for t in full), default=0)
     shown = {}                                       # compared without a clitic, shown as said («للسكر»)
     words = []
-    for t in takes:
+    for t in full if len(full) > 1 else []:
         s = set()
-        for w in _content_words(t["toks"][:n + 1], F):
-            if not _is_number(w):
-                shown.setdefault(_bare(w), w)
+        frag = _fragments(t["toks"])
+        for k, (w, said) in enumerate(zip(t["toks"][:n + 1], t["said"][:n + 1])):
+            neg = _negation(fold(w))
+            if k in frag or neg == "word" or said.lower().replace("’", "'").endswith("n't"):
+                continue
+            if neg == "verb":                            # «مبيقللش» -> «بيقلل», «ماتاخدش» -> «تاخد»
+                w = w[2:-1] if w.startswith("ما") else w[1:-1]
+            if CP._content(w, F) and not _is_number(w):
+                shown.setdefault(_bare(w), said)
                 s.add(_bare(w))
         words.append(s)
     common = set.intersection(*words) if words else set()
-    out = {}
-    if len({frozenset(v) for v in vals}) > 1:
-        out["numbers"] = sorted({str(x) for v in vals for x in v})
-    if len({frozenset(x) for x in negs}) > 1:
-        out["negation"] = True
-    differ = sorted(shown[w] for w in {w for s in words for w in s} - common)
-    if differ and len(differ) <= 4:
+    apart = {w for s in words for w in s} - common
+    differ = sorted(x for x in {shown[w] for w in apart} if x not in meaning)
+    if differ and len(apart) <= 4:
         out["words"] = differ
+    if pairs:
+        out["pairs"] = pairs
+    if short:
+        out["cut_short"] = short
     return out
+
+
+def _cut_short(t: dict, other: dict):
+    """t when it is an earlier take abandoned before the end and said again in full by the later one (not closed by
+    the transcript, fewer words). A LATER shorter take is a correction that leaves something out: never cut short,
+    whatever the transcript's full stops."""
+    return t if not t["punct"] and len(t["said"]) < len(other["said"]) else None
 
 
 def _bare(w: str) -> str:
@@ -183,8 +236,19 @@ def _why(f: dict, tie: bool) -> tuple:
     return text_ar, ", ".join(en)
 
 
+def _named(p: dict, takes: int, lang: str) -> str:
+    """What one pair of takes differs in («نفي: (مفيش) مقابل «مبيقللش»»), with the take numbers when there are more
+    than two takes."""
+    d_ar, d_en = D.describe({x: p[x] for x in D._ORDER if x in p})
+    if takes == 2:
+        return d_ar if lang == "ar" else d_en
+    a, b = p["takes"]
+    return f"{_ar(a)} مقابل {_ar(b)}: {d_ar}" if lang == "ar" else f"{a} vs {b}: {d_en}"
+
+
 def groups(words, cfg=None, samples=None, sr=0, lang: str = "ar") -> list:
-    """Take groups: [{"takes": [sentence + features], "best": n, "differ": {...}, "line_ar", "line_en"}], in time
+    """Take groups: [{"takes": [sentence + features], "best": n or None (the takes differ in meaning), "differ": {...},
+    "line_ar", "line_en"}], in time
     order. A sentence joins the first group whose first take it matches within the retake window (no chains: A~B and
     B~C never pull in a C unlike A)."""
     cfg = _settings(cfg)
@@ -212,30 +276,55 @@ def groups(words, cfg=None, samples=None, sr=0, lang: str = "ar") -> list:
         levels = [t["features"].get("level_db") for t in takes if t["features"].get("level_db") is not None]
         loudest = max(levels) if levels else None
         keys = [_rank_key(t["features"], k, loudest) for k, t in enumerate(takes)]
-        best = max(range(len(takes)), key=lambda k: keys[k])
-        tie = sum(1 for k in keys if k[:-1] == keys[best][:-1]) > 1
         nums = [t["n"] for t in takes]
-        why_ar, why_en = _why(takes[best]["features"], tie)
         differ = _differences([ss[i] for i in g], F)
-        warn_ar, warn_en = "", ""
-        if differ:
-            bits_ar, bits_en = [], []
-            if differ.get("numbers"):
-                bits_ar.append("الأرقام/الجرعة (" + "، ".join(differ["numbers"]) + ")")
-                bits_en.append("numbers/dose (" + ", ".join(differ["numbers"]) + ")")
-            if differ.get("negation"):
-                bits_ar.append("النفي")
-                bits_en.append("a negation")
-            if differ.get("words"):
-                bits_ar.append("الكلام (" + "، ".join(differ["words"]) + ")")
-                bits_en.append("words (" + ", ".join(differ["words"]) + ")")
-            warn_ar = " — ⚠ النسخ مختلفة في: " + "؛ ".join(bits_ar) + "، اسمعهم قبل ما تختار"
-            warn_en = " — ⚠ the takes differ in: " + "; ".join(bits_en) + "; listen before choosing"
+        listed = f"{' و '.join(_ar(n) for n in nums)} نفس الجملة"
+        listed_en = f"{', '.join(map(str, nums[:-1]))} and {nums[-1]} are the same sentence"
+        words_ar = "الكلام (" + "، ".join(differ["words"]) + ")" if differ.get("words") else ""
+        words_en = "words (" + ", ".join(differ["words"]) + ")" if differ.get("words") else ""
+        best = max(range(len(takes)), key=lambda k: keys[k])
+        for p in differ.get("cut_short", []):           # the proposal would be the cut-off take: never past a meaning
+            if p["cut_short"] == nums[best]:
+                differ.setdefault("pairs", []).append({x: v for x, v in p.items() if x != "cut_short"})
+                for kind in D._ORDER:
+                    if kind in p:
+                        differ[kind] = list(dict.fromkeys(differ.get(kind, []) + p[kind]["a"] + p[kind]["b"]))
+        if differ.get("pairs"):                          # the meaning differs: the editor listens and chooses
+            what_ar = " | ".join(_named(p, len(nums), "ar") for p in differ["pairs"]) + ("؛ " + words_ar if words_ar else "")
+            what_en = " | ".join(_named(p, len(nums), "en") for p in differ["pairs"]) + ("; " + words_en if words_en else "")
+            out.append({"takes": takes, "best": None, "differ": differ,
+                        "line_ar": f"{listed}، بس مختلفين في المعنى — ⚠ {what_ar} — مش هنقترح أفضل واحدة: "
+                                   "اسمعهم واختار انت",
+                        "line_en": f"{listed_en}, but they differ in meaning — ⚠ {what_en} — no take is proposed: "
+                                   "listen and choose"})
+            continue
+        tie = sum(1 for k in keys if k[:-1] == keys[best][:-1]) > 1
+        why_ar, why_en = _why(takes[best]["features"], tie)
+        warn_ar = f" — ⚠ النسخ مختلفة في: {words_ar}، اسمعهم قبل ما تختار" if words_ar else ""
+        warn_en = f" — ⚠ the takes differ in: {words_en}; listen before choosing" if words_en else ""
+        left = {}                                        # what each abandoned start did not get to say
+        for p in differ.get("cut_short", []):
+            mine, other = ("a", "b") if p["takes"][0] == p["cut_short"] else ("b", "a")
+            for kind in D._ORDER:
+                if kind in p:                            # negation lists every word on both sides: only the new ones,
+                    said = Counter(p[kind][mine])         # by count («not … and not with milk»: the second is new)
+                    new = []
+                    for w in p[kind][other]:
+                        if said[w]:
+                            said[w] -= 1
+                        else:
+                            new.append(w)
+                    left.setdefault(p["cut_short"], {}).setdefault(kind, []).extend(new)
+        for n, kinds in left.items():
+            said = {k: list(dict.fromkeys(v)) for k, v in kinds.items() if v}
+            if said:
+                warn_ar += f" — ⚠ {_ar(n)} اتقطعت قبل: " + "؛ ".join(
+                    f"{D.LABEL[k][0]} " + "، ".join(f"«{w}»" for w in said[k]) for k in D._ORDER if k in said)
+                warn_en += f" — ⚠ {n} stopped before: " + "; ".join(
+                    f"{D.LABEL[k][1]} " + ", ".join(f"\"{w}\"" for w in said[k]) for k in D._ORDER if k in said)
         out.append({"takes": takes, "best": nums[best], "differ": differ,
-                    "line_ar": f"{' و '.join(_ar(n) for n in nums)} نفس الجملة: الأفضل {_ar(nums[best])} — {why_ar}"
-                               + warn_ar,
-                    "line_en": (f"{', '.join(map(str, nums[:-1]))} and {nums[-1]} are the same sentence: best "
-                                f"{nums[best]} — {why_en}" + warn_en)})
+                    "line_ar": f"{listed}: الأفضل {_ar(nums[best])} — {why_ar}" + warn_ar,
+                    "line_en": f"{listed_en}: best {nums[best]} — {why_en}" + warn_en})
     return out
 
 
@@ -393,8 +482,9 @@ def apply(paths, drop=(), keep=(), by: str = "editor", ctx=None) -> dict:
         start = max(clean[a]["start_ms"] - pad, clean[a - 1]["end_ms"] if a > 0 else 0)
         end = max(clean[b]["end_ms"], clean[b + 1]["start_ms"] - pad if b + 1 < len(clean) else clean[b]["end_ms"])
         best = best_of.get(tuple(x["n"] for x in g["takes"]), g["best"])      # the best the editor was shown
+        why = f"best take: {best}" if best is not None else "no best proposed: the takes differ in meaning"
         new.append({"word_ids": list(t["word_ids"]), "range_ms": [int(start), int(end)],
-                    "reason": f"TK-{n} take dropped (best take: {best})", "by": by})
+                    "reason": f"TK-{n} take dropped ({why})", "by": by})
         cut_now |= words_of(n)
     for g in res:                  # a line never disappears whole by this step, whoever cut its other takes
         nums = [t["n"] for t in g["takes"]]
@@ -403,7 +493,8 @@ def apply(paths, drop=(), keep=(), by: str = "editor", ctx=None) -> dict:
         if all(words_of(n) <= cut_now for n in nums):
             raise Guidance(f"كده كل نسخ الجملة {' و '.join(_ar(n) for n in nums)} هتتشال والجملة هتختفي / every "
                            f"take of {', '.join(map(str, nums))} would be cut and the line would be gone",
-                           f"Keep one of them (the proposed best is {g['best']})")
+                           "Keep one of them" + (f" (the proposed best is {g['best']})" if g["best"] is not None
+                                                 else " (they differ in meaning: listen to them first)"))
     note = ({"blocked_by_other_cuts": blocked,
              "note": f"الجمل {'، '.join(_ar(n) for n in blocked)} لسه متشالة بقص تاني (اقتراح قص أو قص المونتير)، "
                      "شيله من قائمة القص لو عايزها ترجع / still cut by another entry (a cut proposal or the "

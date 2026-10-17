@@ -81,8 +81,13 @@ _ORDER = ("negation", "numbers", "timing")
 _EDGE_PUNCT = re.compile(r"^[\s\"'«»“”(\[]+|[\s.,!?؟…،؛:\"'«»“”)\]]+$")    # shown as said, without the sentence's marks
 
 
+def _stems(tok: str) -> list:
+    """stems(), and a second clitic off too: «وبالليل» = و + بال + ليل."""
+    return list(dict.fromkeys(x for s in stems(tok) for x in stems(s)))
+
+
 def _key(table: dict, tok: str):
-    for s in stems(tok):
+    for s in _stems(tok):
         if s in table:
             return table[s]
     return None
@@ -192,7 +197,7 @@ def reading(words) -> dict:
             continue
         tod = _key(TIME_OF_DAY, t)
         day = _key(DAYS, t)
-        if day and next((s for s in stems(t) if s in DAYS), t) in _DAY_NEEDS_CUE and \
+        if day and next((s for s in _stems(t) if s in DAYS), t) in _DAY_NEEDS_CUE and \
                 not (i > 0 and toks[i - 1] in _DAY_CUE):
             day = None
         if tod or day:

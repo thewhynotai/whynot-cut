@@ -182,5 +182,14 @@ class TestShape(unittest.TestCase):
         self.assertEqual(D.describe({}), ("", ""))
 
 
+class TestTwoClitics(unittest.TestCase):
+    """K-T7 review round 4: «وبالليل» (و + بال + ليل) was read as no time at all."""
+    def test_and_at_night(self):
+        self.assertIn("timing", D.compare("خدي الدوا الصبح".split(), "خدي الدوا الصبح وبالليل".split()))
+        self.assertEqual(D.compare("خدي الدوا بالليل".split(), "خدي الدوا وبالليل".split()), {})
+        self.assertIn("timing", D.compare("خدي الدوا الصبح".split(), "خدي الدوا الصبح وبعد الأكل".split()))
+        self.assertIn("timing", D.compare("روحي يوم".split(), "روحي يوم وبالسبت".split()))
+
+
 if __name__ == "__main__":
     unittest.main()

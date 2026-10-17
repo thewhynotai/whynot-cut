@@ -359,5 +359,190 @@ class TestReviewRound1Apply(Project):
             T.apply(self.p, drop=[2])
 
 
+
+# --- acceptance follow-ups (executor, 2026-10-17): the shared meaning reader, no best when the meaning differs ---------
+def pair(a, b):
+    return T.groups(words([(a, 0.95, 900), (b, 0.95, 300)]))[0]
+
+
+class TestMeaningDiffers(unittest.TestCase):
+    def assertNoBest(self, g):
+        self.assertIsNone(g["best"])
+        self.assertNotIn("الأفضل", g["line_ar"])
+        self.assertNotIn("best ", g["line_en"].split("—")[0])
+        self.assertIn("اسمعهم", g["line_ar"])
+        self.assertNotIn("None", g["line_ar"] + g["line_en"])
+
+    def test_c1_arabic_negated_verb(self):
+        g = pair("الدوا ده بيقلل الضغط عند الكبار في السن جدا", "الدوا ده مبيقللش الضغط عند الكبار في السن جدا.")
+        self.assertEqual(g["differ"]["negation"], ["مبيقللش"])
+        self.assertNoBest(g)
+        self.assertIn("نفي", g["line_ar"])
+        self.assertIn("«مبيقللش»", g["line_ar"])
+        self.assertLess(g["line_ar"].index("نفس الجملة"), g["line_ar"].index("⚠"))
+
+    def test_c2_english_contractions_and_no_doesn_t(self):
+        for a, b, neg in (("this drug lowers blood pressure in older patients a lot",
+                           "this drug doesn't lower blood pressure in older patients a lot.", "doesn't"),
+                          ("this drug is safe for pregnant women in the first months",
+                           "this drug isn't safe for pregnant women in the first months.", "isn't")):
+            with self.subTest(neg=neg):
+                g = pair(a, b)
+                self.assertEqual(g["differ"]["negation"], [neg])
+                self.assertNoBest(g)
+                blob = json.dumps(g, ensure_ascii=False)
+                self.assertNotIn(neg.replace("'", " "), blob)
+
+    def test_c3_timing(self):
+        for a, b, said in (("خدي حباية واحدة الصبح بعد الفطار", "خدي حباية واحدة بالليل بعد الفطار.", ["الصبح", "بالليل"]),
+                           ("خدي الدوا بعد الفطار كل يوم", "خدي الدوا قبل الفطار كل يوم.", ["بعد الفطار", "قبل الفطار"])):
+            with self.subTest(a=a):
+                g = pair(a, b)
+                self.assertEqual(g["differ"]["timing"], said)
+                self.assertNoBest(g)
+                self.assertIn("توقيت", g["line_ar"])
+
+    def test_c4_dose(self):
+        g = pair("خدي حباية واحدة من الدوا ده الصبح", "خدي حبايتين من الدوا ده الصبح.")
+        self.assertEqual(g["differ"]["numbers"], ["حباية واحدة", "حبايتين"])
+        self.assertNoBest(g)
+
+    def test_c5_negation_reported_past_the_words_cap(self):
+        a = ("الدكتور قال إن الدوا ده بيقلل الضغط عند الكبار في السن وده مهم جدا للناس اللي عندها مشاكل في القلب "
+             "والكلى والسكر والكبد وكمان للستات الحوامل في الشهور الأولى من الحمل")
+        b = ("الدكتور قال إن الدوا ده مبيقللش الضغط عند الكبار في السن وده مهم جدا للناس اللي عندها مشاكل في الرئة "
+             "والمعدة والعظام والمخ وكمان للستات الحوامل في الشهور الأولى من الحمل.")
+        g = pair(a, b)
+        self.assertNotIn("words", g["differ"])                 # more than 4 words differ: the word list stays quiet
+        self.assertEqual(g["differ"]["negation"], ["مبيقللش"])
+        self.assertNoBest(g)
+
+    def test_c6_three_takes_only_the_last_negated(self):
+        res = T.groups(words([("الدوا ده بيقلل الضغط عند الكبار", 0.95, 900),
+                              ("الدوا ده بيقلل الضغط عند الكبار", 0.95, 900),
+                              ("الدوا ده مبيقللش الضغط عند الكبار.", 0.95, 300)]))
+        g = res[0]
+        self.assertEqual(group_numbers(res), [[1, 2, 3]])
+        self.assertNoBest(g)
+        self.assertEqual([p["takes"] for p in g["differ"]["pairs"]], [[1, 3], [2, 3]])
+        self.assertIn("١ مقابل ٣", g["line_ar"])
+
+    def test_c7_same_meaning_keeps_a_best(self):
+        for a, b in (("الدواء ده مهم للضغط", "والدواء ده مهم للضغط."), ("خد خمسمية مجم من الدوا", "خد ٥٠٠ مجم من الدوا."),
+                     ("الدوا ده مش بيقلل الضغط عند الكبار في السن خالص",
+                      "الدوا ده مبيقللش الضغط عند الكبار في السن خالص.")):
+            with self.subTest(a=a):
+                g = pair(a, b)
+                self.assertEqual(g["differ"], {})
+                self.assertEqual(g["best"], 2)
+
+    def test_c8_a_content_word_alone_warns_and_keeps_the_proposal(self):
+        g = pair("النهاردة هنتكلم عن مرض السكر", "النهاردة هنتكلم عن مرض الضغط.")
+        self.assertEqual(g["differ"], {"words": ["السكر", "الضغط"]})
+        self.assertEqual(g["best"], 2)
+        self.assertIn("⚠", g["line_ar"])
+
+    def test_c13_a_take_cut_short_is_read_only_as_far_as_it_goes(self):
+        res = T.groups(fixture("mixed")["words"])           # «خدي الـ vitamin D» then «… ألف وحدة كل يوم.»
+        self.assertEqual(res[0]["best"], 2)
+        self.assertNotIn("pairs", res[0]["differ"])
+        self.assertEqual(res[0]["differ"]["cut_short"][0]["cut_short"], 1)
+        self.assertIn("الأفضل ٢", res[0]["line_ar"])
+        self.assertIn("⚠ ١ اتقطعت قبل: رقم أو جرعة «ألف وحدة كل يوم»", res[0]["line_ar"])
+        self.assertIn("1 stopped before: number or dose", res[0]["line_en"])
+        g = pair("خدي حباية واحدة من الدوا ده", "خدي حباية واحدة من الدوا ده الصبح بعد الفطار.")
+        self.assertEqual(g["best"], 2)
+        self.assertNotIn("timing", g["differ"])
+        # a cut-off take that says something else where it overlaps is still a difference
+        g = pair("خدي حباية واحدة من الدوا ده بالليل", "خدي حباية واحدة من الدوا ده الصبح بعد الفطار.")
+        self.assertIsNone(g["best"])
+        self.assertCountEqual(g["differ"]["timing"], ["بالليل", "الصبح", "بعد الفطار"])
+
+    def test_c14_a_closed_take_that_leaves_out_the_timing_differs(self):
+        g = pair("خدي حباية واحدة من الدوا ده.", "خدي حباية واحدة من الدوا ده الصبح.")
+        self.assertEqual(g["differ"]["timing"], ["الصبح"])
+        self.assertIsNone(g["best"])
+        self.assertIn("(مفيش) مقابل «الصبح»", g["line_ar"])
+
+    def test_c15_the_cut_off_take_is_never_proposed_past_a_meaning(self):
+        ws = words([("خدي حباية واحدة من الدوا ده", 0.95, 900), ("خدي حباية واحدة من الدوا ده الصبح بعد الفطار.", 0.95, 300)])
+        with mock.patch.object(T, "_rank_key", lambda f, idx, loudest: (-idx,)):      # rank the cut-off take first
+            g = T.groups(ws)[0]
+        self.assertIsNone(g["best"])
+        self.assertEqual(g["differ"]["timing"], ["بعد الفطار", "الصبح"])
+
+    def test_r1_c1_a_later_shorter_take_without_full_stops_still_differs(self):
+        # Whisper often writes no full stop: a later, shorter correction is a full take, never "cut short"
+        for a, b, kind in (("خدي حباية واحدة الصبح وحباية بالليل", "خدي حباية واحدة الصبح", "timing"),
+                           ("الحباية دي بتتاخد على الريق قبل الفطار", "الحباية دي بتتاخد على الريق", "timing"),
+                           ("you can take this pill with food but not with alcohol", "you can take this pill with food",
+                            "negation")):
+            with self.subTest(a=a):
+                g = T.groups(words([(a, 0.95, 900), (b, 0.95, 300)]))[0]
+                self.assertIn(kind, g["differ"])
+                self.assertIsNone(g["best"])
+                label = {"timing": "توقيت", "negation": "نفي"}[kind]          # the meaning is named, not a fragment
+                self.assertIn(label + ":", g["line_ar"])
+                self.assertNotIn("(قبل)", g["line_ar"])
+        a = "خدي حباية واحدة الصبح وحباية بالليل"
+        g = T.groups(words([(a, 0.95, 900), ("خدي حباية واحدة الصبح", 0.95, 900), (a, 0.95, 300)]))[0]
+        self.assertIsNone(g["best"])
+
+    def test_r1_i1_an_abandoned_start_names_what_it_left_out_not_as_words(self):
+        g = T.groups(words([("خدي حباية واحدة الصبح", 0.95, 900), ("خدي حباية واحدة الصبح يوميا كمان", 0.95, 300)]))[0]
+        self.assertEqual(g["best"], 2)
+        self.assertNotIn("words", g["differ"])
+        self.assertIn("توقيت «يوميا»", g["line_ar"])
+
+    def test_r2_minors_the_note_and_the_words_after_an_abandoned_start(self):
+        g = T.groups(words([("مش لازم تاخدي الدوا ده", 0.95, 900), ("مش لازم تاخدي الدوا ده ولا لازم تكمليه", 0.95, 300)]))[0]
+        self.assertIn("نفي «ولا»", g["line_ar"])                 # the cut-off take said «مش» too
+        self.assertNotIn("«مش»", g["line_ar"])
+        g = T.groups(words([("خدي حباية واحدة من", 0.95, 900), ("خدي حباية واحدة من الدوا ده", 0.95, 900),
+                            ("خدي حباية واحدة من الدوا ده مرتين في اليوم بعد الأكل", 0.95, 300)]))[0]
+        self.assertNotIn("words", g["differ"])                   # take 1 only stopped before «الدوا»
+
+    def test_r3_a_word_said_again_and_words_among_the_full_takes(self):
+        g = T.groups(words([("you should not take this pill", 0.95, 900),
+                            ("you should not take this pill and not with milk", 0.95, 300)]))[0]
+        self.assertIn("negation \"not\"", g["line_en"])         # the second «not» is new, counted, not matched away
+        g = T.groups(words([("مش لازم تاخدي الدوا ده", 0.95, 900), ("مش لازم تاخدي الدوا ده مش كل يوم", 0.95, 300)]))[0]
+        self.assertIn("نفي «مش»", g["line_ar"])
+        g = T.groups(words([("النهاردة هنتكلم عن مرض", 0.95, 900), ("النهاردة هنتكلم عن مرض السكر الصبح", 0.95, 900),
+                            ("النهاردة هنتكلم عن مرض الضغط الصبح.", 0.95, 300)]))[0]
+        self.assertEqual(g["differ"]["words"], ["السكر", "الضغط"])  # the full takes are compared with each other
+        g = T.groups(words([("النهاردة هنتكلم عن مرض", 0.95, 900),
+                            ("النهاردة هنتكلم عن مرض السكر عند الكبار", 0.95, 900),
+                            ("النهاردة هنتكلم عن مرض السكر عند الصغار.", 0.95, 300)]))[0]
+        self.assertEqual(g["differ"]["words"], ["الصغار", "الكبار"])   # never «السكر»: take 1 just did not get there
+
+    def test_c12_words_shown_as_said(self):
+        g = pair("today we talk about the patient's diet and sleep", "today we talk about the Doctor's diet and sleep.")
+        self.assertEqual(g["differ"]["words"], ["Doctor's", "patient's"])
+        g = pair("النهاردة هنتكلم عن مرض للسكر", "النهاردة هنتكلم عن مرض «الضغط».")
+        self.assertEqual(g["differ"]["words"], ["الضغط", "للسكر"])
+
+
+class TestApplyWhenMeaningDiffers(Project):
+    def setUp(self):
+        super().setUp()
+        self.fx = {"words": words([("الدوا ده بيقلل الضغط عند الكبار", 0.95, 900),
+                                   ("الدوا ده مبيقللش الضغط عند الكبار.", 0.95, 300)])}
+        write_json(self.p.p("02_transcription/words.json"), {"meta": {"language": "ar"}, "words": self.fx["words"]})
+        write_json(self.ed, {"global": {"cut_words": []}, "decisions": []})
+        self.rep = T.report(self.p)
+
+    def test_c9_listing_drop_and_refusal_without_a_best(self):
+        self.assertIsNone(self.rep["groups"][0]["best"])
+        self.assertEqual(read_json(self.p.p(T.FILE))["best"], [None])
+        res = T.apply(self.p, drop=[1])
+        self.assertTrue(res["changed"])
+        [e] = self.tk_entries()
+        self.assertEqual(e["reason"], "TK-1 take dropped (no best proposed: the takes differ in meaning)")
+        with self.assertRaises(Guidance) as cm:
+            T.apply(self.p, drop=[2])
+        self.assertNotIn("None", str(cm.exception) + str(getattr(cm.exception, "fix", "")))
+
+
 if __name__ == "__main__":
     unittest.main()
