@@ -144,6 +144,15 @@ class TestKey(unittest.TestCase):
             with self.assertRaises(Guidance, msg=repr(bad)):
                 RD.review_domain_key(bad)
 
+    def test_key_without_the_always_on_domains_is_refused(self):
+        """Review 79c5bf7 P3: a raw profile list must never silently drop medical or ai from the key."""
+        for ids, missing in ((["religious"], ("ai", "medical")), (["business", "ai"], ("medical",)),
+                             (["medical"], ("ai",))):
+            with self.assertRaises(Guidance, msg=repr(ids)) as cm:
+                RD.review_domain_key(ids)
+            for d in missing:
+                self.assertIn(d, str(cm.exception), ids)
+
 
 class TestClientSet(Base):
     def key(self, doc: dict) -> str:
@@ -177,6 +186,21 @@ class TestClientSet(Base):
                 RD.client_set()
             if "crypto" in json.dumps(bad):
                 self.assertIn("crypto", str(cm.exception))
+
+    def test_unknown_legacy_domain_refused_naming_it(self):
+        """Review 79c5bf7 P3: an unknown legacy `domain` was silently general."""
+        for bad, name in (({"domain": "dental"}, "dental"), ({"domain": ["religious"]}, "religious"),
+                          ({"domain": 3}, "3"), ({"review_domains": ["business"], "domain": "Dentistry"}, "Dentistry"),
+                          ({"domain": "business"}, "business"), ({"domain": "ai"}, "'ai'")):
+            self.profile(bad)
+            with self.assertRaises(Guidance, msg=repr(bad)) as cm:
+                RD.client_set()
+            self.assertIn(name, str(cm.exception), bad)
+        for ok, key in (({"domain": ""}, "ai+medical"), ({"domain": "  "}, "ai+medical"),
+                        ({"domain": "medical | religious | general"}, "ai+medical"),     # the shipped template
+                        ({"domain": " Medical  |  Religious | general "}, "ai+medical"),
+                        ({"domain": "Religious"}, "ai+medical+religious")):
+            self.assertEqual(self.key(ok), key, ok)
 
     def test_review_detect(self):
         self.profile({})
@@ -264,15 +288,42 @@ class TestDetect(unittest.TestCase):
             self.assertIn("religious", hit, t)
             self.assertIn("business", hit, t)
 
-    def test_quoted_scripture_after_a_citation_is_not_business(self):
-        for t in ("قال تعالى: «فما ربحت تجارتهم»", "قال تعالى في كتابه «فما ربحت تجارتهم»", "قال رسول الله ﷺ «التاجر الصدوق الأمين مع النبيين» ربح"):
+    def test_quoted_scripture_after_a_citation_hides_nothing(self):
+        """Executor follow-up (review 79c5bf7 P2-1): only a ﴿﴾ verse hides plain business words; a «» or “” quotation
+        after a citation still counts as religious but hides nothing («ربنا قال» is everyday speech)."""
+        for t in ("قال تعالى: «فما ربحت تجارتهم»", "قال تعالى في كتابه «فما ربحت تجارتهم»",
+                  "قال رسول الله ﷺ «التاجر الصدوق الأمين مع النبيين» ربح", "قال تعالى “فما ربحت تجارتهم”"):
             hit = RD.detect(t)
             self.assertIn("religious", hit, t)
-            self.assertFalse([m for m in hit.get("business", []) if "تجار" in m["match"] or "ربحت" in m["match"]], t)
-        self.assertIn("business", domains("قال الله «فما ربحت تجارتهم» وانا بقولك الكورس هيضاعف ربحك"))
-        hit = RD.detect("قال الله تعالى في كتابه «فما ربحت تجارتهم بـ ٥٠٠ جنيه»")       # connector words, price inside
-        self.assertIn("religious", hit)
-        self.assertNotIn("business", hit)
+            self.assertTrue([m for m in hit.get("business", []) if "ربح" in m["match"]], (t, hit))
+        for t in ("قال تعالى «الكورس بـ ٥٠٠ جنيه ونتيجة مضمونة ١٠٠٪»", "ربنا قال «اللي يشترك معانا هيكسب ٢٠ ألف في الشهر»",
+                  "قال الله تعالى في كتابه «فما ربحت تجارتهم بـ ٥٠٠ جنيه»"):
+            hit = RD.detect(t)
+            self.assertIn("religious", hit, t)
+            self.assertIn("business", hit, t)
+        rules = {m["rule"] for m in RD.detect("قال تعالى «الكورس بـ ٥٠٠ جنيه ونتيجة مضمونة ١٠٠٪»")["business"]}
+        self.assertTrue({"currency-amount", "guarantee-hundred", "guarantee-word"} <= rules, rules)
+
+    def test_amounts_are_never_hidden_inside_a_verse(self):
+        for t in ("﴿ الجلسة بـ ٥٠٠ جنيه ﴾", "﴿ نتيجة ١٠٠٪ ﴾", "﴿ بس بـ ٩٩ ﴾", "﴿ خمسين جنيه ﴾", "﴿ هتكسب عشرين ألف ﴾",
+                  "﴿ #1 ﴾", "﴿ $99 ﴾"):
+            hit = RD.detect(t)
+            self.assertIn("religious", hit, t)
+            self.assertIn("business", hit, t)
+
+    def test_zone_hiding_is_data_with_a_code_floor(self):
+        """A pattern rule hides inside ﴿﴾ only when the lexicon says `zone_hideable: true`; a hit holding a digit, % or
+        a currency sign is never hidden, whatever the lexicon says."""
+        lex = RD.lexicon("business")
+        loose = {**lex, "rules": [dict(r, zone_hideable=True) for r in lex["rules"]]}
+        strict = {**lex, "rules": [{k: v for k, v in r.items() if k != "zone_hideable"} for r in lex["rules"]]}
+        with mock.patch.object(RD, "lexicon", side_effect=lambda d: loose if d == "business" else lex_of(d)):
+            self.assertIn("business", domains("﴿ الجلسة بـ ٥٠٠ جنيه ﴾"))
+            self.assertIn("business", domains("﴿ نتيجة ١٠٠٪ ﴾"))
+            self.assertNotIn("business", domains("﴿ بثمن بخس ﴾"))
+        with mock.patch.object(RD, "lexicon", side_effect=lambda d: strict if d == "business" else lex_of(d)):
+            self.assertIn("business", domains("﴿ بثمن بخس ﴾"))                   # price-word pattern: shown
+        self.assertNotIn("business", domains("﴿وَشَرَوْهُ بِثَمَنٍ بَخْسٍ دَرَاهِمَ مَعْدُودَةٍ﴾"))    # shipped: hidden word
 
     def test_invisible_characters_do_not_hide_a_trigger(self):
         for t in ("مضمو\u200fن", "\u2067مضمون\u2069", "\ufefb يوجد مثيل", "مضمون\u0651", "\ufeffEGP 500"):
@@ -300,6 +351,243 @@ class TestDetect(unittest.TestCase):
                                                     for r in lex["rules"]]))}
         with mock.patch.object(RD, "lexicon", side_effect=lambda d: shuffled if d == "business" else lex_of(d)):
             self.assertEqual(json.dumps(RD.detect(t), ensure_ascii=False, sort_keys=True), first)
+
+
+class TestRecallFollowUp(unittest.TestCase):
+    """Executor follow-up to review 79c5bf7 (P2-2…P2-6, P3): missing a claim is worse than a false alarm, but normal
+    speech is not over-flagged."""
+
+    def assert_hits(self, domain: str, texts):
+        for t in texts:
+            self.assertIn(domain, domains(t), (t, RD.detect(t)))
+
+    def assert_clean(self, domain: str, texts):
+        for t in texts:
+            self.assertNotIn(domain, domains(t), (t, RD.detect(t)))
+
+    def test_percent_sign_before_the_number(self):
+        self.assert_hits("business", ("نتيجة ٪١٠٠", "٪100 results", "نتيجة %100", "عرض ٥٠٪", "عرض ٪٥٠", "خصم ٪٣٠"))
+        rules = {m["rule"] for m in RD.detect("نتيجة ٪١٠٠")["business"]}
+        self.assertIn("guarantee-hundred", rules)
+        self.assertIn("ai-accuracy-number", {m["rule"] for m in RD.detect("الـ AI دقته ٪٩٥")["ai"]})
+        self.assert_clean("business", ("٪٥٠ من المرضى بيتحسنوا", "٥٠٪ من المرضى بيتحسنوا"))
+
+    def test_zero_width_characters_are_stripped(self):
+        for t in ("مض\u200bمون", "مض\u2060مون", "ض\u200bمان", "مضم\u2061ون", "مض\u034fمون", "مض\u180eمون",
+                  "ب\u200bكام"):
+            self.assertIn("business", domains(t), repr(t))
+        self.assertEqual(RD.normalize("مض\u200bمون"), "مضمون")
+        self.assertEqual(RD.normalize("a\u2060b"), "ab")
+        self.assertIn("ai", domains("AI" + chr(0x200b) + "tools"))           # the space reading is still tried
+
+    def test_english_currency_words(self):
+        self.assert_hits("business", ("only 99 pounds", "99 dollars", "just 20 bucks", "500 Egyptian pounds",
+                                      "costs 1,500 pounds", "100 euros", "50 riyals"))
+        self.assert_clean("business", ("lose 10 pounds", "I lost 5 pounds in a month", "gained 3 pounds",
+                                       "weighs 150 pounds", "10 pounds of fat", "shed 4 pounds fast"))
+
+    def test_offers_and_refunds(self):
+        self.assert_hits("business", ("50% off", "%50 off", "٥٠٪ اوف", "special offer", "a special offer today",
+                                      "full refund", "refundable", "refunds within 30 days", "فلوسك راجعة",
+                                      "استرداد الفلوس"))
+        self.assert_clean("business", ("we offer care", "50% of patients", "turn it off", "١٠ ٪ من الحالات"))
+
+    def test_amounts_after_a_price_noun(self):
+        self.assert_hits("business", ("الكشف ٣٠٠ ألف", "الكورس ٥٠٠", "الجلسة بـ٢٠٠", "الكشف ب ٣٠٠",
+                                      "الاشتراك ٢٠٠٠.", "الكورس كله ١٥٠٠", "العملية ٥٠ ألف", "الباقة بخمسمية"))
+        self.assert_clean("business", ("الكشف ٥ دقايق", "الجلسة ٤٥ دقيقة", "٣٠٠ ألف مريض في مصر",
+                                       "العملية بتاخد ٣ ساعات", "الكشف ٣ مرات في السنة"))
+
+    def test_amounts_after_bi(self):
+        self.assert_hits("business", ("بخمسمية", "بميتين", "بعشرين ألف", "بألفين", "بخمس تلاف", "بتلات آلاف",
+                                      "بخمسميت جنيه", "بمية وخمسين"))
+        self.assert_clean("business", ("بألف سلامة", "اغسل وشك بمية ساقعة", "بخمس دقايق", "بعشرين سنة",
+                                       "بالف هنا", "بمية مقطرة"))
+
+    def test_spelled_out_numbers(self):
+        self.assert_hits("business", ("هتكسب عشرين ألف في الشهر", "خمسين جنيه", "ألف جنيه بس", "تلاتين ألف دولار",
+                                      "هتقبض خمس تلاف", "مية وخمسين جنيه", "ميتين ريال"))
+        self.assert_clean("business", ("عنده خمسين سنة", "خمسين ألف سنة", "عشرين ألف خطوة في اليوم",
+                                       "ألف سلامة عليك", "خمسين ألف مريض"))
+
+    def test_guarantee_before_al(self):
+        self.assert_hits("business", ("مضمون النتيجة", "مضمونة النتايج", "مضمون الربح", "النتيجة مضمونة"))
+        self.assert_clean("business", ("مضمون الفيديو", "مضمون الرسالة", "مضمون الكلام ده"))
+
+    def test_rank_and_comparison(self):
+        self.assert_hits("business", ("number 1", "Number 1 in Egypt", "نمبر 1", "نمبر ون", "نمبر ١ في مصر",
+                                      "cheaper than", "cheaper than any clinic", "the lowest price"))
+        self.assert_clean("business", ("room number 12", "نمبر 15 في الطابور"))
+
+    def test_common_unbracketed_verses(self):
+        self.assert_hits("religious", ("إن الله مع الصابرين", "واصبروا إن الله مع الصابرين", "إن مع العسر يسرا",
+                                       "فإن مع العسر يسرا", "ألا بذكر الله تطمئن القلوب", "لا يكلف الله نفسا إلا وسعها",
+                                       "إنا لله وإنا إليه راجعون", "حسبنا الله ونعم الوكيل",
+                                       "ومن يتق الله يجعل له مخرجا", "وقل رب زدني علما", "الحمد لله رب العالمين",
+                                       "بسم الله الرحمن الرحيم", "إِنَّ اللَّهَ مَعَ الصَّابِرِينَ"))
+        self.assert_clean("religious", ("الحمد لله", "إن شاء الله", "بسم الله", "ربنا يسهل", "الحمد لله على كل حال"))
+        hit = RD.detect("إن الله مع الصابرين والكورس بـ ٥٠٠ جنيه")                 # no zone: hides nothing
+        self.assertIn("business", hit)
+        self.assertIn("religious", hit)
+
+    def test_medical_egyptian_and_ai_spellings(self):
+        self.assert_hits("medical", ("الدكتور كتبلي الدوا ده", "خد الدوا بعد الأكل"))
+        self.assert_hits("ai", ("gpt-4 قال كده", "GenAI tools", "ai diagnoses cancer", "Ai tools", "ai-generated image",
+                                "AI-powered app"))
+        self.assert_clean("ai", ("aI", "Aida came", "AIDS awareness", "he said it", "ai", "the ai of the story"))
+
+    # ---- fix round 1 (fresh review of this follow-up)
+    def test_price_after_a_price_noun_whatever_follows(self):
+        self.assert_hits("business", ("الكشف ٣٠٠ بس", "(الكشف ٣٠٠)", "الكشف ٣٠٠ 🔥", "الكشف هيكون ٣٠٠ بدل ٥٠٠",
+                                      "الاشتراك ٢٠٠ شهري", "الكشف النهارده بقى ٢٠٠ بس", "﴿ الجلسة بـ ٥٠٠ ﴾",
+                                      "قال الله “الكشف ٣٠٠”", "بـ٩٩ بس", "بـ٩٩ فقط", "الكشف ب٥٠"))
+        self.assert_clean("business", ("الجلسة ٤٥", "عدد الجلسات ٦", "عدد الجلسات ست", "الكورس مدته سبعة",
+                                       "الدورة الشهرية ٢٨", "المتابعة بعد اتنين", "الحجز رقم ٥", "الكشف بتاعك يوم ١٥",
+                                       "العملية نجحت في عشرين ألف حالة", "عملنا العملية لأكتر من عشرين ألف مريض",
+                                       "العملية ٢٠ ألف حالة", "بميتين مل", "خد بميتين ملي مية"))
+
+    def test_a_verse_holding_a_number_hides_nothing(self):
+        for t in ("﴿ السعر ٩٩ ﴾", "﴿ ارباح ٥٠ الف ﴾", "﴿ اربح ٥٠٠٠ ﴾", "﴿ عائد شهري ٢٠٪ ﴾", "﴿ ربح ٢٠٪ ﴾",
+                  "﴿ خصم ٣٠ ﴾", "﴿ مية في المية ﴾", "﴿ مئة بالمئة ﴾", "﴿ نمبر ون ﴾", "﴿ رقم واحد في مصر ﴾",
+                  "﴿ number one ﴾"):
+            hit = RD.detect(t)
+            self.assertIn("religious", hit, t)
+            self.assertIn("business", hit, t)
+
+    def test_hundred_percent_spellings(self):
+        self.assert_hits("business", ("نسبة النجاح ١٠٠ بالمئة", "١٠٠ في المئة", "١٠٠٫٠٪", "100.0%", "مئة في المئة"))
+
+    def test_doctor_speech_is_not_earnings(self):
+        self.assert_clean("business", ("مضاعفات السكر دخلت على الكلى", "مضاعفات السكر بتصيب ٣ مليون مصري",
+                                       "مضاعفات العملية بتحصل في خمس آلاف حالة", "المريض دخل المستشفى",
+                                       "الضغط بيضاعف الخطر"))
+        self.assert_hits("business", ("هيضاعف دخلك", "هتكسب ٢٠ ألف", "بيكسب مليون", "اكسب خمس تلاف"))
+
+    def test_quran_app_spelling(self):
+        self.assert_hits("religious", ("ٱلْحَمْدُ لِلَّهِ رَبِّ ٱلْعَٰلَمِينَ", "إِنَّ ٱللَّهَ مَعَ ٱلصَّٰبِرِينَ",
+                                       "إِنَّا لِلَّٰهِ وَإِنَّآ إِلَيْهِ رَٰجِعُونَ",
+                                       "ٱللَّهُ لَآ إِلَٰهَ إِلَّا هُوَ ٱلْحَىُّ ٱلْقَيُّومُ"))
+
+    def test_split_readings_add_no_partial_rows(self):
+        zw, wj = chr(0x200b), chr(0x2060)
+        for t, want in (("٥" + zw + "٠٠ جنيه", "500 جنيه"), ("5" + zw + "0% off", "50% off"),
+                        ("٥٠٠ ج" + wj + "نيه", "500 جنيه")):
+            rows = RD.detect(t)["business"]
+            matches = [m["match"] for m in rows if m["rule"] in ("currency-amount", "percent-off")]
+            self.assertIn(want, matches, t)
+            self.assertFalse([m for m in matches if m != want and m in want], (t, matches))
+
+    def test_more_invisible_characters(self):
+        for ch in (0xfe0f, 0xfe00, 0xe0020, 0x3164, 0x115f, 0x17b4, 0xffa0):
+            for t in ("ض" + chr(ch) + "مان", "مض" + chr(ch) + "مون"):
+                self.assertIn("business", domains(t), hex(ch))
+        self.assertIn("currency-amount", {m["rule"] for m in RD.detect("٥٠٠" + chr(0xfe0f) + " جنيه")["business"]})
+
+    def test_pounds_need_a_price_cue(self):
+        self.assert_hits("business", ("only 99 pounds", "costs 1,500 pounds", "500 Egyptian pounds", "for 200 pounds",
+                                      "100 GBP", "L.E 500", "LE 500", "costs 300", "٥٠٠ ر.س", "٢٠٠ د.إ", "١٠٠ دينار",
+                                      "100 dollars", "20 bucks"))
+        self.assert_clean("business", ("a 10 pound baby", "the baby was 8 pounds", "weight loss of 20 pounds",
+                                       "lost about 20 pounds", "down 20 pounds", "lose 10-20 pounds", "the costs of care",
+                                       "he left the clinic"))
+
+    def test_more_claim_forms(self):
+        self.assert_hits("business", ("دخلك هيبقى ٥٠ ألف في الشهر", "هتعمل ٥٠ ألف في الشهر", "مرتبك هيبقى عشرين ألف",
+                                      "عائد ٢٠٪ شهريا", "الكشف فري", "كاش باك", "cash back", "العرض لحد آخر الشهر",
+                                      "نتيجة أكيدة", "30 percent off", "save 30%", "free consultation"))
+        self.assert_clean("business", ("عشرين ألف خطوة في اليوم", "دخل الحمام", "الدخل الحراري"))
+
+    # ---- fix round 2
+    def test_earnings_with_plain_digits(self):
+        self.assert_hits("business", ("هتكسب ٥٠٠٠ في الشهر", "هتكسب ٥٠٬٠٠٠ في الشهر", "هتعمل ٥٠٠٠٠ في الشهر",
+                                      "مرتبك هيبقى ٣٠٠٠٠", "دخلك هيبقى ٢٠٠٠٠ شهريا", "make 5000 a month",
+                                      "earn $3,000 per month", "هتعمل ٥٠ ألف شهريا", "دخلك هيتضاعف", "فلوسك هتتضاعف"))
+        hit = RD.detect("﴿ فما ربحت تجارتهم ﴾ هتكسب ٥٠٠٠ في الشهر")
+        self.assertIn("business", hit)
+        self.assert_clean("business", ("هتاخد ١٠٠٠ في اليوم", "بتاخد ٢ حباية في اليوم", "خد ٥٠٠ مجم في اليوم",
+                                       "هتعمل ١٠٠٠ خطوة في اليوم", "بيكسب ٥٠٠ سعر حراري"))
+
+    def test_phone_numbers_and_years_after_a_price_noun(self):
+        self.assert_clean("business", ("الحجز ٠١٠١٢٣٤٥٦٧٨", "الحجز ٠١٠١٢٣٤٥٦٧٨ - ٠١١٢٣٤٥٦٧٨٩", "الحجز ١٩٧٧٧",
+                                       "والحجز ١٦٦٧٦", "الكشف ٢٠٢٤", "المتابعة ٢٠٢٤.", "الكشف عندنا ٢٠٢٤",
+                                       "الحجز ٢٠٢٤/١٠/٢٠", "الجلسات ١٠٠", "الجلسات عشرين"))
+        self.assertEqual([m["rule"] for m in RD.detect("العملية ١٠٠٪ آمنة")["business"]], ["guarantee-hundred"])
+        self.assert_hits("business", ("الكشف ١٥٠٠", "الكشف ٢٠٠٠٠ بس", "الحجز ب ٢٠٠", "الجلسات ب ٥٠٠", "الكشف ٢٠٠٠",
+                                      "الكشف ٢٥٠٠", "الكشف ١٩٠٠"))      # 2010-2039 and 1950-1999 read as years
+
+    def test_price_noun_forms(self):
+        self.assert_hits("business", ("للكشف ٣٠٠ بس", "كشف ٣٠٠ بس", "جلسة الليزر ب ٥٠٠", "باقة ٦ جلسات ب ٢٠٠٠",
+                                      "الكشف في العيادة ب ٢٥٠", "الكشف هنا ب ٢٥٠", "الاستشارة اونلاين ب ٢٠٠",
+                                      "the session is 500", "consultation is only 300", "the visit costs 400"))
+        self.assert_clean("business", ("الدورة الشهرية ب ٢٨ يوم", "الجلسة بتاخد ساعتين ب ٣٠ دقيقة",
+                                       "the session is 45 minutes", "consultation lasts 30 minutes"))
+
+    def test_only_for_with_a_unit_is_not_a_price(self):
+        self.assert_clean("business", ("بس ب ١٠ دقايق في اليوم", "بس ب ٢ حباية", "بس ب ٢٠ مل", "بس ب ١٠٠ مجم"))
+        self.assert_hits("business", ("بس ب ٢٠٠", "بس بـ ٩٩ جنيه"))
+
+    def test_rank_of_a_cause_is_not_a_business_claim(self):
+        self.assert_clean("business", ("السبب رقم واحد في الوفيات", "number one cause of death", "رقم ١ في أسباب الوفاة",
+                                       "السبب رقم ١ للوفاة", "السبب رقم واحد للجلطات",
+                                       "the number 1 risk factor"))
+        self.assert_hits("business", ("رقم واحد في مصر", "number one in Egypt", "نمبر وان", "رقم ١ في مصر"))
+
+    def test_match_shows_the_whole_amount(self):
+        self.assertIn("costs 300", [m["match"] for m in RD.detect("costs 300")["business"]])
+
+    def test_mongolian_and_musical_invisibles(self):
+        for ch in (0x180b, 0x180c, 0x180d, 0x180f, 0x1d173, 0x1d17a):
+            self.assertIn("business", domains("ر" + chr(ch) + "بح"), hex(ch))
+
+    # ---- fix round 3
+    def test_clinic_numbers_after_a_price_noun_are_not_prices(self):
+        self.assert_clean("business", ("نسبة نجاح العملية ب ٩٥٪", "العملية بتنجح ب ٩٠٪ من الحالات", "الكشف ب ١٠:٣٠",
+                                       "الكشف الساعة ب ١٠:٣٠", "العيادة بتفتح الساعة ١٠، والكشف ب ١٠:٣٠",
+                                       "العملية ب ١٠-١٥ دقيقة", "الدورة ب ٢٨، وده طبيعي", "دورة الطمث ب ٢٨",
+                                       "الدورة جت ب ٣٥!", "العملية لمريض ب ٦٥، وكانت ناجحة", "الكشف على مريض ب ٧٠؟",
+                                       "المتابعة بعد العملية ب ١٤.", "الحجز قبل الكشف ب ٤٨", "الجرعة في الجلسة ب ١٠",
+                                       "كورس العلاج بيكون ب ٢٠", "كورس المضاد الحيوي ب ٥٠٠ مجم",
+                                       "the session is 20-30 minutes", "the visit is 2023",
+                                       "الضغط في المتابعة ب ١٢٠/٨٠", "العملية ب ١٢٠-١٥٠ دقيقة"))
+
+    def test_strong_price_followed_by_any_word(self):
+        self.assert_hits("business", ("الكشف ب ٣٠٠ لحد اخر الشهر", "الكشف ب ٣٠٠ للمريض", "الكشف ب ٣٠٠ في العيادة",
+                                      "الكشف ب ٣٠٠ وبس", "الكشف ب ٣٠٠ يا جماعة", "الكشف ب ٣٠٠ مصري",
+                                      "الباقة ب ١٥٠٠ ل ٦ جلسات", "عملية الليزك ب ١٥ الف", "عملية التكميم ب ٦٠ الف بس",
+                                      "عملية التكميم ٦٠ الف", "العملية كلها على بعضها ب ٦٠ الف", "الكشف ب٥٠",
+                                      "احجز ب ٢٠٠", "الفيلر ب ٣٠٠٠", "البوتوكس ب ٢٥٠٠", "الليزر ب ١٠٠٠ للجلسة",
+                                      "only 300 for the session", "packages start at 1500", "earn up to 5000 monthly",
+                                      "دخلك هيزيد للضعف"))
+
+    def test_gains_doses_and_body_numbers_are_not_earnings(self):
+        self.assert_clean("business", ("الطفل بيكسب ٢٠٠ إلى ٣٠٠ جرام في الأسبوع", "الطفل بيكسب ١٥٠-٢٠٠ جرام في الاسبوع",
+                                       "الطفل كسب ٨٠٠", "ضاعف الجرعة ل ٤٠٠", "هنضاعف الجرعة ل ١٠٠٠ وحدة",
+                                       "ضاعفنا الجرعة لـ ٢٠٠٠", "ضاعف المجهود ٢٠٠٪", "قبض الرحم بيبدأ بعد ٢٠٠",
+                                       "دخلنا سنة ٢٠٢٠", "دخلنا ٢٠٢٤ وعندنا", "دخلك العيادة ٢٠١٩",
+                                       "هتعمل ١٥٠ في الاسبوع رياضة", "الكلى بتعمل ١٨٠ في اليوم",
+                                       "الكبد بيعمل ١٠٠٠ في اليوم", "هتعمل ١٠٠ في اليوم"))
+
+    def test_rank_needs_a_place(self):
+        self.assert_clean("business", ("الخطوة رقم ١", "المريض رقم ١", "عامل الخطر رقم ١", "القاتل رقم ١",
+                                       "السبب رقم ١ في الجلطات", "السبب رقم واحد في الجلطات"))
+        self.assert_hits("business", ("رقم ١ في مصر", "احنا رقم ١", "إحنا رقم واحد", "#1 in Egypt"))
+
+    def test_only_for_with_more_units(self):
+        self.assert_clean("business", ("بس ب ٣ شهور", "بس ب ١٠ ثواني", "بس ب ٢ ملعقة", "بس ب ٣ كوبايات", "بس ب ٥ غرز",
+                                       "بس ب ٢ فتحة", "بس ب ١٠٠٠ وحدة", "بس ب ٢٪"))
+
+    def test_lexicon_flags_are_type_checked(self):
+        lex = RD.lexicon("business")
+        bad_rule = {**lex, "rules": [dict(lex["rules"][0], zone_hideable="false")] + lex["rules"][1:]}
+        rel = RD.lexicon("religious")
+        bad_zone = {**rel, "zones": [dict(rel["zones"][0], hides="false")] + rel["zones"][1:]}
+        for name, doc in (("business", bad_rule), ("religious", bad_zone)):
+            real = RD.read_json
+            with mock.patch.object(RD, "read_json",
+                                   side_effect=lambda f, *a, d=doc, r=real: d if f.parent.name == "lexicons" else r(f, *a)):
+                with self.assertRaises(Guidance, msg=name) as cm:
+                    RD.lexicon(name)
+                self.assertIn("false", str(cm.exception))
 
 
 _REAL_LEXICON = RD.lexicon
@@ -412,11 +700,33 @@ class TestScan(Base):
         self.assertEqual(g1["detected"]["business"][0]["in"], "speech")
         self.assertIn("business", g1["required"])
 
+    def test_recitation_hides_only_verse_words_never_amounts_or_quotes(self):
+        """Executor follow-up (79c5bf7 P2-1): speech repeating a «» quotation is not hidden; an amount said inside a
+        recited ﴿﴾ verse is still business."""
+        self.profile({"domain": "religious"})
+        self.put(event("G1", 0, 3000, evidence="ربنا قال اللي يشترك معانا هيكسب ارباح",
+                       text="ربنا قال «اللي يشترك معانا هيكسب ارباح»"),
+                 event("G2", 3000, 6000, evidence="الجلسة بـ ٥٠٠ جنيه فما ربحت تجارتهم",
+                       text="﴿ الجلسة بـ ٥٠٠ جنيه فَمَا رَبِحَت تِّجَارَتُهُمْ ﴾"))
+        s = RD.scan(self.p)
+        g1, g2 = self.line(s, "G1"), self.line(s, "G2")
+        self.assertIn("speech", {m["in"] for m in g1["detected"]["business"]})
+        self.assertIn("screen", {m["in"] for m in g1["detected"]["business"]})
+        speech = [m for m in g2["detected"]["business"] if m["in"] == "speech"]
+        self.assertIn("currency-amount", {m["rule"] for m in speech})              # recited, still shown
+        self.assertTrue([m for m in speech if "ربح" in m["match"]], speech)       # a "verse" with a number hides nothing
+        self.put(event("G3", 0, 3000, evidence="فما ربحت تجارتهم بس الكورس بـ ٥٠٠ جنيه",
+                       text="﴿فَمَا رَبِحَت تِّجَارَتُهُمْ﴾"))
+        g3 = self.line(RD.scan(self.p), "G3")
+        self.assertEqual({m["rule"] for m in g3["detected"]["business"]} & {"earnings-roi"}, set(), g3)  # verse word
+        self.assertIn("currency-amount", {m["rule"] for m in g3["detected"]["business"]})
+        self.assertIn("business", g2["required"])
+
     def test_lexicon_update_that_drops_a_detection(self):
         before = RD.scan(self.p)
         lex = RD.lexicon("business")
         thin = {**lex, "rules": [r for r in lex["rules"] if r["id"] not in ("currency-amount", "only-for-price",
-                                                                           "pricing")]}
+                                                                           "pricing", "priced-amount")]}
         with mock.patch.object(RD, "lexicon", side_effect=lambda d: thin if d == "business" else lex_of(d)):
             after = RD.scan(self.p)
         self.assertEqual(after["key"], before["key"])
@@ -439,6 +749,26 @@ class TestScan(Base):
         s = RD.scan(self.p)
         self.assertEqual(self.line(s, "G1")["detected"], {})                  # off: no detection at all
         self.assertEqual(len(s["ai_assets"]), 2)                              # the manifest record is still listed
+
+    def test_ai_asset_path_matches_across_unicode_forms(self):
+        """Review 79c5bf7 P3: macOS folder names come back in NFD; the manifest may hold NFC (or the other way)."""
+        import unicodedata
+        nfc = unicodedata.normalize("NFC", "data/Broll/café صورة/gen.png")
+        nfd = unicodedata.normalize("NFD", nfc)
+        self.assertNotEqual(nfc, nfd)
+        for platform in ("darwin", "win32", "linux"):
+            for man, shown in ((nfc, nfd), (nfd, nfc)):
+                write_json(self.p.client_db / "asset-manifest.json", {"assets": [{"rel": man, "ai_generated": True}]})
+                self.put(event("G1", 0, 1000, text="الملح", image=shown))
+                with mock.patch.object(RD.sys, "platform", platform):
+                    s = RD.scan(self.p)
+                self.assertEqual([a["event_id"] for a in s["ai_assets"]], ["G1"], (platform, man == nfc))
+        write_json(self.p.client_db / "asset-manifest.json", {"assets": [{"rel": "data/Broll/Gen.PNG",
+                                                                          "ai_generated": True}]})
+        self.put(event("G1", 0, 1000, text="الملح", image="data/broll/gen.png"))
+        for platform, want in (("darwin", ["G1"]), ("win32", ["G1"]), ("linux", [])):   # case rules per OS
+            with mock.patch.object(RD.sys, "platform", platform):
+                self.assertEqual([a["event_id"] for a in RD.scan(self.p)["ai_assets"]], want, platform)
 
     def test_no_plan_is_refused_and_nothing_written(self):
         self.p.p("01_analysis/timeline-spec.json").unlink()

@@ -23,15 +23,22 @@ Two sets, kept apart so the review key stays stable:
   AI-generated file are listed in `ai_assets` too when they have no on-screen words (no review line can name them).
 
 Matching is deterministic. Both sides are normalised the same way: NFKC (presentation forms such as lam-alef, ﷺ),
-no diacritics, tatweel or bidi controls, a zero-width space as a space, Arabic and Latin letters split apart («الـAI»),
-one alef, ى→ي, ة→ه, Arabic-Indic digits as 0-9, ٪ as %. An Arabic term word also matches after a joined prefix
-(و ف ب ل ك ال, the Egyptian بـ/هـ verb prefixes). A lexicon's `zones` (a verse between ﴿ ﴾, a quotation after «قال
-تعالى») count for that lexicon's domain, and no other domain's words inside a CLOSED zone are reported, on screen or in
-the speech's recitation of it (RECITED words in a row); an unclosed zone hides nothing. Known limit: a quotation after
-a citation is taken as scripture, so a claim falsely put in the Prophet's mouth reaches the religious reviewer, not the
-business one; only paired quotes («» “”) count, a straight " (its own closer, so never provably closed) hides nothing;
-a nested quotation is hidden only up to the inner citation, and a gap outside the lexicon's connector words («في سورة
-البقرة») is no quotation (both show more, never less). `reel review-scan` prints `scan()`; nothing here writes.
+no diacritics, tatweel, bidi controls or invisible characters (zero-width spaces and joiners, variation selectors,
+fillers, tags: inside a word they are stripped), Arabic and Latin letters split apart («الـAI»), one alef, ى→ي, ة→ه,
+Arabic-Indic and Persian digits as 0-9, ٪ as %. A text is also read with a zero-width space or word joiner as a word gap
+(«AI» + U+200B + «tools») and with the Quran-app dagger alef as an alef («ٱلْعَٰلَمِينَ»); such a reading adds only the
+domains the first one missed. An Arabic term word also matches after one joined prefix (و ف ب ل ك ال and their pairs,
+the Egyptian verb prefixes بـ هـ and ا ي ت ن).
+
+A lexicon's `zones` count for that lexicon's domain. Only a CLOSED bracket zone (a verse between ﴿ ﴾) hides anything,
+and only other domains' plain WORDS: a `terms` rule (unless it says `zone_hideable: false`, as the spelled 100 % and
+rank rules do) or a pattern rule that says `zone_hideable: true`. A hit holding a digit, % or a currency sign (an amount,
+«١٠٠٪», «بس بـ ٩٩», «#1») is never hidden, whatever the lexicon says: a "verse" holding one hides nothing at all.
+The same words are hidden in the speech's recitation of the verse (RECITED words in a row). An unclosed verse hides
+nothing, and a quotation after a citation («قال تعالى «…»», «ربنا قال “…”») counts as religious but hides nothing:
+«ربنا قال» is everyday speech, so a claim put in scripture's mouth reaches the business reviewer too. Verses quoted with
+no brackets are found only from the religious lexicon's list of common verse phrases (a hint; anything else is a known
+limit) and hide nothing. `reel review-scan` prints `scan()`; nothing here writes.
 """
 from __future__ import annotations
 
@@ -50,28 +57,56 @@ REGISTRY = "registry.json"
 SCHEMA = 1
 MODES = ("review", "suggest", "off")
 ALWAYS_ON = ("ai", "medical")          # a floor, whatever the registry says: existing guards are never weakened by data
+LEGACY_DOMAINS = ("", "general", "medical", "religious")   # profile.json `domain` (common.content_domain)
+TEMPLATE_DOMAIN = "medical | religious | general"      # profiles/_template until the client picks one: general
 RECITED = 3                            # speech words in a row that repeat an on-screen verse count as its recitation
 _ID = re.compile(r"[a-z][a-z0-9_-]{0,31}")
 NOTE = ("Hints point the reviewer at lines and domains; the reviewer still reads every line and may flag any line for "
         "any domain.")
 
 # ---------------------------------------------------------------------------------------------- normalising
-_DROP = re.compile("[\u0610-\u061a\u061c\u064b-\u065f\u0670\u06d6-\u06ed\u0640\u00ad\u200b-\u200f\u202a-\u202e"
-                   "\u2066-\u2069\ufeff]")
+_DAGGER = chr(0x670)                   # the superscript (dagger) alef of Quran-app text, «ٱلْعَٰلَمِينَ»
+_INVISIBLE = (                         # dropped before matching: marks, tatweel and characters that show nothing
+    (0x610, 0x61a), (0x61c, 0x61c), (0x640, 0x640), (0x64b, 0x65f), (0x670, 0x670), (0x6d6, 0x6ed),   # Arabic
+    (0xad, 0xad), (0x34f, 0x34f), (0x115f, 0x1160), (0x17b4, 0x17b5), (0x180b, 0x180f), (0x3164, 0x3164),  # fillers
+    (0x200b, 0x200f), (0x202a, 0x202e), (0x2060, 0x2064), (0x2066, 0x2069), (0xfeff, 0xfeff),  # zero-width, bidi
+    (0xfe00, 0xfe0f), (0xffa0, 0xffa0), (0x1d173, 0x1d17a), (0xe0000, 0xe007f))   # selectors, fillers, format, tags
+_DROP = re.compile("[" + "".join(re.escape(chr(a)) + ("-" + re.escape(chr(b)) if b != a else "")
+                                  for a, b in _INVISIBLE) + "]")
+_MARKS = re.compile("[" + chr(0x64b) + "-" + chr(0x65f) + "]")
 _MAP = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي", "ة": "ه", "ک": "ك", "ی": "ي", "٪": "%",
                       "٫": ".", "٬": ",", **{chr(0x660 + i): str(i) for i in range(10)},
                       **{chr(0x6f0 + i): str(i) for i in range(10)}})
 _PREFIXES = ("و", "ف", "ب", "ل", "ك", "ا", "ي", "ت", "ن", "ه", "ال", "وال", "فال", "بال", "كال", "لل", "ولل", "وب", "ول",
              "فب", "فل", "هي", "هت", "هن", "بي", "بت", "بن", "وهي", "وهت", "وهن", "وبي", "وبت", "وبن")
 _WORD = re.compile(r"\w+")
-_GAPS = re.compile("[" + chr(0x200b) + chr(0x2060) + "]")        # zero-width space, word joiner: a word gap
+_GAPS = re.compile("[" + chr(0x200b) + chr(0x2060) + "]")        # zero-width space, word joiner: also read as a gap
+_NEVER_HIDDEN = re.compile(r"[0-9%$€£]")                            # an amount, a percent or a currency sign
 _SCRIPTS = re.compile(r"(?<=[ء-ي])(?=[A-Za-z])|(?<=[A-Za-z])(?=[ء-ي])")    # «الـAI» → «ال AI»
 
 
 def normalize(text: str) -> str:
     """The matching form of a text (lexicon terms and plan words alike); Latin case is kept (case rules need it)."""
-    s = _GAPS.sub(" ", unicodedata.normalize("NFKC", str(text)))
-    return _SCRIPTS.sub(" ", _DROP.sub("", s).translate(_MAP))
+    return _SCRIPTS.sub(" ", _DROP.sub("", unicodedata.normalize("NFKC", str(text))).translate(_MAP))
+
+
+def _dagger_as_alef(raw: str) -> str:
+    """Quran-app spelling: the dagger alef read as an alef (رَٰجِعُونَ → راجعون), except in the name of God (لِلَّٰهِ)."""
+    s = _MARKS.sub("", unicodedata.normalize("NFKC", raw))
+    return s.replace("لل" + _DAGGER + "ه", "لله").replace(_DAGGER, "ا")
+
+
+def _readings(text: str) -> list:
+    """The matching forms of one text: normalised first; then, only when they differ, the text with a zero-width space
+    or word joiner read as a word gap («AI» + U+200B + «tools») and with the dagger alef read as an alef. A later
+    reading adds only the domains the earlier ones did not find (so a split amount never yields a second, partial row)."""
+    raw = str(text)
+    out = [normalize(raw)]
+    for alt in (_GAPS.sub(" ", raw), _dagger_as_alef(raw)):
+        n = normalize(alt)
+        if n not in out:
+            out.append(n)
+    return out
 
 
 def _arabic(word: str) -> bool:
@@ -164,7 +199,14 @@ def lexicon(domain: str) -> dict:
                                                               for t in r["terms"])
             if not ok:
                 raise Guidance(f"the {domain} lexicon has a bad rule: {str(r)[:120]}", how, where=where)
+    for r in doc.get("rules", []) + doc.get("supporting", []):
+        if not isinstance(r.get("zone_hideable", False), bool):
+            raise Guidance(f"the {domain} lexicon's rule {r['id']} has zone_hideable {r['zone_hideable']!r}",
+                           how + " (zone_hideable is true or false)", where=where)
     for z in doc.get("zones", []):
+        if isinstance(z, dict) and not isinstance(z.get("hides", True), bool):
+            raise Guidance(f"the {domain} lexicon's zone {z.get('id')!r} has hides {z['hides']!r}",
+                           how + " (hides is true or false)", where=where)
         if not (isinstance(z, dict) and isinstance(z.get("id"), str) and
                 ((isinstance(z.get("open"), str) and isinstance(z.get("close"), str) and z["open"] and z["close"]) or
                  (isinstance(z.get("after"), list) and isinstance(z.get("quotes"), list) and
@@ -219,6 +261,10 @@ def review_domain_key(ids) -> str:
     got = _canon(ids, registry(), "the review-domain list")
     if not got:
         raise Guidance("the review-domain list is empty", "Pass the client set (it always holds the always-on domains)")
+    missing = [d for d in ALWAYS_ON if d not in got]
+    if missing:                          # a raw profile list must never drop an always-on review from the key
+        raise Guidance(f"the review-domain list {got} lacks the always-on {' and '.join(missing)}",
+                       "Pass client_set(), which adds the always-on domains (medical and ai review every client)")
     return "+".join(got)
 
 
@@ -235,8 +281,12 @@ def client_set(profile: dict | None = None) -> tuple:
     if p.get("review_domains") is not None:
         ids += _canon(p["review_domains"], reg, "profile.json `review_domains`")
     legacy = p.get("domain")
-    if isinstance(legacy, str) and legacy.strip().lower() in reg:
-        ids.append(legacy.strip().lower())
+    lv = " ".join(legacy.split()).lower() if isinstance(legacy, str) else None
+    if legacy is not None and lv not in (*LEGACY_DOMAINS, TEMPLATE_DOMAIN):
+        raise Guidance(f"profile.json `domain` is {legacy!r}, which is not a subject area",
+                       "Use general, medical or religious; other review domains (business, ai) go in `review_domains`")
+    if lv in reg:
+        ids.append(lv)
     ids += [d for d, e in reg.items() if e["always_on"]] + list(ALWAYS_ON)
     return tuple(sorted(set(ids)))
 
@@ -264,20 +314,24 @@ def _term_words(term: str, case: bool) -> list:
 
 
 def _compile_rules(rules: list) -> list:
+    """(id, pattern, terms, case, zone-hideable): a terms rule is hideable inside a verse unless it says
+    `zone_hideable: false`; a pattern rule only when it says `zone_hideable: true` (a new pattern shows more)."""
     out = []
     for r in rules:
         if "pattern" in r:
             out.append((r["id"], re.compile(r["pattern"], re.IGNORECASE if "i" in str(r.get("flags", "")) else 0),
-                        None, False))
+                        None, False, r.get("zone_hideable") is True))
         else:
             case = bool(r.get("case"))
-            out.append((r["id"], None, [_term_words(t, case) for t in r["terms"]], case))
+            out.append((r["id"], None, [_term_words(t, case) for t in r["terms"]], case,
+                        r.get("zone_hideable") is not False))
     return out
 
 
 def _zone_finder(zones: list):
-    """norm -> [(start, end, zone id, closed)]. A zone left open (no closing bracket or quote) still counts for its
-    domain, but hides nothing: an unclosed ﴿ must never swallow a price after it."""
+    """norm -> [(start, end, zone id, hides)]. Every zone counts for its domain; only a CLOSED bracket zone hides (a
+    lexicon may say `hides: false` on one). A zone left open hides nothing (an unclosed ﴿ must never swallow a price
+    after it), nor does a quotation after a citation («ربنا قال» is everyday speech)."""
     brackets, quoted = [], []
     for z in zones:
         if "after" in z:
@@ -288,11 +342,11 @@ def _zone_finder(zones: list):
             quoted.append((z["id"], re.compile(rf"(?:{phrases}){gap}\s*[:،,]?\s*([{opens}])"),
                            {q[0]: q[1] for q in z["quotes"]}))
         else:
-            brackets.append((z["id"], normalize(z["open"]), normalize(z["close"])))
+            brackets.append((z["id"], normalize(z["open"]), normalize(z["close"]), z.get("hides") is not False))
 
     def find(norm: str) -> list:
         spans = []
-        for zid, opener, closer in brackets:
+        for zid, opener, closer, hides in brackets:
             i = norm.find(opener)
             while i >= 0:
                 j = norm.find(closer, i + len(opener))
@@ -301,7 +355,7 @@ def _zone_finder(zones: list):
                     spans.append((i, len(norm) if j < 0 else k, zid, False))
                     i = k
                     continue
-                spans.append((i, j + len(closer), zid, True))
+                spans.append((i, j + len(closer), zid, hides))
                 i = norm.find(opener, j + len(closer))
         for zid, pat, closers in quoted:
             starts = [m for m in pat.finditer(norm)]
@@ -311,7 +365,7 @@ def _zone_finder(zones: list):
                 k = norm.find(m.group(1), q + 1)
                 nxt = starts[n + 1].start() if n + 1 < len(starts) else -1
                 stop = min(x for x in (k, nxt, len(norm)) if x >= 0)
-                spans.append((q, j + 1, zid, True) if 0 <= j < stop else (q, stop, zid, False))
+                spans.append((q, j + 1 if 0 <= j < stop else stop, zid, False))
         return spans
     return find
 
@@ -334,16 +388,19 @@ def _word_ok(tok: str, word: str, stem: bool, ar: bool, case: bool) -> bool:
 
 
 def _rule_hits(norm: str, tokens: list, rules: list) -> list:
+    """[(start, end, rule, hideable)]."""
     hits = []
-    for rid, pat, terms, case in rules:
+    for rid, pat, terms, case, hideable in rules:
         if pat is not None:
-            hits += [(m.start(), m.end(), rid) for m in pat.finditer(norm) if m.group(0).strip()]
-            continue
-        for words in terms:
-            n = len(words)
-            for i in range(len(tokens) - n + 1):
-                if all(_word_ok(tokens[i + k][0], *words[k], case) for k in range(n)):
-                    hits.append((tokens[i][1], tokens[i + n - 1][2], rid))
+            spans = [(m.start(), m.end()) for m in pat.finditer(norm) if m.group(0).strip()]
+        else:
+            spans = []
+            for words in terms:
+                n = len(words)
+                for i in range(len(tokens) - n + 1):
+                    if all(_word_ok(tokens[i + k][0], *words[k], case) for k in range(n)):
+                        spans.append((tokens[i][1], tokens[i + n - 1][2]))
+        hits += [(a, b, rid, hideable) for a, b in spans]
     return hits
 
 
@@ -364,33 +421,44 @@ def _recited(tokens: list, words: dict) -> list:
 
 
 def _detect(text: str, ms: list, recited_words: dict | None = None):
-    """{domain: [(start, end, rule, words)]} and the closed-zone words per owning domain. `recited_words` (owner ->
-    words, from the screen's zones) hides another domain's hit inside the speech's recitation of that zone."""
-    norm = normalize(text)
+    """{domain: [(start, end, rule, words)]} and the hiding-zone words per owning domain, over every reading of the
+    text (a later reading adds only new domains). `recited_words` (owner -> words, from the screen's hiding
+    zones) hides another domain's hideable hit inside the speech's recitation of that zone."""
+    out: dict = {}
+    zone_words: dict = {}
+    for norm in _readings(text):
+        found = _detect_one(norm, ms, recited_words or {}, zone_words)
+        for did, rows in found.items():
+            out.setdefault(did, rows)
+    return {d: out[d] for d in sorted(out)}, zone_words
+
+
+def _detect_one(norm: str, ms: list, recited_words: dict, zone_words: dict) -> dict:
     tokens = [(m.group(0), m.start(), m.end()) for m in _WORD.finditer(norm)]
-    zones, zone_words = [], {}
+    zones = []
     for did, _r, _s, find in ms:
-        for a, b, zid, closed in find(norm):
-            zones.append((a, b, did, zid, closed))
-            if closed:
+        for a, b, zid, hides in find(norm):
+            hides = hides and not _NEVER_HIDDEN.search(norm[a:b])     # a "verse" with an amount: a code floor
+            zones.append((a, b, did, zid, hides))
+            if hides:
                 zone_words.setdefault(did, set()).update(_WORD.findall(norm[a:b]))
-    hide = [(a, b, owner) for a, b, owner, _z, closed in zones if closed] + _recited(tokens, recited_words or {})
+    hide = [(a, b, owner) for a, b, owner, _z, hides in zones if hides] + _recited(tokens, recited_words)
     out: dict = {}
     for did, rules, supporting, _f in ms:
         def keep(h):
-            return not any(za <= h[0] and h[1] <= zb for za, zb, owner in hide if owner != did)
+            return not (h[3] and any(za <= h[0] and h[1] <= zb for za, zb, owner in hide if owner != did))
         hits = [h for h in _rule_hits(norm, tokens, rules) if keep(h)]
-        hits += [(a, b, zid) for a, b, owner, zid, _c in zones if owner == did]
+        hits += [(a, b, zid, False) for a, b, owner, zid, _h in zones if owner == did]
         if hits:
             hits += [h for h in _rule_hits(norm, tokens, supporting) if keep(h)]
             seen, rows = set(), []
-            for a, b, rid in sorted(hits, key=lambda h: (h[0], h[1], h[2])):
+            for a, b, rid, _h in sorted(hits, key=lambda h: (h[0], h[1], h[2])):
                 words = norm[a:b].strip()
                 if (rid, words) not in seen:
                     seen.add((rid, words))
                     rows.append((a, b, rid, words))
             out[did] = rows
-    return out, zone_words
+    return out
 
 
 def detect(text: str, ms: list | None = None) -> dict:
@@ -422,9 +490,15 @@ def _shown_files(e: dict) -> list:
     return files
 
 
+def _nfc(s: str) -> str:
+    return unicodedata.normalize("NFC", s)
+
+
 def _real(p: Path) -> str:
-    r = str(Path(p).resolve())
-    return r.casefold() if sys.platform == "win32" else r
+    """A comparable real path: NFC (macOS folder names come back in NFD); case folded where the file system usually
+    ignores case (Windows, macOS)."""
+    r = _nfc(str(Path(p).resolve()))
+    return r.casefold() if sys.platform in ("win32", "darwin") else r
 
 
 def _ai_files(paths: Paths, events: dict) -> dict:
@@ -434,11 +508,11 @@ def _ai_files(paths: Paths, events: dict) -> dict:
     gen: set = set()
     for a in man.get("assets") or []:
         if isinstance(a, dict) and isinstance(a.get("rel"), str) and a.get("ai_generated") is True:
-            gen.add(a["rel"])
+            gen.add(_nfc(a["rel"]))
             gen.update(_real(paths.root / f) for f in (a["rel"], a.get("display_derivative")) if isinstance(f, str) and f)
     out: dict = {}
     for eid, e in events.items():
-        files = [f for f in _shown_files(e) if f in gen or _real(paths.root / f) in gen]
+        files = [f for f in _shown_files(e) if _nfc(f) in gen or _real(paths.root / f) in gen]
         if files:
             out[eid] = list(dict.fromkeys(files))
     return out
