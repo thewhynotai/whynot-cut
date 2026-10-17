@@ -905,7 +905,8 @@ class TestSetupModels(unittest.TestCase):
     def test_preprocessor_config_has_the_models_mel_count(self):
         with tempfile.TemporaryDirectory() as tmp_path:
             self.S.write_preprocessor(Path(tmp_path), n_mels=128)
-            cfg = json.load(open(Path(tmp_path) / "preprocessor_config.json"))
+            with open(Path(tmp_path) / "preprocessor_config.json", encoding="utf-8") as f:
+                cfg = json.load(f)
         self.assertTrue(cfg["feature_size"] == 128 and cfg["sampling_rate"] == 16000 and cfg["hop_length"] == 160)
 
     def test_portable_complete_needs_every_model(self):

@@ -535,7 +535,7 @@ class TestTempFolderAndCancel(unittest.TestCase):
         if pidfile:
             code = ("import subprocess, sys, time\n"
                     "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
-                    "open(%r, 'w').write(str(g.pid))\n"
+                    "__import__('pathlib').Path(%r).write_text(str(g.pid))\n"
                     "time.sleep(120)\n" % str(pidfile))
         return [sys.executable, "-c", code]
 

@@ -36,7 +36,8 @@ def convert_hf_whisper(repo: str, out: Path) -> None:
     import mlx.core as mx
     from huggingface_hub import snapshot_download
     src = Path(snapshot_download(repo, allow_patterns=["*.json", "model.safetensors"]))
-    cfg = json.load(open(src / "config.json"))
+    with open(src / "config.json", encoding="utf-8") as f:
+        cfg = json.load(f)
     dims = {"n_mels": cfg["num_mel_bins"], "n_audio_ctx": cfg["max_source_positions"], "n_audio_state": cfg["d_model"],
             "n_audio_head": cfg["encoder_attention_heads"], "n_audio_layer": cfg["encoder_layers"],
             "n_vocab": cfg["vocab_size"], "n_text_ctx": cfg["max_target_positions"], "n_text_state": cfg["d_model"],
@@ -52,7 +53,8 @@ def convert_hf_whisper(repo: str, out: Path) -> None:
         weights[k] = v.astype(mx.float16)
     out.mkdir(parents=True, exist_ok=True)
     mx.save_safetensors(str(out / "weights.safetensors"), weights)
-    json.dump(dict(dims, model_type="whisper"), open(out / "config.json", "w"), indent=1)
+    with open(out / "config.json", "w", encoding="utf-8", newline="\n") as f:
+        json.dump(dict(dims, model_type="whisper"), f, indent=1)
 
 
 # portable (Windows / any OS) copies: CTranslate2 Whisper + Parakeet ONNX; folder names match kalam/transcribe.py
@@ -65,10 +67,11 @@ ONNX_FILES = ["config.json", "vocab.txt", "nemo128.onnx", "decoder_joint-model.o
 
 def write_preprocessor(out: Path, n_mels: int) -> None:
     """faster-whisper reads the mel count from preprocessor_config.json (the Egyptian repo has none)"""
-    json.dump({"chunk_length": 30, "feature_extractor_type": "WhisperFeatureExtractor", "feature_size": n_mels,
-               "hop_length": 160, "n_fft": 400, "n_samples": 480000, "nb_max_frames": 3000, "padding_side": "right",
-               "padding_value": 0.0, "processor_class": "WhisperProcessor", "return_attention_mask": False,
-               "sampling_rate": 16000}, open(Path(out) / "preprocessor_config.json", "w"), indent=1)
+    with open(Path(out) / "preprocessor_config.json", "w", encoding="utf-8", newline="\n") as f:
+        json.dump({"chunk_length": 30, "feature_extractor_type": "WhisperFeatureExtractor", "feature_size": n_mels,
+                   "hop_length": 160, "n_fft": 400, "n_samples": 480000, "nb_max_frames": 3000, "padding_side": "right",
+                   "padding_value": 0.0, "processor_class": "WhisperProcessor", "return_attention_mask": False,
+                   "sampling_rate": 16000}, f, indent=1)
 
 
 def portable_missing(md: Path) -> list:
@@ -84,7 +87,9 @@ def convert_ct2(repo: str, out: Path) -> None:
     src = Path(snapshot_download(repo, allow_patterns=["*.json", "model.safetensors", "*.txt"]))
     TransformersConverter(str(src)).convert(str(out), quantization="float16", force=True)
     shutil.copy(src / "tokenizer.json", out / "tokenizer.json")
-    write_preprocessor(out, json.load(open(src / "config.json"))["num_mel_bins"])
+    with open(src / "config.json", encoding="utf-8") as f:
+        n_mels = json.load(f)["num_mel_bins"]
+    write_preprocessor(out, n_mels)
 
 
 def main_portable(models_dir: str) -> None:
