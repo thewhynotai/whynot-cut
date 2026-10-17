@@ -33,6 +33,12 @@ reel ref-style   --root "<CLIENT>" --record --by client-researcher   # after wri
     standing style changed, then `--record` again. `--record` warns when the profile files were not touched.
   - No reference edits at all: write the three files from the profile's `style.json`/`notes.md` and the editor's own
     words, marked "no reference edits", and record them.
+  - **Old videos with their own style** (2.x authored `01_analysis/editing-style.json` per video): seed or extend the
+    client style from one with `reel ref-style --adopt <ID>`. It prints the diff first (added keys, rules, and
+    conflicts where the client value is kept); report it to the lead, who shows it to the editor and, only with their
+    OK, runs `--adopt <ID> --yes` (subagents may not: the guard blocks it).
+    Conflicts land in `editing-rules.json` `conflicts` for you and the editor to settle; then review the three files
+    against the current references and `--record`. It never changes the video's own files.
 - **Client reel-profile** (`output/client_database/reel-profile/`, created by `reel client-init`):
   - `profile.json`: id, display name, prefix, languages, specialty, and `people[]`:
     `{"name": "Dr. Name / د. الاسم", "role": "client", "gender": "male" | "female" | "unknown",

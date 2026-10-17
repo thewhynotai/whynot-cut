@@ -32,13 +32,22 @@ def inside(path, folder, fold: bool = FOLD_CASE) -> bool:
     return a == b or a.startswith(b.rstrip("\\/") + os.sep)
 
 
+def _is_client(d: Path) -> bool:
+    """A client folder: assets/ and data/, and a sign WhyNot Cut worked there (its marker, or output/client_database/).
+    A store that merely has folders named assets and data (a mirror on a bigger disk) is not one."""
+    return (d / "assets").is_dir() and (d / "data").is_dir() and \
+        ((d / ".whynot-client").exists() or (d / "output" / "client_database").is_dir())
+
+
 def other_client(landed: str, root) -> str | None:
-    """The client folder (one with assets/ and data/) that `landed` is inside of, when it is not this client."""
+    """The client folder that `landed` is inside of, when it is not this client."""
     me = real(root)
     p = Path(landed)
     for anc in [p, *p.parents]:
-        if (anc / "assets").is_dir() and (anc / "data").is_dir():
-            return None if inside(real(anc), me) and inside(me, real(anc)) else str(anc)
+        if inside(real(anc), me) and inside(me, real(anc)):
+            return None
+        if _is_client(anc):
+            return str(anc)
     return None
 
 

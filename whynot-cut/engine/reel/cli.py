@@ -349,6 +349,16 @@ def cmd_ref_style(a):
     """Client reference style: show its state, --record it against the current references, or --apply it to a video."""
     from lib import ref_style
     p = P(a)
+    acts = [f"--{n}" for n in ("record", "apply", "adopt") if getattr(a, n, None)]
+    if len(acts) > 1:
+        out({"refused": f"{' and '.join(acts)}: one action at a time (nothing was written)",
+             "how": "Run them one after the other."})
+    if a.yes and not a.adopt:
+        out({"refused": "--yes goes with --adopt <ID> (nothing was written)",
+             "how": "`reel ref-style --adopt <ID>` shows the diff; `--adopt <ID> --yes` writes it."})
+    if a.adopt:                     # T4.9: an old per-video style into the client style, the diff first
+        out(ref_style.adopt(p.root, a.adopt, yes=a.yes))
+        return
     if a.record:
         r = ref_style.record(p.root, by=a.by or "claude")
         out(r, check=False)
@@ -956,7 +966,7 @@ WRITES_IF = {
                                                 / "output/discovery/input-inventory.json").exists(),
     "settings": lambda a: bool(a.init),
     "range": lambda a: bool(a.footage),
-    "ref-style": lambda a: bool(a.record or a.apply),
+    "ref-style": lambda a: bool(a.record or a.apply or (getattr(a, "adopt", None) and getattr(a, "yes", False))),
 }
 
 
@@ -1683,6 +1693,10 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--apply", action="store_true",
                             help="copy the current client style (+ 01_analysis/editing-style-overrides.json) into the video")
             sp.add_argument("--by", help="who wrote the client style (e.g. client-researcher)")
+            sp.add_argument("--adopt", metavar="ID",
+                            help="merge video ID's old per-video style (2.x) into the client style: shows the diff "
+                                 "(added keys, rules, conflicts where the client value is kept); writes only with --yes")
+            sp.add_argument("--yes", action="store_true", help="with --adopt: write the merge")
         if name == "previews":
             sp.add_argument("--no-composite", action="store_true")
         if name == "handoff":
