@@ -1,0 +1,188 @@
+{
+ "note": "Made-up transcript for K-T1 tests (no client speech). planted.high = word ids of risky low-confidence items; planted.low = low-risk low-confidence words.",
+ "meta": {
+  "language": "en",
+  "redecoded_segments": []
+ },
+ "planted": {
+  "high": [
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   10,
+   12
+  ],
+  "low": [
+   1,
+   15,
+   17,
+   19,
+   20
+  ]
+ },
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "so",
+   "start_ms": 0,
+   "end_ms": 360,
+   "probability": 0.31
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "take",
+   "start_ms": 400,
+   "end_ms": 760,
+   "probability": 0.95
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "five",
+   "start_ms": 800,
+   "end_ms": 1160,
+   "probability": 0.62
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "hundred",
+   "start_ms": 1200,
+   "end_ms": 1560,
+   "probability": 0.7
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "mg",
+   "start_ms": 1600,
+   "end_ms": 1960,
+   "probability": 0.8
+  },
+  {
+   "id": 6,
+   "segment_id": 1,
+   "word": "twice",
+   "start_ms": 2000,
+   "end_ms": 2360,
+   "probability": 0.58
+  },
+  {
+   "id": 7,
+   "segment_id": 1,
+   "word": "a",
+   "start_ms": 2400,
+   "end_ms": 2760,
+   "probability": 0.97
+  },
+  {
+   "id": 8,
+   "segment_id": 1,
+   "word": "day",
+   "start_ms": 2800,
+   "end_ms": 3160,
+   "probability": 0.96
+  },
+  {
+   "id": 9,
+   "segment_id": 1,
+   "word": "and",
+   "start_ms": 3200,
+   "end_ms": 3560,
+   "probability": 0.99
+  },
+  {
+   "id": 10,
+   "segment_id": 1,
+   "word": "don't",
+   "start_ms": 3600,
+   "end_ms": 3960,
+   "probability": 0.66
+  },
+  {
+   "id": 11,
+   "segment_id": 2,
+   "word": "take",
+   "start_ms": 4000,
+   "end_ms": 4360,
+   "probability": 0.97
+  },
+  {
+   "id": 12,
+   "segment_id": 2,
+   "word": "ibuprofen",
+   "start_ms": 4400,
+   "end_ms": 4760,
+   "probability": 0.48
+  },
+  {
+   "id": 13,
+   "segment_id": 2,
+   "word": "with",
+   "start_ms": 4800,
+   "end_ms": 5160,
+   "probability": 0.98
+  },
+  {
+   "id": 14,
+   "segment_id": 2,
+   "word": "it",
+   "start_ms": 5200,
+   "end_ms": 5560,
+   "probability": 0.98
+  },
+  {
+   "id": 15,
+   "segment_id": 2,
+   "word": "um",
+   "start_ms": 5600,
+   "end_ms": 5960,
+   "probability": 0.22
+  },
+  {
+   "id": 16,
+   "segment_id": 2,
+   "word": "the",
+   "start_ms": 6000,
+   "end_ms": 6360,
+   "probability": 0.99
+  },
+  {
+   "id": 17,
+   "segment_id": 2,
+   "word": "weather",
+   "start_ms": 6400,
+   "end_ms": 6760,
+   "probability": 0.61
+  },
+  {
+   "id": 18,
+   "segment_id": 2,
+   "word": "is",
+   "start_ms": 6800,
+   "end_ms": 7160,
+   "probability": 0.98
+  },
+  {
+   "id": 19,
+   "segment_id": 2,
+   "word": "nice",
+   "start_ms": 7200,
+   "end_ms": 7560,
+   "probability": 0.64
+  },
+  {
+   "id": 20,
+   "segment_id": 2,
+   "word": "okay",
+   "start_ms": 7600,
+   "end_ms": 7960,
+   "probability": 0.28
+  }
+ ]
+}

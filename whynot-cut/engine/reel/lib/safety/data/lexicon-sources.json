@@ -1,0 +1,9 @@
+{
+ "note": "Every source of the shipped medical lexicon, checked per Addendum K0.5 before it is used: the licence must allow commercial redistribution inside the product (no non-commercial terms, no AGPL, no per-user licence such as the UMLS terms, nothing paid). A source that fails, or whose file no longer matches its pinned sha256, is refused and its terms are not used; it is replaced, never used for now. Excluded on purpose: DrugBank open data (CC BY-NC) and RxNorm/UMLS content under the UMLS licence.",
+ "sources": [
+  {"id": "whynot-own-medical-v1", "file": "medical-lexicon.json", "version": "1", "licence": "GPL-3.0-or-later",
+   "commercial_redistribution": true, "attribution": "none needed (our own work)",
+   "basis": "WhyNot Cut's own curated list, typed for this product from general knowledge on 2026-10-17; no third-party list was copied",
+   "sha256": "f89076397449dc48c1a168a393d596cb735daad64056119c5d6d96f542eb9952"}
+ ]
+}
