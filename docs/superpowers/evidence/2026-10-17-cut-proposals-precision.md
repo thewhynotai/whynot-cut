@@ -17,6 +17,9 @@
 - Only proposals whose default is `proposed` count. A `keep` proposal (low confidence, a soft «اه», a take holding a
   number) is shown to the editor unticked and is not counted as a cut.
 - A proposal is correct (tp) when any of its words carries the label of its kind; otherwise it is a false positive (fp).
+  **This rule is lenient:** a retake that also took one word the editor would keep still counts as correct. The
+  tables from the acceptance follow-up below add a **strict** column: correct only when every word of the proposal
+  carries the label of its kind.
 - A labelled item (consecutive words with the same label) that no correct proposal touches is a miss (fn).
 - A trap is any `proposed` proposal touching a `-` word.
 
@@ -82,6 +85,50 @@ is accepted, because a looser rule would also call real short words false starts
   - the better take is judged on hesitation sounds only;
   - a take the transcript closed beats one that only stops at a pause;
   - a pause counts once.
+
+## Acceptance follow-up (2026-10-17, executor review of 5abdc20)
+Changes:
+- **Retakes that differ in meaning are never pre-ticked.** One differences reader is shared with K-T7
+  (`lib/safety/differences.py`). It compares the two takes' whole sentences for numbers and doses (K-T1's reader,
+  «حباية واحدة» included), negation (K-T1's reader: «مش», «مبيقللش», "doesn't", "isn't", plus «غير» / «من غير»;
+  «قبل ما» and «ولا» meaning "or" are not negation) and timing (time of day, days including «النهارده» / «بكرة», how
+  often: «كل أسبوع» / «كل شهر», "once a day" / "once a week", and before/after/with a meal or sleep). When they
+  differ, the proposal is `keep` and its reason names the words, Arabic first. Negation is compared by count: "not"
+  and "never" read the same, while a flip of polarity is caught. Ordinals («الشهر التالت», "first trimester"; not the
+  openers «أول حاجة», «أول ما», "first of all") and «تاني» / "again" are read as numbers, and «بعد بكرة» / «أول امبارح» as days of their own. A split negation («عشان ما تتعبيش») stays
+  negation.
+- A later take dropped from the middle of its sentence is shown but never ticked, because the cut would leave a
+  broken line.
+- «آية» is never a filler. A false start that holds a number («50» → «500», «خمس» → «خمسمية») is never ticked, and
+  neither is a spelled number said twice. Drug names use K-T1's reader, so split names and the ل/ف/لل clitics are
+  protected.
+
+Re-run on the same fixtures (`work/T25fix/evaluate2.py`, lane notes), lenient and strict:
+
+| set | kind | proposed | correct (lenient) | correct (strict) | missed | precision (lenient) | precision (strict) | recall | shown unticked |
+|---|---|---|---|---|---|---|---|---|---|
+| A | retake | 5 | 5 | 5 | 0 | 1.00 | 1.00 | 1.00 | 0 |
+| A | false_start | 1 | 1 | 1 | 0 | 1.00 | 1.00 | 1.00 | 0 |
+| A | filler | 11 | 11 | 11 | 0 | 1.00 | 1.00 | 1.00 | 0 |
+| A | repeat_word | 2 | 2 | 2 | 0 | 1.00 | 1.00 | 1.00 | 1 |
+| B (blind) | retake | 4 | 4 | 4 | 0 | 1.00 | 1.00 | 1.00 | 1 |
+| B (blind) | false_start | 3 | 3 | 3 | 1 | 1.00 | 1.00 | 0.75 | 0 |
+| B (blind) | filler | 12 | 12 | 12 | 0 | 1.00 | 1.00 | 1.00 | 0 |
+| B (blind) | repeat_word | 4 | 4 | 4 | 0 | 1.00 | 1.00 | 1.00 | 0 |
+
+Traps proposed: 0 on both sets. The unticked blind retake is the dose said twice on purpose ("ten milligrams").
+
+On these fixtures, strict precision equals lenient precision: no ticked proposal took a word outside its label.
+
+The first version of the differences reader flagged two blind retakes that mean the same:
+- «واحد» = "someone" in one take only;
+- "with food" vs "with a full meal".
+
+Two general rules fixed them (they are tested in `test_safety_differences.py`):
+- an everyday number word counts only against a number in the other take;
+- the meal or sleep word may come up to three words after before/after/with.
+
+The blind set is therefore no longer blind for this reader.
 
 ## Not verified (live, editor)
 - Labels from a real editor on a real clip (PODCAST-TEST and a medical client's reel): Gate 6 live check. These

@@ -137,7 +137,16 @@ class TestRetakes(unittest.TestCase):
     def test_retake_differing_by_one_word(self):
         spec = [("خدي", 300, 60), ("الدوا", 300, 60), ("بعد", 300, 60), ("الفطار", 400, 600),
                 ("خدي", 300, 60), ("الدوا", 300, 60), ("بعد", 300, 60), ("الغدا", 400, 60), ("دايما.", 400, 300)]
-        self.assertEqual(kinds(C.compute(words(spec))), [("retake", ["خدي", "الدوا", "بعد", "الفطار"])])
+        res = C.compute(words(spec))
+        # the takes differ in timing (after breakfast / after lunch): found, never pre-ticked, the words named
+        self.assertEqual(kinds(res), [])
+        self.assertEqual(kinds(res, "keep"), [("retake", ["خدي", "الدوا", "بعد", "الفطار"])])
+        p = res["proposals"][0]
+        self.assertIn("«بعد الفطار» مقابل «بعد الغدا»", p["reason"])
+        self.assertIn("timing", p["differs"])
+        spec2 = [("أول", 250, 60), ("حاجة", 300, 60), ("لازم", 300, 60), ("تشربي", 350, 600),
+                 ("أول", 250, 60), ("حاجة", 300, 60), ("لازم", 300, 60), ("تشربي", 350, 60), ("كتير.", 300, 400)]
+        self.assertEqual(kinds(C.compute(words(spec2))), [("retake", ["أول", "حاجة", "لازم", "تشربي"])])
 
     def test_retake_across_a_long_pause_but_not_past_the_window(self):
         near = [("لو", 200, 60), ("نمتي", 300, 60), ("بدري", 300, 60), ("هتصحي", 400, 1800),
@@ -263,6 +272,98 @@ class TestProtections(unittest.TestCase):
         self.assertLessEqual(p["end_ms"], ws[2]["start_ms"])
 
 
+class TestAcceptanceFollowUps(unittest.TestCase):
+    """Executor acceptance review 2026-10-17 (Task 25 P1/P2): a retake whose takes differ in a negation, a timing word
+    or a dose is never pre-ticked; «آية» is never a filler; a false start holding a number is never ticked."""
+
+    def retake(self, spec, lang="ar"):
+        res = C.compute(words(spec), lang=lang)
+        rt = [p for p in res["proposals"] if p["kind"] == "retake"]
+        self.assertEqual(len(rt), 1, res["proposals"])
+        return rt[0]
+
+    def test_p1_negation_flip_is_kept_and_named(self):
+        for neg in ("مش", "ما"):
+            with self.subTest(neg=neg):
+                spec = [("الدوا", 300, 60), ("ده", 200, 60), ("بيقلل", 400, 60), ("الضغط.", 400, 700),
+                        ("الدوا", 300, 60), ("ده", 200, 60), (neg, 200, 60), ("بيقلل", 400, 60), ("الضغط.", 400, 300)]
+                p = self.retake(spec)
+                self.assertEqual(p["default"], "keep")
+                self.assertIn(f"«{neg}»", p["reason"])
+                self.assertIn("negation", p["differs"])
+        spec = [("الدوا", 300, 60), ("ده", 200, 60), ("بيقلل", 400, 60), ("الضغط.", 400, 700),
+                ("الدوا", 300, 60), ("ده", 200, 60), ("مبيقللش", 500, 60), ("الضغط.", 400, 300)]
+        self.assertEqual(self.retake(spec)["default"], "keep")
+
+    def test_p1_time_of_day_with_one_pill(self):
+        spec = [("خدي", 300, 60), ("حباية", 300, 60), ("واحدة", 300, 60), ("الصبح.", 400, 700),
+                ("خدي", 300, 60), ("حباية", 300, 60), ("واحدة", 300, 60), ("بالليل.", 400, 300)]
+        p = self.retake(spec)
+        self.assertEqual(p["default"], "keep")
+        self.assertIn("«الصبح»", p["reason"])
+        self.assertIn("«بالليل»", p["reason"])
+        self.assertLess(p["confidence"], C.DEFAULTS["keep_below"])
+
+    def test_p1_says_number_sees_an_everyday_number_word_next_to_a_unit(self):
+        self.assertTrue(C._says_number([{"word": w} for w in ("خدي", "حباية", "واحدة")]))
+        self.assertFalse(C._says_number([{"word": w} for w in ("جالي", "واحد", "امبارح")]))
+
+    def test_p1_dose_and_english_negation(self):
+        spec = [("take", 300, 60), ("five", 300, 60), ("hundred", 300, 60), ("milligrams", 500, 60), ("daily.", 400, 700),
+                ("take", 300, 60), ("two", 300, 60), ("hundred", 300, 60), ("milligrams", 500, 60), ("daily.", 400, 300)]
+        self.assertEqual(self.retake(spec, "en")["default"], "keep")
+        spec = [("it", 150, 60), ("lowers", 300, 60), ("the", 150, 60), ("blood", 300, 60), ("pressure.", 400, 700),
+                ("it", 150, 60), ("doesn't", 300, 60), ("lower", 300, 60), ("the", 150, 60), ("blood", 300, 60),
+                ("pressure.", 400, 300)]
+        res = C.compute(words(spec), lang="en")
+        self.assertEqual([p for p in res["proposals"] if p["default"] == "proposed" and p["kind"] == "retake"], [])
+
+    def test_p1_review_probes_how_often_ghair_and_relative_days(self):
+        probes = [(["خدي", "الحقنة", "كل", "أسبوع."], ["خدي", "الحقنة", "كل", "شهر."]),
+                  (["ده", "دوا", "آمن", "للأطفال."], ["ده", "دوا", "غير", "آمن", "للأطفال."]),
+                  (["ابدأي", "الدوا", "النهارده", "الصبح."], ["ابدأي", "الدوا", "بكرة", "الصبح."])]
+        for a, b in probes:
+            with self.subTest(a=a, b=b):
+                spec = [(w, 300, 60) for w in a[:-1]] + [(a[-1], 300, 700)] + [(w, 300, 60) for w in b[:-1]] + \
+                    [(b[-1], 300, 300)]
+                self.assertEqual(self.retake(spec)["default"], "keep")
+
+    def test_review_r2_a_later_take_dropped_from_mid_sentence_is_never_ticked(self):
+        """Dropping only the end of the later sentence («with water.») would leave a broken line: shown, unticked."""
+        spec = [("take", 300, 60), ("it", 150, 60), ("daily", 300, 60), ("with", 200, 60), ("water.", 300, 700),
+                ("take", 300, 60), ("it", 150, 60), ("every", 300, 60), ("day", 300, 60), ("with", 200, 60),
+                ("water.", 300, 300)]
+        res = C.compute(words(spec), lang="en")
+        for p in res["proposals"]:
+            if p["kind"] == "retake" and p["default"] == "proposed":
+                first = p["word_ids"][0]
+                self.assertTrue(first == 1 or spec[first - 2][0].endswith("."), p)
+
+    def test_p2_aya_is_never_a_filler(self):
+        base = [("الضغط", 400, 60), ("عالي.", 300, 450), None, ("ممكن", 300, 60), ("يكون", 300, 60), ("تعبان.", 400, 60)]
+        for w in ("آية", "اية", "آيه", "آيَة"):
+            with self.subTest(w=w):
+                spec = [x if x else (w, 900, 400) for x in base]
+                self.assertEqual(kinds(C.compute(words(spec)), None), [])
+        spec = [x if x else ("إيه", 900, 400) for x in base]
+        self.assertEqual(kinds(C.compute(words(spec))), [("filler", ["إيه"])])
+
+    def test_p2_false_start_holding_a_number_is_never_ticked(self):
+        for a, b in (("50", "500"), ("٥٠", "٥٠٠"), ("خمس", "خمسمية"), ("تلت", "تلتمية")):
+            with self.subTest(a=a, b=b):
+                spec = [("خدي", 300, 60), (a, 150, 100, 0.4), (b, 400, 60), ("مجم.", 300, 60)]
+                res = C.compute(words(spec))
+                fs = [p for p in res["proposals"] if p["kind"] == "false_start"]
+                self.assertEqual([p["default"] for p in fs], ["keep"])
+                self.assertIn("رقم", fs[0]["reason"])
+        spec = [("الدكت", 150, 100, 0.4), ("الدكتورة", 400, 60), ("قالت.", 300, 60)]
+        self.assertEqual(kinds(C.compute(words(spec))), [("false_start", ["الدكت"])])
+
+    def test_p2_spelled_number_said_twice_is_never_ticked(self):
+        res = C.compute(words([("خدي", 300, 60), ("خمسة", 300, 60), ("خمسة", 300, 60), ("مجم.", 300, 60)]))
+        self.assertEqual([(p["kind"], p["default"]) for p in res["proposals"]], [("repeat_word", "keep")])
+
+
 class TestText(unittest.TestCase):
     def test_egyptian_and_msa_spellings_and_digits_compare_equal(self):
         self.assertEqual(C.norm_word("الدكتورة"), C.norm_word("الدكتوره"))
@@ -340,6 +441,13 @@ class TestProject(Project):
             {"text": "في في البيت", "at": "00:00:05.000"}], "decisions": []})
         doc = C.propose(self.p)
         self.assertNotIn("repeat_word", [p["kind"] for p in doc["proposals"]])
+
+    def test_p3_drug_names_split_or_with_a_clitic_are_protected(self):
+        """K-T1's drug reader: a name split over two words and the ل/ف/لل clitics."""
+        spec = ["خدي", "ميت", "فورمين", "و", "للباراسيتامول", "فبنادول", "لبنادول", "بعد", "الأكل"]
+        ws = [{"id": i, "word": w, "start_ms": i * 400, "end_ms": i * 400 + 300} for i, w in enumerate(spec, 1)]
+        protect, _ = C._protections(self.p, ws, [C.norm_word(w["word"]) for w in ws], "ar")
+        self.assertEqual(sorted(protect["word_ids"]), [2, 3, 5, 6, 7])
 
     def test_sign_off_from_the_profile_and_the_fallback_line(self):
         write_json(self.root / common.CLIENT_PROFILE_REL / "profile.json",
@@ -443,7 +551,7 @@ class TestReviewRound1(unittest.TestCase):
         spec = [("لازم", 300, 60), ("تاخد", 300, 60), ("الدوا", 300, 60), ("بعد", 300, 60), ("الفطار.", 300, 800),
                 ("لازم", 300, 60), ("تاخد", 300, 60), ("الدوا", 300, 60), ("بعد", 300, 60), ("الغدا.", 300, 300)]
         ws = words(spec)
-        self.assertEqual(kinds(C.compute(ws))[0][0], "retake")
+        self.assertEqual(kinds(C.compute(ws), None)[0][0], "retake")
         for w in ws[5:]:
             w["speaker"] = "B"
         for w in ws[:5]:

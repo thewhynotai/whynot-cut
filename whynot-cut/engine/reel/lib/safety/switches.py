@@ -12,7 +12,10 @@ HOOK_CHECK_IN_PLAN = "k_t6_hook_check_in_plan"         # K-T6: the hook rules ru
 BUILDER_FADES = "k_t3_builder_fades"                   # K-T3: short audio fades at every cut in the builder
 # K-T5: the Arabic integrity line in `reel motion-qc` (Gate 4 is unchanged by K: K5; the standalone check always runs)
 ARABIC_QC_IN_MOTION_QC = "k_t5_arabic_qc_in_motion_qc"
-ALL = (PLAN_BLOCK, QC_SAFEZONE_HARD_FAIL, HOOK_CHECK_IN_PLAN, BUILDER_FADES, ARABIC_QC_IN_MOTION_QC)
+# Task 25: cut proposals inside the plan (an accepted take cut whole, the "Proposed cuts" table in edit-plan.md, the
+# Premiere markers); `reel cut-proposals` itself always runs
+TASK25_PLAN_PROPOSALS = "task25_plan_proposals"
+ALL = (PLAN_BLOCK, QC_SAFEZONE_HARD_FAIL, HOOK_CHECK_IN_PLAN, BUILDER_FADES, ARABIC_QC_IN_MOTION_QC, TASK25_PLAN_PROPOSALS)
 
 
 def config(ctx=None) -> dict:

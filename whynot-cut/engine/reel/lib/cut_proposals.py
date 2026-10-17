@@ -36,6 +36,7 @@ import unicodedata
 from pathlib import Path
 
 from . import cut_proposals_norm as N
+from .safety.differences import compare as compare_takes, describe as describe_differences
 
 FILE = "01_analysis/cut-proposals.json"
 SCHEMA = 1
@@ -124,9 +125,24 @@ def _always(tok: str, fill: dict, lang: str) -> bool:
 
 
 def _says_number(ws: list) -> bool:
-    """A number or a dose is said in these words (digits of any script, spelled; «واحد» "someone" alone is not)."""
+    """A number or a dose is said in these words (digits of any script, spelled, a dual «حبايتين», an everyday number
+    word beside a unit «حباية واحدة»; «واحد» "someone" alone is not)."""
+    from .safety.numbers import find_numbers, fold, quantities
+    toks = [fold(w["word"]) for w in ws]
+    return any(not n["ambiguous"] for n in find_numbers(toks)) or bool(quantities(toks))
+
+
+def _holds_number(*raw: str) -> bool:
+    """Any of these words is or holds a number, an everyday number word included («خمس» before «خمسمية»)."""
     from .safety.numbers import find_numbers, fold
-    return any(not n["ambiguous"] for n in find_numbers([fold(w["word"]) for w in ws]))
+    return any(find_numbers([fold(w)]) or re.search(r"\d", norm_word(w)) for w in raw)
+
+
+def _never_filler(raw: str) -> bool:
+    """A word written with «ة» or as «آي…» is a real word («آية», a verse), never «إيه» or another filler: checked
+    before the shared normaliser folds ة into ه."""
+    bare = re.sub("[\u064b-\u065f\u0670\u0640]", "", unicodedata.normalize("NFC", str(raw or "")))
+    return "ة" in bare or bare.startswith("آي")
 
 
 def _lcs(a: list, b: list) -> int:
@@ -316,6 +332,17 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
         has_number = _says_number(ws[drop[0]:drop[0] + drop[1]])
         if has_number:
             conf = min(conf, V["conf_on_purpose"])     # a dose or a number said again is often said on purpose
+        # the two takes differ in a negation, a number or dose, or a timing word: the editor hears both and chooses.
+        # Each take is read with the rest of its sentence («it doesn't lower | the blood pressure»), never with the
+        # other take's words.
+        def sentence_of(x, lx, other):
+            lo_, hi_ = x, x + lx - 1
+            while lo_ > 0 and not sentence_end(lo_ - 1) and not other[0] <= lo_ - 1 < other[0] + other[1]:
+                lo_ -= 1
+            while hi_ < n - 1 and not sentence_end(hi_) and not other[0] <= hi_ + 1 < other[0] + other[1]:
+                hi_ += 1
+            return [ws[k]["word"] for k in range(lo_, hi_ + 1)]
+        differs = compare_takes(sentence_of(drop[0], drop[1], keep), sentence_of(keep[0], keep[1], drop))
         kept_text = " ".join(ws[k]["word"].strip() for k in range(keep[0], keep[0] + keep[1]))
         number_ar = "؛ بس فيها رقم أو جرعة، فسايبينها لحد ما تسمعها" if has_number else ""
         number_en = "; it holds a number or a dose, so it is left unticked" if has_number else ""
@@ -325,9 +352,22 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
         en = (f"said twice; drop the {'first' if later else 'second'} take, keep the "
               f"{'later' if later else 'earlier'} one (more complete, clearer): \"{kept_text}\"")
         ks, ke = span(keep[0], keep[0] + keep[1] - 1)
+        # a later take dropped from the middle of its sentence would leave a broken line: shown, never ticked
+        mid = drop[0] > keep[0] and drop[0] > 0 and not sentence_end(drop[0] - 1)
+        if mid:
+            number_ar += "؛ بس الجزء ده بيبدأ من نص جملة، فسايبينه لحد ما تسمعه"
+            number_en += "; it starts mid-sentence, so it is left unticked"
+            conf = min(conf, V["conf_on_purpose"])
+        extra = {"keep": {"start_ms": ks, "end_ms": ke, "word_ids": [ws[k]["id"] for k in range(keep[0], keep[0] + keep[1])]},
+                 "similarity": round(sc, 2)}
+        if differs:
+            d_ar, d_en = describe_differences(differs)
+            number_ar += f"؛ بس الإعادتين مختلفين في المعنى ({d_ar})، فسايبينها لحد ما تسمعهم وتختار"
+            number_en += f"; but the two takes differ in meaning ({d_en}), so it is left unticked for you to choose"
+            conf = min(conf, V["conf_on_purpose"])
+            extra["differs"] = differs
         add("retake", drop[0], drop[0] + drop[1] - 1, conf, ar + number_ar, en + number_en,
-            extra={"keep": {"start_ms": ks, "end_ms": ke, "word_ids": [ws[k]["id"] for k in range(keep[0], keep[0] + keep[1])]},
-                   "similarity": round(sc, 2)})
+            default="keep" if differs or mid else None, extra=extra)
         used.update(range(a, a + la))
         used.update(range(b, b + lb))
 
@@ -342,16 +382,21 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
             and t not in STOP and t not in EMPHASIS and t not in _COMMON_PREFIX_WORDS
         if (short or prob(i) < V["false_start_max_p"] or fragment) and gap_after(i) <= V["false_start_restart_ms"]:
             bonus = V["conf_unsure_bonus"] if short and prob(i) < V["false_start_max_p"] else 0
-            add("false_start", i, i, V["conf_false_start"] + bonus,
-                f"بداية كلمة اتقطعت واتقالت تاني: «{ws[i + 1]['word'].strip()}»",
-                f"a cut-off start, said again: \"{ws[i + 1]['word'].strip()}\"")
+            # «50» before «500», «خمس» before «خمسمية»: a number is never ticked, the editor hears it
+            number = _holds_number(ws[i]["word"], ws[i + 1]["word"])
+            add("false_start", i, i, V["conf_on_purpose"] if number else V["conf_false_start"] + bonus,
+                f"بداية كلمة اتقطعت واتقالت تاني: «{ws[i + 1]['word'].strip()}»"
+                + ("؛ بس فيها رقم، فسايبينها لحد ما تسمعها" if number else ""),
+                f"a cut-off start, said again: \"{ws[i + 1]['word'].strip()}\""
+                + ("; it holds a number, so it is left unticked" if number else ""),
+                default="keep" if number else None)
             used.add(i)
 
     # fillers ---------------------------------------------------------------------------------------------------------
     two = {tuple(c.split()) for c in F["context"] if " " in c}
     one = {c for c in F["context"] if " " not in c}
     for i, t in enumerate(toks):
-        if i in used or not t or LAUGHTER.fullmatch(t):
+        if i in used or not t or LAUGHTER.fullmatch(t) or _never_filler(ws[i]["word"]):
             continue
         if _always(t, F, lang):
             add("filler", i, i, V["conf_always_filler"] + (V["conf_unsure_bonus"] / 2 if prob(i) < V["unsure_p"] else 0),
@@ -362,7 +407,7 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
         if not size:
             continue
         j = i + size - 1
-        if any(k in used for k in range(i, j + 1)) or phrase_only_word(i):
+        if any(k in used for k in range(i, j + 1)) or phrase_only_word(i) or _never_filler(ws[j]["word"]):
             continue
         if not stretched(j) and not (size == 1 and stretched(i)):
             continue
@@ -391,7 +436,7 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
             continue
         if gap_after(i) > V["repeat_max_gap_ms"]:
             continue
-        number = bool(re.search(r"\d", t))
+        number = _holds_number(ws[i]["word"])
         add("repeat_word", i, i, V["conf_on_purpose"] if number else V["conf_repeat_word"],
             f"«{ws[i]['word'].strip()}» اتقالت مرتين ورا بعض؛ نشيل واحدة"
             + ("، بس دي رقم فسايبينها لحد ما تسمعها" if number else ""),
@@ -461,8 +506,8 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
     return {"proposals": [_ordered(p) for p in kept], "notes": notes}
 
 
-_ORDER = ("id", "kind", "start_ms", "end_ms", "word_ids", "words", "keep_ref", "keep", "similarity", "confidence",
-          "reason", "reason_en", "default")
+_ORDER = ("id", "kind", "start_ms", "end_ms", "word_ids", "words", "keep_ref", "keep", "similarity", "differs",
+          "confidence", "reason", "reason_en", "default")
 
 
 def _ordered(p: dict) -> dict:
@@ -560,15 +605,11 @@ def _protections(paths, ws: list, toks: list, lang: str, ctx=None, media_end_ms=
         q = [norm_word(x) for x in str(text).split() if norm_word(x)]
         for i, j in _quote_spans(toks, q):
             ids.update(ws[k]["id"] for k in range(i, j + 1))
-    try:                                      # drug and product names (K-T1's lexicon + the client's glossary)
-        from .safety import lexicon
-        from .safety.numbers import fold
-        terms = set(lexicon.load_sources()["terms"]) | set(lexicon.client_terms(ctx))
-        for i, w in enumerate(ws):
-            f = fold(w["word"])
-            if f in terms or any(f.startswith(p) and f[len(p):] in terms for p in ("و", "ب", "ال", "وال", "بال")) \
-                    or lexicon.inn_like(f):
-                ids.add(w["id"])
+    try:     # drug and product names: K-T1's reader (split names, clitics) over its lexicon + the client's glossary
+        from .safety import lexicon, risk_words
+        index, _ = risk_words._lexicon_index(lexicon.load_sources()["groups"] + [[t] for t in lexicon.client_terms(ctx)])
+        for a, b, _g in risk_words._drug_spans(risk_words._tokens(ws), [False] * len(ws), index, False, False):
+            ids.update(ws[k]["id"] for k in range(a, b))
     except Exception:  # noqa: BLE001
         pass
     _, sp = _read(paths.p("00_inputs/speakers.json"))
