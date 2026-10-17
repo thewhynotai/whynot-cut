@@ -231,8 +231,14 @@ def _drug_spans(toks: list, doubtful: list, index: dict, medical: bool, latin_ru
     return spans
 
 
+def classify(words, meta=None, *, domain: str = "general", terms=None, groups=None) -> list:
+    """Every high-risk item of these words (dose, number, drug name, negation by a claim, duration), sure or not: the
+    words whose loss changes meaning (K-T2 marks them on the "what we removed" slates)."""
+    return [e for e in rank(words, meta, domain=domain, terms=terms, groups=groups, every_item=True) if e["high"]]
+
+
 def rank(words, meta=None, *, thr: float = DEFAULT_THRESHOLD, domain: str = "general", terms=None,
-         groups=None) -> list:
+         groups=None, every_item: bool = False) -> list:
     """The words to confirm, risk first. Each entry: word_ids, text (as heard, decimals kept), start_ms, end_ms, risk,
     high, doubt, why [(ar, en)], score, flagged, and when it applies value (numbers), variants (other spellings of a
     drug), anchor (the claim word a negation belongs to). Stable: the same words give the same list.
@@ -312,7 +318,7 @@ def rank(words, meta=None, *, thr: float = DEFAULT_THRESHOLD, domain: str = "gen
     for it in items:
         rng = range(it["a"], it["b"])
         d = max(doubts[k][0] for k in rng)
-        if d <= 0:
+        if d <= 0 and not every_item:
             continue
         why = []
         for k in rng:
