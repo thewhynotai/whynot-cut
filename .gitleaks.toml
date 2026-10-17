@@ -10,6 +10,10 @@
 # WHOLE FILE, whatever `regexes` and `condition = "AND"` say (a real key in an allowlisted file was not reported). With
 # `targetRules` the AND works as written. So every block names the one rule that produced the false positive, and a
 # test proves a real key of another rule, and a second generic key, in the same file are still reported.
+# The one commit-pinned block (the last one) exists because the secrets test of commit 4ab2aab held a private-key-shaped
+# literal (BEGIN/END markers around a made-up body: the PEM class sample of the allow-rule tests). The next commit splits
+# the markers, but the history keeps the old commit. It is pinned to that one 40-hex commit AND that one file AND the one
+# rule `private-key`, so it can never hide anything in another commit, file or rule.
 # Adding an entry needs: the file, the exact fake value, and a reason in the comment above it.
 title = "WhyNot Cut"
 
@@ -48,3 +52,10 @@ targetRules = ["generic-api-key"]
 condition = "AND"
 paths = ['''^docs[\\/]review[\\/]2026-10-11[\\/]adobe\.md$''']
 regexes = ['''^whynotcut\.p12$''']
+
+[[allowlists]]
+description = "private-key-shaped sample literal in the secrets test, commit 4ab2aab only (markers split in the next commit)"
+targetRules = ["private-key"]
+condition = "AND"
+commits = ["4ab2aabef228598c978a0d3348955aafdd445d3c"]
+paths = ['''^whynot-cut[\\/]tests[\\/]test_security_scan_secrets\.py$''']

@@ -44,7 +44,8 @@ GHP = "ghp_" + "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0eF3hJ6"     # GitHub PAT shape (36
 STRIPE = "sk_live_" + "9f8e7d6c5b4a39281706f5e4d3c2b1a0"
 ANT = "sk-ant-api03-" + ("Qw3Er7Ty1Ui5Op9As2Df6Gh0Jk4Lz8Xc" * 3)[:93] + "AA"
 JWT = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." + "eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ." + "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
-PEM = "-----BEGIN RSA PRIVATE KEY-----\n" + "\n".join(["MIIEowIBAAKCAQEA" + "x7Q2m9Zk" * 6] * 6) + "\n-----END RSA PRIVATE KEY-----\n"
+PEM = ("-----BEGIN " + "RSA PRIVATE KEY-----\n" + "\n".join(["MIIEowIBAAKCAQEA" + "x7Q2m9Zk" * 6] * 6)
+       + "\n-----END " + "RSA PRIVATE KEY-----\n")  # the markers are split so this file holds no private-key block itself
 GENERIC = 'api_key = "' + "k8Jd92Lq0Zx7Vb3Nm5Tr1Yw6Uc4Hf2Ae" + '"'
 CLASSES = {
     "aws": 'aws_key = "%s"\n' % KEY,
@@ -95,11 +96,11 @@ class AllowRules(unittest.TestCase):
         self.assertNotIn("allowlist", self.cfg)  # only [[allowlists]] entries, each reviewed below
 
     def test_every_allow_rule_is_one_file_and_one_exact_value(self):
-        al = self.cfg["allowlists"]
+        al = [a for a in self.cfg["allowlists"] if "commits" not in a]
         self.assertGreaterEqual(len(al), 1)
         for a in al:
             self.assertEqual(a.get("condition"), "AND", a)
-            for banned in ("commits", "stopwords", "rules", "regexTarget"):
+            for banned in ("stopwords", "rules", "regexTarget"):
                 self.assertNotIn(banned, a, "%s makes an allow rule broader than one value" % banned)
             # gitleaks 8.30.1 skips a whole file for a path-bearing allow block that has no targetRules (see the header)
             self.assertEqual(a.get("targetRules"), ["generic-api-key"], a)
@@ -115,6 +116,40 @@ class AllowRules(unittest.TestCase):
             literal = rx[1:-1].replace("\\", "")
             self.assertGreaterEqual(len(literal), 12, "too short to be an exact token: " + rx)
             self.assertTrue(a.get("description"))
+
+    def test_a_commit_pinned_block_is_one_full_commit_one_file_one_rule_and_nothing_else(self):
+        pinned = [a for a in self.cfg["allowlists"] if "commits" in a]
+        self.assertLessEqual(len(pinned), 1, "a commit-pinned allow is an exception: one, with a reason")
+        self.assertEqual(pinned, [a for a in self.cfg["allowlists"][-1:] if "commits" in a], "it stays the LAST block")
+        for a in pinned:
+            self.assertEqual(a.get("condition"), "AND")
+            self.assertEqual(len(a["commits"]), 1)
+            self.assertRegex(a["commits"][0], r"^[0-9a-f]{40}$", "a full 40-hex commit id, never an abbreviation or a range")
+            self.assertEqual(len(a["paths"]), 1)
+            self.assertRegex(a["paths"][0], r"^\^[\w.\\\[\]/-]+\$$")
+            self.assertNotRegex(a["paths"][0], r"\.\*|\.\+|\|")
+            self.assertEqual(len(a.get("targetRules", [])), 1)
+            for banned in ("stopwords", "rules", "regexTarget", "regexes"):
+                self.assertNotIn(banned, a)
+            self.assertTrue(a.get("description"))
+
+    @NEEDS_TOOLS
+    @NEEDS_GIT
+    def test_the_commit_pinned_block_silences_exactly_its_commit_and_is_needed(self):
+        pinned = [a for a in self.cfg["allowlists"] if "commits" in a]
+        for a in pinned:
+            sha = a["commits"][0]
+            if subprocess.run([GIT, "cat-file", "-e", sha + "^{commit}"], cwd=str(ROOT), capture_output=True).returncode != 0:
+                continue  # an archive / stage without that history: nothing to prove here
+            exe = str(scan.tool_exe("gitleaks"))
+            args = [exe, "git", ".", "--log-opts", "%s^..%s" % (sha, sha), "--redact", "--no-banner", "--exit-code", "7", "-l", "error"]
+            with_block = subprocess.run(args + ["--config", str(ROOT / ".gitleaks.toml")], cwd=str(ROOT), capture_output=True).returncode
+            self.assertEqual(with_block, 0, "the pinned commit still reports with the repo config")
+            with tempfile.TemporaryDirectory() as d:
+                bare = Path(d) / "bare.toml"
+                bare.write_text('title = "bare"\n[extend]\nuseDefault = true\n', encoding="utf-8")
+                without = subprocess.run(args + ["--config", str(bare)], cwd=str(ROOT), capture_output=True).returncode
+            self.assertEqual(without, 7, "the commit-pinned block hides nothing: remove it")
 
     @NEEDS_TOOLS
     def test_every_class_sample_is_still_caught_with_our_config_in_any_path(self):
@@ -524,6 +559,8 @@ class EveryAllowBlockIsNeededAndSafe(unittest.TestCase):
 
     def _blocks(self):
         for a in self.cfg["allowlists"]:
+            if "commits" in a:
+                continue  # commit-pinned: proven by test_the_commit_pinned_block_silences_exactly_its_commit_and_is_needed
             rel = a["paths"][0][1:-1].replace("[\\\\/]", "/").replace("\\", "")
             yield a, rel
 
