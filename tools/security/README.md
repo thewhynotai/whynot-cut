@@ -5,6 +5,7 @@ One entry point, free scanners only, everything local first (CI runs the same co
 ```
 python tools/security/install_tools.py          # once per PC: pinned, sha256-checked, per user under D:/ClaudeData/tools/security
 python tools/security/install_tools.py --check  # verify only (no network): installed, unaltered (binaries + every wheel file)
+python tools/security/install_tools.py --fuzz   # Hypothesis for the engine runtime's Python 3.12 (tests/test_fuzz_*.py)
 python tools/security/scan.py --all [--history] [--gate <name>]
 ```
 
@@ -42,3 +43,19 @@ the file's exact sha256 or git blob id. History scans fail closed: a git command
 
 The write gate (L-T8), the executable audit (L-T4) and the escape lint (L-T7) are the real protections; these rules are
 the tripwire that keeps new code from walking around them.
+
+## Fuzzing (L-T10)
+`tests/test_fuzz_*.py` hold Hypothesis property tests for the engine's parsers (the daemon's wire parsers, SRT / JSON / plan readers,
+the Premiere project reader, brand-web HTML / CSS / robots parsers, hostile media and documents). The unit profile uses a fixed seed
+and 60 examples per test (`unit_examples=` may lower that, unit profile only). The long profile (gate, through heavy.sh): `python tools/security/fuzz_long.py` runs every file with
+random seeds and 10,000 examples for EVERY target. The one exception is a HEAVY waiver, `fuzz(heavy=<bytes>)`, honoured only when a single
+example is 100 KB or more (1,500 examples); the report lists each waived target with its example size. A strategy whose whole space is
+smaller than the requirement declares `fuzz(space=<n>)`. Lowering `max_examples` is an error raised at import, and `fuzz_long.py` exits non-zero,
+naming the target, when any target ran fewer examples than required (read from the `FUZZ-COUNT` lines; `--smoke N` only tries the script out and
+never passes). Its scratch folders live in one per-run root that the script removes, also when the watchdog ended a hung run. Every finding is in
+`tests/security/fuzz/regressions.json` with a replayable `input` (JSON, `{"base64"}` or `{"repeat"}`; replayed by `test_fuzz_regressions.py`) and a
+strict test that is a `unittest.expectedFailure` while its id is in the test file's OPEN / KNOWN_OPEN dict: applying the owner's patch turns it
+into an UNEXPECTED SUCCESS, the cue to delete the id and mark the finding fixed. Generators for schema-shaped documents have a valid-only mode
+(`from_schema(..., hostile=False)`); a per-schema test requires at least 20% of its documents to validate, for every action data / readback
+schema, every plan kind and every session message. Hypothesis comes from
+`install_tools.py --fuzz` and a missing one skips (fails with WNC_REQUIRE_SCANNERS=1).

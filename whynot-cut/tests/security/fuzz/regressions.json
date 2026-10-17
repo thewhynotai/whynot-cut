@@ -1,0 +1,326 @@
+{
+  "_about": "Every crash the fuzzers found outside our typed errors (Addendum L, L-T10). `status` open = a patch is with the owner (lane3/hooks/L-T10/) and the strict test named in `test` is an expected failure while the id is in the test file's OPEN / KNOWN_OPEN dict (it shows as an UNEXPECTED SUCCESS when the owner applies the patch: delete the id and set `status` to fixed); fixed = the id is gone and the test is an ordinary one. tests/test_fuzz_regressions.py replays every entry: `call` names the route (the target function and its typed-error policy), `input` is what is sent (a JSON value, {\"base64\": ...} for bytes, {\"repeat\": [[piece, count], ...]} for a long text), `more_inputs` are extra cases; an entry whose input is too big to store has `synthetic` (what the named test builds) and is replayed by that test. `only_on` (\"nt\") marks a finding that exists only on Windows: its replay is an expected failure there while open, an ordinary test elsewhere.",
+  "findings": [
+    {
+      "id": "srt-empty-end",
+      "target": "lib/srt.py read_srt",
+      "input": {
+        "base64": "MQowMDowMDowMSwwMDAgLS0+CmhlbGxvCg=="
+      },
+      "exception": "IndexError",
+      "owner": "executor (lib/**)",
+      "patch": "srt-empty-end.patch",
+      "status": "open",
+      "call": "read_srt_bytes",
+      "test": "test_fuzz_files.SrtReader.test_empty_second_timestamp_is_a_value_error_not_an_index_error",
+      "what": "1, newline, 00:00:01,000 -->, newline, hello"
+    },
+    {
+      "id": "json-deep-recursion",
+      "target": "lib/common.py read_json (the transcript/plan JSON loader)",
+      "input": {
+        "repeat": [
+          [
+            "[",
+            4000
+          ],
+          [
+            "0",
+            1
+          ],
+          [
+            "]",
+            4000
+          ]
+        ]
+      },
+      "exception": "RecursionError",
+      "owner": "executor (lib/**)",
+      "patch": "json-deep-recursion.patch",
+      "status": "open",
+      "call": "read_json_bytes",
+      "test": "test_fuzz_files.JsonLoader.test_deep_json_file_is_a_file_format_error",
+      "what": "'[' * 4000 + '0' + ']' * 4000"
+    },
+    {
+      "id": "topics-non-object",
+      "target": "lib/reels.py validate_topics",
+      "input": [
+        null
+      ],
+      "exception": "AttributeError/TypeError",
+      "owner": "executor (lib/**)",
+      "patch": "topics-non-object.patch",
+      "status": "open",
+      "call": "validate_topics",
+      "more_inputs": [
+        [
+          3
+        ],
+        [
+          "x"
+        ],
+        [
+          []
+        ],
+        [
+          null,
+          3,
+          "x",
+          [],
+          {
+            "start": 0,
+            "end": 20000,
+            "title": "t"
+          }
+        ]
+      ],
+      "test": "test_fuzz_files.PlanChecks.test_a_topic_that_is_not_an_object_is_a_problem_not_a_crash",
+      "what": "[null]"
+    },
+    {
+      "id": "xml-deep-recursion",
+      "target": "lib/verify.py _content_signature",
+      "input": {
+        "repeat": [
+          [
+            "<a>",
+            5000
+          ],
+          [
+            "</a>",
+            5000
+          ]
+        ]
+      },
+      "exception": "RecursionError",
+      "owner": "executor (lib/**)",
+      "patch": "verify-caps.patch (cap now 128 MiB, GzipFile-based)",
+      "status": "open",
+      "call": "content_signature",
+      "test": "test_fuzz_xml.DeepNesting.test_deep_xml_gets_a_signature",
+      "what": "'<a>' * 5000 + '</a>' * 5000"
+    },
+    {
+      "id": "gzip-bomb-uncapped",
+      "target": "lib/verify.py prproj_signature / _prproj_xml",
+      "input": null,
+      "exception": "none: 3.2x memory, no cap (L-G26)",
+      "owner": "executor (lib/**)",
+      "patch": "verify-caps.patch (cap now 128 MiB, GzipFile-based)",
+      "status": "open",
+      "call": null,
+      "synthetic": "a .prproj of 60 MB of spaces, gzipped to under 200 KB, built by the test",
+      "test": "test_fuzz_xml.GzipBomb.test_gzip_bomb_is_capped",
+      "what": "a 100 KB .prproj that inflates to 100 MB of spaces"
+    },
+    {
+      "id": "robots_lone_surrogate",
+      "target": "lib/brand_web/robots.py parse / allowed",
+      "input": {
+        "text": "User-agent: *\nDisallow: /\udc80",
+        "path": "/a"
+      },
+      "exception": "UnicodeEncodeError",
+      "owner": "J track",
+      "patch": "robots-surrogate-redos.patch",
+      "status": "open",
+      "call": "robots_parse_allowed",
+      "more_inputs": [
+        {
+          "text": "User-agent: *\nDisallow: /a",
+          "path": "/\udc80"
+        }
+      ],
+      "test": "test_fuzz_brandweb.OpenFindings.test_a_lone_surrogate_in_robots_is_not_a_crash",
+      "what": "Disallow: /<lone surrogate U+DC80>"
+    },
+    {
+      "id": "robots_redos",
+      "target": "lib/brand_web/robots.py Rules.allowed",
+      "input": {
+        "text": "User-agent: *\nDisallow: /a*a*a*a*b",
+        "path": {
+          "repeat": [
+            [
+              "/",
+              1
+            ],
+            [
+              "a",
+              500
+            ]
+          ]
+        }
+      },
+      "exception": "none: 46 s CPU, holds the GIL (no timeout can interrupt it)",
+      "owner": "J track",
+      "patch": "robots-surrogate-redos.patch",
+      "status": "open",
+      "call": "robots_match_time",
+      "test": "test_fuzz_brandweb.OpenFindings.test_robots_matching_is_linear_not_backtracking",
+      "what": "Disallow: /a*a*a*a*b against '/' + 'a' * 500"
+    },
+    {
+      "id": "png_1x_2x_palette",
+      "target": "lib/client_db.py image_palette",
+      "input": null,
+      "exception": "none: +690 MB",
+      "owner": "executor / wnc-queue",
+      "patch": "image-pixel-cap.patch + image-pixel-cap-client-db.patch",
+      "status": "open",
+      "call": null,
+      "synthetic": "12000x12000 grey PNG (IHDR + zlib zeros, 140 KB), built by the test",
+      "test": "test_fuzz_media.PillowHostile.test_bomb_1x_2x_image_palette",
+      "what": "12000x12000 grey PNG (140 KB)"
+    },
+    {
+      "id": "png_1x_2x_open_rgb",
+      "target": "lib/media_util.py open_rgb",
+      "input": null,
+      "exception": "none: +650 MB",
+      "owner": "executor",
+      "patch": "image-pixel-cap.patch",
+      "status": "open",
+      "call": null,
+      "synthetic": "the same 12000x12000 grey PNG, built by the test",
+      "test": "test_fuzz_media.PillowHostile.test_bomb_1x_2x_open_rgb",
+      "what": "same PNG"
+    },
+    {
+      "id": "docx_bomb",
+      "target": "lib/discover.py _docx_text / read_document",
+      "input": null,
+      "exception": "none: 670 MB peak",
+      "owner": "executor",
+      "patch": "docx-bomb.patch",
+      "status": "open",
+      "call": null,
+      "synthetic": "a .docx whose word/document.xml is 200 MB of spaces, built by the test",
+      "test": "test_fuzz_media.DocxHostile.test_zip_bomb_200MB_of_spaces",
+      "what": ".docx whose word/document.xml is 200 MB of spaces (under 1 MB on disk)"
+    },
+    {
+      "id": "motion-script-shape",
+      "target": "lib/motion_script.py check_fields",
+      "input": {
+        "scenes": [
+          {
+            "id": "S01",
+            "type": []
+          }
+        ]
+      },
+      "exception": "TypeError",
+      "owner": "executor (lib/**)",
+      "patch": "motion-script-shapes.patch",
+      "status": "open",
+      "call": "check_fields",
+      "more_inputs": [
+        {
+          "scenes": [
+            {
+              "id": "S01",
+              "type": {}
+            }
+          ]
+        },
+        {
+          "scenes": [
+            {
+              "id": "S01",
+              "type": [
+                []
+              ]
+            }
+          ]
+        },
+        {
+          "scenes": [
+            {
+              "id": "S01",
+              "type": "title",
+              "at": "@start"
+            }
+          ],
+          "beats": true
+        },
+        {
+          "scenes": "x"
+        },
+        {
+          "scenes": [
+            1,
+            null,
+            "s"
+          ]
+        },
+        {
+          "scenes": [
+            {
+              "id": "S01",
+              "type": "list_steps",
+              "items": 5
+            }
+          ]
+        },
+        {
+          "scenes": [
+            {
+              "id": "S01",
+              "type": "comparison",
+              "first": 3,
+              "second": []
+            }
+          ]
+        },
+        [
+          1,
+          2
+        ],
+        "x"
+      ],
+      "test": "test_fuzz_files.SchemaShapedPlans.test_a_motion_script_with_wrongly_typed_fields_is_a_list_of_problems_not_a_crash",
+      "what": "{scenes: [one scene], beats: true}"
+    },
+    {
+      "id": "device-name-hang",
+      "target": "lib/srt.py read_srt and lib/common.py read_json (any path-taking reader) on Windows",
+      "input": "CON",
+      "exception": "none: blocks forever on the console (L-G27)",
+      "owner": "executor (lib/**; L-T16 owns the full path-oddity suite)",
+      "patch": "device-names.patch (apply after srt-empty-end.patch)",
+      "status": "open",
+      "call": "read_srt_path",
+      "more_inputs": [
+        "CON:",
+        "CON ",
+        "con.txt",
+        "NUL.",
+        "COM1",
+        "CONIN$",
+        "//./PhysicalDrive0"
+      ],
+      "test": "test_fuzz_files.DeviceNames.test_a_windows_device_name_is_refused_not_read",
+      "what": "Path('CON') (also NUL.txt, COM1 ...)",
+      "only_on": "nt"
+    },
+    {
+      "id": "device-name-hang-verify",
+      "target": "lib/verify.py prproj_signature on a Windows device name",
+      "exception": "none: blocks forever on the console (L-G27)",
+      "owner": "executor (lib/**)",
+      "patch": "device-names-verify.patch (apply after verify-caps.patch and device-names.patch)",
+      "status": "open",
+      "call": "prproj_signature_path",
+      "input": "CON",
+      "more_inputs": [
+        "CON:",
+        "NUL",
+        "COM1"
+      ],
+      "test": "test_fuzz_files.DeviceNames.test_prproj_signature_of_a_device_name_is_none_not_a_hang",
+      "only_on": "nt"
+    }
+  ]
+}

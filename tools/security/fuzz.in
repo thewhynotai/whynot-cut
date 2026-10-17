@@ -1,0 +1,3 @@
+# Hypothesis for the property tests (Addendum L, L-T10), installed next to the engine runtime's Python version by
+# `install_tools.py --fuzz` (never into the runtime locks: L-G37). Pinned like dev.in: 14+ days old on 2026-10-17.
+hypothesis==6.168.3

@@ -72,6 +72,8 @@
     "licence": "MPL-2.0"
    }
   },
+  "fuzz_lock": "tools/security/fuzz.lock",
+  "fuzz_lock_sha256": "311fa22ad21fa82007927554d890e69d42b1b9b2bfcda3667137deee7d49fe05",
   "override": "tools/security/dev.override"
  },
  "npm_tools": {
