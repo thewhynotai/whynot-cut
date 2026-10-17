@@ -124,6 +124,10 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     (`lib/safety/decision_log.py`), K-T12 (`lib/safety/cover_check.py`), K-T17 (`lib/resolve_export.py`,
     `tests/test_resolve_export*.py`), M4-T1 (`lib/asset_manifest.py`, `tests/test_asset_manifest.py`) and M4-T4
     (`hooks/magnific_guard.py`, `tests/test_magnific_guard*.py`). Call sites, cli, skills and config arrive as patches.
+  - API backlog BL-14 (2026-10-17 22:00, T4.5 part B, moved from the paused wnc-queue track): `lib/client_db.py`,
+    `lib/client_move.py`, `lib/client_move_paths.py`, the writer hunks in `lib/ref_analysis.py`, the `_caption_fonts` hunk in
+    `lib/looks_captions.py`, `tests/test_t45_*.py`, `tests/fixtures/t45/**`; cli, plan, previews, ae_builder and
+    motion_plan hunks arrive as patches.
   - **ONE writer per shared file (2026-10-17, ownership audit; this overrides any grant above):**
     - executor is the only committer of `lib/plan.py`, `config/defaults/style.json`, `lib/qc.py`, `lib/previews.py`,
       `lib/handoff.py`, `lib/ps_builder.py`, `lib/publish.py`. Every other owner (Adobe T4.1/T4.6, lanes, wnc-queue swaps,
