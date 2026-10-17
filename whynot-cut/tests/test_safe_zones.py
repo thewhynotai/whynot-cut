@@ -22,7 +22,7 @@ from lib import safe_zones as SZ  # noqa: E402
 FILE = SK / "config" / "defaults" / "safe-zones.json"
 NAMES = ["ig_reels_organic", "ig_reels_ads", "ig_reels_ads_disclaimer", "tiktok", "yt_shorts", "feed_4x5"]
 FRAMES = [(1080, 1920), (720, 1280), (2160, 3840), (1080, 1350)]
-BASES = {"official", "template", "screenshot", "community"}
+BASES = {"official", "derived", "template", "screenshot", "community"}
 DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -286,13 +286,12 @@ class Violations(unittest.TestCase):
         self.assertIn("على اليمين", v[0]["text"])
         self.assertIn("تيك توك", v[0]["text"])
         self.assertEqual(SZ.violations([left], p), [])
-        r = SZ.load("tiktok", rtl=True)
-        self.assertEqual(SZ.violations([right], r), [])
+        r = SZ.load("tiktok", rtl=True)          # the app UI language is not the caption language: both rails count
+        self.assertEqual([f["zone"] for f in SZ.violations([right], r)], ["right_rail"])
         v = SZ.violations([self.box((10, 800, 100, 880), label="الترجمة")], r)
-        self.assertEqual(v[0]["zone"], "right_rail")
-        self.assertIn("على اليسار", v[0]["text"])
-        self.assertEqual(r.safe_text, (240, 252, 960, 906))
-        self.assertEqual(r.mirrored().zones, p.zones)          # mirrored twice is the original
+        self.assertIn("right_rail_rtl", [f["zone"] for f in v])
+        self.assertTrue(any("على اليسار" in f["text"] for f in v))
+        self.assertEqual(r.safe_text, (240, 252, 840, 906))
 
     def test_c34_face_envelope(self):
         p = SZ.load("tiktok")
@@ -327,8 +326,8 @@ class Violations(unittest.TestCase):
         self.assertEqual(SZ.violations([box], a), [])
         v = SZ.violations([box], u)
         self.assertEqual({f["platform"] for f in v}, {"tiktok"})
-        self.assertEqual(SZ.union([]).name, "ig_reels_organic")
-        self.assertEqual(SZ.union(["nonsense"]).name, "ig_reels_organic")
+        self.assertTrue(SZ.union([]).fallback)                 # no known target: today's built-in numbers, flagged
+        self.assertTrue(SZ.union(["nonsense"]).fallback)
 
     def test_c37_plain_words(self):
         for n in NAMES:
@@ -536,6 +535,225 @@ class Review2(unittest.TestCase):
         items = SZ.qc_items([{"id": "a", "kind": "text", "rect": [10, 10, 50, 50]}], ["ig_reels_organic"], p.frame)
         bad = [i for i in items if not i["ok"]]
         self.assertTrue(bad and all("لم تُقَس" in i["detail"] for i in bad))
+
+
+class Acceptance(unittest.TestCase):
+    """The executor's acceptance review of 4451e94 (P1 RTL rails, P2 safe_text/caption_band source, clock, structured
+    unknown/errors, P3s) and the public check() API the looks track's caption fit uses."""
+
+    def box(self, rect, kind="text", id_="a"):
+        return {"id": id_, "kind": kind, "rect": list(rect), "label": "الترجمة"}
+
+    # P1: the app UI does not follow the caption language -> rtl checks the LTR and the RTL layouts together
+    def test_p1_rtl_keeps_the_ltr_rail_too(self):
+        r = SZ.load("tiktok", rtl=True)
+        v = SZ.violations([self.box((850, 800, 950, 880))], r)          # English app UI: the buttons are on the right
+        self.assertEqual([f["zone"] for f in v], ["right_rail"])
+        self.assertIn("على اليمين", v[0]["text"])
+        v = SZ.violations([self.box((10, 800, 100, 880))], r)           # Arabic app UI: mirrored to the left
+        self.assertIn("right_rail_rtl", [f["zone"] for f in v])
+        self.assertTrue(any("على اليسار" in f["text"] for f in v))
+        self.assertEqual(r.safe_text, (240, 252, 840, 906))
+        self.assertTrue(r.rtl)
+        self.assertEqual(SZ.violations([self.box((250, 800, 830, 880))], r), [])
+        self.assertTrue(set(SZ.load("tiktok").zones) <= set(r.zones))    # every LTR zone is still there
+        self.assertEqual(SZ.safe_area_for("tiktok", rtl=True), {"left": 240, "right": 240, "top": 252, "bottom": 1014})
+        self.assertEqual(SZ.load("ig_reels_ads", rtl=True).safe_text, SZ.load("ig_reels_ads").safe_text)   # nothing to mirror
+        self.assertEqual(SZ.union(["ig_reels_ads", "tiktok"], rtl=True).safe_text, (240, 269, 840, 906))
+        u = SZ.load("tiktok", rtl=True, frame=(720, 1280))
+        self.assertEqual(u.safe_text[0], 160)                            # 240 * 720/1080: the mirrored rail, scaled
+        self.assertEqual(u.safe_text[2], 560)
+
+    def test_p1_rtl_qc_flags_the_caption_on_the_right(self):
+        items = SZ.qc_items([self.box((850, 800, 950, 880))], ["tiktok"], (1080, 1920), rtl=True)
+        self.assertTrue(any(not i["ok"] and "P1" in i["name"] for i in items))
+
+    # P2: safe_text / caption_band are checked against the zones
+    def _mut(self, fn):
+        d = raw()
+        fn(d["profiles"]["tiktok"])
+        return write(d)
+
+    def test_p2_safe_text_or_caption_band_over_a_zone_is_refused(self):
+        whole = self._mut(lambda t: t.update(safe_text=[0, 0, 1080, 1920], caption_band=[0, 1500, 1080, 1920]))
+        with self.assertRaises(SZ.SafeZoneError) as cm:
+            SZ.read_profiles(whole, strict=True)
+        self.assertIn("tiktok", str(cm.exception))
+        profs, _d, reasons = SZ.read_profiles(whole)
+        self.assertNotIn("tiktok", profs)
+        self.assertTrue(any("tiktok" in r for r in reasons))
+        self.assertNotEqual(SZ.safe_area_for("tiktok", path=whole), {"left": 0, "right": 0, "top": 0, "bottom": 0})
+        band = self._mut(lambda t: t.update(caption_band=[120, 700, 900, 906]))        # into the right rail
+        with self.assertRaises(SZ.SafeZoneError):
+            SZ.read_profiles(band, strict=True)
+        for n in NAMES:                                                                 # the shipped file is clean
+            p = SZ.load(n)
+            for z in p.zones:
+                self.assertIsNone(SZ._overlap(p.safe_text, z.rect), (n, z.name))
+                self.assertIsNone(SZ._overlap(p.caption_band, z.rect), (n, z.name))
+
+    # P2: the clock never drops shipped profiles at runtime
+    def test_p2_clock_check_is_strict_only(self):
+        import datetime as _dt
+        old = SZ._today
+        SZ._today = lambda: _dt.date(2026, 1, 1)                    # a PC clock set before the retrieved dates
+        try:
+            for n in NAMES:
+                p = SZ.load(n)
+                self.assertEqual(p.name, n)
+                self.assertEqual(p.errors, ())
+            with self.assertRaises(SZ.SafeZoneError):
+                SZ.read_profiles(strict=True)                       # the strict loader (tests, release) still refuses
+        finally:
+            SZ._today = old
+        fut = self._mut(lambda t: t["zones"][0].update(retrieved="2999-01-01"))
+        self.assertIn("tiktok", SZ.read_profiles(fut)[0])
+
+    # P2 (K-T4): structured unknown / errors, never a silent []
+    def test_p2_structured_unknown_and_errors(self):
+        self.assertEqual(SZ.load("tiktok").unknown, ())
+        self.assertEqual(SZ.load("tiktoc").unknown, ("tiktoc",))
+        self.assertEqual(SZ.load("tiktoc", client_default="ytx").unknown, ("tiktoc", "ytx"))
+        self.assertEqual(SZ.union(["tiktok", "tiktoc"]).unknown, ("tiktoc",))
+        self.assertTrue(SZ.load("tiktok", path=write(None, b"{{{")).errors)
+        broken = self._mut(lambda t: t["zones"][0].pop("source"))
+        self.assertTrue(any("tiktok" in e for e in SZ.load("yt_shorts", path=broken).errors))
+        items = SZ.qc_items([self.box((140, 800, 300, 880))], ["tiktok", "tiktoc"], (1080, 1920))
+        unk = [i for i in items if i["name"] == SZ.QC_UNKNOWN]
+        self.assertEqual(unk[0]["unknown"], ["tiktoc"])
+        old = SZ.violations
+        SZ.violations = lambda *a, **k: 1 / 0
+        try:
+            items = SZ.qc_items([self.box((140, 800, 300, 880))], ["tiktok"], (1080, 1920))
+        finally:
+            SZ.violations = old
+        self.assertEqual(len(items), 1)
+        self.assertFalse(items[0]["ok"])
+        self.assertEqual(items[0]["name"], SZ.QC_ERROR)
+        self.assertTrue(items[0]["errors"] and "ZeroDivisionError" in items[0]["errors"][0])
+        self.assertRegex(items[0]["detail"], r"[؀-ۿ]")
+
+    # P3s
+    def test_p3_no_known_target_is_never_the_first_profile(self):
+        for names in (["nonsense"], ["nonsense", "x"], []):
+            u = SZ.union(names)
+            self.assertTrue(u.fallback, names)
+            self.assertEqual(u.safe_text, (90, 250, 990, 1500), names)    # today's built-in numbers, flagged
+        self.assertEqual(SZ.union(["nonsense"]).unknown, ("nonsense",))
+
+    def test_p3_disjoint_safe_areas_are_an_error_not_the_first_profile(self):
+        d = raw()
+        a = d["profiles"]["tiktok"]
+        src = {"basis": "community", "source": "https://example.test/x", "retrieved": "2026-10-17"}
+        b = {"frame": [1080, 1920], "safe_text": [48, 1300, 887, 1310], "caption_band": [48, 1300, 887, 1310],
+             "zones": [dict(name="huge_top", kind="top", rect=[0, 0, 1080, 1300], **src),
+                       dict(name="bottom_ui", kind="bottom", rect=[0, 1310, 1080, 1920], **src)]}
+        d["profiles"] = {"tiktok": a, "other": b}
+        d["default"] = "tiktok"
+        p = write(d)
+        u = SZ.union(["tiktok", "other"], path=p)
+        self.assertEqual(SZ.safe_width(u), 0)
+        self.assertNotEqual(u.safe_text, SZ.load("tiktok", path=p).safe_text)
+        self.assertTrue(any("common" in e for e in u.errors))
+
+    def test_p3_union_does_not_depend_on_order(self):
+        a, b = SZ.union(["feed_4x5", "tiktok"]), SZ.union(["tiktok", "feed_4x5"])
+        self.assertEqual((a.frame, a.safe_text, a.caption_band), (b.frame, b.safe_text, b.caption_band))
+        a, b = SZ.union(["ig_reels_ads_disclaimer", "tiktok"]), SZ.union(["tiktok", "ig_reels_ads_disclaimer"])
+        self.assertEqual((a.frame, a.safe_text, a.caption_band), (b.frame, b.safe_text, b.caption_band))
+
+    def test_p3_bases_true_to_their_sources(self):
+        for z in SZ.load("ig_reels_organic").zones:
+            self.assertEqual(z.basis, "derived", z.name)               # ads-guide numbers reused for organic
+        for z in SZ.load("feed_4x5").zones:
+            self.assertEqual(z.basis, "derived", z.name)
+            self.assertIn("facebook.com/business/ads-guide", z.source)
+        self.assertIn("API", raw()["profiles"]["ig_reels_organic"]["encode"]["note"])
+        for z in SZ.load("ig_reels_ads").zones:
+            self.assertEqual(z.basis, "official")
+
+    def test_p3_basis_in_the_qc_line(self):
+        it = SZ.qc_items([self.box((850, 800, 950, 880))], ["tiktok"], (1080, 1920))
+        self.assertIn("مقاس من قالب المنصة", next(i for i in it if not i["ok"])["detail"])
+        ok = SZ.qc_items([self.box((300, 800, 400, 880))], ["ig_reels_organic"], (1080, 1920))
+        self.assertIn("مشتق", ok[0]["detail"])
+        v = SZ.violations([self.box((850, 800, 950, 880))], SZ.load("tiktok"))
+        self.assertEqual(v[0]["basis"], "template")
+
+    def test_p3_evidence_quotes_at_most_15_words(self):
+        ev = SK.parent / "docs" / "superpowers" / "evidence" / "2026-10-17-safe-zones-sources.md"
+        quotes = re.findall(r"«([^»]*)»", ev.read_text(encoding="utf-8"))
+        self.assertTrue(quotes)
+        for q in quotes:
+            self.assertLessEqual(len(q.split()), 15, q)
+
+    # the public API for caption fit (Task 23)
+    def test_check_api(self):
+        o = SZ.check((850, 800, 950, 880), "tiktok", 1080, 1920)
+        self.assertEqual(len(o), 1)
+        self.assertEqual(o[0]["zone"], "right_rail")
+        self.assertEqual(tuple(o[0]["rect"]), (840, 400, 1080, 1920))
+        self.assertEqual(tuple(o[0]["overlap"]), (850, 800, 950, 880))
+        self.assertEqual((o[0]["severity"], o[0]["basis"], o[0]["platform"]), ("P1", "template", "tiktok"))
+        self.assertEqual(SZ.check((300, 800, 400, 880), "tiktok", 1080, 1920), [])
+        self.assertEqual(SZ.check({"rect": [300, 800, 400, 880]}, "tiktok", 1080, 1920), [])
+        h = SZ.check((300, 600, 500, 700), "tiktok", 1080, 1920, head=(400, 500, 600, 800))
+        self.assertEqual([x["zone"] for x in h], ["face"])
+        self.assertEqual(tuple(h[0]["overlap"]), (400, 600, 500, 700))
+        r = SZ.check((10, 800, 100, 880), "tiktok", 1080, 1920, rtl=True)
+        self.assertIn("right_rail_rtl", [x["zone"] for x in r])
+        s = SZ.check((570, 400, 630, 450), "tiktok", 720, 1280)            # inside the scaled rail (x >= 560)
+        self.assertEqual([x["zone"] for x in s], ["right_rail"])
+        m = SZ.check((850, 800, 1000, 850), ["ig_reels_ads", "tiktok"], 1080, 1920)
+        self.assertEqual({x["platform"] for x in m}, {"tiktok"})
+        self.assertTrue(SZ.check((850, 1600, 950, 1700), "tiktoc", 1080, 1920))   # unknown name: built-in numbers, never a silent pass
+        for junk in (None, (1, 2, 3), ("a", 0, 1, 1), (5, 5, 1, 1)):
+            self.assertEqual(SZ.check(junk, "tiktok", 1080, 1920), [])
+
+
+class AcceptanceReview(unittest.TestCase):
+    """Independent re-review of the acceptance fixes: what it found missing."""
+
+    def box(self, rect, kind="text"):
+        return {"id": "r", "kind": kind, "rect": list(rect), "label": "الترجمة"}
+
+    def test_unusable_file_with_a_platform_chosen_is_a_failing_line(self):
+        missing = Path(tempfile.mkdtemp()) / "safe-zones.json"
+        for path in (missing, write(None, b"{{{")):
+            items = SZ.qc_items([self.box((300, 800, 400, 880))], ["tiktok"], (1080, 1920), path=path)
+            self.assertEqual([(i["name"], i["ok"]) for i in items], [(SZ.QC_ERROR, False)])
+            self.assertIn("tiktok", items[0]["detail"])
+            self.assertTrue(items[0]["errors"])
+            self.assertNotIn("إنستجرام", items[0]["detail"])
+
+    def test_a_damaged_profile_is_not_called_unknown(self):
+        d = raw()
+        d["profiles"]["tiktok"]["zones"][0].pop("source")
+        broken = write(d)
+        p = SZ.load("tiktok", path=broken)
+        self.assertEqual((p.unknown, p.damaged), ((), ("tiktok",)))
+        u = SZ.union(["tiktok", "yt_shorts"], path=broken)
+        self.assertEqual((u.unknown, u.damaged), ((), ("tiktok",)))
+        items = SZ.qc_items([self.box((300, 800, 400, 880))], ["tiktok"], (1080, 1920), path=broken)
+        self.assertFalse([i for i in items if i["name"] == SZ.QC_UNKNOWN])
+        err = [i for i in items if i["name"] == SZ.QC_ERROR]
+        self.assertEqual(err[0]["damaged"], ["tiktok"])
+        self.assertIn("تالف", err[0]["detail"])
+        self.assertFalse(err[0]["ok"])
+
+    def test_check_never_raises_and_flags_the_fallback(self):
+        for bad in (5, None, object(), {"x": 1}):       # no usable name: the built-in numbers, flagged, never raises
+            o = SZ.check((850, 1600, 950, 1700), bad, 1080, 1920)
+            self.assertTrue(o and all(x["fallback"] for x in o), bad)
+        o = SZ.check((850, 1600, 950, 1700), "tiktoc", 1080, 1920)
+        self.assertTrue(o and all(x["fallback"] for x in o))
+        self.assertTrue(all(x["fallback"] is False for x in SZ.check((850, 800, 950, 880), "tiktok", 1080, 1920)))
+        self.assertIsInstance(SZ.check((850, 800, 950, 880), "tiktok", "w", None), list)
+        mixed = SZ.check((850, 800, 950, 880), ["tiktok", "tiktoc"], 1080, 1920)      # one name was not checked
+        self.assertTrue(mixed and all(x["fallback"] for x in mixed))
+
+    def test_organic_encode_is_derived_too(self):
+        self.assertEqual(SZ.load("ig_reels_organic").encode["basis"], "derived")
 
 
 if __name__ == "__main__":

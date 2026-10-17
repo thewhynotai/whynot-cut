@@ -3,15 +3,19 @@
 """Platform safe-zone profiles (Phase 4 Task 27, R-4.5): where each platform's own UI covers a reel, scaled to any frame
 size, plus the platform's delivery-encode rules and the check of an exported file against them.
 
-Data: config/defaults/safe-zones.json. Every number carries a basis (official | template | screenshot | community), a
-source URL and the date it was read; the strict loader refuses a number without them. A value a platform does not
+Data: config/defaults/safe-zones.json. Every number carries a basis (official | derived | template | screenshot |
+community; derived = an official number reused for a placement the platform gives none for), a source URL and the date
+it was read; the loader refuses a number without them, and a safe_text or caption_band that overlaps a zone. A value a platform does not
 publish stays absent from the file (no check), never a guess. Community numbers are flagged in the profile and in the
 finding text. Rectangles are [x0, y0, x1, y1] in pixels with x1/y1 exclusive: a box that only touches a zone's edge
 does not overlap it.
 
 Nothing here raises for a real user (G10): an unreadable or damaged file falls back to today's built-in numbers
 (legacy_safe_area), a damaged profile is dropped with a reason, a bad box is skipped, an unmeasured value is not a
-finding. `read_profiles(strict=True)` is the one place that raises (SafeZoneError), for the loader's tests.
+finding. `read_profiles(strict=True)` is the one place that raises (SafeZoneError), for the loader's tests; it alone
+also refuses a retrieved date in the future (a wrong PC clock never drops the shipped profiles at runtime). A profile
+carries `unknown` (platform names asked for that are not in the file) and `errors` (why the file or a profile was not
+usable) as structured fields, so a gate never has to read `fallback_reason` text.
 Standard library only.
 """
 from __future__ import annotations
@@ -25,7 +29,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 DEFAULT_FILE = Path(__file__).resolve().parents[3] / "config" / "defaults" / "safe-zones.json"
-BASES = ("official", "template", "screenshot", "community")
+BASES = ("official", "derived", "template", "screenshot", "community")
+_BASIS_AR = {"official": "رقم رسمي", "derived": "مشتق من أرقام رسمية", "template": "مقاس من قالب المنصة",
+             "screenshot": "مقاس من لقطة شاشة", "community": "تقدير غير رسمي"}
 ENCODE_KEYS = {"codec", "profile", "level_max", "gop_s", "closed_gop", "pix_fmt", "audio", "audio_sample_rate_max",
                "audio_channels_max", "audio_bitrate_kbps_min", "container", "fps_min", "fps_max", "bitrate_kbps_min",
                "loudness_lufs", "true_peak_dbtp"}
@@ -72,6 +78,9 @@ class Profile:
     fallback_reason: str = ""
     aspect_mismatch: bool = False
     rtl: bool = False
+    unknown: tuple = ()       # platform names asked for that the file does not know (structured, for gates)
+    damaged: tuple = ()       # platform names the file has, but whose profile is damaged (dropped with a reason)
+    errors: tuple = ()        # why the file, a profile or the multi-platform safe area was not usable
 
     def scaled(self, frame) -> "Profile":
         fr = _frame(frame)
@@ -97,18 +106,38 @@ class Profile:
         c = self.caption_band
         return ((c[0] * W) // fw, (c[1] * H) // fh, -((-c[2] * W) // fw), -((-c[3] * H) // fh))
 
-    def mirrored(self) -> "Profile":
+    def both_layouts(self) -> "Profile":
+        """The right-to-left caption case: the app's UI follows the VIEWER's app language, not the caption language, so
+        the left-to-right zones stay and a mirrored copy of every mirror_rtl zone (named <zone>_rtl) is added; the safe
+        text and caption band are where both layouts agree."""
+        if self.rtl:
+            return self
         W = self.frame[0]
 
         def m(r):
             return (W - r[2], r[1], W - r[0], r[3])
-        return replace(self, zones=tuple(replace(z, rect=m(z.rect)) for z in self.zones), safe_text=m(self.safe_text),
-                       caption_band=m(self.caption_band), rtl=not self.rtl)
+        extra = tuple(replace(z, name=z.name + "_rtl", rect=m(z.rect)) for z in self.zones if z.mirror_rtl)
+        if not extra:
+            return replace(self, rtl=True)
+        safe = _meet([self.safe_text, m(self.safe_text)])
+        cb = _clip(_meet([self.caption_band, m(self.caption_band)]), safe)
+        return replace(self, zones=self.zones + extra, safe_text=safe, caption_band=cb, rtl=True)
 
 
 def _clip(r, bound):
     x0, y0, x1, y1 = max(r[0], bound[0]), max(r[1], bound[1]), min(r[2], bound[2]), min(r[3], bound[3])
     return (x0, y0, max(x0, x1), max(y0, y1))
+
+
+def _meet(rects):
+    """Where all the rectangles agree; an empty meet is a zero-size rectangle (zero width AND height)."""
+    x0, y0 = max(r[0] for r in rects), max(r[1] for r in rects)
+    x1, y1 = min(r[2] for r in rects), min(r[3] for r in rects)
+    return (x0, y0, x1, y1) if x0 < x1 and y0 < y1 else (x0, y0, x0, y0)
+
+
+def _today():
+    return datetime.date.today()
 
 
 def _num(v) -> bool:
@@ -152,7 +181,7 @@ def _legacy_profile(reason: str) -> Profile:
 
 
 # --------------------------------------------------------------------------- loading and validation
-def _check_source(where, d):
+def _check_source(where, d, strict=False):
     if d.get("basis") not in BASES:
         raise SafeZoneError(f"{where}: basis must be one of {', '.join(BASES)} (got {d.get('basis')!r})")
     s = d.get("source")
@@ -165,7 +194,7 @@ def _check_source(where, d):
         day = datetime.date.fromisoformat(r)
     except ValueError:
         raise SafeZoneError(f"{where}: retrieved is not a real date ({r})") from None
-    if day > datetime.date.today() + datetime.timedelta(days=1):
+    if strict and day > _today() + datetime.timedelta(days=1):      # strict only: a wrong PC clock never drops a profile
         raise SafeZoneError(f"{where}: retrieved is in the future ({r})")
 
 
@@ -179,7 +208,7 @@ def _rect(where, v, W, H, strict_area=False):
     return (x0, y0, x1, y1)
 
 
-def _parse_profile(name, d) -> Profile:
+def _parse_profile(name, d, strict=False) -> Profile:
     if not isinstance(d, dict):
         raise SafeZoneError(f"{name}: not an object")
     fr = _frame(d.get("frame"))
@@ -196,7 +225,7 @@ def _parse_profile(name, d) -> Profile:
             raise SafeZoneError(f"{name}: zone {i} has no name")
         where = f"{name}/{z['name']}"
         rect = _rect(where, z.get("rect"), W, H)
-        _check_source(where, z)
+        _check_source(where, z, strict)
         kind = z.get("kind") if isinstance(z.get("kind"), str) else "ui"
         zones.append(Zone(z["name"], kind, rect, z["basis"], z["source"].strip(), z["retrieved"], str(z.get("note", "")),
                           name, ar, z.get("mirror_rtl") is True))
@@ -206,6 +235,10 @@ def _parse_profile(name, d) -> Profile:
     cb = _rect(f"{name}/caption_band", d.get("caption_band"), W, H, True)
     if not (safe[0] <= cb[0] and cb[2] <= safe[2] and safe[1] <= cb[1] and cb[3] <= safe[3]):
         raise SafeZoneError(f"{name}: caption_band must sit inside safe_text")
+    for label, r in (("safe_text", safe), ("caption_band", cb)):
+        for z in zones:                     # they have no source of their own: they must stay clear of every sourced zone
+            if _overlap(r, z.rect):
+                raise SafeZoneError(f"{name}/{label}: {list(r)} overlaps the zone {z.name} {list(z.rect)}")
     enc = d.get("encode")
     if enc is not None:
         if not isinstance(enc, dict):
@@ -213,7 +246,7 @@ def _parse_profile(name, d) -> Profile:
         extra = set(enc) - ENCODE_KEYS - ENCODE_META
         if extra:
             raise SafeZoneError(f"{name}/encode: unknown keys {sorted(extra)}")
-        _check_source(f"{name}/encode", enc)
+        _check_source(f"{name}/encode", enc, strict)
         _check_encode_types(name, enc)
         if enc["basis"] == "community" and "community" not in flags:
             flags.append("community")
@@ -275,7 +308,7 @@ def read_profiles(path=None, strict=False):
     profs = {}
     for name, body in d["profiles"].items():
         try:
-            profs[name] = _parse_profile(name, body)
+            profs[name] = _parse_profile(name, body, strict)
         except SafeZoneError as e:
             if strict:
                 raise
@@ -299,8 +332,9 @@ def load(profile=None, *, client_default=None, frame=None, rtl=False, path=None)
     frame=(w, h) scales to that size; rtl=True mirrors the platform's right-to-left (Arabic) layout when it has one."""
     profs, default, reasons = read_profiles(path)
     if not profs:
-        return _scale_rtl(_legacy_profile("; ".join(reasons) or "no profiles"), frame, rtl)
-    note = list(reasons)
+        why = tuple(reasons) or ("no profiles",)
+        return _scale_rtl(replace(_legacy_profile("; ".join(why)), errors=why), frame, rtl)
+    note, unknown, damaged = list(reasons), [], []
     chosen = None
     for label, want in (("reel", profile), ("client", client_default)):
         if want is None or want == "":
@@ -309,48 +343,71 @@ def load(profile=None, *, client_default=None, frame=None, rtl=False, path=None)
         if k in profs:
             chosen = profs[k]
             break
-        note.append(f"unknown {label} profile {str(want)[:40]!r}")
+        if _damaged(k, reasons):
+            note.append(f"damaged {label} profile {str(want)[:40]!r}")
+            damaged.append(str(want)[:40])
+        else:
+            note.append(f"unknown {label} profile {str(want)[:40]!r}")
+            unknown.append(str(want)[:40])
     if chosen is None:
         chosen = profs[default]
-    out = replace(chosen, fallback_reason="; ".join(note))
+    out = replace(chosen, fallback_reason="; ".join(note), unknown=tuple(unknown), damaged=tuple(damaged),
+                  errors=tuple(reasons))
     return _scale_rtl(out, frame, rtl)
+
+
+def _damaged(key, reasons) -> bool:
+    """The file has this profile but the loader dropped it (its reason starts with the profile's name)."""
+    return bool(key) and any(r.startswith((f"{key}:", f"{key}/")) for r in reasons)
 
 
 def _scale_rtl(p: Profile, frame, rtl) -> Profile:
     p = p.scaled(frame)
-    if rtl and any(z.mirror_rtl for z in p.zones) and not p.rtl:
-        p = p.mirrored()
-    return p
+    return p.both_layouts() if rtl else p
 
 
 def union(profiles, *, frame=None, rtl=False, path=None) -> Profile:
     """A multi-platform reel: every zone of every target profile, the safe text is where they all agree. A name that is
     not a known profile is left out and named in `fallback_reason` (the QC line shows it: a typo is never a silent pass)."""
-    known = read_profiles(path)[0]
-    ps, unknown = [], []
+    known, _default, file_errors = read_profiles(path)
+    if not known and not any(isinstance(p, Profile) for p in profiles or []):
+        why = tuple(file_errors) or ("no profiles",)
+        return _scale_rtl(replace(_legacy_profile("; ".join(why)), errors=why), frame, rtl)
+    ps, unknown, damaged = [], [], []
     for p in profiles or []:
         if isinstance(p, Profile):
             ps.append(p)
         elif _key(p) in known:
             ps.append(load(p, path=path))
+        elif _damaged(_key(p), file_errors):
+            damaged.append(str(p)[:40])
         else:
             unknown.append(str(p)[:40])
-    note = "; ".join(f"unknown profile {u!r}" for u in unknown)
-    if not ps:
-        base = load(None, frame=frame, rtl=rtl, path=path)
-        return replace(base, fallback_reason="; ".join(x for x in (base.fallback_reason, note) if x))
-    fr = _frame(frame) or ps[0].frame
+    note = "; ".join([f"unknown profile {u!r}" for u in unknown] + [f"damaged profile {u!r}" for u in damaged])
+    if not ps:                 # no known target: today's built-in numbers, flagged (never the file's first profile)
+        base = _legacy_profile(note or "no target platform")
+        return _scale_rtl(replace(base, unknown=tuple(unknown), damaged=tuple(damaged), errors=tuple(file_errors)),
+                          frame, rtl)
+    frames = [tuple(p.frame) for p in ps]       # the frame never depends on the order the targets are listed in
+    fr = _frame(frame) or max(set(frames), key=lambda f: (frames.count(f), f[0] * f[1], f))
     ps = [_scale_rtl(p, fr, rtl) for p in ps]
     zones = tuple(z for p in ps for z in p.zones)
-    safe = (max(p.safe_text[0] for p in ps), max(p.safe_text[1] for p in ps), min(p.safe_text[2] for p in ps), min(p.safe_text[3] for p in ps))
-    if safe[0] >= safe[2] or safe[1] >= safe[3]:
-        safe = ps[0].safe_text
-    cb = _clip(ps[0].caption_band, safe)
+    errors = list(dict.fromkeys(e for p in ps for e in p.errors))
+    safe = _meet([p.safe_text for p in ps])
+    if safe[0] == safe[2]:
+        errors.append("the target platforms leave no common safe area: " + ", ".join(p.name for p in ps))
+    cbs = [p.caption_band for p in ps]
+    cb = _clip((safe[0], max(c[1] for c in cbs), safe[2], min(c[3] for c in cbs)), safe)
+    if cb[1] >= cb[3] and safe[1] < safe[3]:    # the bands do not meet: the lowest band height, at the bottom of the safe text
+        h = min(c[3] - c[1] for c in cbs)
+        cb = (safe[0], max(safe[1], safe[3] - h), safe[2], safe[3])
     reasons = [p.fallback_reason for p in ps if p.fallback_reason] + ([note] if note else [])
     return Profile("+".join(p.name for p in ps), fr, zones, safe, cb, None,
                    tuple(dict.fromkeys(f for p in ps for f in p.flags)), " + ".join(dict.fromkeys(p.platform_ar for p in ps)),
                    tuple(dict.fromkeys(g for p in ps for g in p.gaps)),
-                   any(p.fallback for p in ps), "; ".join(reasons), any(p.aspect_mismatch for p in ps), rtl)
+                   any(p.fallback for p in ps), "; ".join(reasons), any(p.aspect_mismatch for p in ps), rtl,
+                   tuple(dict.fromkeys([u for p in ps for u in p.unknown] + unknown)),
+                   tuple(dict.fromkeys([u for p in ps for u in p.damaged] + damaged)), tuple(errors))
 
 
 def safe_width(profile, side_margin_px=0) -> int:
@@ -393,8 +450,9 @@ def _severity(kind, ow, oh, area):
 def violations(boxes, profile, *, face=None) -> list:
     """Every graphic/text box tested against each UI zone of the profile and, when `face` is given, the head envelope
     (R-6.4). A box is {"id", "kind": "text"|"shape", "rect": [x0, y0, x1, y1], "label": plain-words name}. Findings come
-    in box order, then zone order: {box, kind, zone, platform, severity P1|P2, overlap_w, overlap_h, overlap_px,
-    community, text}. A box that cannot be read is skipped, never an error."""
+    in box order, then zone order: {box, kind, zone, platform, severity P1|P2, basis, rect (the zone), overlap (the
+    shared rectangle), overlap_w, overlap_h, overlap_px, community, text}. A box that cannot be read is skipped, never an
+    error."""
     if not isinstance(profile, Profile) or not isinstance(boxes, (list, tuple)):
         return []
     fr = _box_rect({"rect": face}) if face is not None else None
@@ -422,8 +480,9 @@ def violations(boxes, profile, *, face=None) -> list:
             else:
                 where = f"{_ZONE_AR[zk]} في {plat}"
             community = z.basis == "community"
-            text = f"{label} داخل {where} ({_ar(depth)} بكسل)" + (" — تقدير غير رسمي" if community else "")
+            text = f"{label} داخل {where} ({_ar(depth)} بكسل) — {_BASIS_AR.get(z.basis, '')}"
             out.append({"box": bid, "kind": "zone", "zone": z.name, "platform": z.platform, "severity": _severity(kind, total, 1, area),
+                        "basis": z.basis, "rect": tuple(z.rect), "overlap": _meet([r, z.rect]),
                         "overlap_w": math.ceil(ow), "overlap_h": math.ceil(oh), "overlap_px": math.ceil(ow * oh),
                         "community": community, "text": text})
         if fr:
@@ -431,13 +490,36 @@ def violations(boxes, profile, *, face=None) -> list:
             if o:
                 ow, oh = o
                 out.append({"box": bid, "kind": "face", "zone": "face", "platform": profile.name,
-                            "severity": _severity(kind, min(area, ow * oh + total), 1, area), "overlap_w": math.ceil(ow),
+                            "severity": _severity(kind, min(area, ow * oh + total), 1, area), "basis": "measured",
+                            "rect": tuple(fr), "overlap": _meet([r, fr]), "overlap_w": math.ceil(ow),
                             "overlap_h": math.ceil(oh), "overlap_px": math.ceil(ow * oh), "community": False,
                             "text": f"{label} يغطي الوجه ({_ar(min(ow, oh))} بكسل)"})
     return out
 
 
-def safe_area_for(profile=None, frame=None, *, path=None) -> dict:
+def check(box, platform, w, h, head=None, rtl=False, *, path=None) -> list:
+    """Caption fit (R-4.1 / Task 23): the zones one box overlaps for the target platform(s) at a w x h frame.
+    `box` is [x0, y0, x1, y1] or a violations() box dict (kind "text" by default); `platform` one name or a list (the
+    union); `head` the head envelope rectangle (R-6.4); rtl adds the mirrored layout (the LTR one stays). Each overlap:
+    {zone, rect, overlap, severity P1|P2, basis, platform, text, fallback}; [] when the box is clear or cannot be
+    read. An unknown or damaged platform name is checked against today's built-in numbers (never a silent pass) and
+    its overlaps carry fallback=True; so do the overlaps of a list where only some names were usable. Never raises."""
+    try:
+        b = dict(box) if isinstance(box, dict) else {"rect": box}
+        b.setdefault("kind", "text")
+        if _box_rect(b) is None:
+            return []
+        names = [platform] if isinstance(platform, str) else [n for n in platform if isinstance(n, (str, Profile))] \
+            if isinstance(platform, (list, tuple)) else []
+        prof = union(names, frame=(w, h), rtl=rtl, path=path)
+        keep = ("zone", "rect", "overlap", "severity", "basis", "platform", "text")
+        partial = prof.fallback or bool(prof.unknown or prof.damaged)     # a requested platform was not checked
+        return [dict({k: f[k] for k in keep}, fallback=partial) for f in violations([b], prof, face=head)]
+    except Exception:  # noqa: BLE001  G10: a public helper never raises for a user
+        return []
+
+
+def safe_area_for(profile=None, frame=None, *, rtl=False, path=None) -> dict:
     """The {left, right, top, bottom} margins (px) captions and previews keep clear of: today's subtitle-style.json
     numbers when no profile is chosen or the file is unreadable, else the chosen profile's safe text scaled to `frame`."""
     if profile in (None, "") or profile == []:
@@ -446,7 +528,7 @@ def safe_area_for(profile=None, frame=None, *, path=None) -> dict:
     known = read_profiles(path)[0]
     if not any(_key(n) in known for n in names):         # a typo must not move the margins: today's numbers stay
         return legacy_safe_area()
-    p = union(names, frame=frame, path=path)
+    p = union(names, frame=frame, rtl=rtl, path=path)
     if p.fallback:
         return legacy_safe_area()
     W, H = p.frame
@@ -454,14 +536,15 @@ def safe_area_for(profile=None, frame=None, *, path=None) -> dict:
     return {"left": s[0], "right": W - s[2], "top": s[1], "bottom": H - s[3]}
 
 
-def safe_top_px_for(profile=None, frame=None, *, path=None):
+def safe_top_px_for(profile=None, frame=None, *, rtl=False, path=None):
     """What previews.SAFE_TOP_PX is today (220, not scaled) when no profile is chosen or the file is unreadable, else
     the top of the chosen profile's safe text at `frame`."""
-    if profile in (None, ""):
+    if profile in (None, "") or profile == [] or profile == ():
         return legacy_safe_top_px()
-    if _key(profile) not in read_profiles(path)[0]:
+    names = list(profile) if isinstance(profile, (list, tuple)) else [profile]
+    if not any(_key(n) in read_profiles(path)[0] for n in names):      # a typo must not move the keep-out
         return legacy_safe_top_px()
-    p = load(profile, frame=frame, path=path)
+    p = union(names, frame=frame, rtl=rtl, path=path)
     return legacy_safe_top_px() if p.fallback else p.safe_text[1]
 
 
@@ -470,12 +553,16 @@ QC_OK = "Graphics clear of platform app areas"
 QC_P1 = "Text clear of platform app areas (P1)"
 QC_P2 = "Graphics clear of platform app areas (P2: decorative)"
 QC_UNKNOWN = "Platform app areas: a platform name is not known"
+QC_ERROR = "Platform app areas: the check could not run"
 
 
 def qc_items(boxes, platforms, frame=None, *, rtl=False, face=None, path=None) -> list:
     """The QC lines for a reel's target platform(s): [] when none is chosen (QC output stays as it is today). A
     multi-platform reel is checked against the union of its profiles. One line per severity: {name, ok, detail}; a
-    clean reel gets one passing line. P1 = text (or a shape under the shared-area rule), P2 = decorative < 20 %."""
+    clean reel gets one passing line. P1 = text (or a shape under the shared-area rule), P2 = decorative < 20 %.
+    Structured fields for a gate: `unknown` on the unknown-name line, `errors` on every line when the file, a profile
+    or the common safe area was not usable, and a failing QC_ERROR line (never a silent []) when the check itself
+    cannot run. The numbers' basis (official, derived, template, community) is named in every line."""
     if isinstance(platforms, str):
         platforms = [platforms] if platforms.strip() else []
     if not platforms:
@@ -483,19 +570,32 @@ def qc_items(boxes, platforms, frame=None, *, rtl=False, face=None, path=None) -
     try:
         prof = union(list(platforms), frame=frame, rtl=rtl, path=path)
         found = violations(boxes, prof, face=face)
-    except Exception:  # noqa: BLE001  G10: a check that cannot run is no finding
-        return []
+    except Exception as e:  # noqa: BLE001  G10: never raises for a user; the line says the check did not run
+        return [{"name": QC_ERROR, "ok": False, "detail": "تعذّر فحص مناطق واجهة المنصة، فلم يُفحَص شيء — أعد المحاولة أو راجع ملف المنصات",
+                 "errors": [f"{e.__class__.__name__}: {str(e)[:200]}"]}]
+    chosen = "، ".join(str(n)[:40] for n in platforms)
+    if prof.fallback and prof.errors and not prof.unknown and not prof.damaged:     # the file itself is unusable
+        return [{"name": QC_ERROR, "ok": False, "errors": list(prof.errors),
+                 "detail": f"ملف مناطق المنصات غير صالح، فلم تُفحَص مناطق {chosen} — أعد تثبيت الإضافة أو راجع الملف"}]
+    bases = "الأرقام: " + "، ".join(dict.fromkeys(_BASIS_AR[z.basis] for z in prof.zones if z.basis in _BASIS_AR))
     out = []
     for sev, name in (("P1", QC_P1), ("P2", QC_P2)):
         hit = [f for f in found if f["severity"] == sev]
         if hit:
             texts = list(dict.fromkeys(f["text"] for f in hit))
             out.append({"name": name, "ok": False, "detail": "؛ ".join([*texts[:5], *prof.gaps]) + (f" (+{len(texts) - 5})" if len(texts) > 5 else "")})
-    if prof.fallback_reason and "unknown profile" in prof.fallback_reason:
-        out.append({"name": QC_UNKNOWN, "ok": False,
-                    "detail": "اسم منصة غير معروف في قائمة المنصات: " + prof.fallback_reason.replace("unknown profile", "").strip()})
+    if prof.unknown:
+        out.append({"name": QC_UNKNOWN, "ok": False, "unknown": list(prof.unknown),
+                    "detail": "اسم منصة غير معروف في قائمة المنصات: " + "، ".join(repr(u) for u in prof.unknown)})
+    if prof.damaged:
+        out.append({"name": QC_ERROR, "ok": False, "damaged": list(prof.damaged), "errors": list(prof.errors),
+                    "detail": "ملف مناطق المنصات تالف في: " + "، ".join(repr(u) for u in prof.damaged)
+                              + " — لم تُفحَص هذه المنصات؛ أعد تثبيت الإضافة أو راجع الملف"})
     if not out:
-        out.append({"name": QC_OK, "ok": True, "detail": "؛ ".join([prof.platform_ar or prof.name, *prof.gaps])})
+        out.append({"name": QC_OK, "ok": True, "detail": "؛ ".join([prof.platform_ar or prof.name, bases, *prof.gaps])})
+    if prof.errors:
+        for it in out:
+            it.setdefault("errors", list(prof.errors))
     return out
 
 
@@ -521,15 +621,41 @@ def _level(v):
     return x / 10 if x >= 10 else x
 
 
+_MEASURED_BY = {"codec": "codec", "profile": "profile", "level_max": "level", "gop_s": "gop_s", "closed_gop": "closed_gop",
+                "pix_fmt": "pix_fmt", "audio": "audio_codec", "audio_sample_rate_max": "sample_rate",
+                "audio_channels_max": "channels", "audio_bitrate_kbps_min": "audio_bitrate_kbps", "container": "container",
+                "fps_min": "fps", "fps_max": "fps", "bitrate_kbps_min": "bitrate_kbps", "loudness_lufs": "loudness_lufs",
+                "true_peak_dbtp": "true_peak_dbtp"}
+_KEY_AR = {"codec": "ترميز الفيديو", "profile": "بروفايل الترميز", "level_max": "مستوى الترميز",
+           "gop_s": "المسافة بين الإطارات المفتاحية", "closed_gop": "إغلاق مجموعات الإطارات (GOP)", "pix_fmt": "تنسيق البكسل",
+           "audio": "ترميز الصوت", "audio_sample_rate_max": "معدل عينات الصوت", "audio_channels_max": "عدد قنوات الصوت",
+           "audio_bitrate_kbps_min": "معدل بيانات الصوت", "container": "حاوية الملف", "fps_min": "عدد الإطارات في الثانية",
+           "fps_max": "عدد الإطارات في الثانية", "bitrate_kbps_min": "معدل بيانات الفيديو", "loudness_lufs": "علو الصوت",
+           "true_peak_dbtp": "ذروة الصوت"}
+
+
+def _measured(m, mkey):
+    v = m.get(mkey)
+    if mkey == "closed_gop":
+        return isinstance(v, bool)
+    if mkey in ("codec", "profile", "pix_fmt", "audio_codec", "container"):
+        return isinstance(v, str) and bool(v.strip())
+    if mkey == "level":
+        return _level(v) is not None
+    return _num(v)
+
+
 def encode_findings(media_info, profile) -> list:
     """Compare an exported file's measured values (see probe_media) with the profile's encode block. Only values the
-    platform publishes (present in the block) and the file measured (not None) are checked. Each finding is
-    {check, text (plain Arabic), severity "advisory"}; loudness findings add delta_db."""
+    platform publishes (present in the block) are checked. Each finding is {check, text (plain Arabic), severity
+    "advisory"}; loudness findings add delta_db. A published value the file could not be measured for (no ffprobe, a
+    probe that failed) is never a silent pass: one finding {check "not_measured", severity "not_measured", keys, text}
+    names them all."""
     enc = profile.encode if isinstance(profile, Profile) else None
-    if not enc or not isinstance(media_info, dict):
+    if not enc:
         return []
+    m = media_info if isinstance(media_info, dict) else {}
     plat = profile.platform_ar or profile.name
-    m = media_info
     f = []
 
     def add(check, text, **extra):
@@ -576,6 +702,12 @@ def encode_findings(media_info, profile) -> list:
         d = m["true_peak_dbtp"] - enc["true_peak_dbtp"]
         if d > 0:
             add("true_peak_dbtp", f"ذروة الصوت أعلى من الحد المسموح لـ{plat} بـ {_ar(d)} ديسيبل", delta_db=round(d, 1))
+    hevc = _measured(m, "codec") and _codec(m["codec"]) != "h264"
+    missing = [k for k in enc if k in _MEASURED_BY and not (k == "level_max" and hevc) and not _measured(m, _MEASURED_BY[k])]
+    if missing:
+        words = list(dict.fromkeys(_KEY_AR[k] for k in missing))
+        f.append({"check": "not_measured", "severity": "not_measured", "keys": missing,
+                  "text": f"لم يُقَس في الملف ما يطلبه {plat}: " + "، ".join(words) + " — أداة القياس غير متاحة أو تعذّر القياس، فراجعها يدويًا"})
     return f
 
 
@@ -686,27 +818,79 @@ def _default_runner(argv, **kw):
     return subprocess.run(argv, capture_output=True, text=True, errors="replace", timeout=kw.get("timeout", 300), check=False)
 
 
-def probe_media(path, runner=None, ffmpeg=None, ffprobe=None, timeout=300) -> dict:
+def _abs(p):
+    """An absolute path as a string, else None: a bare or relative name would let Windows run a program planted in the
+    current folder (the SEC-1 class)."""
+    try:
+        return str(p) if p and Path(p).is_absolute() else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _probe_tool(tool, ffmpeg=None, path_env=None):
+    """The absolute path of ffmpeg/ffprobe, never from the current folder: the engine's pinned copy (plat.engine_ffmpeg),
+    else beside the absolute ffmpeg the engine runs, else an ABSOLUTE folder on PATH (relative entries such as "." are
+    skipped; shutil.which is not used: on Windows it looks in the current folder first). None when there is none.
+    path_env replaces PATH and turns the engine-home lookup off (tests)."""
+    import os
+    exe = tool + (".exe" if os.name == "nt" else "")
+    if path_env is None:
+        try:
+            from .plat import engine_ffmpeg
+            pinned = engine_ffmpeg(tool=tool)
+            if pinned is not None and _abs(pinned):
+                return str(pinned)
+        except Exception:  # noqa: BLE001  advisory: a broken engine home is "not found", not an error
+            pass
+    anchor = _abs(ffmpeg)
+    if anchor:
+        sib = Path(anchor).with_name(exe)
+        if sib.is_file():
+            return str(sib)
+    for d in (os.environ.get("PATH", "") if path_env is None else path_env).split(os.pathsep):
+        d = d.strip().strip('"')
+        if not d or not Path(d).is_absolute():
+            continue
+        c = Path(d) / exe
+        if c.is_file():
+            return str(c)
+    return None
+
+
+def probe_media(path, runner=None, ffmpeg=None, ffprobe=None, timeout=300, path_env=None) -> dict:
+    # path_env: tests only (replaces PATH and turns the engine-home and ffmpeg_choice lookups off)
     """Measure an exported file for encode_findings: streams, keyframe gap, closed GOP (trace_headers on a stream copy,
     the first 120 s), loudness and true peak (ebur128). Fails open: a missing tool or a step that fails adds a note and
-    the other values are still returned."""
+    the other values are still returned (encode_findings then says "not measured"). The tools run only by absolute
+    path (_probe_tool); an explicit relative ffmpeg/ffprobe is refused."""
     run = runner or _default_runner
     info, notes = {}, []
-    ff, fp = ffmpeg, ffprobe
-    if ff is None and runner is None:
-        try:
-            from .common import ffmpeg_exe
-            ff = ffmpeg_exe()
-        except Exception:  # noqa: BLE001
-            ff = None
-    ff = ff or "ffmpeg"
-    if fp is None:
-        import shutil
-        sibling = Path(ff).with_name("ffprobe.exe" if str(ff).lower().endswith(".exe") else "ffprobe") if Path(ff).parent != Path(".") else None
-        fp = str(sibling) if sibling is not None and sibling.is_file() else (shutil.which("ffprobe") or "ffprobe")   # never the current folder
+    if ffmpeg is not None or ffprobe is not None:
+        ff, fp = _abs(ffmpeg), _abs(ffprobe)
+        if ffmpeg is not None and ff is None:
+            notes.append("ffmpeg: not an absolute path, not run")
+        if ffprobe is not None and fp is None:
+            notes.append("ffprobe: not an absolute path, not run")
+        if ffmpeg is None:
+            ff = _probe_tool("ffmpeg", None, path_env)
+        if ffprobe is None:
+            fp = _probe_tool("ffprobe", ff, path_env)
+    else:
+        ff = None
+        if path_env is None:
+            try:
+                from .common import ffmpeg_exe
+                ff = _abs(ffmpeg_exe())
+            except Exception:  # noqa: BLE001
+                ff = None
+        ff = ff or _probe_tool("ffmpeg", None, path_env)
+        fp = _probe_tool("ffprobe", ff, path_env)
     src = str(path)
 
     def go(label, argv):
+        if not argv[0]:
+            notes.append(f"{label}: {'ffprobe' if label in ('streams', 'keyframes') else 'ffmpeg'} not available")
+            return None
         try:
             p = run(argv, timeout=timeout)
         except Exception as e:  # noqa: BLE001  FileNotFoundError, TimeoutExpired, OSError: the tool is advisory
@@ -733,7 +917,7 @@ def probe_media(path, runner=None, ffmpeg=None, ffprobe=None, timeout=300) -> di
             notes.append("keyframes: unreadable output")
         if g is not None:
             info["gop_s"] = g
-    p = go("closed GOP", [ff, "-v", "trace", "-t", "120", "-i", src, "-map", "0:v:0", "-c", "copy", "-bsf:v", "trace_headers",
+    p = go("closed GOP", [ff, "-v", "info", "-t", "120", "-i", src, "-map", "0:v:0", "-c", "copy", "-bsf:v", "trace_headers",
                           "-f", "null", "-"])
     if p is not None:
         c = closed_gop_from_trace((p.stderr or "") + (p.stdout or ""))

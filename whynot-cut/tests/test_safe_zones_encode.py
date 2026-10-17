@@ -86,16 +86,17 @@ class Findings(unittest.TestCase):
         self.assertIn("ذروة", f[0]["text"])
 
     def test_c51_unmeasured_values_are_not_findings(self):
-        self.assertEqual(SZ.encode_findings({}, self.p), [])
-        self.assertEqual(SZ.encode_findings({"codec": None, "loudness_lufs": None, "closed_gop": None}, self.p), [])
-        self.assertEqual(SZ.encode_findings({"loudness_lufs": "loud", "level": "x", "gop_s": float("nan")}, self.p), [])
-        self.assertEqual(SZ.encode_findings(None, self.p), [])
+        # an unmeasured value is never a mismatch; it is one "not measured" line instead (never a silent pass)
+        for m in ({}, {"codec": None, "loudness_lufs": None, "closed_gop": None},
+                  {"loudness_lufs": "loud", "level": "x", "gop_s": float("nan")}, None):
+            self.assertEqual([x["severity"] for x in SZ.encode_findings(m, self.p)], ["not_measured"], m)
 
     def test_c51_unpublished_values_never_checked(self):
         shipped = SZ.load("ig_reels_organic")       # no loudness / GOP length / level in the shipped file
         bad = dict(GOOD, loudness_lufs=-3.0, true_peak_dbtp=3.0, gop_s=30.0, level=6.2)
-        self.assertEqual(SZ.encode_findings(bad, shipped), [])
-        self.assertEqual([x["check"] for x in SZ.encode_findings(dict(GOOD, closed_gop=False), shipped)], ["closed_gop"])
+        adv = lambda f: [x["check"] for x in f if x["severity"] == "advisory"]   # noqa: E731
+        self.assertEqual(adv(SZ.encode_findings(bad, shipped)), [])
+        self.assertEqual(adv(SZ.encode_findings(dict(GOOD, closed_gop=False), shipped)), ["closed_gop"])
 
     def test_c54_no_encode_block(self):
         self.assertEqual(SZ.encode_findings(dict(GOOD, closed_gop=False), SZ.load("yt_shorts")), [])
@@ -191,7 +192,8 @@ class Probe(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0, stdout="", stderr=(FIX / "ebur128_summary.txt").read_text(encoding="utf-8"))
             return subprocess.CompletedProcess(argv, 0, stdout=out, stderr="")
 
-        info = SZ.probe_media("x.mp4", runner=runner)
+        tools = Path(tempfile.mkdtemp())
+        info = SZ.probe_media("x.mp4", runner=runner, ffmpeg=str(tools / "ffmpeg.exe"), ffprobe=str(tools / "ffprobe.exe"))
         self.assertEqual((info["codec"], info["gop_s"], info["closed_gop"], info["loudness_lufs"]), ("h264", 2.0, True, -12.1))
         self.assertEqual(len(calls), 4)
         self.assertTrue(all(a[0] for a in calls))
@@ -300,8 +302,89 @@ class RealFfmpeg(unittest.TestCase):
             self.assertTrue(-30 < i["loudness_lufs"] < -15, i)
             self.assertLess(i["true_peak_dbtp"], 0)
         f = SZ.encode_findings(o, fixture_profile())
-        self.assertEqual([x["check"] for x in f], ["closed_gop"])
-        self.assertEqual(SZ.encode_findings(c, fixture_profile()), [])
+        self.assertEqual([x["check"] for x in f if x["severity"] == "advisory"], ["closed_gop"])
+        self.assertEqual([x["check"] for x in SZ.encode_findings(c, fixture_profile()) if x["severity"] == "advisory"], [])
+
+
+class AcceptanceEncode(unittest.TestCase):
+    """The executor's acceptance review of 4451e94: ffprobe/ffmpeg never from the current folder (SEC-1 class), an
+    unmeasured value is shown as "not measured" (never a silent pass), -v info for the trace."""
+
+    def planted_cwd(self):
+        import os
+        d = Path(tempfile.mkdtemp())
+        for n in ("ffprobe", "ffprobe.exe", "ffmpeg", "ffmpeg.exe"):
+            (d / n).write_text("x")
+        return d, os.getcwd()
+
+    def test_planted_tools_in_the_current_folder_are_never_run(self):
+        import os
+        calls = []
+
+        def runner(argv, **k):
+            calls.append(str(argv[0]))
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+
+        d, old = self.planted_cwd()
+        path0 = os.environ.get("PATH", "")
+        os.chdir(d)
+        os.environ["PATH"] = os.pathsep.join([".", "", "relative" + os.sep + "bin", path0])   # relative PATH entries too
+        try:
+            info = SZ.probe_media("x.mp4", runner=runner)
+        finally:
+            os.chdir(old)
+            os.environ["PATH"] = path0
+        for c in calls:
+            self.assertTrue(Path(c).is_absolute(), c)                  # never a bare name the OS resolves from the cwd
+            self.assertNotEqual(Path(c).resolve().parent, d.resolve(), c)
+        self.assertIsInstance(info, dict)
+
+    def test_resolver_order_and_refusals(self):
+        import os
+        fake = Path(tempfile.mkdtemp())
+        (fake / ("ffprobe.exe" if os.name == "nt" else "ffprobe")).write_text("x")
+        ff = fake / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        ff.write_text("x")
+        self.assertEqual(Path(SZ._probe_tool("ffprobe", str(ff))).parent, fake)        # beside the engine's ffmpeg
+        self.assertIsNone(SZ._probe_tool("ffprobe", "ffmpeg", path_env=""))              # a bare ffmpeg is no anchor
+        self.assertIsNone(SZ._probe_tool("ffprobe", None, path_env="." + os.pathsep + "rel"))   # relative PATH entries skipped
+        self.assertEqual(Path(SZ._probe_tool("ffprobe", None, path_env=str(fake))).parent, fake)  # absolute PATH entry ok
+
+    def test_unavailable_probe_is_not_measured_never_a_silent_pass(self):
+        def runner(argv, **k):
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        info = SZ.probe_media("x.mp4", runner=runner, ffmpeg=None, ffprobe=None, path_env="")
+        self.assertTrue(info.get("notes"))
+        f = SZ.encode_findings(info, fixture_profile())
+        nm = [x for x in f if x["severity"] == "not_measured"]
+        self.assertEqual(len(nm), 1)
+        self.assertIn("لم", nm[0]["text"])
+        self.assertIn("codec", nm[0]["keys"])
+        self.assertIn("closed_gop", nm[0]["keys"])
+        for bad in ("None", "{", "closed_gop", "_"):
+            self.assertNotIn(bad, nm[0]["text"])
+        self.assertEqual(SZ.encode_findings(dict(GOOD), fixture_profile()), [])        # everything measured: no such line
+
+    def test_relative_explicit_tools_are_refused(self):
+        calls = []
+
+        def runner(argv, **k):
+            calls.append(str(argv[0]))
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+        SZ.probe_media("x.mp4", runner=runner, ffmpeg="ffmpeg", ffprobe="ffprobe", path_env="")
+        self.assertEqual(calls, [])
+
+    def test_trace_runs_at_info_level(self):
+        calls = []
+
+        def runner(argv, **k):
+            calls.append([str(a) for a in argv])
+            return subprocess.CompletedProcess(argv, 1, stdout="", stderr="")
+        fake = Path(tempfile.mkdtemp())
+        SZ.probe_media("x.mp4", runner=runner, ffmpeg=str(fake / "ffmpeg.exe"), ffprobe=str(fake / "ffprobe.exe"))
+        tr = next(c for c in calls if "trace_headers" in c)
+        self.assertEqual(tr[tr.index("-v") + 1], "info")
+        self.assertNotIn("trace", [tr[tr.index("-v") + 1]])
 
 
 if __name__ == "__main__":

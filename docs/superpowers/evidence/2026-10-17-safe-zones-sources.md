@@ -4,7 +4,8 @@
 # Safe-zone profiles: where every number comes from (Phase 4 Task 27, R-4.5)
 
 Read on **2026-10-17** by the API-credit lane. File: `whynot-cut/config/defaults/safe-zones.json`. Basis order:
-official → template → screenshot → community (last resort, flagged in the file and in the QC line). Quotes are at most
+official → derived (an official number reused for a placement the platform gives none for) → template → screenshot →
+community (last resort, flagged in the file and in the QC line). Every QC line names the basis of the numbers it used. Quotes are at most
 15 words. No screenshot of a third-party UI is stored in the repo; the TikTok template images were opened only to
 measure them and live outside the repo.
 
@@ -22,12 +23,17 @@ community number with a measured one (see "Open items").
 
 Rounding is toward safety (zones grow). The action rail has **no published number**: it is not guessed.
 
-## Instagram Reels, organic — `ig_reels_organic`
-Meta publishes no organic figure. The ads numbers above are reused as the closest official numbers; every zone note
-says «Ads figure reused for organic». The right-hand action rail (like / comment / share) has **no published number and
+## Instagram Reels, organic — `ig_reels_organic` (derived)
+Meta publishes no organic figure. The ads numbers above are reused as the closest official numbers, so every zone's
+basis is `derived` (not `official`) and its note says «Derived: the Reels ads-guide figure reused for organic». The right-hand action rail (like / comment / share) has **no published number and
 we did not guess one**: the profile carries it as an explicit gap (`gaps`), which the QC line prints, so a clean result
 never silently claims the rail was checked. Needs Yunus: an in-app screenshot of an organic Reel to measure the rail
 (see "Open items"). The same gap is stated on the two ads profiles.
+
+## Right-to-left captions
+`load(..., rtl=True)` keeps every left-to-right zone and adds a mirrored copy of each zone marked `mirror_rtl` (TikTok's
+action rail): the app's buttons follow the viewer's app language, not the caption language, so an Arabic caption must
+clear both layouts (TikTok safe text 240–840 px wide instead of 120–840).
 
 ## Instagram Reels, ads with disclaimer — `ig_reels_ads_disclaimer` (bottom band: community)
 | Number | Value | Source | Quote / method |
@@ -62,21 +68,23 @@ from a third-party reading of Google's universal all-YouTube template, https://w
 (10 % top, 25 % bottom, 10 % right); the wider one is used for safety. **Re-verify with a screenshot or Google's overlay.**
 The page https://support.google.com/youtube/answer/10059070?hl=en states no safe-zone, codec or loudness number.
 
-## 4:5 feed — `feed_4x5` (community, flagged)
-No platform publishes a 4:5 number. The side margin borrows the 6 % of the Reels ads guide; the page
-https://www.facebook.com/business/ads-guide/update/video/instagram-feed states none. The feed UI sits outside the
+## 4:5 feed — `feed_4x5` (derived)
+No platform publishes a 4:5 number. The side margin reuses the 6 % of the official Reels ads guide
+(https://www.facebook.com/business/ads-guide/update/image/instagram-reels, cited as the `source`), so its basis is
+`derived`; the page https://www.facebook.com/business/ads-guide/update/video/instagram-feed states none. The feed UI sits outside the
 video frame, so no top/bottom zone is claimed.
 
 ## Delivery-encode blocks
 | Profile | Values | Source | Quote |
 |---|---|---|---|
-| ig_reels_organic | codec H.264 or HEVC, closed GOP, 4:2:0, 23–60 fps, AAC ≤ 48 kHz, 1–2 channels, MOV/MP4 | https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media | «HEVC or H264, progressive scan, closed GOP, 4:2:0 chroma subsampling.» · «23-60 FPS.» · «AAC, 48khz sample rate maximum, 1 or 2 channels» · «MOV or MP4 (MPEG-4 Part 14), no edit lists, moov atom at the front of the file.» (read 2026-10-17) |
+| ig_reels_organic (derived) | codec H.264 or HEVC, closed GOP, 4:2:0, 23–60 fps, AAC ≤ 48 kHz, 1–2 channels, MOV/MP4 | https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media | «HEVC or H264, progressive scan, closed GOP, 4:2:0 chroma subsampling.» · «23-60 FPS.» · «AAC, 48khz sample rate maximum, 1 or 2 channels» · «MOV or MP4 (MPEG-4 Part 14), no edit lists» (read 2026-10-17). These are the API-upload requirements: for an organic Reel posted from the app the closed-GOP rule is the closest official rule, not a stated app requirement. |
 | ig_reels_ads, ig_reels_ads_disclaimer | H.264, AAC ≥ 128 kbps, MP4/MOV | https://www.facebook.com/business/ads-guide/update/video/instagram-reels | Arabic page, read in Arabic and translated: «نوع الملف: MP4، MOV» (file type MP4, MOV), «فيديو مضغوط بتنسيق H.264» (video compressed as H.264), AAC stereo at 128 kbps or higher |
 | tiktok | bitrate ≥ 2,500 kbps, MP4/MOV | TikTok in-feed page above | the page's spec lines (as summarised on reading 2026-10-17): non-Spark videos «bitrate ≥2,500kbps»; Spark Ads Pull «normally .mp4 or .mov» |
 No platform page we read publishes a GOP length, an H.264 profile/level or a loudness target, so those keys are absent
 and `encode_findings` never checks them (the tests use a fixture profile with made-up limits).
 
 ## Open items (Yunus, optional)
-1. Replace the community numbers (YouTube Shorts, the 40 % disclaimer band, the 4:5 sides, the organic IG rail) with a
+1. Replace the community and derived numbers (YouTube Shorts, the 40 % disclaimer band, the 4:5 sides, the organic IG
+   bands and rail) with a
    measurement: one screenshot per platform taken on your phone and account, kept outside the repo.
 2. Re-verify everything at each minor release.

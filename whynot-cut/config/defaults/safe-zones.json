@@ -18,10 +18,10 @@
       1080,
       269
      ],
-     "basis": "official",
+     "basis": "derived",
      "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
      "retrieved": "2026-10-17",
-     "note": "14% of 1080x1920 = 268.8, rounded up. Profile icon / header. Ads figure reused for organic: Meta publishes no organic Reels number."
+     "note": "14% of 1080x1920 = 268.8, rounded up. Profile icon / header. Derived: the Reels ads-guide figure reused for organic; Meta publishes no organic Reels number."
     },
     {
      "name": "bottom_ui",
@@ -32,10 +32,10 @@
       1080,
       1920
      ],
-     "basis": "official",
+     "basis": "derived",
      "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
      "retrieved": "2026-10-17",
-     "note": "35% of 1920 = 672: the bottom band starts at y=1248. Caption / sound / buttons. Ads figure reused for organic: Meta publishes no organic Reels number."
+     "note": "35% of 1920 = 672: the bottom band starts at y=1248. Caption / sound / buttons. Derived: the Reels ads-guide figure reused for organic; Meta publishes no organic Reels number."
     },
     {
      "name": "left_margin",
@@ -46,10 +46,10 @@
       65,
       1920
      ],
-     "basis": "official",
+     "basis": "derived",
      "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
      "retrieved": "2026-10-17",
-     "note": "6% of 1080 = 64.8, rounded up. Ads figure reused for organic: Meta publishes no organic Reels number."
+     "note": "6% of 1080 = 64.8, rounded up. Derived: the Reels ads-guide figure reused for organic; Meta publishes no organic Reels number."
     },
     {
      "name": "right_margin",
@@ -60,10 +60,10 @@
       1080,
       1920
      ],
-     "basis": "official",
+     "basis": "derived",
      "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
      "retrieved": "2026-10-17",
-     "note": "6% of 1080 = 64.8, rounded up. The action rail itself has no published number: not guessed. Ads figure reused for organic: Meta publishes no organic Reels number."
+     "note": "6% of 1080 = 64.8, rounded up. The action rail itself has no published number: not guessed. Derived: the Reels ads-guide figure reused for organic; Meta publishes no organic Reels number."
     }
    ],
    "safe_text": [
@@ -95,10 +95,10 @@
     ],
     "fps_min": 23,
     "fps_max": 60,
-    "basis": "official",
+    "basis": "derived",
     "source": "https://developers.facebook.com/docs/instagram-platform/instagram-graph-api/reference/ig-user/media",
     "retrieved": "2026-10-17",
-    "note": "Instagram Graph API Reels specification. The platform publishes no GOP length, profile, level or loudness number: those are absent, not guessed."
+    "note": "Instagram Graph API Reels specification: these are the API-upload requirements (closed GOP included), applied to an organic Reel as the closest official rule. The platform publishes no GOP length, profile, level or loudness number: those are absent, not guessed."
    },
    "platform_ar": "إنستجرام",
    "gaps": [
@@ -495,10 +495,10 @@
       65,
       1350
      ],
-     "basis": "community",
-     "source": "https://www.solidlabs.com/social-safe-zones",
+     "basis": "derived",
+     "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
      "retrieved": "2026-10-17",
-     "note": "No 4:5 number is published. Meta asks to keep side edges clear on feed video; the 6% side figure of the Reels ads guide is borrowed. Re-verify."
+     "note": "Derived: no 4:5 number is published; the 6% side figure of the official Reels ads guide (its source) is reused. Re-verify."
     },
     {
      "name": "right_margin",
@@ -509,10 +509,10 @@
       1080,
       1350
      ],
-     "basis": "community",
-     "source": "https://www.solidlabs.com/social-safe-zones",
+     "basis": "derived",
+     "source": "https://www.facebook.com/business/ads-guide/update/image/instagram-reels",
      "retrieved": "2026-10-17",
-     "note": "Same borrowed 6% side figure."
+     "note": "Derived: the same 6% side figure of the official Reels ads guide."
     }
    ],
    "safe_text": [
