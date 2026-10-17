@@ -7,7 +7,8 @@ scan(base, cache_dir) -> [{path, name, folder, textFields, thumb}]: every .mogrt
 (`base`), sorted by folder then name (UTF-16 code-unit order, like the JavaScript it replaces). A .mogrt is a zip:
 definition.json (name, text controls) and thumb.png are read from it (read only) with stdlib zipfile; the thumbnail is
 written as <cache_dir>/mogrt-thumbs/<sha1 of the path>.png and the records are cached in <cache_dir>/mogrt-index.json keyed
-"<path>|<modification time>", so a template is opened again only when it changed (or its thumbnail was lost). A hidden
+"<path>|<modification time>", so a template is opened again only when it changed (or its thumbnail was lost). Cache files
+are written atomically (temp name + replace) with default permissions (nothing in them is secret). A hidden
 file or folder (a name starting with ".") is skipped; a template that cannot be read still gets a record (name from the
 file name, no text fields, no thumbnail), as upstream. definition_info / folder_of are the engine twins of the panel's pure
 functions KalamMogrt.definitionInfo / folderOf (tested against the JS port).
@@ -19,6 +20,22 @@ import json
 import os
 import re
 import zipfile
+
+
+def _atomic_write(path: str, data: bytes) -> None:
+    """write through a temp name and replace: a crash or a full disk leaves the previous file whole (default permissions:
+    the cache holds thumbnails and a template index, nothing secret)"""
+    tmp = "%s.%d.tmp" % (path, os.getpid())
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 __all__ = ["scan", "definition_info", "folder_of"]
 
@@ -73,8 +90,7 @@ def _read(p: str, key: str, thumbs: str):
         thumb = ""
         if png:
             thumb = os.path.join(thumbs, hashlib.sha1(p.encode("utf-8")).hexdigest() + ".png")
-            with open(thumb, "wb") as f:
-                f.write(png)
+            _atomic_write(thumb, png)
         return {"path": p, "name": info["name"] or _basename(p), "textFields": info["textFields"], "thumb": thumb}, True
     except Exception:  # noqa: BLE001  (upstream catches everything: a template we cannot read is still listed)
         return {"path": p, "name": _basename(p), "textFields": [], "thumb": ""}, False
@@ -131,8 +147,7 @@ def scan(base, cache_dir) -> list:
 
     walk(base)
     try:
-        with open(index_file, "w", encoding="utf-8", newline="\n") as f:
-            f.write(json.dumps(cache, ensure_ascii=False))
+        _atomic_write(index_file, json.dumps(cache, ensure_ascii=False).encode("utf-8"))
     except OSError:
         pass
     out.sort(key=lambda m: (_u16(m["folder"]), _u16(m["name"]), _u16(m["path"])))

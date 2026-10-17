@@ -263,7 +263,7 @@ def check_subscription(exe, auth_runner=None) -> str:
     runner = auth_runner or _run_auth_status
     with tempfile.TemporaryDirectory(prefix="wnc-kalam-cc-") as d:
         try:
-            _code, out = runner(cmd + ["--safe-mode", "auth", "status"], d)
+            code, out = runner(cmd + ["--safe-mode", "auth", "status"], d)
             data = json.loads(out)
         except (OSError, ValueError, subprocess.SubprocessError):
             raise SubscriptionRefused("auth_status_unavailable", _AUTH_UNAVAILABLE) from None
@@ -272,6 +272,8 @@ def check_subscription(exe, auth_runner=None) -> str:
         raise SubscriptionRefused("auth_status_unavailable", _AUTH_UNAVAILABLE)
     if method == "claude.ai" and data.get("loggedIn") is False:
         method = "none"
+    if method == "claude.ai" and code != 0:         # a failing command is never trusted, whatever it printed
+        raise SubscriptionRefused("auth_status_unavailable", _AUTH_UNAVAILABLE)
     if method != "claude.ai":
         raise SubscriptionRefused("subscription_not_active", _not_active_how(method))
     return method

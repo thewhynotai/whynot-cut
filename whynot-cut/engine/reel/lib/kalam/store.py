@@ -9,8 +9,10 @@ and ~/Library/Application Support/Kalam, engine.js).
     models/                 the Kalam model pack (CTranslate2 Whisper copies, Parakeet ONNX; lib/kalam/setup_models.py)
     hf/                     the Hugging Face cache of the aligner (HF_HOME)
 
-Everything is user-only (serve.security.private_dir / open_private: POSIX 0700 / 0600, Windows a protected DACL for the
-current user), the helpers `reel serve` and the Hush / Tidy stores use; text is UTF-8 with \\n line ends and no BOM.
+The settings, the log and the per-run files are user-only (serve.security.private_dir / open_private: POSIX 0700 / 0600,
+Windows a protected DACL for the current user), the helpers `reel serve` and the Hush / Tidy stores use; cache/ (the MOGRT
+index and thumbnails written by lib/kalam/mogrt.py, nothing secret) uses default permissions, written atomically; text is
+UTF-8 with \\n line ends and no BOM.
 Secrets: the API key reaches the engine only in the per-run settings file, which `take_settings` deletes right after
 reading it (A6b gate 3); `redact` / `report_text` keep keys and settings out of every report (Kalam FR-24 rule).
 `safe_name` is the JS port's `KalamPlatform.safeName` (adobe/tools/kalam/src/js/platform.js) plus two Windows gaps its review
@@ -21,6 +23,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -61,11 +65,31 @@ def redact(obj):
     return obj
 
 
-def take_settings(path) -> dict:
+def _is_reparse(path) -> bool:
+    """a symbolic link, or on Windows any reparse point (junction, symlink, mount point)"""
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+
+def take_settings(path, store=None) -> dict:
     """Read the per-run settings file (JSON, UTF-8, a BOM is accepted) and DELETE it, whatever the content is: the API key
     in it must not stay on disk (A6b gate 3). OSError when it cannot be read or deleted, ValueError when it is not a JSON
-    object."""
+    object. PermissionError, with nothing read or deleted, unless the file really lies in the store's run folder
+    (<engine home>/tools/kalam/run) or the temp folder (resolved: no ".." or link can lead out), is not a link / reparse
+    point, and is not the persistent settings.json: the engine must never delete a file it was merely pointed at."""
+    store = store or Store()
     p = Path(path)
+    if _is_reparse(p):
+        raise PermissionError("refusing to read a link as the per-run settings file: %s" % p.name)
+    real = Path(os.path.realpath(p))
+    if real == Path(os.path.realpath(store.settings_file)):
+        raise PermissionError("refusing to take the persistent settings file: only a per-run settings file is deleted")
+    roots = [Path(os.path.realpath(r)) for r in (store.run_dir, tempfile.gettempdir())]
+    if not any(real == r or real.is_relative_to(r) for r in roots):
+        raise PermissionError("the per-run settings file must be in %s or the temp folder (not %s)" % (store.run_dir, p.parent))
     raw = p.read_bytes()
     try:
         p.unlink()
@@ -99,6 +123,7 @@ class Store:
         self.cache_dir = self.home / "cache"
         self.models_dir = self.home / "models"
         self.hf_dir = self.home / "hf"
+        self.run_dir = self.home / "run"          # the per-run settings files (take_settings deletes them)
         self.settings_file = self.home / "settings.json"
         self.log_file = self.logs / "whynot-kalam.log"
 

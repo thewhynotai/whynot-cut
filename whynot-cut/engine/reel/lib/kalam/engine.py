@@ -64,9 +64,27 @@ def aligner_present() -> bool:
         return False
 
 
+def _nvidia_smi():
+    """nvidia-smi by its absolute path: a folder of PATH that is absolute (platform.find_on_path, the same discovery as
+    for Claude: never the current folder, never a bare name), then System32 on Windows; None when it is not there"""
+    found = _platform.find_on_path("nvidia-smi", os.environ.get("PATH", ""))
+    if found:
+        return found
+    if _platform.is_windows():
+        root = os.environ.get("SystemRoot") or os.environ.get("SYSTEMROOT")
+        if root:
+            candidate = Path(root) / "System32" / "nvidia-smi.exe"
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
 def _gpu() -> str:
+    exe = _nvidia_smi()
+    if not exe:
+        return ""
     try:
-        out = subprocess.run(["nvidia-smi", "--query-gpu=name,driver_version", "--format=csv,noheader"],
+        out = subprocess.run([exe, "--query-gpu=name,driver_version", "--format=csv,noheader"],
                              capture_output=True, text=True, encoding="utf-8", timeout=15).stdout.strip()
         return out or ""
     except Exception:
@@ -130,6 +148,7 @@ def say(**kw):
     data = (text + "\n").encode("utf-8")
     buf = getattr(sys.stdout, "buffer", None)
     if buf is not None:
+        sys.stdout.flush()                         # text a library printed before must not land after (or inside) our line
         buf.write(data)
         buf.flush()
     else:                                          # a text-only stand-in for stdout

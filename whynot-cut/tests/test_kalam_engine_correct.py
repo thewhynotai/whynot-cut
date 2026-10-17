@@ -1358,6 +1358,22 @@ class TestSubscriptionAuthPreflight(unittest.TestCase):
         self.assertEqual(stats["error"], "subscription_not_active")
         self.assertIn("/login", stats["how"])
 
+    def test_a_failing_status_command_is_never_trusted_even_if_it_printed_claude_ai(self):
+        for code in (1, 2, 127):
+            calls = []
+            out, stats = correct(SRC, "rules", {}, "", client=self._pair((code, auth_json("claude.ai")), calls))
+            self.assertEqual([c[0] for c in calls], ["auth"], code)
+            self.assertEqual((out, stats["error"]), (SRC, "auth_status_unavailable"), code)
+        # a non-zero exit with another method still names that method (not logged in exits 1 as well)
+        _o, stats = correct(SRC, "rules", {}, "", client=self._pair((1, auth_json("api_key"))))
+        self.assertEqual(stats["error"], "subscription_not_active")
+        _o, stats = correct(SRC, "rules", {}, "", client=self._pair((1, auth_json("none", logged_in=False))))
+        self.assertEqual(stats["error"], "subscription_not_active")
+        self.assertEqual(_correct_module.check_subscription("/x/claude", auth_runner=lambda a, c: (0, auth_json())), "claude.ai")
+        with self.assertRaises(_correct_module.SubscriptionRefused) as cm:
+            _correct_module.check_subscription("/x/claude", auth_runner=lambda a, c: (1, auth_json()))
+        self.assertEqual(cm.exception.code, "auth_status_unavailable")
+
     def test_a_check_that_cannot_be_trusted_refuses_as_unavailable(self):
         cases = {"missing": OSError("no such file"), "timeout": subprocess.TimeoutExpired("claude", 60),
                  "not json": (1, "error: unknown command"), "empty": (0, ""), "list": (0, "[]"),

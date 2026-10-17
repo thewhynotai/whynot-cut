@@ -63,6 +63,12 @@ def mod(name):
     return importlib.import_module("lib.kalam." + name)
 
 
+def touch(p: Path, text: str = "x") -> Path:
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
 def run_js(root, load, calls):
     """calls = [{"fn": "KalamPlatform.safeName", "args": [...]}] through adobe/tools/_harness/js_runner.js in ONE node process"""
     with tempfile.TemporaryDirectory() as d:
@@ -192,6 +198,60 @@ class TestStore(unittest.TestCase):
             self.assertFalse(f.exists(), text)
         with self.assertRaises(OSError):
             t(Path(self._tmp.name) / "missing.json")
+
+    def test_take_settings_accepts_the_run_folder_of_the_store_and_the_temp_folder(self):
+        take = mod("store").take_settings
+        self.S.run_dir.mkdir(parents=True)
+        for folder in (self.S.run_dir, Path(tempfile.gettempdir())):
+            f = folder / "kalam-run-settings.json"
+            f.write_text(json.dumps({"a": 1}), encoding="utf-8")
+            self.assertEqual(take(f, store=self.S), {"a": 1})
+            self.assertFalse(f.exists())
+
+    def test_take_settings_refuses_the_persistent_settings_file_and_keeps_it(self):
+        self.assertTrue(self.S.save_settings({"max_line": 30}))
+        with self.assertRaises(PermissionError):
+            mod("store").take_settings(self.S.settings_file, store=self.S)
+        self.assertTrue(self.S.settings_file.is_file())
+        with self.assertRaises(PermissionError):                      # also spelled through the folder with a ".." step
+            mod("store").take_settings(self.S.home / "logs" / ".." / "settings.json", store=self.S)
+        self.assertTrue(self.S.settings_file.is_file())
+
+    def test_take_settings_refuses_a_file_outside_the_expected_locations_and_keeps_it(self):
+        take = mod("store").take_settings
+        outside = Path.home() / "somewhere-else" / "notes.json"
+        outside.parent.mkdir(parents=True)
+        outside.write_text(json.dumps({"api_key": "x"}), encoding="utf-8")
+        with self.assertRaises(PermissionError) as cm:
+            take(outside, store=self.S)
+        self.assertIn("settings", str(cm.exception))
+        self.assertTrue(outside.is_file())
+        climb = Path(tempfile.gettempdir()) / ".." / ".." / "escape.json"            # resolves above the temp folder
+        with self.assertRaises(PermissionError):
+            take(climb, store=self.S)
+
+    def test_take_settings_refuses_a_reparse_point_and_keeps_both_files(self):
+        take = mod("store").take_settings
+        target = Path(self._tmp.name) / "real.json"
+        target.write_text(json.dumps({"a": 1}), encoding="utf-8")
+        link = Path(self._tmp.name) / "link.json"
+        try:
+            os.symlink(target, link)
+        except (OSError, NotImplementedError):
+            self.skipTest("this account cannot create symbolic links")
+        with self.assertRaises(PermissionError):
+            take(link, store=self.S)
+        self.assertTrue(target.is_file() and link.is_symlink())
+
+    def test_a_windows_reparse_point_attribute_is_refused_too(self):
+        S = mod("store")
+        f = Path(self._tmp.name) / "junction-like.json"
+        f.write_text(json.dumps({"a": 1}), encoding="utf-8")
+        with mock.patch.object(S, "_is_reparse", lambda path: True):
+            with self.assertRaises(PermissionError):
+                S.take_settings(f, store=self.S)
+        self.assertTrue(f.is_file())
+        self.assertFalse(S._is_reparse(f))                                  # an ordinary file is not one
 
     def test_take_settings_reads_a_bom(self):
         f = Path(self._tmp.name) / "bom.json"
@@ -349,6 +409,31 @@ class TestMogrtScan(unittest.TestCase):
         self.assertNotIn(b"\r", raw)
         json.loads(raw.decode("utf-8"))
 
+    def test_cache_files_are_written_through_a_temp_name_and_replaced(self):
+        calls, real = [], os.replace
+        with mock.patch("os.replace", lambda a, b: (calls.append((str(a), str(b))), real(a, b))[1]):
+            self.M.scan(str(self.base), str(self.cache))
+        targets = {os.path.basename(b) for _a, b in calls}
+        self.assertIn("mogrt-index.json", targets)
+        self.assertTrue(any(t.endswith(".png") for t in targets))
+        self.assertTrue(all(a.endswith(".tmp") for a, _b in calls))
+        self.assertEqual(list(self.cache.rglob("*.tmp")), [])
+
+    def test_a_failed_write_keeps_the_previous_index_and_leaves_nothing_behind(self):
+        self.M.scan(str(self.base), str(self.cache))
+        index = self.cache / "mogrt-index.json"
+        before = index.read_bytes()
+        make_mogrt(self.base / "New One.mogrt", definition("New One", ("Text",)))
+        with mock.patch("os.replace", side_effect=OSError("disk full")):
+            self.M.scan(str(self.base), str(self.cache))                 # must not raise
+        self.assertEqual(index.read_bytes(), before)
+        self.assertEqual(list(self.cache.rglob("*.tmp")), [])
+
+    def test_the_store_docstring_does_not_claim_the_cache_is_private(self):
+        doc = mod("store").__doc__
+        self.assertNotIn("Everything is user-only", doc)
+        self.assertIn("default permissions", doc)
+
     def test_the_scan_never_modifies_the_templates(self):
         before = {p: (p.read_bytes(), p.stat().st_mtime_ns) for p in self.base.rglob("*.*") if p.is_file()}
         self.M.scan(str(self.base), str(self.cache))
@@ -415,8 +500,7 @@ class TestMogrtScanMatchesUpstream(unittest.TestCase):
             js_cache, py_cache = d / "cache-js", d / "cache-py"
             p = subprocess.run([NODE, "-e", self.SCRIPT, str(KALAM_UP / "js" / "mogrt.js"), str(base), str(js_cache)],
                                capture_output=True, text=True, encoding="utf-8", timeout=120)
-            if p.returncode != 0:
-                self.skipTest("the upstream scan does not run under this node: %s" % p.stderr[-300:])
+            self.assertEqual(p.returncode, 0, "the upstream scan failed under node: %s" % p.stderr[-600:])
             want = json.loads(p.stdout)
             got = M.scan(str(base), str(py_cache))
 
@@ -615,6 +699,56 @@ class TestAudio(unittest.TestCase):
 def types_module(name):
     import types
     return types.ModuleType(name)
+
+
+class TestAudioStreaming(unittest.TestCase):
+    """read_wav holds the samples once (a memory-mapped file read in blocks), never the file bytes and the samples side by
+    side; RF64 / W64 are refused with the way out"""
+
+    def test_peak_memory_is_about_the_output_not_twice_the_file(self):
+        import tracemalloc
+        A = mod("audio")
+        frames = _tone(30.0, 48000, 2)                                      # 30 s, 48 kHz, stereo, 24-bit: 8.6 MB on disk
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "long.wav"
+            path.write_bytes(_wav_bytes(frames, 48000, "pcm24"))
+            out_bytes = frames.shape[0] * frames.shape[1] * 4
+            tracemalloc.start()
+            try:
+                a2d, sr = A.read_wav(str(path))
+                _cur, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            self.assertEqual((a2d.shape, sr), (frames.shape, 48000))
+            self.assertLess(peak, out_bytes * 1.35, "peak %d vs output %d" % (peak, out_bytes))
+            path.unlink()                                                   # the file is closed (Windows would refuse)
+            self.assertFalse(path.exists())
+
+    def test_blocks_give_the_same_samples_as_one_pass_for_every_format(self):
+        A = mod("audio")
+        with tempfile.TemporaryDirectory() as d:
+            for kind in ("pcm8", "pcm16", "pcm24", "pcm32", "float32", "float64"):
+                frames = _tone(0.9, 16000, 2)
+                path = Path(d) / (kind + ".wav")
+                path.write_bytes(_wav_bytes(frames, 16000, kind))
+                whole, _ = A.read_wav(str(path))
+                with mock.patch.object(A, "BLOCK_FRAMES", 977):             # many small odd-sized blocks
+                    blocks, _ = A.read_wav(str(path))
+                self.assertEqual(whole.tobytes(), blocks.tobytes(), kind)
+
+    def test_rf64_and_w64_say_what_to_use(self):
+        A = mod("audio")
+        with tempfile.TemporaryDirectory() as d:
+            for tag in (b"RF64", b"BW64", b"riff"):
+                path = Path(d) / "big.wav"
+                path.write_bytes(tag + b"\xff\xff\xff\xffWAVE" + b"\x00" * 64)
+                with self.assertRaises(ValueError) as cm:
+                    A.read_wav(str(path))
+                self.assertIn("soundfile", str(cm.exception), tag)
+            empty = Path(d) / "empty.wav"
+            empty.write_bytes(b"")
+            with self.assertRaises(ValueError):
+                A.read_wav(str(empty))
 
 
 # ==================================================================================== test_portable.py (12) + new
@@ -949,14 +1083,15 @@ class TestSetupModels(unittest.TestCase):
 
             conv_mod.TransformersConverter = TransformersConverter
             hub = types_module("huggingface_hub")
-            hub.snapshot_download = lambda repo, allow_patterns=None, **kw: calls.append(("download", repo, allow_patterns)) or str(src)
+            hub.snapshot_download = lambda repo, allow_patterns=None, **kw: calls.append(
+                ("download", repo, allow_patterns, kw.get("revision"))) or str(src)
             with mock.patch.dict(sys.modules, {"ctranslate2": types_module("ctranslate2"), "ctranslate2.converters": conv_mod,
                                                "huggingface_hub": hub}):
-                S.convert_ct2("some/repo", out)
+                S.convert_ct2(S.ARABIC_SRC, out)
             self.assertTrue((out / "tokenizer.json").is_file())
             self.assertEqual(json.loads((out / "preprocessor_config.json").read_text(encoding="utf-8"))["feature_size"], 128)
-        self.assertEqual(calls, [("download", "some/repo", ["*.json", "model.safetensors", "*.txt"]), ("init", str(src)),
-                                 ("convert", str(out), "float16", True)])
+        self.assertEqual(calls, [("download", S.ARABIC_SRC, ["*.json", "model.safetensors", "*.txt"], S.REVISIONS[S.ARABIC_SRC]),
+                                 ("init", str(src)), ("convert", str(out), "float16", True)])
 
     def test_main_portable_prepares_only_what_is_missing_and_never_vendors(self):
         S = self.S
@@ -966,17 +1101,26 @@ class TestSetupModels(unittest.TestCase):
             (md / S.CT2_OTHER).mkdir(parents=True)
             (md / S.CT2_OTHER / "model.bin").write_bytes(b"x")                 # already there
             hub = types_module("huggingface_hub")
-            hub.snapshot_download = lambda repo, **kw: calls.append(("download", repo, kw.get("local_dir"))) or str(d)
+            hub.snapshot_download = lambda repo, **kw: calls.append(
+                ("download", repo, kw.get("local_dir"), kw.get("revision"))) or str(d)
             out = io.StringIO()
             with mock.patch.dict(sys.modules, {"huggingface_hub": hub}), \
                     mock.patch.object(S, "convert_ct2", lambda repo, dest: calls.append(("convert", repo, str(dest)))), \
                     contextlib.redirect_stdout(out):
                 S.main_portable(str(md))
         self.assertEqual(calls, [("convert", S.ARABIC_SRC, str(md / S.CT2_ARABIC)),
-                                 ("download", S.ONNX_SRC, str(md / S.ONNX_ENGLISH)),
-                                 ("download", S.ALIGNER_REPO, None)])
-        self.assertIn("portable models ready", out.getvalue())
-        self.assertNotIn(str(S.CT2_OTHER), out.getvalue())
+                                 ("download", S.ONNX_SRC, str(md / S.ONNX_ENGLISH), S.REVISIONS[S.ONNX_SRC]),
+                                 ("download", S.ALIGNER_REPO, None, S.ALIGNER_REV)])
+        text = out.getvalue()
+        self.assertIn("portable models ready", text)
+        self.assertNotIn(str(S.CT2_OTHER), text)
+        notices = [l for l in text.splitlines() if l.lstrip().startswith("model:")]
+        self.assertEqual(len(notices), 3)                                  # one notice per model, before its download
+        for repo, licence in ((S.ARABIC_SRC, "Apache-2.0"), (S.ONNX_SRC, "CC-BY-4.0"), (S.ALIGNER_REPO, "CC-BY-NC-4.0")):
+            line = next(l for l in notices if repo in l)
+            self.assertIn(licence, line)
+            self.assertIn(S.REVISIONS[repo][:8], line)
+        self.assertLess(text.index(S.ONNX_SRC), text.index("portable models ready"))
 
     def test_the_mlx_conversion_is_for_a_mac_only(self):
         S = self.S
@@ -986,6 +1130,65 @@ class TestSetupModels(unittest.TestCase):
             self.assertIn("Apple Silicon", str(cm.exception))
             with self.assertRaises(RuntimeError):
                 S.convert_hf_whisper("some/repo", Path("/out"))
+
+    def test_every_download_source_has_a_pinned_revision_from_the_licence_table(self):
+        S = self.S
+        wanted = {S.ARABIC_SRC, S.OTHER_SRC, S.ONNX_SRC, S.ALIGNER_REPO, "mlx-community/whisper-large-v3-turbo",
+                  "mlx-community/parakeet-tdt-0.6b-v2"}
+        self.assertEqual(set(S.REVISIONS), wanted)
+        for repo, rev in S.REVISIONS.items():
+            self.assertRegex(rev, r"^[0-9a-f]{40}$", repo)
+        align_w2v = importlib.import_module("lib.align_w2v")
+        self.assertEqual((S.ALIGNER_REPO, S.ALIGNER_REV), (align_w2v.MMS_REPO, align_w2v.MMS_REV))   # one place for the aligner
+        doc = HERE.parents[1] / "docs" / "legal" / "third-party-licences.md"
+        if not doc.is_file():
+            self.skipTest("docs/ is not part of the plugin zip")
+        lines = doc.read_text(encoding="utf-8").splitlines()
+        for repo, rev in S.REVISIONS.items():
+            self.assertTrue(any(repo in l and rev[:8] in l for l in lines), "%s @ %s is not in the licence table" % (repo, rev[:8]))
+
+    def test_an_unpinned_repo_is_refused_before_anything_is_downloaded(self):
+        S = self.S
+        calls = []
+        hub = types_module("huggingface_hub")
+        hub.snapshot_download = lambda *a, **k: calls.append(a) or "/x"
+        with mock.patch.dict(sys.modules, {"huggingface_hub": hub, "ctranslate2": types_module("ctranslate2"),
+                                           "ctranslate2.converters": types_module("ctranslate2.converters")}):
+            with self.assertRaises(ValueError) as cm:
+                S.convert_ct2("some/unpinned-repo", Path("/out"))
+        self.assertIn("no pinned revision", str(cm.exception))
+        self.assertEqual(calls, [])
+
+    def test_the_mac_path_pins_every_download_and_prints_the_notices(self):
+        S = self.S
+        calls, converted = [], []
+        hub = types_module("huggingface_hub")
+        hub.snapshot_download = lambda repo, **kw: calls.append((repo, kw.get("revision"))) or "/x"
+        out = io.StringIO()
+        with mock.patch.dict(sys.modules, {"huggingface_hub": hub}), mock.patch.object(S.sys, "platform", "darwin"), \
+                mock.patch.object(S, "convert_hf_whisper", lambda repo, dest: converted.append(repo)), \
+                contextlib.redirect_stdout(out), tempfile.TemporaryDirectory() as d:
+            S.main(d)
+        self.assertEqual(converted, [S.ARABIC_SRC])
+        self.assertEqual(calls, [(repo, S.REVISIONS[repo]) for repo in S.OTHERS])
+        self.assertEqual(len([l for l in out.getvalue().splitlines() if l.lstrip().startswith("model:")]), 4)
+
+    def test_the_mlx_conversion_downloads_the_pinned_revision(self):
+        S = self.S
+        calls = []
+        hub = types_module("huggingface_hub")
+
+        def snapshot(repo, **kw):
+            calls.append((repo, kw.get("revision")))
+            raise RuntimeError("stop after the download call")
+
+        hub.snapshot_download = snapshot
+        mlx, core = types_module("mlx"), types_module("mlx.core")
+        with mock.patch.dict(sys.modules, {"huggingface_hub": hub, "mlx": mlx, "mlx.core": core}), \
+                mock.patch.object(S.sys, "platform", "darwin"):
+            with self.assertRaises(RuntimeError):
+                S.convert_hf_whisper(S.ARABIC_SRC, Path("/out"))
+        self.assertEqual(calls, [(S.ARABIC_SRC, S.REVISIONS[S.ARABIC_SRC])])
 
     def test_the_mlx_name_map_is_the_owners(self):
         S = self.S
@@ -1429,25 +1632,176 @@ class TestDoctorNew(unittest.TestCase):
         self.assertIn("claude.ai", stdout.decode("utf-8"))
 
 
+class TestEngineFixRound1(EngineCase):
+    """Task 11 review: M5 (nvidia-smi through absolute-only discovery), M7 (the key injected into a logged value),
+    M9 (the text layer is flushed before bytes are written), and the any-clip checks on a fake run"""
+
+
+    def test_the_run_log_scrubs_a_key_that_a_logged_value_carries(self):
+        E = self.E
+        store = mod("store").Store()
+
+        def fake_run(wav, mode, out, settings, models, log=None):
+            log("note: the server echoed %s back" % settings["api_key"])
+            return {"stage": "done"}
+
+        with mock.patch.object(E, "run", fake_run):
+            f, argv, (code, stdout, _) = self.run_main({"correct": False, "api_key": SECRET_KEY})
+        self.assertEqual(code, 0)
+        text = store.log_file.read_text(encoding="utf-8")
+        self.assertIn("note: the server echoed ***", text)
+        self.assertNotIn(SECRET_KEY, text)
+
+    def test_say_flushes_text_written_before_it(self):
+        E = self.E
+        raw = io.BytesIO()
+        out = io.TextIOWrapper(raw, encoding="utf-8", newline="\n")             # buffered: not write_through
+        with mock.patch.object(sys, "stdout", out):
+            out.write("a library print\n")
+            E.say(stage="x")
+        data = raw.getvalue()
+        self.assertTrue(data.startswith(b"a library print\n{"), data)
+        out.detach()
+
+    def test_the_any_clip_invariants_hold_on_a_fake_run_and_a_rerun_is_identical(self):
+        outs = []
+        for n in (1, 2):
+            self.out = self.tmp / ("out%d" % n)
+            code, stdout, _ = self.run_main({"correct": False})[2]
+            self.assertEqual(code, 0)
+            outs.append(self.out)
+            duration = 3.6
+            for name in ("captions.srt", "captions.json", "words.json", "corrected.json"):
+                check_utf8_lf(self, (self.out / name).read_bytes(), name)
+            check_words(self, json.loads((self.out / "words.json").read_text(encoding="utf-8")), duration)
+            check_srt(self, (self.out / "captions.srt").read_text(encoding="utf-8"), duration)
+        for name in ("captions.srt", "captions.json", "words.json"):
+            self.assertEqual((outs[0] / name).read_bytes(), (outs[1] / name).read_bytes(), name)
+
+
+class TestGpuLookup(unittest.TestCase):
+    """engine._gpu: nvidia-smi is found like Claude: absolute PATH folders only (platform.find_on_path), then System32 on
+    Windows; a file in the current folder or a bare name is never started"""
+
+    def setUp(self):
+        self.E = mod("engine")
+
+    def test_an_absolute_path_hit_is_started_by_its_full_path(self):
+        E = self.E
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            touch(d / "cwd" / "nvidia-smi.exe")
+            real = touch(d / "bin" / ("nvidia-smi.exe" if os.name == "nt" else "nvidia-smi"))
+            os.chmod(real, 0o755)
+            seen = []
+
+            def fake_run(args, **kw):
+                seen.append(args)
+                return _types.SimpleNamespace(stdout="Example GPU, 000.00\n")
+
+            old = os.getcwd()
+            os.chdir(d / "cwd")
+            try:
+                with mock.patch.dict(os.environ, {"PATH": os.pathsep.join(["", ".", str(real.parent)]),
+                                                  "SystemRoot": str(d / "nowhere")}), \
+                        mock.patch.object(E.subprocess, "run", fake_run):
+                    out = E._gpu()
+            finally:
+                os.chdir(old)
+        self.assertEqual(out, "Example GPU, 000.00")
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(os.path.isabs(seen[0][0]))
+        self.assertEqual(os.path.normcase(seen[0][0]), os.path.normcase(str(real)))
+
+    def test_nothing_is_started_when_only_the_cwd_or_a_bare_name_could_find_it(self):
+        E = self.E
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            touch(d / "cwd" / "nvidia-smi.exe")
+            old = os.getcwd()
+            os.chdir(d / "cwd")
+            try:
+                with mock.patch.dict(os.environ, {"PATH": os.pathsep.join(["", ".", "cwd"]), "SystemRoot": str(d / "nowhere")}), \
+                        mock.patch.object(E.subprocess, "run", side_effect=AssertionError("must not start a program")):
+                    out = E._gpu()
+            finally:
+                os.chdir(old)
+        self.assertEqual(out, "")
+
+    def test_system32_is_the_windows_fallback(self):
+        E = self.E
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            smi = touch(d / "System32" / "nvidia-smi.exe")
+            seen = []
+            with mock.patch.dict(os.environ, {"PATH": "", "SystemRoot": str(d)}), mock.patch.object(E._platform, "is_windows", lambda: True), \
+                    mock.patch.object(E.subprocess, "run", lambda args, **kw: seen.append(args) or _types.SimpleNamespace(stdout="x\n")):
+                E._gpu()
+        self.assertEqual([os.path.normcase(a[0]) for a in seen], [os.path.normcase(str(smi))])
+
+
 # ================================================== test_cli.py (2) and test_pipeline_slow.py (3): real models, real clips
+# Two kinds of checks (owner direction: any input, never tuned to single cases):
+#   * INVARIANTS that hold for ANY clip (TestRealModelsAnyClip, and test_missing_key_still_makes_captions_with_notice):
+#     run when WHYNOT_KALAM_SLOW=1, the Kalam pack and a clip (WHYNOT_KALAM_TEST_WAV, an H13 clip under whynot-test/) exist.
+#   * REFERENCE checks of the owner's two clips (the upstream-named tests with their exact words, 17.68 / 15.12 s, >= 190
+#     words, >= 20 blocks): only when WHYNOT_KALAM_REFERENCE=1 AND the clip's sha256 equals WHYNOT_KALAM_REF_SHA256_AR /
+#     WHYNOT_KALAM_REF_SHA256_EN, so another clip can never run them (and fail for reasons unrelated to the engine).
 REAL_PACK = _isolation.REAL_ENGINE_HOME / "tools" / "kalam" / "models"          # read only: the sandbox engine home is empty
 WAV_AR = os.environ.get("WHYNOT_KALAM_TEST_WAV", "")                            # an H13 clip under whynot-test/ (Arabic speech)
 WAV_EN = os.environ.get("WHYNOT_KALAM_TEST_WAV_EN", "")                         # an H13 clip under whynot-test/ (English speech)
 
 
-def _slow_skip_reason(wav: str) -> str:
-    """why the real-model tests do not run here ('' = they run). They load the Kalam pack and align on the GPU or the CPU:
-    run them through the machine queue (heavy.sh gpu|job) with WHYNOT_KALAM_SLOW=1."""
+def real_hf_dir() -> Path:
+    return _isolation.REAL_ENGINE_HOME / "tools" / "kalam" / "hf"
+
+
+def slow_env(engine_home: Path) -> dict:
+    """the environment of a real-model run: a TEMP engine home (log, caches, settings stay out of the real one), the real
+    model cache and pack used read-only (HF_HOME + --models), offline"""
+    return dict(os.environ, PYTHONPATH=str(ENGINE), HF_HUB_OFFLINE="1", WHYNOT_HOME=str(engine_home), HF_HOME=str(real_hf_dir()))
+
+
+def sha256_of(path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def slow_skip_reason(wav: str) -> str:
+    """why the any-clip real-model tests do not run here ('' = they run). They load the Kalam pack and align on the GPU or
+    the CPU: run them through the machine queue (heavy.sh gpu|job) with WHYNOT_KALAM_SLOW=1. ANY clip will do."""
     if os.environ.get("WHYNOT_KALAM_SLOW") != "1":
         return "heavy: set WHYNOT_KALAM_SLOW=1 and run through heavy.sh (real models)"
     if not (REAL_PACK / "ct2-whisper-turbo-ar-dialectal" / "model.bin").is_file():
         return "the Kalam model pack is not installed (%s)" % REAL_PACK
     if not wav or not Path(wav).is_file():
-        return "no test clip: set WHYNOT_KALAM_TEST_WAV (an H13 clip under whynot-test/; never client media)"
+        return "no test clip: set WHYNOT_KALAM_TEST_WAV (any H13 clip under whynot-test/; never client media)"
     try:
         importlib.import_module("lib.kalam.align")
     except ModuleNotFoundError:
         return "Task 16: lib/kalam/align.py is not ported yet"
+    return ""
+
+
+def reference_skip_reason(wav: str, which: str) -> str:
+    """why a reference check of the OWNER'S clip does not run ('' = it runs): it needs the slow gate, the reference flag
+    and a clip whose sha256 equals the digest named in WHYNOT_KALAM_REF_SHA256_<AR|EN>"""
+    reason = slow_skip_reason(wav)
+    if reason:
+        return reason
+    if os.environ.get("WHYNOT_KALAM_REFERENCE") != "1":
+        return ("reference check of the owner's %s clip: set WHYNOT_KALAM_REFERENCE=1 and WHYNOT_KALAM_REF_SHA256_%s "
+                "(the sha256 of that clip); any other clip runs the any-clip invariants instead" % (which, which))
+    want = os.environ.get("WHYNOT_KALAM_REF_SHA256_" + which, "").strip().lower()
+    if not want:
+        return "WHYNOT_KALAM_REF_SHA256_%s does not name the reference clip" % which
+    if not wav or not Path(wav).is_file():
+        return "no clip: set WHYNOT_KALAM_TEST_WAV%s to the reference clip" % ("" if which == "AR" else "_EN")
+    if sha256_of(wav) != want:
+        return "this clip is not the reference clip named by WHYNOT_KALAM_REF_SHA256_%s (sha256 differs)" % which
     return ""
 
 
@@ -1461,35 +1815,144 @@ def srt_blocks(text):
     return out
 
 
+def check_words(tc, words, duration, tol=0.1):
+    """any clip: words exist, each lies inside the clip, starts never go backwards and a word ends before the next starts
+    (within `tol` seconds: aligners overlap by a few ms)"""
+    tc.assertTrue(words, "no words")
+    for w in words:
+        tc.assertTrue(0 <= w["s"] <= w["e"] <= duration + tol, w)
+    for a, b in zip(words, words[1:]):
+        tc.assertTrue(a["s"] <= b["s"] + 1e-6 and a["e"] <= b["s"] + tol, (a, b))
+
+
+def check_srt(tc, text, duration):
+    """any clip: numbered from 1, gapless, 1-2 lines per block, a line of at most 32 characters unless it is one word,
+    nothing after the clip's end (plus the tail the packer adds), no sentence punctuation"""
+    blocks = srt_blocks(text)
+    tc.assertTrue(blocks, "no blocks")
+    tc.assertEqual([b[0] for b in blocks], list(range(1, len(blocks) + 1)))
+    tc.assertTrue(all(a[2] == b[1] for a, b in zip(blocks, blocks[1:])), "a gap between blocks")
+    for n, start, end, lines in blocks:
+        tc.assertTrue(1 <= len(lines) <= 2, (n, lines))
+        tc.assertTrue(all(len(l) <= 32 or " " not in l for l in lines), (n, lines))
+        tc.assertTrue(0 <= start < end, (n, start, end))
+    tc.assertLessEqual(blocks[-1][2] / 1000.0, duration + 1.0)
+    tc.assertFalse(re.search(r"[.,!?\u060c\u061f]", " ".join(" ".join(b[3]) for b in blocks)))
+    return blocks
+
+
+def check_utf8_lf(tc, raw: bytes, name=""):
+    tc.assertNotIn(b"\r", raw, name)
+    tc.assertFalse(raw.startswith(b"\xef\xbb\xbf"), name)
+    raw.decode("utf-8")
+
+
+class TestSlowGates(unittest.TestCase):
+    """the gates and the any-clip checks themselves, exercised here with fakes (they can fail)"""
+
+    def test_a_real_model_run_uses_a_temp_engine_home_and_the_real_pack_read_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = slow_env(Path(d))
+        self.assertEqual(env["WHYNOT_HOME"], d)
+        self.assertNotEqual(Path(env["WHYNOT_HOME"]), _isolation.REAL_ENGINE_HOME)
+        self.assertEqual(Path(env["HF_HOME"]), _isolation.REAL_ENGINE_HOME / "tools" / "kalam" / "hf")
+        self.assertEqual(env["HF_HUB_OFFLINE"], "1")
+        self.assertEqual(Path(env["PYTHONPATH"]), ENGINE)
+
+    def test_the_any_clip_gate_names_any_clip_and_the_reference_gate_names_the_clips_by_sha256(self):
+        with tempfile.TemporaryDirectory() as d:
+            clip = Path(d) / "any-clip.wav"
+            clip.write_bytes(_wav_bytes(_tone(0.2, 16000), 16000, "pcm16"))
+            digest = sha256_of(clip)
+            with mock.patch.dict(os.environ):
+                for k in ("WHYNOT_KALAM_SLOW", "WHYNOT_KALAM_REFERENCE", "WHYNOT_KALAM_REF_SHA256_AR"):
+                    os.environ.pop(k, None)
+                self.assertIn("WHYNOT_KALAM_SLOW=1", slow_skip_reason(str(clip)))
+                os.environ["WHYNOT_KALAM_SLOW"] = "1"
+                with mock.patch.object(sys.modules[__name__], "REAL_PACK", Path(d) / "no-pack"):
+                    self.assertIn("pack is not installed", slow_skip_reason(str(clip)))
+                    self.assertIn("pack is not installed", reference_skip_reason(str(clip), "AR"))
+                # the reference gate with everything else open
+                pack = Path(d) / "pack"
+                (pack / "ct2-whisper-turbo-ar-dialectal").mkdir(parents=True)
+                (pack / "ct2-whisper-turbo-ar-dialectal" / "model.bin").write_bytes(b"x")
+                fake_align = _types.ModuleType("lib.kalam.align")
+                with mock.patch.object(sys.modules[__name__], "REAL_PACK", pack), \
+                        mock.patch.dict(sys.modules, {"lib.kalam.align": fake_align}):
+                    self.assertEqual(slow_skip_reason(str(clip)), "")                          # ANY clip passes the slow gate
+                    self.assertIn("WHYNOT_KALAM_REFERENCE=1", reference_skip_reason(str(clip), "AR"))
+                    os.environ["WHYNOT_KALAM_REFERENCE"] = "1"
+                    self.assertIn("does not name the reference clip", reference_skip_reason(str(clip), "AR"))
+                    os.environ["WHYNOT_KALAM_REF_SHA256_AR"] = "0" * 64
+                    self.assertIn("is not the reference clip", reference_skip_reason(str(clip), "AR"))
+                    os.environ["WHYNOT_KALAM_REF_SHA256_AR"] = digest.upper()
+                    self.assertEqual(reference_skip_reason(str(clip), "AR"), "")
+                    self.assertIn("does not name the reference clip", reference_skip_reason(str(clip), "EN"))
+
+    def test_the_any_clip_checks_accept_a_good_run_and_reject_a_bad_one(self):
+        words = [{"w": "a", "s": 0.1, "e": 0.4}, {"w": "b", "s": 0.45, "e": 0.9}]
+        check_words(self, words, 1.0)
+        bad = {
+            "outside the clip": [{"w": "a", "s": 0.1, "e": 5.0}],
+            "backwards": [{"w": "a", "s": 0.5, "e": 0.6}, {"w": "b", "s": 0.1, "e": 0.2}],
+            "overlap": [{"w": "a", "s": 0.1, "e": 0.9}, {"w": "b", "s": 0.3, "e": 0.9}],
+            "inverted": [{"w": "a", "s": 0.4, "e": 0.1}],
+            "empty": [],
+        }
+        for name, ws in bad.items():
+            with self.assertRaises(AssertionError, msg=name):
+                check_words(self, ws, 1.0)
+        good = "1\n00:00:00,000 --> 00:00:01,000\nline one\nline two\n\n2\n00:00:01,000 --> 00:00:02,000\nnext\n"
+        self.assertEqual(len(check_srt(self, good, 2.0)), 2)
+        for name, text in {
+            "gap": "1\n00:00:00,000 --> 00:00:01,000\na\n\n2\n00:00:01,500 --> 00:00:02,000\nb\n",
+            "three lines": "1\n00:00:00,000 --> 00:00:01,000\na\nb\nc\n",
+            "long line": "1\n00:00:00,000 --> 00:00:01,000\n" + "word " * 12 + "end\n",
+            "numbering": "2\n00:00:00,000 --> 00:00:01,000\na\n",
+            "after the end": "1\n00:00:00,000 --> 00:00:09,000\na\n",
+            "punctuation": "1\n00:00:00,000 --> 00:00:01,000\nhello.\n",
+        }.items():
+            with self.assertRaises(AssertionError, msg=name):
+                check_srt(self, text, 2.0)
+        check_utf8_lf(self, "\u0645\u0631\u062d\u0628\u0627\n".encode("utf-8"))
+        for raw in (b"a\r\nb", b"\xef\xbb\xbfa", b"\xff\xfe"):
+            with self.assertRaises((AssertionError, UnicodeDecodeError)):
+                check_utf8_lf(self, raw)
+
+
 class TestCli(unittest.TestCase):
     def setUp(self):
-        reason = _slow_skip_reason(WAV_AR)
+        reason = slow_skip_reason(WAV_AR)
         if reason:
             self.skipTest(reason)
 
-    def run_engine(self, tmp_path, settings):
+    def run_engine(self, tmp_path, settings, wav=None):
         sp = Path(tmp_path) / "settings.json"
         sp.write_text(json.dumps(settings), encoding="utf-8")
-        env = dict(os.environ, PYTHONPATH=str(ENGINE), HF_HUB_OFFLINE="1", WHYNOT_HOME=str(_isolation.REAL_ENGINE_HOME))
-        p = subprocess.run([sys.executable, "-s", "-B", "-m", "lib.kalam.engine", "run", "--wav", WAV_AR, "--mode", "ar",
-                            "--out", str(tmp_path), "--settings", str(sp), "--models", str(REAL_PACK)],
-                           capture_output=True, env=env, cwd=str(ENGINE), timeout=3600)
+        home = Path(tmp_path) / "engine-home"                                    # a temp engine home, never the real one
+        p = subprocess.run([sys.executable, "-s", "-B", "-m", "lib.kalam.engine", "run", "--wav", wav or WAV_AR, "--mode", "ar",
+                            "--out", str(Path(tmp_path) / "out"), "--settings", str(sp), "--models", str(REAL_PACK)],
+                           capture_output=True, env=slow_env(home), cwd=str(ENGINE), timeout=3600)
         events = [json.loads(l) for l in p.stdout.decode("utf-8").splitlines() if l.startswith("{")]
         return p, events
 
     def test_uncorrected_run_writes_valid_gapless_srt(self):
+        """upstream assertions of the owner's Arabic clip (>= 20 blocks): reference clip only (see the header above)"""
+        reason = reference_skip_reason(WAV_AR, "AR")
+        if reason:
+            self.skipTest(reason)
         with tempfile.TemporaryDirectory() as tmp_path:
             p, ev = self.run_engine(tmp_path, {"correct": False})
             self.assertEqual(p.returncode, 0, p.stderr[-2000:])
             stages = [e["stage"] for e in ev]
             self.assertTrue(stages[0] == "loading" and stages[-1] == "done" and "aligning" in stages)
-            blocks = srt_blocks((Path(tmp_path) / "captions.srt").read_text(encoding="utf-8"))
+            blocks = srt_blocks((Path(tmp_path) / "out" / "captions.srt").read_text(encoding="utf-8"))
             self.assertTrue([b[0] for b in blocks] == list(range(1, len(blocks) + 1)) and len(blocks) >= 20)
             self.assertTrue(all(a[2] == b[1] for a, b in zip(blocks, blocks[1:])))
             self.assertTrue(all(1 <= len(b[3]) <= 2 for b in blocks))
             text = " ".join(" ".join(b[3]) for b in blocks)
             self.assertFalse(re.search(r"[.,!?\u060c\u061f]", text))
-            caps = json.loads((Path(tmp_path) / "captions.json").read_text(encoding="utf-8"))
+            caps = json.loads((Path(tmp_path) / "out" / "captions.json").read_text(encoding="utf-8"))
             self.assertTrue(len(caps) == len(blocks) and ev[-1]["corrected"] is False and "notice" not in ev[-1])
 
     def test_missing_key_still_makes_captions_with_notice(self):
@@ -1497,48 +1960,107 @@ class TestCli(unittest.TestCase):
             p, ev = self.run_engine(tmp_path, {"correct": True, "backend": "api", "api_key": ""})
             self.assertTrue(p.returncode == 0 and ev[-1]["stage"] == "done")
             self.assertTrue(ev[-1]["corrected"] is False and ev[-1]["notice"] == "no_api_key")
-            self.assertTrue((Path(tmp_path) / "captions.srt").exists())
+            self.assertTrue((Path(tmp_path) / "out" / "captions.srt").exists())
 
 
-class TestPipelineSlow(unittest.TestCase):
-    """the upstream slow tests: the named-word onset of the Arabic reference clip and the English clip only apply to the
-    clips they were written for (WHYNOT_KALAM_TEST_WAV_IS_REFERENCE=1 / WHYNOT_KALAM_TEST_WAV_EN)"""
+class TestRealModelsAnyClip(unittest.TestCase):
+    """invariants of the real pipeline that hold for ANY clip (the clip is only 'a clip from whynot-test/')"""
 
     def setUp(self):
-        reason = _slow_skip_reason(WAV_AR)
+        reason = slow_skip_reason(WAV_AR)
         if reason:
             self.skipTest(reason)
         self.A = mod("audio")
+        a2d, rate = self.A.read_wav(WAV_AR)
+        self.duration = a2d.shape[0] / rate                                      # the file's OWN length
+
+    def run_once(self, tmp_path, name):
+        runner = TestCli("test_missing_key_still_makes_captions_with_notice")
+        sub = Path(tmp_path) / name
+        sub.mkdir()
+        p, ev = runner.run_engine(sub, {"correct": False})
+        self.assertEqual(p.returncode, 0, p.stderr[-2000:])
+        return sub / "out", ev, p
+
+    def test_durations_equal_the_files_own_length(self):
+        a = self.A.load_16k(WAV_AR)
+        self.assertLessEqual(abs(len(a) / 16000 - self.duration), 2 / 16000)
+        self.assertEqual(self.A.envelope_db(a).shape[0], int(len(a) / 160))
+        if WAV_EN and Path(WAV_EN).is_file():
+            a2d, rate = self.A.read_wav(WAV_EN)
+            self.assertLessEqual(abs(len(self.A.load_16k(WAV_EN)) / 16000 - a2d.shape[0] / rate), 2 / 16000)
+
+    def test_a_run_obeys_the_pipeline_invariants(self):
+        with tempfile.TemporaryDirectory() as tmp_path:
+            out, ev, _p = self.run_once(tmp_path, "one")
+            stages = [e["stage"] for e in ev]
+            self.assertEqual(stages[0], "loading")
+            self.assertEqual(stages[-1], "done")
+            self.assertTrue(all(s_ in ("loading", "transcribing", "aligning", "correcting", "captions", "done") for s_ in stages))
+            self.assertLessEqual(abs(ev[1]["seconds"] - round(self.duration, 2)), 0.02)
+            for name in ("captions.srt", "captions.json", "words.json", "corrected.json"):
+                check_utf8_lf(self, (out / name).read_bytes(), name)
+            words = json.loads((out / "words.json").read_text(encoding="utf-8"))
+            check_words(self, words, self.duration)
+            blocks = check_srt(self, (out / "captions.srt").read_text(encoding="utf-8"), self.duration)
+            caps = json.loads((out / "captions.json").read_text(encoding="utf-8"))
+            self.assertEqual([c["n"] for c in caps], [b[0] for b in blocks])
+
+    def test_transcribe_and_align_give_ordered_scored_words(self):
+        a = self.A.load_16k(WAV_AR)
+        align = importlib.import_module("lib.kalam.align").align
+        ws = align(a, mod("transcribe").transcribe(a, "ar", str(REAL_PACK)))
+        check_words(self, ws, len(a) / 16000)
+        self.assertTrue(all("score" in w for w in ws))
+
+    def test_a_rerun_is_deterministic(self):
+        with tempfile.TemporaryDirectory() as tmp_path:
+            out1, _e1, _ = self.run_once(tmp_path, "one")
+            out2, _e2, _ = self.run_once(tmp_path, "two")
+            for name in ("captions.srt", "captions.json", "words.json"):
+                self.assertEqual((out1 / name).read_bytes(), (out2 / name).read_bytes(), name)
+
+
+class TestPipelineSlow(unittest.TestCase):
+    """the upstream slow tests with their exact numbers and words: they hold only for the owner's two reference clips, so
+    they run only behind the reference gate (WHYNOT_KALAM_REFERENCE=1 + the clip's sha256), never for another clip"""
+
+    def setUp(self):
+        self.A = mod("audio")
+
+    def _need(self, wav, which):
+        reason = reference_skip_reason(wav, which)
+        if reason:
+            self.skipTest(reason)
         self.align = importlib.import_module("lib.kalam.align").align
         self.transcribe = mod("transcribe").transcribe
 
     def test_load_16k_resamples_48k(self):
-        if not WAV_EN:
-            self.skipTest("no 48 kHz English clip: set WHYNOT_KALAM_TEST_WAV_EN")
+        self._need(WAV_EN, "EN")
         a = self.A.load_16k(WAV_EN)
         self.assertTrue(abs(len(a) / 16000 - 17.68) < 0.05 or abs(len(a) / 16000 - 15.12) < 0.05)
         self.assertEqual(self.A.envelope_db(a).shape[0], int(len(a) / 160))
 
     def test_arabic_transcribe_and_align(self):
+        self._need(WAV_AR, "AR")
         a = self.A.load_16k(WAV_AR)
         ws = self.align(a, self.transcribe(a, "ar", str(REAL_PACK)))
         self.assertTrue(len(ws) >= 190)
         self.assertTrue(all(w["s"] <= w["e"] for w in ws))
         self.assertTrue(all(ws[i]["s"] <= ws[i + 1]["s"] + 1e-6 for i in range(len(ws) - 1)))
-        if os.environ.get("WHYNOT_KALAM_TEST_WAV_IS_REFERENCE") == "1":
-            shabab = [w for w in ws if w["w"] == "\u0634\u0628\u0627\u0628"]
-            self.assertTrue(shabab and abs(shabab[0]["s"] - 5.87) < 0.2)
+        shabab = [w for w in ws if w["w"] == "\u0634\u0628\u0627\u0628"]
+        self.assertTrue(shabab and abs(shabab[0]["s"] - 5.87) < 0.2)
         self.assertTrue(all("score" in w for w in ws))
 
     def test_english_parakeet(self):
-        if not WAV_EN:
-            self.skipTest("no English clip: set WHYNOT_KALAM_TEST_WAV_EN")
+        self._need(WAV_EN, "EN")
         a = self.A.load_16k(WAV_EN)
         ws = self.align(a, self.transcribe(a, "en", str(REAL_PACK)))     # Parakeet starts ~0.25 s early; alignment fixes it
         text = " ".join(w["w"] for w in ws).lower()
         self.assertTrue("silence" in text and "final sentence" in text)
         hello = [w for w in ws if w["w"].lower().strip(",.") == "hello"]
         self.assertTrue(hello and abs(hello[0]["s"] - 1.21) < 0.1)
+
 
 
 if __name__ == "__main__":

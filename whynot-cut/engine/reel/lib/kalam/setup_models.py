@@ -11,13 +11,47 @@ import os
 import sys
 from pathlib import Path
 
+from .. import align_w2v as _align_w2v
 from . import platform as _platform
 from .store import Store
 
 ARABIC_SRC = "oddadmix/whisper-large-v3-turbo-arabic-dialectal"
 OTHERS = ["mlx-community/whisper-large-v3-turbo", "mlx-community/parakeet-tdt-0.6b-v2",
           "MahmoudAshraf/mms-300m-1130-forced-aligner"]
-ALIGNER_REPO = OTHERS[-1]       # the aligner download (lib/kalam/align.py, Task 16, decides which model the pack really needs)
+ALIGNER_REPO, ALIGNER_REV = _align_w2v.MMS_REPO, _align_w2v.MMS_REV     # one place for the aligner (owner decision G8: MMS stays in
+#                                                                      the 3.0 trial edition; the commercial edition replaces it)
+# Every download is pinned to the revision recorded in docs/legal/third-party-licences.md (the 8-hex prefixes of its table,
+# resolved to the full commit through the Hugging Face API): rows M4, M5, M7, M8 and M9. A repo without a pinned revision is
+# refused, never fetched from its moving head.
+REVISIONS = {
+    "oddadmix/whisper-large-v3-turbo-arabic-dialectal": "cb15abb9792c4812f63de322eeb4e9ca00b79c49",    # M7
+    "openai/whisper-large-v3-turbo": "41f01f3fe87f28c78e2fbf8b568835947dd65ed9",                       # M5
+    "istupakov/parakeet-tdt-0.6b-v2-onnx": "0bbb45a3365852604aef28b538a8f066f4ccaa85",                 # M9
+    ALIGNER_REPO: ALIGNER_REV,                                                                         # M8
+    "mlx-community/whisper-large-v3-turbo": "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb",                # M4
+    "mlx-community/parakeet-tdt-0.6b-v2": "8ae155301e23d820d82aa60d24817c900e69e487",                  # M9
+}
+LICENCES = {
+    "oddadmix/whisper-large-v3-turbo-arabic-dialectal": "Apache-2.0",
+    "openai/whisper-large-v3-turbo": "MIT",
+    "istupakov/parakeet-tdt-0.6b-v2-onnx": "CC-BY-4.0 (attribution required)",
+    ALIGNER_REPO: "CC-BY-NC-4.0 (non-commercial: 3.0 trial edition only)",
+    "mlx-community/whisper-large-v3-turbo": "MIT (inherited)",
+    "mlx-community/parakeet-tdt-0.6b-v2": "CC-BY-4.0 (inherited)",
+}
+
+
+def _rev(repo: str) -> str:
+    try:
+        return REVISIONS[repo]
+    except KeyError:
+        raise ValueError("no pinned revision for %s: add it to setup_models.REVISIONS (and the licence table) first" % repo) from None
+
+
+def _notice(repo: str) -> None:
+    """one line before a model is downloaded: its name, licence and pinned revision (size: not recorded)"""
+    print("    model: %s | licence: %s | revision: %s" % (repo, LICENCES.get(repo, "see the licence table"), _rev(repo)[:8]),
+          flush=True)
 _MAC_ONLY = "the MLX models are for Apple Silicon (macOS) only: use the portable pack (--portable) on this machine"
 
 # Hugging Face Whisper names -> mlx_whisper names
@@ -35,7 +69,7 @@ def convert_hf_whisper(repo: str, out: Path) -> None:
         raise RuntimeError(_MAC_ONLY)
     import mlx.core as mx
     from huggingface_hub import snapshot_download
-    src = Path(snapshot_download(repo, allow_patterns=["*.json", "model.safetensors"]))
+    src = Path(snapshot_download(repo, allow_patterns=["*.json", "model.safetensors"], revision=_rev(repo)))
     with open(src / "config.json", encoding="utf-8") as f:
         cfg = json.load(f)
     dims = {"n_mels": cfg["num_mel_bins"], "n_audio_ctx": cfg["max_source_positions"], "n_audio_state": cfg["d_model"],
@@ -81,10 +115,11 @@ def portable_missing(md: Path) -> list:
 
 
 def convert_ct2(repo: str, out: Path) -> None:
+    rev = _rev(repo)                            # refuse an unpinned repo before anything is imported or downloaded
     import shutil
     from ctranslate2.converters import TransformersConverter
     from huggingface_hub import snapshot_download
-    src = Path(snapshot_download(repo, allow_patterns=["*.json", "model.safetensors", "*.txt"]))
+    src = Path(snapshot_download(repo, allow_patterns=["*.json", "model.safetensors", "*.txt"], revision=rev))
     TransformersConverter(str(src)).convert(str(out), quantization="float16", force=True)
     shutil.copy(src / "tokenizer.json", out / "tokenizer.json")
     with open(src / "config.json", encoding="utf-8") as f:
@@ -96,14 +131,17 @@ def main_portable(models_dir: str) -> None:
     from huggingface_hub import snapshot_download
     md = Path(models_dir)
     for d in portable_missing(md):
+        repo = {CT2_ARABIC: ARABIC_SRC, CT2_OTHER: OTHER_SRC}.get(d, ONNX_SRC)
+        _notice(repo)
         print("    preparing " + d + " ...", flush=True)
         if d == CT2_ARABIC:
             convert_ct2(ARABIC_SRC, md / d)
         elif d == CT2_OTHER:
             convert_ct2(OTHER_SRC, md / d)
         else:
-            snapshot_download(ONNX_SRC, allow_patterns=ONNX_FILES, local_dir=str(md / d))
-    snapshot_download(ALIGNER_REPO)   # the aligner (hf cache)
+            snapshot_download(ONNX_SRC, allow_patterns=ONNX_FILES, local_dir=str(md / d), revision=_rev(ONNX_SRC))
+    _notice(ALIGNER_REPO)
+    snapshot_download(ALIGNER_REPO, revision=ALIGNER_REV)   # the aligner (hf cache)
     print("    portable models ready", flush=True)
 
 
@@ -114,10 +152,12 @@ def main(models_dir: str) -> None:
     md = Path(models_dir)
     ar = md / "whisper-turbo-ar-dialectal"
     if not (ar / "weights.safetensors").exists():
+        _notice(ARABIC_SRC)
         print("    converting the Egyptian-Arabic model (one time)...", flush=True)
         convert_hf_whisper(ARABIC_SRC, ar)
     for repo in OTHERS:
-        snapshot_download(repo)
+        _notice(repo)
+        snapshot_download(repo, revision=_rev(repo))
     print("    models ready", flush=True)
 
 
