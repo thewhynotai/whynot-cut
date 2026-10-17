@@ -1,6 +1,6 @@
 """The file-queue protocol of the WhyNot Cut CEP bundle (one bundle; Premiere uses ppro-queue, After Effects ae-queue).
 
-The bundle's hidden daemon writes `bridge.heartbeat` every second, claims `<id>.job.json` by renaming it, evaluates the
+The bundle's hidden daemon writes `bridge.heartbeat` every 1 s around a job, 2 s when idle (H6), claims `<id>.job.json` by renaming it, evaluates the
 library named in the job with the job's data file, and writes `<id>.result.json`. These helpers are host-neutral:
 ppro_bridge and ae_bridge pass their own queue folder and library.
 
@@ -51,6 +51,8 @@ from .common import now_iso
 SWEEP_AGE_S = 24 * 3600                  # queue files older than this are a crashed run's leftovers
 ORPHAN_AGE_S = 21 * 60                   # a .running older than the bridge's own 20-minute job limit
 CLAIM_CHECK_S = 2.0                      # how often an unclaimed wait re-reads the heartbeat
+CLAIM_DEAD_CHECKS = 2                    # this many stale heartbeats IN A ROW cancel an unclaimed job (one read could
+                                         # be an antivirus stall of the bridge's write; router.py waits for 3)
 LOCK_NAME = ".build.lock"
 # a second build waits this long for the first, then gets BRIDGE_BUSY. Not a bound on the first build: its bridge call
 # may take claim 900 s + result 900 s in the worst case (submit's two clocks), so a long wait can still end busy
@@ -352,7 +354,7 @@ def _cancel(queue: Path, jid: str) -> bool:
 def _wait(queue: Path, jid: str, t0: float, claim_s: float, timeout: float, poll_s: float, app: str) -> dict:
     res_p, job_p = queue / f"{jid}.result.json", queue / f"{jid}.job.json"
     claim_p, run_p, err_p = queue / f"{jid}.claimed", queue / f"{jid}.running", queue / f"{jid}.error"
-    claimed_at, checked = None, t0
+    claimed_at, checked, stale_reads = None, t0, 0
     while True:
         now = time.time()
         if res_p.exists():
@@ -410,7 +412,8 @@ def _wait(queue: Path, jid: str, t0: float, claim_s: float, timeout: float, poll
             elif now - checked >= CLAIM_CHECK_S:
                 checked = now
                 st = status(queue, app=app)
-                if not st["alive"] and _cancel(queue, jid):
+                stale_reads = 0 if st["alive"] else stale_reads + 1
+                if stale_reads >= CLAIM_DEAD_CHECKS and _cancel(queue, jid):
                     return {"ok": False, "error": "bridge stopped before it started the job (cancelled)",
                             "status": st, "cancelled": True, "job": jid}
         elif now - claimed_at >= timeout:

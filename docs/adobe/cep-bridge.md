@@ -83,7 +83,7 @@ Sources: `adobe/cep-bridge/**` (the shell), `whynot-cut/engine/reel/lib/cep_bund
 - **`libs`:** these must equal `cep_bundle.expected_libs()` of the engine that drives the bundle. Otherwise jobs are
   refused with "the WhyNot Cut extension in <app> is from another build".
 
-### 3.3 The heartbeat: `<engine_home>/{ppro,ae}-queue/bridge.heartbeat` (only the daemon writes it, every second)
+### 3.3 The heartbeat: `<engine_home>/{ppro,ae}-queue/bridge.heartbeat` (only the daemon writes it: every 1 s while a job is queued, claimed or running or a probe is out, every 2 s when idle, and at once when a job ends or host_busy changes; H6)
 ```json
 {"at": 1760000000000, "busy": false, "role": "daemon", "host": "PPRO" | "AEFT", "hostVersion": "26.5.2",
  "bundle": "3.0.0", "version": "3.0.0", "protocol": 4, "build": "<16 hex>", "libs": {"<name>": "<sha256>"},
