@@ -1165,5 +1165,112 @@ class RoundTwoHardening(unittest.TestCase):
         self.assertEqual(self._semgrep_with([])["status"], "OK")
 
 
+class RunScansComposition(unittest.TestCase):
+    """`--all` must run EVERY scanner: removing one from run_scans may never leave the suite green (acceptance follow-up 1)."""
+    FUNCS = ("scan_semgrep", "scan_bandit", "scan_eslint", "scan_gitleaks", "scan_binary_secrets", "check_locks",
+             "scan_pip_audit", "scan_osv", "scan_npm", "scan_sbom", "scan_commit_messages")
+
+    def _run(self, modes, **kw):
+        calls = []
+        self.flags = []
+        patches = []
+        for name in self.FUNCS:
+            def fake(*a, _n=name, **k):
+                calls.append((_n, a[2:] if _n == "scan_gitleaks" else (), k))
+                self.flags.append((_n, k.get("history", a[2] if _n == "scan_gitleaks" and len(a) > 2 else None)))
+                return scan.result(_n, "OK")
+            patches.append(mock.patch.object(scan, name, side_effect=fake))
+        with contextlib.ExitStack() as st, tempfile.TemporaryDirectory() as d:
+            for p in patches:
+                st.enter_context(p)
+            st.enter_context(mock.patch.object(scan, "find_locks", return_value=([Path(d) / "a.lock"], [Path(d) / "p.json"])))
+            res = scan.run_scans(modes, Path(d), Path(d), **kw)
+        return [c[0] for c in calls], [r["tool"] for r in res]
+
+    def test_all_modes_run_exactly_the_full_tool_list(self):
+        called, tools = self._run({"sast", "secrets", "locks", "deps", "sbom"})
+        self.assertEqual(sorted(called), sorted(["scan_semgrep", "scan_bandit", "scan_eslint", "scan_gitleaks",
+                                                 "scan_binary_secrets", "check_locks", "scan_pip_audit", "scan_osv",
+                                                 "scan_npm", "scan_sbom"]))
+        self.assertEqual(len(tools), 10)
+
+    def test_history_adds_the_history_gitleaks_pass_and_the_commit_message_scan(self):
+        called, _ = self._run({"secrets"}, history=True)
+        self.assertEqual(sorted(called), sorted(["scan_gitleaks", "scan_gitleaks", "scan_binary_secrets", "scan_commit_messages"]))
+        self.assertEqual([h for n, h in self.flags if n == "scan_gitleaks"], [False, True])  # tree pass, then the history pass
+        self.assertEqual([h for n, h in self.flags if n == "scan_binary_secrets"], [True])
+
+    def test_the_cli_all_flag_selects_every_mode(self):
+        seen = {}
+        def fake(modes, *a, **k):
+            seen["modes"] = set(modes)
+            return []
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(scan, "run_scans", side_effect=fake), \
+                mock.patch.object(scan, "is_offline", return_value=False), contextlib.redirect_stdout(io.StringIO()):
+            scan.main(["--all", "--root", d, "--raw", d, "--out", d, "--baseline", str(Path(d) / "none.json")])
+        self.assertEqual(seen["modes"], {"sast", "secrets", "deps", "sbom", "locks"})
+
+
+class PipAuditGapIsPinnedByName(unittest.TestCase):
+    """A pip-audit `skipped-requirements` gap names its packages (torch, torchaudio): a NEW skipped package is not accepted."""
+    GAP = {"tool": "pip-audit", "code": "skipped-requirements", "reason": "local +cu128 builds", "owner_task": "executor",
+           "review_date": "2099-01-01", "packages": ["torch", "torchaudio"]}
+
+    def _audit(self, names):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(scan, "need", return_value=None), \
+                mock.patch.object(scan, "run") as run_mock:
+            lock = Path(d) / "a.lock"
+            lock.write_text("x\n", encoding="utf-8")
+
+            def fake(argv, cwd=None, **kw):
+                Path(argv[argv.index("-o") + 1]).write_text(
+                    json.dumps({"dependencies": [{"name": n, "skip_reason": "no PyPI match"} for n in names]}), encoding="utf-8")
+                return 0, "", ""
+            run_mock.side_effect = fake
+            return scan.scan_pip_audit(Path(d), Path(d), [lock])
+
+    def _accepted(self, names, gap=None):
+        r = [self._audit(names)]
+        scan.apply_known_gaps(r, {("pip-audit", "skipped-requirements"): gap or self.GAP})
+        return scan.exit_code(r, []) == scan.EXIT_OK
+
+    def test_the_result_carries_the_skipped_package_names(self):
+        self.assertEqual(sorted(self._audit(["torch", "torchaudio"])["skipped"]), ["torch", "torchaudio"])
+
+    def test_torch_and_torchaudio_alone_are_accepted(self):
+        self.assertTrue(self._accepted(["torch", "torchaudio"]))
+        self.assertTrue(self._accepted(["TorchAudio"]))  # package names compare case-insensitively (PEP 503 spelling)
+
+    def test_any_other_skipped_package_is_not_hidden(self):
+        self.assertFalse(self._accepted(["torch", "requests"]))
+        self.assertFalse(self._accepted(["somepkg"]))
+
+    def test_a_gap_without_a_package_list_accepts_no_skipped_package(self):
+        gap = {k: v for k, v in self.GAP.items() if k != "packages"}
+        self.assertFalse(self._accepted(["torch"], gap))
+
+    def test_the_real_baseline_pins_the_packages(self):
+        _, gaps = scan.load_baseline_full(ROOT / "docs" / "security" / "baseline.json")
+        g = gaps[("pip-audit", "skipped-requirements")]
+        self.assertEqual(sorted(g["packages"]), ["torch", "torchaudio"])
+
+    def test_a_bad_packages_field_is_a_baseline_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            for bad in ("torch", [], [""], [1]):
+                p = Path(d) / "b.json"
+                p.write_text(json.dumps({"accepted": [], "known_gaps": [dict(self.GAP, packages=bad)]}), encoding="utf-8")
+                with self.assertRaises(scan.BaselineError, msg=repr(bad)):
+                    scan.load_baseline_full(p)
+
+
+class BaselineTriage(unittest.TestCase):
+    def test_qc_py_et_parse_is_accepted_risk_not_false_positive(self):
+        data = json.loads((ROOT / "docs" / "security" / "baseline.json").read_text(encoding="utf-8"))
+        qc = [e for e in data["accepted"] if e["file"].endswith("lib/qc.py") and "defused-xml" in e["rule"]]
+        self.assertTrue(qc, "the qc.py ET.parse entry is missing")
+        for e in qc:
+            self.assertEqual(e["verdict"], "accepted_risk", e["reason"])
+
+
 if __name__ == "__main__":
     unittest.main()

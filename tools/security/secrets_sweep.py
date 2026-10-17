@@ -42,6 +42,20 @@ def git_exe():
     return g
 
 
+def head_info(root, run):
+    """'HEAD <sha>, <n> commits (all refs)' of the scanned repository, or '' when git cannot say (never fatal: the
+    scan itself already ran). The report uses it to show WHICH commit a history scan covered."""
+    try:
+        git = git_exe()
+        rc, sha, _ = run([git, "rev-parse", "HEAD"], cwd=str(root))
+        rc2, n, _ = run([git, "rev-list", "--all", "--count"], cwd=str(root))
+    except (SweepError, OSError):
+        return ""
+    if rc != 0 or rc2 != 0 or not sha.strip() or not n.strip().isdigit():
+        return ""
+    return "HEAD %s, %s commits (all refs)" % (sha.strip(), n.strip())
+
+
 def require_repo(root, run):
     """The git dir of root, or SweepError. Uses git itself (a worktree or submodule has a `.git` FILE, not a folder)."""
     rc, out, err = run([git_exe(), "rev-parse", "--git-dir"], cwd=str(root))

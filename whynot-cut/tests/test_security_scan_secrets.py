@@ -279,6 +279,14 @@ class HistorySweep(unittest.TestCase):
         self.assertEqual(h[0]["commit"], self.sha_add)
         self.assertEqual(h[0]["rule"], "aws-access-token")
 
+    def test_the_history_note_records_the_scanned_sha_and_the_commit_count(self):
+        head = git(self.repo, "rev-parse", "HEAD").strip()
+        self.assertIn(head, self.hist["note"])  # the full SHA, so the report can be matched to a commit
+        count = git(self.repo, "rev-list", "--all", "--count").strip()
+        self.assertGreaterEqual(int(count), 6)
+        self.assertIn("%s commits" % count, self.hist["note"])
+        self.assertNotIn(head, self.tree["note"])  # the tree scan is not a history scan
+
     def test_large_file_is_scanned_to_the_end(self):
         self.assertIn("big.log", {f["file"] for f in self.tree["findings"]})
         self.assertIn("big.log", {f["file"] for f in self.hist["findings"]})

@@ -271,6 +271,9 @@ def load_baseline_full(path):
         _check_entry(e, GAP_FIELDS, "known_gaps entry #%d" % i)
         if e["code"] not in GAP_CODES:
             raise BaselineError("known_gaps entry #%d: code %r is not one of %s" % (i, e["code"], ", ".join(GAP_CODES)))
+        pk = e.get("packages")
+        if pk is not None and (not isinstance(pk, list) or not pk or not all(isinstance(x, str) and x.strip() for x in pk)):
+            raise BaselineError("known_gaps entry #%d: `packages` must be a non-empty list of package names" % i)
         gaps[(e["tool"], e["code"])] = e
     return out, gaps
 
@@ -294,6 +297,18 @@ def split_by_baseline(findings, baseline, today=None):
     return new, accepted, expired
 
 
+def _pkg(name):
+    return re.sub(r"[-_.]+", "-", str(name)).lower()  # the PEP 503 spelling
+
+
+def _gap_covers(gap, code, r):
+    """`skipped-requirements` is accepted per PACKAGE: every package the scanner skipped must be named in the gap's
+    `packages` (so a future skipped package is never hidden by an old entry). Other codes need no package list."""
+    if code != "skipped-requirements":
+        return True
+    return bool(r.get("skipped")) and {_pkg(n) for n in r["skipped"]} <= {_pkg(n) for n in gap.get("packages", [])}
+
+
 def apply_known_gaps(results, gaps):
     """A DEGRADED scanner is marked accepted (shown, not hidden) only when EVERY reason code it carries has a
     `known_gaps` entry for (this tool, that code). A gap written for "offline" never accepts "scan errors"."""
@@ -302,6 +317,7 @@ def apply_known_gaps(results, gaps):
             continue
         codes = r.get("codes") or []
         found = [gaps.get((r["tool"], c)) for c in codes]
+        found = [g if g and _gap_covers(g, c, r) else None for g, c in zip(found, codes)]
         if codes and all(found):
             r["accepted_gap"] = {"reason": "; ".join(g["reason"] for g in found), "owner_task": found[0]["owner_task"],
                                  "review_date": min(g["review_date"] for g in found)}
@@ -322,8 +338,9 @@ def is_offline(explicit=False):
 
 # --------------------------------------------------------------------------------------------------------- results
 
-def result(tool, status, findings=None, note="", version=None, codes=None):
-    return {"tool": tool, "status": status, "findings": findings or [], "note": note, "version": version, "codes": list(codes or [])}
+def result(tool, status, findings=None, note="", version=None, codes=None, skipped=None):
+    return {"tool": tool, "status": status, "findings": findings or [], "note": note, "version": version, "codes": list(codes or []),
+            "skipped": list(skipped or [])}
 
 
 def need(name):
@@ -660,6 +677,10 @@ def scan_gitleaks(root, raw_dir, history=False):
         out_json.unlink(missing_ok=True)  # an unscrubbed report never outlives a failed run
         raise
     note = "full git history (diffs of every commit)" if history else "working tree (archives opened to depth 2)"
+    if history:
+        import secrets_sweep as ss
+        info = ss.head_info(root, run)
+        note += "; " + info if info else ""
     return result("gitleaks-history" if history else "gitleaks", "OK", findings, note, pinned_version("gitleaks"))
 
 
@@ -859,7 +880,7 @@ def scan_pip_audit(root, raw_dir, locks):
     if not locks:
         return result("pip-audit", "FAILED", note="no Python lock file found under %s (expected whynot-cut/setup/locks/*.lock): "
                       "nothing was audited" % root, version=pinned_version("pip-audit"))
-    findings, notes, status, codes = [], [], "OK", []
+    findings, notes, status, codes, skipped_names = [], [], "OK", [], []
     for i, lock in enumerate(locks):
         out_json = Path(raw_dir) / ("pip-audit-%d.json" % i)
         if out_json.exists():
@@ -873,9 +894,10 @@ def scan_pip_audit(root, raw_dir, locks):
         if skipped:
             status = "DEGRADED"
             codes.append("skipped-requirements")
+            skipped_names += [str(d.get("name", "?")) for d in skipped]
             notes.append("%s: %d requirement(s) NOT audited (%s)" % (lock.name, len(skipped), skipped[0]["skip_reason"][:80]))
         findings += parse_pip_audit(data, lock, root)
-    return result("pip-audit", status, findings, "; ".join(notes) or "%d lock(s)" % len(locks), pinned_version("pip-audit"), codes)
+    return result("pip-audit", status, findings, "; ".join(notes) or "%d lock(s)" % len(locks), pinned_version("pip-audit"), codes, skipped_names)
 
 
 def osv_argv(locks_py, locks_npm, out_json, root):

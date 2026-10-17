@@ -471,8 +471,8 @@
    "rule": "python.lang.security.use-defused-xml-parse.use-defused-xml-parse",
    "file": "whynot-cut/engine/reel/lib/qc.py",
    "line_at_triage": 41,
-   "verdict": "false_positive",
-   "reason": "qc.py run_qc() parses tm['xml'], the xmeml the engine itself wrote (07_premiere manifest from premiere_xml.timeline_manifest()); stdlib ElementTree/expat does not fetch external entities, and the source is not a client document.",
+   "verdict": "accepted_risk",
+   "reason": "qc.py run_qc() parses tm['xml'] with stdlib ElementTree, which is not hardened against entity-expansion (billion laughs) or deep nesting. Accepted, not a false positive: the file is the xmeml the engine itself wrote (07_premiere manifest from premiere_xml.timeline_manifest()), not a client document, and expat does not fetch external entities. Move to a size-capped parse with the L-T10 xml fixtures when the executor next touches qc.py.",
    "owner_task": "executor lib/**",
    "review_date": "2027-01-17"
   },
@@ -1280,6 +1280,7 @@
   {
    "tool": "pip-audit",
    "code": "skipped-requirements",
+   "packages": ["torch", "torchaudio"],
    "reason": "torch and torchaudio 2.8.0+cu128 in runtime-cuda.txt are local-version builds from the PyTorch index: pip-audit looks them up on PyPI and cannot; OSV-Scanner audits the same pins and reports them",
    "owner_task": "executor (T4.12 runtime locks) / L-T9 (SBOM + OSV over the binaries)",
    "review_date": "2026-11-17"

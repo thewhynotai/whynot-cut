@@ -2,8 +2,9 @@
 # © 2026 The Why Not AI (thewhynot.ai)
 """Phase 4 Task 39 (L-T1): tests for the REAL findings of the first scan (triage: docs/security/baseline.json, reason
 "real: ..."). The fix belongs to the file's owner; lane 3 sends a patch (D:/ClaudeData/claude-api-lane/lane3/hooks/L-T1/)
-and these tests, which pin the bad behaviour while the id is in OPEN. The owner applies the patch and deletes the id from
-OPEN: the `test_known_open_*` test then skips and the strict test (skipped while open) takes over.
+and these tests. Each strict test states the FIXED behaviour and is marked `expectedFailure` while its id is in OPEN, so
+it is red-by-design today. When the owner applies the patch the test passes: unittest reports an UNEXPECTED SUCCESS (a
+failing run), which is the signal to delete the id from OPEN and turn the test into a plain one.
 
   serve-security-which       serve/security.py resolves `icacls` and `whoami` through PATH before System32 (L-G11): a planted
                              icacls.exe / whoami.exe runs when the bearer-token file is locked down. Owner: Adobe track.
@@ -25,8 +26,13 @@ ROOT = Path(__file__).resolve().parents[2]
 ENGINE = ROOT / "whynot-cut" / "engine" / "reel"
 _sys.path.insert(0, str(ENGINE))
 
-OPEN = {"serve-security-which", "bootstrap-staging-delete"}
+OPEN = {"bootstrap-staging-delete"}
 WINDOWS = unittest.skipUnless(os.name == "nt", "Windows only: the hazard is the Windows search order")
+
+
+def open_issue(issue_id):
+    """expectedFailure while `issue_id` is in OPEN, a plain test once it is not."""
+    return unittest.expectedFailure if issue_id in OPEN else (lambda f: f)
 
 
 def planted_tool_dir(name):
@@ -51,28 +57,16 @@ class ServeSecurityToolPaths(unittest.TestCase):
         return (d / "marker.txt").exists()
 
     @WINDOWS
-    @unittest.skipUnless("serve-security-which" in OPEN, "fixed: delete the OPEN entry")
-    def test_known_open_planted_icacls_runs(self):
-        self.assertTrue(self._run_with_planted("icacls", lambda s, p: s.restrict_to_user(p)),
-                        "FIXED? a planted icacls on PATH no longer runs: delete 'serve-security-which' from OPEN")
-
-    @WINDOWS
-    @unittest.skipUnless("serve-security-which" in OPEN, "fixed: delete the OPEN entry")
-    def test_known_open_planted_whoami_runs(self):
-        self.assertTrue(self._run_with_planted("whoami", lambda s, p: s._sid_from_whoami()),
-                        "FIXED? a planted whoami on PATH no longer runs: delete 'serve-security-which' from OPEN")
-
-    @WINDOWS
-    @unittest.skipIf("serve-security-which" in OPEN, "open: serve-security-which (lane3/hooks/L-T1/serve-security-system32.patch)")
+    @open_issue("serve-security-which")  # lane3/hooks/L-T1/serve-security-system32.patch
     def test_a_planted_icacls_in_path_is_never_run(self):
         self.assertFalse(self._run_with_planted("icacls", lambda s, p: s.restrict_to_user(p)))
 
     @WINDOWS
-    @unittest.skipIf("serve-security-which" in OPEN, "open: serve-security-which (lane3/hooks/L-T1/serve-security-system32.patch)")
+    @open_issue("serve-security-which")  # lane3/hooks/L-T1/serve-security-system32.patch
     def test_a_planted_whoami_in_path_is_never_run(self):
         self.assertFalse(self._run_with_planted("whoami", lambda s, p: s._sid_from_whoami()))
 
-    @unittest.skipIf("serve-security-which" in OPEN, "open: serve-security-which")
+    @open_issue("serve-security-which")
     def test_source_has_no_which_for_system_tools(self):
         text = (ENGINE / "serve" / "security.py").read_text(encoding="utf-8")
         self.assertNotRegex(text, r"which\(\s*[\"'](icacls|whoami)")
@@ -89,12 +83,7 @@ class BootstrapStagingDelete(unittest.TestCase):
                 out.append((n, ln.strip()))
         return out
 
-    @unittest.skipUnless("bootstrap-staging-delete" in OPEN, "fixed: delete the OPEN entry")
-    def test_known_open_staging_folder_is_deleted_with_remove_item_recurse(self):
-        self.assertTrue(self._recursive_removes(),
-                        "FIXED? bootstrap.ps1 has no Remove-Item -Recurse left: delete 'bootstrap-staging-delete' from OPEN")
-
-    @unittest.skipIf("bootstrap-staging-delete" in OPEN, "open: bootstrap-staging-delete (lane3/hooks/L-T1/bootstrap-staging-delete.patch)")
+    @open_issue("bootstrap-staging-delete")
     def test_no_recursive_remove_item_in_bootstrap(self):
         self.assertEqual(self._recursive_removes(), [])
 
