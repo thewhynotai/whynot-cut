@@ -92,7 +92,7 @@
 - [ ] BL-01 to BL-04 (read-once hook, licence files, GPL notices, run-state/resume).
 - [ ] Accept the committed work: T4.9, Tasks 23, 26, 28, 54.
 - [ ] Owners for the out-of-lane suite failures: installer r5_1 (installer track); identity gate (executor); `serve/security.py` (Adobe).
-- [ ] **L-T8 engine write gate** (executor): the real fix for the subagent guard hole. It is on the Gate 4 security line.
+- [ ] **BL-15 lead-step approval token** (Gate 4; executor design in PROGRESS d1b3009): the engine-side fix for the subagent guard hole. Together with the guard commits it forms the Gate 4 security line. **L-T8, the engine write gate, stays at Gate 5** (Stage 8).
 
 **Exit (Gate 4, as in the phase plan):**
 - independent review 0 Critical / 0 Important;
@@ -230,7 +230,7 @@ After the tag, the K1 safety switches turn on.
 - Adobe for the live E1–E20+ scenarios.
 
 **Existing plans:** Phase 8 and Phase 9 (T9.2), Addendum L.
-- [ ] Security items: L-T4, L-T5, L-T6, L-T16, L-T17; L-T10 fuzzing rework; the daemon auth tests; a red-team review (H32 needs the owner's OK before it runs).
+- [ ] Security items: L-T8 (the engine write gate), L-T4, L-T5, L-T6, L-T16, L-T17; L-T10 fuzzing rework; the daemon auth tests; a red-team review (H32 needs the owner's OK before it runs).
 - [ ] Structure, code and security reviews: 0 Critical / 0 Important.
 - [ ] Windows live end-to-end on a full episode, fault injection, a soak run, and a timed edit (G-04).
 
