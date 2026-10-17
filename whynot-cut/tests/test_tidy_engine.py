@@ -1093,7 +1093,7 @@ class TidyStore(Tmp):
 class TidyPackage(unittest.TestCase):
     def test_headers_and_names(self):
         files = sorted(LIB.glob("*.py"))
-        self.assertEqual([f.name for f in files], ["__init__.py", "backup.py", "disk.py", "media.py", "sniff.py", "store.py", "wavpower.py"])
+        self.assertEqual([f.name for f in files], ["__init__.py", "backup.py", "classify.py", "disk.py", "jsutil.py", "media.py", "plan.py", "sniff.py", "store.py", "sync.py", "wavpower.py"])
         for f in files:
             body = f.read_text(encoding="utf-8")
             lines = body.split("\n")
