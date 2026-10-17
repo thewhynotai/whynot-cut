@@ -1,0 +1,321 @@
+{
+  "version": 1,
+  "note": "Look recommender (R-4.6): the ONLY home of fit tables and look traits (look files carry none). Every number is a starting value, set by editorial judgement and reviewed; measured on real reels before it is called final. Score = 3 x fit[content type][look] + 2 x reference match + 1 x delivery fit - recent use (motion looks only). Editorial review 2026-10-17 (short-video editing coach): fast speech favours phrases over single Arabic words; bold opinion and comedy lead with phrases; emotional keeps still captions.",
+  "weights": {
+    "fit": 3,
+    "ref": 2,
+    "delivery": 1
+  },
+  "neutral": 0.5,
+  "energy_from_cuts": {
+    "floor_cpm": 6,
+    "span_cpm": 24,
+    "note": "client energy = clamp((median cuts per minute - floor) / span, 0, 1)"
+  },
+  "match": {
+    "same": 1.0,
+    "next": 0.5,
+    "far": 0.0
+  },
+  "recent": {
+    "weight": 0.8,
+    "decay": 0.6,
+    "reels": 10,
+    "note": "motion looks only: sum over the client's last reels that used a motion look of weight x decay^age (age 0 = the most recent such reel; ordinary clips without one do not count)"
+  },
+  "variety": {
+    "min_fit": 0.3,
+    "note": "motion looks only: a look used in both of the client's last two reels gives way to the next-ranked look; below min_fit, no look"
+  },
+  "rate_bands": {
+    "fast": 3.2,
+    "slow": 2.2,
+    "note": "words per second, pauses over the caption catalog's pause_ignore_ms ignored (the same bands as caption auto)"
+  },
+  "content_types": [
+    "storytelling",
+    "drama",
+    "success_story",
+    "advice",
+    "bold_opinion",
+    "emotional",
+    "comedy",
+    "explainer",
+    "list",
+    "medical_claim",
+    "interview"
+  ],
+  "caption": {
+    "order": [
+      "phrase-clean",
+      "phrase-boxed",
+      "phrase-highlight",
+      "line-clean",
+      "line-boxed",
+      "line-highlight",
+      "word-clean",
+      "word-boxed"
+    ],
+    "traits": {
+      "word-clean": {
+        "energy": 0.9,
+        "caption_density": "low",
+        "text_weight": "light",
+        "playful": false
+      },
+      "word-boxed": {
+        "energy": 0.9,
+        "caption_density": "low",
+        "text_weight": "heavy",
+        "playful": false
+      },
+      "phrase-clean": {
+        "energy": 0.6,
+        "caption_density": "medium",
+        "text_weight": "light",
+        "playful": false
+      },
+      "phrase-boxed": {
+        "energy": 0.6,
+        "caption_density": "medium",
+        "text_weight": "heavy",
+        "playful": false
+      },
+      "phrase-highlight": {
+        "energy": 0.7,
+        "caption_density": "medium",
+        "text_weight": "regular",
+        "playful": false
+      },
+      "line-clean": {
+        "energy": 0.3,
+        "caption_density": "high",
+        "text_weight": "light",
+        "playful": false
+      },
+      "line-boxed": {
+        "energy": 0.3,
+        "caption_density": "high",
+        "text_weight": "heavy",
+        "playful": false
+      },
+      "line-highlight": {
+        "energy": 0.4,
+        "caption_density": "high",
+        "text_weight": "regular",
+        "playful": false
+      }
+    },
+    "delivery": {
+      "word": {
+        "fast": 0.7,
+        "medium": 0.5,
+        "slow": 0.2
+      },
+      "phrase": {
+        "fast": 1.0,
+        "medium": 1.0,
+        "slow": 0.7
+      },
+      "line": {
+        "fast": 0.3,
+        "medium": 0.7,
+        "slow": 1.0
+      }
+    },
+    "fit": {
+      "storytelling": {
+        "line-clean": 0.9,
+        "phrase-clean": 0.8,
+        "line-highlight": 0.6,
+        "phrase-highlight": 0.6,
+        "line-boxed": 0.5,
+        "phrase-boxed": 0.5,
+        "word-clean": 0.3,
+        "word-boxed": 0.2
+      },
+      "drama": {
+        "phrase-highlight": 0.9,
+        "phrase-clean": 0.8,
+        "line-highlight": 0.7,
+        "word-clean": 0.6,
+        "line-clean": 0.6,
+        "phrase-boxed": 0.4,
+        "word-boxed": 0.4,
+        "line-boxed": 0.3
+      },
+      "success_story": {
+        "phrase-clean": 0.9,
+        "phrase-highlight": 0.8,
+        "line-clean": 0.7,
+        "phrase-boxed": 0.6,
+        "line-highlight": 0.6,
+        "line-boxed": 0.5,
+        "word-clean": 0.4,
+        "word-boxed": 0.3
+      },
+      "advice": {
+        "phrase-boxed": 0.9,
+        "line-boxed": 0.8,
+        "phrase-highlight": 0.7,
+        "phrase-clean": 0.7,
+        "line-highlight": 0.6,
+        "line-clean": 0.5,
+        "word-boxed": 0.3,
+        "word-clean": 0.2
+      },
+      "bold_opinion": {
+        "word-boxed": 0.6,
+        "phrase-boxed": 0.8,
+        "word-clean": 0.6,
+        "phrase-highlight": 0.7,
+        "phrase-clean": 0.6,
+        "line-boxed": 0.4,
+        "line-highlight": 0.4,
+        "line-clean": 0.3
+      },
+      "emotional": {
+        "line-clean": 0.9,
+        "phrase-clean": 0.8,
+        "line-highlight": 0.3,
+        "phrase-highlight": 0.3,
+        "line-boxed": 0.4,
+        "phrase-boxed": 0.3,
+        "word-clean": 0.2,
+        "word-boxed": 0.1
+      },
+      "comedy": {
+        "word-clean": 0.7,
+        "phrase-highlight": 0.8,
+        "word-boxed": 0.8,
+        "phrase-clean": 0.7,
+        "phrase-boxed": 0.6,
+        "line-highlight": 0.4,
+        "line-clean": 0.3,
+        "line-boxed": 0.3
+      },
+      "explainer": {
+        "phrase-highlight": 0.9,
+        "phrase-boxed": 0.8,
+        "line-highlight": 0.7,
+        "line-boxed": 0.7,
+        "phrase-clean": 0.6,
+        "line-clean": 0.5,
+        "word-boxed": 0.3,
+        "word-clean": 0.2
+      },
+      "list": {
+        "phrase-boxed": 0.9,
+        "line-boxed": 0.8,
+        "phrase-highlight": 0.7,
+        "line-highlight": 0.6,
+        "phrase-clean": 0.6,
+        "line-clean": 0.5,
+        "word-boxed": 0.4,
+        "word-clean": 0.3
+      },
+      "medical_claim": {
+        "line-boxed": 0.9,
+        "phrase-boxed": 0.9,
+        "line-clean": 0.7,
+        "phrase-clean": 0.7,
+        "line-highlight": 0.6,
+        "phrase-highlight": 0.6,
+        "word-boxed": 0.2,
+        "word-clean": 0.1
+      },
+      "interview": {
+        "line-clean": 0.9,
+        "line-boxed": 0.8,
+        "phrase-clean": 0.7,
+        "phrase-boxed": 0.6,
+        "line-highlight": 0.5,
+        "phrase-highlight": 0.5,
+        "word-clean": 0.2,
+        "word-boxed": 0.2
+      }
+    },
+    "display": {
+      "word-clean": "word-clean",
+      "word-boxed": "word-boxed",
+      "phrase-clean": "phrase-clean",
+      "phrase-boxed": "phrase-boxed",
+      "phrase-highlight": "phrase-highlight",
+      "line-clean": "line-clean",
+      "line-boxed": "line-boxed",
+      "line-highlight": "line-highlight"
+    }
+  },
+  "motion": {
+    "note": "Motion looks (R-6.1, Phase 6): the catalogue is config/defaults/looks/motion/*.json (name, display, status planned | preview_gate | accepted); their traits and fit rows go here when each look is built.",
+    "order": [],
+    "traits": {},
+    "fit": {}
+  },
+  "reason": {
+    "ar": {
+      "caption_type": "اخترنا شكل الكابشن «{look}» عشان نوع الفيديو {type} والكلام {rate}.",
+      "caption_rate": "اخترنا شكل الكابشن «{look}» عشان الكلام {rate}.",
+      "motion_type": "اخترنا الشكل «{look}» عشان نوع الفيديو {type}.",
+      "motion_variety": "اخترنا الشكل «{look}» عشان نوع الفيديو {type}، وغيّرنا عن الشكل اللي اتكرر في آخر فيديوهين للعميل.",
+      "fixed_client": "استخدمنا «{look}» لأنه الشكل اللي العميل مختاره.",
+      "fixed_reel": "استخدمنا «{look}» لأنه الشكل اللي اتختار للفيديو ده.",
+      "no_motion": "لسه مفيش شكل جديد اتراجع واتعتمد للنوع ده، فاستخدمنا الشكل الأساسي.",
+      "types": {
+        "storytelling": "حكاية",
+        "drama": "موقف فيه شد",
+        "success_story": "قصة نجاح",
+        "advice": "نصايح بخطوات",
+        "bold_opinion": "رأي جريء",
+        "emotional": "لحظة مؤثرة",
+        "comedy": "كوميدي",
+        "explainer": "شرح",
+        "list": "قايمة نقط",
+        "medical_claim": "معلومة طبية",
+        "interview": "حوار"
+      },
+      "rates": {
+        "fast": "سريع",
+        "medium": "سرعته عادية",
+        "slow": "بطيء"
+      },
+      "motion_plain": "اخترنا الشكل «{look}» عشان يناسب الفيديو ده.",
+      "motion_plain_variety": "اخترنا الشكل «{look}» وغيّرنا عن الشكل اللي اتكرر في آخر فيديوهين للعميل.",
+      "no_motion_variety": "الشكل اللي بيناسب الفيديو ده اتكرر في آخر فيديوهين للعميل، ومفيش شكل تاني مناسب، فاستخدمنا الشكل الأساسي.",
+      "override_refused": "الشكل «{look}» مش مناسب للمحتوى ده (طبي أو ديني)، فاخترنا غيره.",
+      "override_unknown": "الشكل «{look}» مش جاهز للاستخدام، فاخترنا غيره."
+    },
+    "en": {
+      "caption_type": "We picked the caption look “{look}” because the video is {type} and the speech is {rate}.",
+      "caption_rate": "We picked the caption look “{look}” because the speech is {rate}.",
+      "motion_type": "We picked the look “{look}” because the video is {type}.",
+      "motion_variety": "We picked the look “{look}” because the video is {type}, and we switched away from the look used in the client's last two videos.",
+      "fixed_client": "We used “{look}” because it is the look this client chose.",
+      "fixed_reel": "We used “{look}” because it was chosen for this video.",
+      "no_motion": "There is no reviewed new look for this kind of video yet, so the usual look is used.",
+      "types": {
+        "storytelling": "a story",
+        "drama": "a tense moment",
+        "success_story": "a success story",
+        "advice": "step-by-step advice",
+        "bold_opinion": "a bold opinion",
+        "emotional": "an emotional moment",
+        "comedy": "comedy",
+        "explainer": "an explainer",
+        "list": "a list of points",
+        "medical_claim": "medical information",
+        "interview": "an interview"
+      },
+      "rates": {
+        "fast": "fast",
+        "medium": "at a normal pace",
+        "slow": "slow"
+      },
+      "motion_plain": "We picked the look “{look}” because it suits this video.",
+      "motion_plain_variety": "We picked the look “{look}” and switched away from the look used in the client's last two videos.",
+      "no_motion_variety": "The look that suits this video was used in the client's last two videos and no other look fits, so the usual look is used.",
+      "override_refused": "The look “{look}” does not suit this content (medical or religious), so another one was picked.",
+      "override_unknown": "The look “{look}” is not ready to use, so another one was picked."
+    }
+  }
+}

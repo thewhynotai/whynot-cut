@@ -237,6 +237,13 @@ def resolve(words: list | None = None, override=None, motion_look: dict | None =
             "rate": None if rate is None else round(rate, 2), "digits": digits}
 
 
+# --------------------------------------------------------------------------- recommend
+def recommend(paths, kind: str = "caption", **kw) -> dict:
+    """The look this reel would suit, with the top three and one plain line (R-4.6; lib/looks_recommend)."""
+    from .looks_recommend import recommend as _recommend
+    return _recommend(paths, kind=kind, **kw)
+
+
 # --------------------------------------------------------------------------- pick
 def _client_style_file() -> Path:
     root = current_context().root

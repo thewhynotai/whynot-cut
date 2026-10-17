@@ -26,9 +26,9 @@ from .common import load_config
 
 _DIGIT = re.compile("[0-9٠-٩۰-۹]")
 _SEP = ".,٫٬"
-_ARABIC_CH = re.compile("[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]")
+_ARABIC_CH = re.compile("[\u0600-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-\ufeff]")
 _ARABIC_LETTER = re.compile("[ء-يٮ-ۓۺ-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-ﻼ]")
-_IGNORABLE = {"‌", "‍", "‎", "‏", "⁦", "⁧", "⁨", "⁩", "؜", " "}
+_IGNORABLE = {"\u200c", "\u200d", "\u200e", "\u200f", "\u2066", "\u2067", "\u2068", "\u2069", "\u061c", " "}
 HOUSE_PS = {"arabic": ["IBMPlexSansArabic-SemiBold", "IBMPlexSansArabic-Bold", "IBMPlexSansArabic-Regular"],
             "latin": ["Inter-SemiBold", "Inter-Bold", "Inter-Regular"]}
 LATIN_SYSTEM = ["SegoeUI-Semibold", "SegoeUI", "Arial-BoldMT", "ArialMT", "HelveticaNeue-Medium", "Helvetica",
@@ -128,7 +128,7 @@ class CTEngine:
     """macOS CoreText (lib/ct_text) for an installed face, by PostScript name. A direction mark before the text sets
     the run's direction (numbers stay left to right in both)."""
     name = "coretext"
-    _MARK = {"rtl": "‏", "ltr": "‎"}
+    _MARK = {"rtl": "\u200f", "ltr": "\u200e"}
 
     def font(self, face: dict, size: float):
         from . import ct_text

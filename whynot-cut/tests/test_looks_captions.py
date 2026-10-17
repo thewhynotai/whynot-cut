@@ -1387,7 +1387,7 @@ class TestDarwinPath(unittest.TestCase):
         from lib import ct_text
         with mock.patch.object(ct_text, "measure", side_effect=lambda t, f: len(t)) as m:
             self.assertEqual(LT.CTEngine().advance("abc", "rtl", font), 4)
-            self.assertTrue(m.call_args[0][0].startswith("‏"))
+            self.assertTrue(m.call_args[0][0].startswith("\u200f"))
 
     @unittest.skipUnless(sys.platform == "darwin", "CoreText exists only on macOS (the Mac CI runner)")
     def test_real_coretext_measures_and_finds_missing_glyphs(self):

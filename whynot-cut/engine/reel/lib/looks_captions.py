@@ -725,7 +725,7 @@ def _sheet(tiles: list[tuple[str, str]], out, size: tuple, label_face: dict | No
 
 
 def render(paths, looks_: list[str] | None = None, frames: list | None = None, emphasis: str | None = None,
-           budget_s: float | None = None, **kw) -> dict:
+           budget_s: float | None = None, sheet: bool = True, **kw) -> dict:
     """`reel caption-looks`: every caption look (or `looks`, Task 16 names too) on two frames of this clip, plus one
     sheet, in 08_quality_control/previews/caption-looks/ (never 03_broll: the real caption stills are not touched).
     The editor picks by sight, then `pick`. Over the time budget (catalog gallery_budget_s, 20 s) is a warning.
@@ -792,13 +792,15 @@ def render(paths, looks_: list[str] | None = None, frames: list | None = None, e
                     "shown": part["text"] if part else "", "emphasised": ew,
                     "band_word": part["words"][state]["text"] if part and lk["presentation"] == "highlight" else None})
     label_face = (chains[next(iter(chains))][0]["latin"] or [None])[0] if chains else None
-    sheet = _sheet(tiles, out / "caption-looks-sheet.png", (W, H), label_face)
+    # sheet=False (the recommender's stills): the editor's own gallery sheet is left as it is
+    sheet = _sheet(tiles, out / "caption-looks-sheet.png", (W, H), label_face) if sheet else None
     elapsed = time.monotonic() - t0
     budget = float(cat.get("gallery_budget_s", 20) if budget_s is None else budget_s)
     if elapsed > budget:
         warnings.append(f"the caption-look gallery took {elapsed:.1f} s, over its {budget:.0f} s budget on this "
                         "computer (a starting budget: the looks are still right)")
-    return {"looks": res, "sheet": str(sheet), "elapsed_s": round(elapsed, 2), "warnings": warnings, "dir": str(out)}
+    return {"looks": res, "sheet": str(sheet) if sheet else None, "elapsed_s": round(elapsed, 2), "warnings": warnings,
+            "dir": str(out)}
 
 
 def pick(paths, look: str, yes: bool = False, emphasis: str | None = None) -> dict:
