@@ -1,0 +1,25 @@
+{
+ "words": [
+  {
+   "id": 1,
+   "word": "today",
+   "start_ms": 500,
+   "end_ms": 850,
+   "probability": 0.95
+  },
+  {
+   "id": 2,
+   "word": "we",
+   "start_ms": 900,
+   "end_ms": 1250,
+   "probability": 0.95
+  },
+  {
+   "id": 3,
+   "word": "talk",
+   "start_ms": 1300,
+   "end_ms": 1650,
+   "probability": 0.95
+  }
+ ]
+}
