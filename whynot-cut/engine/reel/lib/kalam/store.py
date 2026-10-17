@@ -119,18 +119,25 @@ def default_models_dir() -> Path:
 class Store:
     def __init__(self, engine_home=None):
         self.engine_home = Path(engine_home) if engine_home else plat.engine_home()
-        self.home = self.engine_home / "tools" / "kalam"
-        self.logs = self.home / "logs"
-        self.cache_dir = self.home / "cache"
-        self.models_dir = self.home / "models"
-        self.hf_dir = self.home / "hf"
-        self.run_dir = self.home / "run"          # the per-run settings files (take_settings deletes them)
-        self.settings_file = self.home / "settings.json"
+        self.store_root = self.engine_home / "tools" / "kalam"
+        self.logs = self.store_root / "logs"
+        self.cache_dir = self.store_root / "cache"
+        self.models_dir = self.store_root / "models"
+        self.hf_dir = self.store_root / "hf"
+        self.run_dir = self.store_root / "run"    # the per-run settings files (take_settings deletes them)
+        self.settings_file = self.store_root / "settings.json"
         self.log_file = self.logs / "whynot-kalam.log"
+
+    @property
+    def home(self) -> Path:
+        """the old name of store_root (<engine home>/tools/kalam), kept for callers until Task 17 renames them. The
+        installer's engine-home scan reads `home / "<name>"` as a top-level engine folder, so the code here uses
+        store_root"""
+        return self.store_root
 
     def _dir(self, path: Path) -> Path:
         sec = _security()
-        sec.private_dir(self.home)       # parents first: every folder under tools/kalam is user-only
+        sec.private_dir(self.store_root)  # parents first: every folder under tools/kalam is user-only
         return sec.private_dir(path)
 
     def write_private(self, path, data: bytes) -> bool:
@@ -156,7 +163,7 @@ class Store:
     def ensure_run_dir(self) -> Path:
         """<engine home>/tools/kalam/run/, created user-only (the parents too)"""
         sec = _security()
-        sec.private_dir(self.home)
+        sec.private_dir(self.store_root)
         return sec.private_dir(self.run_dir)
 
     def new_run_settings(self, settings: dict) -> Path:

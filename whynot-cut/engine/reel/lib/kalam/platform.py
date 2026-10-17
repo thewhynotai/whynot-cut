@@ -42,14 +42,14 @@ def backend() -> str:
     return "portable"
 
 
-def claude_candidates(env: dict, home: Path, windows: bool) -> list:
+def claude_candidates(env: dict, user_home: Path, windows: bool) -> list:
     """places the Claude Code CLI is installed by its native installer, npm or Homebrew"""
     if windows:
-        out = [str(home / ".local" / "bin" / "claude.exe")]
+        out = [str(user_home / ".local" / "bin" / "claude.exe")]
         if env.get("APPDATA"):
             out.append(str(Path(env["APPDATA"]) / "npm" / "claude.cmd"))
         return out
-    h = PurePosixPath(Path(home).as_posix())          # a POSIX string on every host (Path would use "\" on Windows)
+    h = PurePosixPath(Path(user_home).as_posix())     # a POSIX string on every host (Path would use "\" on Windows)
     return [str(h / ".local" / "bin" / "claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
 
 
@@ -69,33 +69,33 @@ def in_sandbox(env=None) -> bool:
     return bool((os.environ if env is None else env).get(SANDBOX_ENV))
 
 
-def claude_install_candidates(env, home, windows: bool, sandbox: bool = False, which=None) -> list:
+def claude_install_candidates(env, user_home, windows: bool, sandbox: bool = False, which=None) -> list:
     """Every Claude Code CLI file on this machine, best first: $CLAUDE_CLI, `claude` on PATH, the fixed native / npm
     install paths, then the CLIs bundled with the desktop app (newest version first). In a sandbox only $WNC_CLAUDE_CLI
-    (the test switch) and the bundles under the (fake) home are searched. `which(name, path=)` defaults to
+    (the test switch) and the bundles under the (fake) user home are searched. `which(name, path=)` defaults to
     shutil.which (the installer's rule); correct.find_claude_code passes the cwd-proof PATH walk instead."""
-    home = Path(home)
+    user_home = Path(user_home)
     which = shutil.which if which is None else which
     exe = "claude.exe" if windows else "claude"
     out = []
     if sandbox:
         if env.get("WNC_CLAUDE_CLI"):
             out.append(Path(env["WNC_CLAUDE_CLI"]))
-        appdata = home / "AppData" / "Roaming"
+        appdata = user_home / "AppData" / "Roaming"
     else:
         if env.get("CLAUDE_CLI"):
             out.append(Path(env["CLAUDE_CLI"]))
         found_on_path = which("claude", path=env.get("PATH"))
         if found_on_path:
             out.append(Path(found_on_path))
-        appdata = Path(env.get("APPDATA") or home / "AppData" / "Roaming")
+        appdata = Path(env.get("APPDATA") or user_home / "AppData" / "Roaming")
         if windows:
-            local = Path(env.get("LOCALAPPDATA") or home / "AppData" / "Local")
-            out += [local / "Programs" / "claude" / exe, home / ".local" / "bin" / exe, appdata / "npm" / "claude.cmd"]
+            local = Path(env.get("LOCALAPPDATA") or user_home / "AppData" / "Local")
+            out += [local / "Programs" / "claude" / exe, user_home / ".local" / "bin" / exe, appdata / "npm" / "claude.cmd"]
         else:
-            out += [home / ".local" / "bin" / exe, home / ".claude" / "local" / exe, Path("/usr/local/bin") / exe,
+            out += [user_home / ".local" / "bin" / exe, user_home / ".claude" / "local" / exe, Path("/usr/local/bin") / exe,
                     Path("/opt/homebrew/bin") / exe]
-    bundle = (appdata if windows else home / "Library" / "Application Support") / "Claude" / "claude-code"
+    bundle = (appdata if windows else user_home / "Library" / "Application Support") / "Claude" / "claude-code"
     found = []
     if bundle.is_dir():
         found += [p for p in bundle.glob(f"*/*/{exe}") if p.is_file()]

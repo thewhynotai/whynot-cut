@@ -53,17 +53,24 @@ def _num(x):
 class Store:
     def __init__(self, engine_home=None):
         self.engine_home = Path(engine_home) if engine_home else plat.engine_home()
-        self.home = self.engine_home / "tools" / "hush"
-        self.logs = self.home / "logs"
-        self.cache_dir = self.home / "cache"
-        self.settings_file = self.home / "settings.json"
-        self.presets_file = self.home / "presets.json"
+        self.store_root = self.engine_home / "tools" / "hush"
+        self.logs = self.store_root / "logs"
+        self.cache_dir = self.store_root / "cache"
+        self.settings_file = self.store_root / "settings.json"
+        self.presets_file = self.store_root / "presets.json"
         self.log_file = self.logs / "whynot-hush.log"
-        self.last_scan_file = self.home / "last-scan.json"   # `reel hush scan` without --out; `plan` reads it by default
+        self.last_scan_file = self.store_root / "last-scan.json"  # `reel hush scan` without --out; `plan` reads it by default
+
+    @property
+    def home(self) -> Path:
+        """the old name of store_root (<engine home>/tools/hush), kept for callers until Task 17 renames them. The
+        installer's engine-home scan reads `home / "<name>"` as a top-level engine folder, so the code here uses
+        store_root"""
+        return self.store_root
 
     def _dir(self, path: Path) -> Path:
         sec = _security()
-        sec.private_dir(self.home)       # parents first: every folder under tools/hush is user-only
+        sec.private_dir(self.store_root)  # parents first: every folder under tools/hush is user-only
         return sec.private_dir(path)
 
     def write_private(self, path, data: bytes) -> bool:
@@ -208,7 +215,7 @@ class Store:
 
 
 def home() -> Path:
-    return Store().home
+    return Store().store_root
 
 
 def log(msg) -> bool:
