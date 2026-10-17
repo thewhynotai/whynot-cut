@@ -14,8 +14,9 @@ Models load from the complete local snapshot when there is one (no network: offl
 T4.11 (G13-RUN): on an NVIDIA GPU the batch is fitted to the free VRAM at load time, leaving room for Premiere
 (`fit_batch`); nothing fits -> the CPU, with a message, never an out-of-memory loop. `run.release()` drops the model
 after the job (transcribe / bench call it), so the next GPU job finds the memory free.
-T4.14 (G13): one GPU precision per model, `transcription.json` gpu_compute_types (the old gpu_compute_type is still
-read; a wrong or missing entry falls back to float16); the CPU stays int8. `reel bench --compute-type --device
+T4.14 (G13): one GPU precision per model, `transcription.json` gpu_compute_types in a profile, else the old
+gpu_compute_type, else the shipped GPU_COMPUTE_TYPE_DEFAULTS (in code, so the old key in a profile still beats it), else
+float16; a wrong entry is skipped. The CPU stays int8. `reel bench --compute-type --device
 --reference` measures speed and, against a reference transcript, WER/CER (lib/wer.py).
 """
 from __future__ import annotations
@@ -233,14 +234,20 @@ def mlx_model_source(model: str) -> str:
 # --------------------------------------------------------------------------- CTranslate2 loading
 GPU_COMPUTE_TYPES = ("float16", "int8_float16", "bfloat16", "int8_bfloat16", "float32", "int8_float32", "int8")
 _DEVICE_DEFAULT_CT = {"cuda": "float16", "cpu": "int8", "metal": "float16"}   # what every pre-T4.14 bench measured
+# The shipped GPU precision per model (T4.14 pick, evidence 2026-10-17-g13-transcription-precision.md). In code, not in
+# transcription.json: a shipped per-model entry there would beat a profile that sets only the old gpu_compute_type.
+GPU_COMPUTE_TYPE_DEFAULTS = {"large-v3": "float16", "large-v3-turbo": "float16"}
 
 
 def gpu_compute_type_for(model: str, cfg: dict) -> str:
-    """The GPU precision for `model`: cfg gpu_compute_types[model] (exact model name), else the old gpu_compute_type,
-    else float16. A value CTranslate2 does not know is skipped (falls through to the next)."""
+    """The GPU precision for `model`: cfg gpu_compute_types[model] (exact model name, set in a profile), else the old
+    gpu_compute_type (set in a profile: explicit, so it beats the shipped default), else the shipped
+    GPU_COMPUTE_TYPE_DEFAULTS[model], else float16. A value CTranslate2 does not know is skipped (falls through)."""
     per = cfg.get("gpu_compute_types") if isinstance(cfg, dict) else None
-    for v in ((per.get(model) if isinstance(per, dict) and isinstance(model, str) else None),
-              cfg.get("gpu_compute_type") if isinstance(cfg, dict) else None):
+    named = isinstance(model, str)
+    for v in ((per.get(model) if isinstance(per, dict) and named else None),
+              cfg.get("gpu_compute_type") if isinstance(cfg, dict) else None,
+              GPU_COMPUTE_TYPE_DEFAULTS.get(model) if named else None):
         if isinstance(v, str) and v in GPU_COMPUTE_TYPES:
             return v
     return "float16"

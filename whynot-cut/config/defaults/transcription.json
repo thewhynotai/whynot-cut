@@ -9,11 +9,8 @@
     "medium"
   ],
   "compute_type": "int8",
-  "gpu_compute_types": {
-    "large-v3": "float16",
-    "large-v3-turbo": "float16"
-  },
-  "gpu_compute_types_note": "NVIDIA GPU precision per model (T4.14, G13); the processor always runs int8 (compute_type). float16 for both: there is no editor-verified reference transcript yet, so by the rule int8_float16 cannot win (Not verified: no reference); large-v3-turbo is not measured (not downloaded). Speed, VRAM and agreement: docs/superpowers/evidence/2026-10-17-g13-transcription-precision.md. A missing or unknown entry falls back to gpu_compute_type, then float16. A profile that sets only the old gpu_compute_type no longer changes a model listed here: set gpu_compute_types in the profile. Episode checkpoints do not record the precision, so change it between runs with --force.",
+  "gpu_compute_types": {},
+  "gpu_compute_types_note": "NVIDIA GPU precision per model (T4.14, G13), set in a client profile, e.g. {\"large-v3\": \"int8_float16\"}; the processor always runs int8 (compute_type). Empty here: the shipped choice is in the engine (float16 for large-v3 and large-v3-turbo: there is no editor-verified reference transcript yet, so by the rule int8_float16 cannot win; Not verified: no reference; large-v3-turbo is not measured, not downloaded). Speed, VRAM and agreement: docs/superpowers/evidence/2026-10-17-g13-transcription-precision.md. Order: this map for the model, else the old gpu_compute_type from a profile, else the engine's choice, else float16; an unknown value is skipped. Episode checkpoints do not record the precision, so change it between runs with --force.",
   "cpu_threads": "auto",
   "cpu_threads_note": "Whisper threads on the CPU: auto = the physical cores (faster-whisper's own default is 4), or a number.",
   "batch_size": 4,

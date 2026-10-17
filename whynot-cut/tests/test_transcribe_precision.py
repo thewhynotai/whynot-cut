@@ -16,7 +16,6 @@ import os
 import random
 import shutil
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -101,22 +100,30 @@ class TestWer(unittest.TestCase):
         self.assertAlmostEqual(t["wer"], 4 / 12, places=4)
         self.assertIsNone(wer.total([])["wer"])
 
-    def test_deterministic_and_fast(self):
+    def test_deterministic(self):
+        # batch A: no wall clock (flaky under load); an 800-word case for the result, _trim for the work it saves
         rnd = random.Random(7)
-        words = [rnd.choice(["كلمة", "طبيب", "علاج", "مريض", "dose", "3.5"]) for _ in range(2000)]
+        words = [rnd.choice(["كلمة", "طبيب", "علاج", "مريض", "dose", "3.5"]) for _ in range(800)]
         hyp = list(words)
-        for i in range(0, 2000, 37):
+        for i in range(0, 800, 37):
             hyp[i] = "x"
-        t0 = time.perf_counter()
         r1 = wer.wer(words, hyp)
-        self.assertLess(time.perf_counter() - t0, 2.0)
         self.assertEqual(r1, wer.wer(words, hyp))
-        self.assertEqual(r1["sub"], len(range(0, 2000, 37)))
-        a = [rnd.choice("abcdef") for _ in range(500)]
-        b = [rnd.choice("abcdef") for _ in range(500)]
-        t0 = time.perf_counter()
-        wer.wer(a, b)
-        self.assertLess(time.perf_counter() - t0, 2.0)
+        self.assertEqual(r1["sub"], len(range(0, 800, 37)))
+        self.assertEqual((r1["del"], r1["ins"], r1["n"]), (0, 0, 800))
+        a = [rnd.choice("abcdef") for _ in range(300)]
+        b = [rnd.choice("abcdef") for _ in range(300)]
+        r2 = wer.wer(a, b)
+        self.assertEqual(r2["sub"] + r2["del"] + r2["ins"], _naive_edits(a, b))
+
+    def test_equal_ends_cost_no_table(self):
+        # the work is the table over the middle only: a 2000-word transcript with one changed word is a 1 x 1 table
+        words = [f"w{i}" for i in range(2000)]
+        hyp = list(words)
+        hyp[1000] = "x"
+        self.assertEqual(wer._trim(words, hyp), (["w1000"], ["x"]))
+        self.assertEqual(wer._trim(words, words), ([], []))
+        self.assertEqual(wer.wer(words, hyp)["sub"], 1)
 
 
 # --------------------------------------------------------------------------- B. gpu_compute_type_for
@@ -346,9 +353,13 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(WB.fit_batch("large-v3", "int8_float16", 4, 7424), (4, "cuda"))
 
     def test_shipped_transcription_json(self):
+        # batch A: the per-model precisions live in code (WB.GPU_COMPUTE_TYPE_DEFAULTS), so the shipped file lists none
+        # and a profile's old gpu_compute_type is not overridden by a shipped per-model entry
         d = json.loads((SK / "config" / "defaults" / "transcription.json").read_text(encoding="utf-8"))
-        self.assertEqual(set(d["gpu_compute_types"]), {"large-v3", "large-v3-turbo"})
-        for v in d["gpu_compute_types"].values():
+        self.assertEqual(d["gpu_compute_types"], {})
+        self.assertNotIn("gpu_compute_type", d)
+        self.assertEqual(set(WB.GPU_COMPUTE_TYPE_DEFAULTS), {"large-v3", "large-v3-turbo"})
+        for v in WB.GPU_COMPUTE_TYPE_DEFAULTS.values():
             self.assertIn(v, WB.GPU_COMPUTE_TYPES)
         self.assertIn("g13-transcription-precision", d["gpu_compute_types_note"])
         self.assertEqual(d["compute_type"], "int8")                         # the CPU
@@ -374,9 +385,7 @@ class TestReview1Wer(unittest.TestCase):
         for i in range(0, len(b), 50):
             b[i] = "ق"
         b = "".join(b)
-        t0 = time.perf_counter()
-        c = wer.cer(a, b)
-        self.assertLess(time.perf_counter() - t0, 5.0)
+        c = wer.cer(a, b)                       # batch A: no wall clock; the fast distance is checked against a table below
         ra, rb = "".join(wer.tokens(a)), "".join(wer.tokens(b))
         self.assertGreater(c, 0)
         self.assertEqual(wer._distance("kitten", "sitting"), 3)
@@ -522,6 +531,127 @@ class TestReview1Pick(unittest.TestCase):
         self.assertIn("no reference", r["reason"])
         self.assertEqual(WB.pick_compute_type([row(m(0.10, 0.05, 10.0, 5000), m(0.104, 0.052, 11.5, 4500),
                                                    ref="verified")])["choice"], "int8_float16")
+
+
+# --------------------------------------------------------------------------- executor acceptance review, batch A
+def _naive_edits(a, b):
+    """The plain O(n*m) edit distance, the reference the fast paths are checked against."""
+    prev = list(range(len(b) + 1))
+    for i, x in enumerate(a, 1):
+        cur = [i]
+        for j, y in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x != y)))
+        prev = cur
+    return prev[-1]
+
+
+class TestBatchAOldKey(unittest.TestCase):
+    """P2: a profile that sets only the old gpu_compute_type keeps it; the shipped per-model choice is a code default."""
+
+    def shipped(self):
+        return json.loads((SK / "config" / "defaults" / "transcription.json").read_text(encoding="utf-8"))
+
+    def test_old_key_in_a_profile_beats_the_shipped_default(self):
+        from lib.common import deep_merge
+        merged = deep_merge(self.shipped(), {"gpu_compute_type": "int8_float16"})      # how load_config merges
+        for model in ("large-v3", "large-v3-turbo"):
+            self.assertEqual(WB.gpu_compute_type_for(model, merged), "int8_float16", model)
+
+    def test_code_default_applies_without_any_key(self):
+        with mock.patch.dict(WB.GPU_COMPUTE_TYPE_DEFAULTS, {"large-v3": "int8_float16"}):
+            self.assertEqual(WB.gpu_compute_type_for("large-v3", self.shipped()), "int8_float16")
+            self.assertEqual(WB.gpu_compute_type_for("large-v3", {}), "int8_float16")
+            # the old key (explicit) beats the code default; a per-model entry in a profile beats both
+            self.assertEqual(WB.gpu_compute_type_for("large-v3", {"gpu_compute_type": "float16"}), "float16")
+            self.assertEqual(WB.gpu_compute_type_for("large-v3", {"gpu_compute_type": "float16",
+                                                                  "gpu_compute_types": {"large-v3": "bfloat16"}}),
+                             "bfloat16")
+            self.assertEqual(WB.gpu_compute_type_for("medium", {}), "float16")          # not listed: float16
+            self.assertEqual(WB.gpu_compute_type_for("large-v3", {"gpu_compute_type": "fp16"}), "int8_float16")
+
+    def test_a_bad_code_default_is_skipped(self):
+        with mock.patch.dict(WB.GPU_COMPUTE_TYPE_DEFAULTS, {"large-v3": "fp16"}):
+            self.assertEqual(WB.gpu_compute_type_for("large-v3", {}), "float16")
+
+
+class TestBatchANormaliser(unittest.TestCase):
+    """P3: units glued to an integer, thousands separators, alef wasla, a leading decimal point."""
+
+    def same(self, a, b):
+        self.assertEqual(wer.tokens(a), wer.tokens(b), (a, b))
+        self.assertEqual(wer.wer(a.split(), b.split())["wer"], 0.0, (a, b))
+        self.assertEqual(wer.cer(a, b), 0.0, (a, b))
+
+    def test_unit_glued_to_an_integer(self):
+        self.same("5mg", "5 mg")
+        self.same("خد 5مجم", "خد 5 مجم")
+        self.same("٥مجم", "5 مجم")
+        self.assertEqual(wer.tokens("12mg."), ["12", "mg"])
+        self.assertEqual(wer.tokens("b12 covid19 mp4"), ["b12", "covid19", "mp4"])     # letters first: one word
+        self.assertEqual(wer.tokens("2nd"), ["2", "nd"])                    # an ordinal splits too (both sides alike)
+
+    def test_thousands_separators(self):
+        self.same("3,000", "3000")
+        self.same("3,000,000", "3000000")
+        self.same("٣٬٠٠٠", "3000")                                 # Arabic thousands separator
+        self.same("2,500.5", "2500.5")
+        self.assertEqual(wer.tokens("3,000,000"), ["3000000"])
+        self.assertNotEqual(wer.tokens("3,000"), wer.tokens("3"))
+        # a comma with other than 3 digits after it is a decimal comma (kept as a decimal)
+        self.assertEqual(wer.tokens("3,5"), ["3.5"])
+        self.assertEqual(wer.tokens("٣،٥"), ["3.5"])
+        self.assertNotEqual(wer.tokens("3,5"), wer.tokens("35"))
+
+    def test_alef_wasla_folds(self):
+        self.same("ٱلله", "الله")
+        self.same("بِٱسْمِ", "باسم")
+
+    def test_leading_point_stays_a_decimal(self):
+        self.assertEqual(wer.tokens(".5"), ["0.5"])
+        self.assertEqual(wer.tokens("٫٥ مجم"), ["0.5", "مجم"])
+        self.same(".5", "0.5")
+        self.assertNotEqual(wer.tokens(".5"), wer.tokens("5"))
+        self.assertEqual(wer.tokens("(.5mg)"), ["0.5", "mg"])
+        self.assertEqual(wer.tokens("5."), ["5"])                                       # a full stop after a number
+        self.assertEqual(wer.tokens("... 5"), ["5"])                                    # an ellipsis is not a point
+
+
+class TestBatchAReview1(unittest.TestCase):
+    """Fresh-eyes review of batch A: a leading-zero decimal comma, decimals inside a word, CER across number tokens,
+    the presentation form of alef wasla."""
+
+    def same(self, a, b):
+        self.assertEqual(wer.tokens(a), wer.tokens(b), (a, b))
+        self.assertEqual(wer.cer(a, b), 0.0, (a, b))
+
+    def test_leading_zero_is_a_decimal_comma(self):
+        self.assertEqual(wer.tokens("0,125"), ["0.125"])                  # a digoxin-style dose, never 125
+        self.same("0,125 mg", "0.125 mg")
+        self.assertNotEqual(wer.tokens("0,125"), wer.tokens("125"))
+        self.assertEqual(wer.tokens("0,125,000"), ["0.125.000"])         # not thousands either
+
+    def test_decimal_inside_a_word_keeps_its_point(self):
+        self.assertEqual(wer.tokens("و٣٫٥"), ["و", "3.5"])                # a glued preposition
+        self.assertEqual(wer.tokens("ب3.5مجم"), ["ب", "3.5", "مجم"])
+        self.assertEqual(wer.tokens("2.5-3.5"), ["2.5", "3.5"])            # a range
+        self.assertEqual(wer.tokens("x1.5"), ["x", "1.5"])
+        self.assertEqual(wer.tokens("b12 covid19"), ["b12", "covid19"])   # an integer after letters stays in the word
+        self.same("و٣٫٥", "و 3.5")
+
+    def test_cer_never_joins_two_numbers(self):
+        for a, b in (("و٣٫٥", "و٣٥"), ("2.5-3.5", "2.5-35"), ("3 . 5", "35"), ("3.5", "35"), ("5 0", "50")):
+            self.assertGreater(wer.cer(a, b), 0, (a, b))
+        self.assertEqual(wer.cer("عبد الله", "عبدالله"), 0.0)                # words still join for free
+
+    def test_leading_point_after_a_glued_prefix(self):
+        self.assertEqual(wer.tokens("و٫٥ مجم"), ["و", "0.5", "مجم"])        # re-review: never "5"
+        self.assertEqual(wer.tokens("x.5"), ["x", "0.5"])
+        self.assertNotEqual(wer.tokens("و٫٥"), wer.tokens("و ٥"))
+        self.assertGreater(wer.cer("و.5", "و5"), 0)
+        self.assertEqual(wer.tokens("كلمة."), ["كلمه"])                          # a full stop after a word stays punctuation
+
+    def test_alef_wasla_presentation_form(self):
+        self.same("\ufb50لله", "الله")
 
 
 if __name__ == "__main__":

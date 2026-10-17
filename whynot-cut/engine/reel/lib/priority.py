@@ -4,15 +4,16 @@
 
 The preferences setting `background_priority` (below_normal | normal, default below_normal) decides; the environment
 variable WHYNOT_PRIORITY (same values) beats it: the developer's PC and the test suite run at normal
-(tests/_isolation.py). Windows: SetPriorityClass(BELOW_NORMAL_PRIORITY_CLASS); macOS and Linux: niceness 10. Child
-processes (ffmpeg, Whisper) inherit it. `reel serve` (the panel's engine) is never lowered: cli.main skips it.
+(tests/_isolation.py sets it). The value the process had when this module was imported counts too, so code that
+clears os.environ later (tests do) cannot lower a process that was started at normal.
+Windows: SetPriorityClass(BELOW_NORMAL_PRIORITY_CLASS); macOS and Linux: niceness 10. Child processes (ffmpeg,
+Whisper) inherit it. `reel serve` (the panel's engine) is never lowered: cli.main skips it.
 The engine never RAISES its own priority: a process already at that level or lower is left alone. A refusal is
 ignored ("unsupported"); nothing is printed (stdout is the CLI's JSON). Standard library only.
 """
 from __future__ import annotations
 
 import os
-import sys
 
 ENV = "WHYNOT_PRIORITY"
 CHOICES = ("below_normal", "normal")
@@ -27,11 +28,18 @@ def _choice(v) -> str | None:
     return s if s in CHOICES else None
 
 
+_START = _choice(os.environ.get(ENV))   # WHYNOT_PRIORITY as the process started (read once, at import)
+
+
 def wanted(setting=None, env=None) -> str:
     """below_normal | normal: WHYNOT_PRIORITY, else the setting (read from the preferences when None), else the
-    default. An invalid value at any level is skipped, never an error."""
-    env = os.environ if env is None else env
+    default. An invalid value at any level is skipped, never an error. With the real environment (env None), normal
+    at start or now wins: a process started with WHYNOT_PRIORITY=normal stays normal after os.environ is cleared."""
+    real = env is None
+    env = os.environ if real else env
     got = _choice(env.get(ENV))
+    if real and "normal" in (got, _START):
+        return "normal"
     if got:
         return got
     if setting is None:
@@ -69,11 +77,9 @@ def _win_set(cls: int, kernel32=None) -> None:
 def apply(setting: str | None = None, *, os_name: str | None = None, setter=None, env=None, getter=None) -> str:
     """Lower this process (and so its children) to BelowNormal unless the setting or WHYNOT_PRIORITY says normal.
     Returns "below_normal", "normal" or "unsupported". Never raises. `setter` / `getter` replace the OS calls (tests:
-    an injected setter with no getter means "the current priority is unknown", so the call is made). A process that
-    imported tests/_isolation (the test runner) is never lowered by a real OS call, whatever its environment."""
+    an injected setter with no getter means "the current priority is unknown", so the call is made). The test runner
+    is never lowered: tests/_isolation.py sets WHYNOT_PRIORITY=normal before any engine import (see wanted)."""
     if wanted(setting, env) == "normal":
-        return "normal"
-    if setter is None and "_isolation" in sys.modules:
         return "normal"
     osn = os_name or os.name
     try:

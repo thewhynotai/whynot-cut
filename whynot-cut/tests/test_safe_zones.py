@@ -707,8 +707,11 @@ class Acceptance(unittest.TestCase):
         m = SZ.check((850, 800, 1000, 850), ["ig_reels_ads", "tiktok"], 1080, 1920)
         self.assertEqual({x["platform"] for x in m}, {"tiktok"})
         self.assertTrue(SZ.check((850, 1600, 950, 1700), "tiktoc", 1080, 1920))   # unknown name: built-in numbers, never a silent pass
-        for junk in (None, (1, 2, 3), ("a", 0, 1, 1), (5, 5, 1, 1)):
-            self.assertEqual(SZ.check(junk, "tiktok", 1080, 1920), [])
+        for junk in (None, (1, 2, 3), ("a", 0, 1, 1), (5, 5, 1, 1), (950, 880, 850, 800), (float("nan"), 0, 9, 9),
+                     "box", (10, 10, 10, 10)):
+            o = SZ.check(junk, "tiktok", 1080, 1920)                # batch A review: never "clear" for a box not read
+            self.assertEqual([(x["zone"], x["severity"]) for x in o], [(SZ.CHECK_ERROR, "P1")], junk)
+            self.assertIn("box", o[0]["error"])
 
 
 class AcceptanceReview(unittest.TestCase):
@@ -754,6 +757,98 @@ class AcceptanceReview(unittest.TestCase):
 
     def test_organic_encode_is_derived_too(self):
         self.assertEqual(SZ.load("ig_reels_organic").encode["basis"], "derived")
+
+
+class BatchA(unittest.TestCase):
+    """Executor acceptance review, batch A (P3): check() reports a failure instead of a silent [], the file is parsed
+    once per change, the probe decodes as UTF-8."""
+
+    def test_check_failure_is_a_structured_error_never_clear(self):
+        from unittest import mock
+        with mock.patch.object(SZ, "union", side_effect=RuntimeError("boom")):
+            o = SZ.check((850, 800, 950, 880), "tiktok", 1080, 1920)
+        self.assertTrue(o, "a failed check must never read as clear")                 # caption fit tests truthiness
+        self.assertEqual(len(o), 1)
+        e = o[0]
+        self.assertEqual((e["zone"], e["severity"], e["fallback"]), (SZ.CHECK_ERROR, "P1", True))
+        self.assertIn("RuntimeError", e["error"])
+        self.assertIsNone(e["rect"])
+        self.assertIsNone(e["overlap"])
+        self.assertTrue(e["text"])
+        for k in ("zone", "rect", "overlap", "severity", "basis", "platform", "text", "fallback"):
+            self.assertIn(k, e)
+        # a clear box and a real overlap carry no error key
+        self.assertEqual(SZ.check((300, 800, 400, 880), "tiktok", 1080, 1920), [])
+        self.assertNotIn("error", SZ.check((850, 800, 950, 880), "tiktok", 1080, 1920)[0])
+
+    def test_profiles_parsed_once_per_file_change(self):
+        from unittest import mock
+        import os
+        f = write(raw())
+        old = f.stat().st_mtime_ns - 60_000_000_000                       # an older file: a fresh one is never cached
+        os.utime(f, ns=(old, old))
+        real = SZ._read_file
+        with mock.patch.object(SZ, "_read_file", side_effect=real) as rf:
+            a = SZ.read_profiles(f)
+            b = SZ.read_profiles(f)
+            SZ.check((850, 800, 950, 880), "tiktok", 1080, 1920, path=f)
+            SZ.check((850, 800, 950, 880), "tiktok", 1080, 1920, path=f)
+            self.assertEqual(rf.call_count, 1)
+            self.assertEqual(set(a[0]), set(b[0]))
+            b[2].append("caller noise")                                      # a caller's change never reaches the cache
+            b[0].pop("tiktok")
+            self.assertNotIn("caller noise", SZ.read_profiles(f)[2])
+            self.assertIn("tiktok", SZ.read_profiles(f)[0])
+            d = raw()
+            d["profiles"].pop("tiktok")
+            f.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")   # size changes
+            os.utime(f, ns=(old + 5_000_000_000, old + 5_000_000_000))
+            self.assertNotIn("tiktok", SZ.read_profiles(f)[0])
+            self.assertEqual(rf.call_count, 2)
+            # same size, new mtime: re-read too
+            body = f.read_bytes()
+            f.write_bytes(body)
+            os.utime(f, ns=(old + 9_000_000_000, old + 9_000_000_000))
+            SZ.read_profiles(f)
+            self.assertEqual(rf.call_count, 3)
+            with self.assertRaises(SZ.SafeZoneError):                         # strict is never served from the cache
+                bad = write(None, b"{{{")
+                SZ.read_profiles(bad)
+                SZ.read_profiles(bad, strict=True)
+        missing = Path(tempfile.mkdtemp()) / "safe-zones.json"
+        self.assertEqual(SZ.read_profiles(missing)[0], {})                    # a missing file is never cached as good
+        missing.write_text(json.dumps(raw(), ensure_ascii=False), encoding="utf-8")
+        self.assertIn("tiktok", SZ.read_profiles(missing)[0])
+
+    def test_cached_encode_dicts_are_not_shared(self):
+        import os
+        f = write(raw())
+        old = f.stat().st_mtime_ns - 60_000_000_000
+        os.utime(f, ns=(old, old))
+        p = SZ.load("ig_reels_organic", path=f)
+        p.encode["container"].append("caller noise")                       # a nested list: a deep copy is needed
+        self.assertNotIn("caller noise", SZ.load("ig_reels_organic", path=f).encode["container"])
+
+    def test_a_file_rewritten_at_once_with_the_same_size_is_read_again(self):
+        # NTFS mtime steps can be coarse: two writes inside one step look the same by (mtime, size); a file changed in
+        # the last 2 s is never served from the cache
+        f = write(raw())
+        for i in range(20):
+            d = raw()
+            d["profiles"]["tiktok"]["zones"][0]["note"] = f"v{i % 2}"         # same size, other content
+            f.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+            self.assertEqual(SZ.read_profiles(f)[0]["tiktok"].zones[0].note, f"v{i % 2}", i)
+
+    def test_probe_decodes_utf8(self):
+        from unittest import mock
+        seen = {}
+
+        def fake_run(argv, **kw):
+            seen.update(kw)
+            return mock.Mock(returncode=0, stdout="", stderr="")
+        with mock.patch.object(SZ.subprocess, "run", side_effect=fake_run):
+            SZ._default_runner(["x"])
+        self.assertEqual((seen.get("encoding"), seen.get("errors"), seen.get("text")), ("utf-8", "replace", True))
 
 
 if __name__ == "__main__":

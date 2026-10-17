@@ -58,8 +58,13 @@ Whisper load and release (T4.11, one process, float16, 54 s decode): 533 MB befo
   fail the quality bar (≤ 0.5 pp).
 - **large-v3-turbo: float16.** "Not verified: not measured" — the model is not downloaded on this PC; downloading it
   is a pin decision for the executor's Task 12 (not done by this lane).
-- `transcription.json` `gpu_compute_types = {"large-v3": "float16", "large-v3-turbo": "float16"}`; the old
-  `gpu_compute_type` is still read as the fallback.
+- The shipped choice `{"large-v3": "float16", "large-v3-turbo": "float16"}` is `GPU_COMPUTE_TYPE_DEFAULTS` in
+  `lib/whisper_backends.py` (moved out of `transcription.json` in the acceptance follow-up, batch A); the file's
+  `gpu_compute_types` is `{}` for profiles to fill. Order: a profile's `gpu_compute_types[model]`, else the old
+  `gpu_compute_type` from a profile, else the shipped choice, else float16 (transcription.json has no settings layer:
+  the defaults merged with the shipped and client profiles; a per-model entry in any profile beats the old key in
+  any profile). So a profile that set only
+  the old key (for example int8_float16 on a small GPU) keeps it; before batch A a shipped per-model entry overrode it.
 - VRAM constants (T4.11 `fit_batch`) from the measured line + 10 %: large-v3 float16 3279 MB, int8_float16 2223 MB,
   `PER_BATCH_MB` 900 (816 / 544 measured); turbo rows keep the starting values. With the 1536 MB Premiere headroom an
   idle 8 GB laptop card now fits **batch 2** for large-v3 float16 (batch 4 peaked at 6245 MB + 533 idle = 6.8 GB of
@@ -67,6 +72,37 @@ Whisper load and release (T4.11, one process, float16, 54 s decode): 533 MB befo
   7515 MB free, the card showed 7424-7504), not a measured run at batch 2. This is the plan's headroom rule applied
   to measured numbers; `PER_BATCH_MB` is one value (float16's slope), so int8_float16 is over-reserved (its slope is
   544 MB); whether 1536 MB is the right headroom is an executor/owner choice (1024 MB would allow batch 3).
+
+## Noise and the pick rule (why 0.5 pp WER / 0.3 pp CER)
+- **Run-to-run noise is zero here.** Decoding is deterministic: the text of every run was identical across its 3
+  repeats (above), so repeating a run cannot separate two precisions. Speed does vary run to run (the machine was
+  shared), which is why RTF is a median of 3 and the speed leg asks for a clear margin (≥ 10 % faster), not any gain.
+- **The noise that matters is which clips were measured.** One word in a 500-word clip is 0.2 pp of WER. If one
+  clip's WER of about 0.10 is treated as a sample, its standard error is about √(0.1 × 0.9 / 500) ≈ 1.3 pp, larger
+  than the 0.5 pp bar. Both precisions decode the same audio, so the paired difference is much tighter than that,
+  but on one or two clips a difference under about 1 pp still cannot be told from chance.
+- **Decision (the rule as written; not tuned to these numbers):** a difference inside the bar (≤ 0.5 pp WER and
+  ≤ 0.3 pp CER) is treated as "no quality difference", and then speed or VRAM decides. A difference above the bar
+  keeps float16, even when it could be noise. The rule is asymmetric on purpose: a wrong int8_float16 pick costs
+  words (medical terms, doses) in every transcript, while a wrong float16 pick costs only speed and VRAM, which the
+  T4.11 VRAM fit already manages. With no editor-verified reference the question does not come up: float16 by rule.
+- **The bar is applied per clip** (as `pick_compute_type` is written): int8_float16 must stay within it on every
+  reference clip. More clips therefore make an int8_float16 win harder (more chances to cross the bar by chance), not
+  easier; that keeps the rule on the safe side.
+- **What would change it:** an editor-verified reference set of at least ~2,000 words (several clips, Arabic and
+  English), with the bar applied to the corpus total (`wer.total()` over the reference clips, where 0.5 pp is about
+  10 words) instead of per clip. That is a change to `pick_compute_type`, for the executor to decide when such a set
+  exists.
+
+## Normaliser changes (batch A) and these numbers
+The acceptance follow-up changed `lib/wer.py`: "5mg" = "5 mg" (a glued unit is its own word), "3,000" = "3000"
+(thousands separators dropped; "0,125" and "1,5" stay decimals; the ambiguous "1,500" reads as thousands), ٱ folds to
+ا, ".5" stays the decimal "0.5", a decimal inside a word keeps its point ("و٣٫٥" = "و" + "3.5"), and CER keeps a
+space between two number tokens ("3 . 5" is never "35"). Re-checked on the saved hypotheses:
+the (b) agreement numbers are unchanged (int8_float16 vs float16 WER 0.0604, 30 of 497; CPU vs GPU 0.1046), because
+none of those words has a digit or ٱ. The (a) WER/CER above were not recomputed (the (a) hypotheses were not saved),
+but the R02 reference has no digit or ٱ, and (a) is a window of the same audio as (b), whose hypotheses have none, so
+they are expected to be the same (Not verified).
 
 ## Budgets
 | Budget | Measured | Result |

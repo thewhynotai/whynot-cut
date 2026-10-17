@@ -20,11 +20,13 @@ Standard library only.
 """
 from __future__ import annotations
 
+import copy
 import datetime
 import json
 import math
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -295,9 +297,51 @@ def _read_file(path):
     return d
 
 
+_CACHE: dict = {}                 # resolved path -> ((mtime_ns, size), result): parsed once per change of the file
+# a file changed in the last 2 s is not cached: two writes inside one coarse mtime step with the same size would look
+# unchanged (the "racy" rule git uses)
+_SETTLE_NS = 2_000_000_000
+
+
+def _stamp(path):
+    try:
+        f = Path(path)
+        st = f.stat()
+        return str(f.resolve()), (st.st_mtime_ns, st.st_size)
+    except (OSError, ValueError, TypeError, RuntimeError):
+        return None, None
+
+
+def _copy(result):
+    """A caller's copy of a cached result: its own dict and list, and its own encode dicts (Profile is frozen)."""
+    profs, default, reasons = result
+    return ({k: replace(v, encode=copy.deepcopy(v.encode)) if v.encode is not None else v for k, v in profs.items()},
+            default, list(reasons))
+
+
 def read_profiles(path=None, strict=False):
     """(profiles by name, default name, reasons). strict=True raises SafeZoneError on the first problem; otherwise a
-    bad profile is dropped (its reason recorded) and an unreadable file gives ({}, None, [reason])."""
+    bad profile is dropped (its reason recorded) and an unreadable file gives ({}, None, [reason]). The non-strict
+    result is cached by the file's mtime and size (caption fit calls check() per cue); an unreadable file or one
+    changed in the last 2 s is never cached, and every call gets its own copy. Blind spot (as git's): a file swapped
+    in with the same size AND its old mtime kept (copy -p, robocopy, unzip) is served from the cache until it changes
+    again."""
+    if strict:
+        return _read_profiles(path, True)
+    key, stamp = _stamp(path or DEFAULT_FILE)
+    hit = _CACHE.get(key) if key else None
+    if hit and hit[0] == stamp:
+        return _copy(hit[1])
+    result = _read_profiles(path, False)
+    if key and result[0] and time.time_ns() - stamp[0] > _SETTLE_NS:
+        if len(_CACHE) > 16:
+            _CACHE.clear()
+        _CACHE[key] = (stamp, result)
+        return _copy(result)
+    return result
+
+
+def _read_profiles(path, strict):
     reasons = []
     try:
         d = _read_file(path or DEFAULT_FILE)
@@ -497,26 +541,36 @@ def violations(boxes, profile, *, face=None) -> list:
     return out
 
 
+CHECK_ERROR = "check_error"       # check(): the zone name of the one item a failed check returns
+
+
 def check(box, platform, w, h, head=None, rtl=False, *, path=None) -> list:
     """Caption fit (R-4.1 / Task 23): the zones one box overlaps for the target platform(s) at a w x h frame.
     `box` is [x0, y0, x1, y1] or a violations() box dict (kind "text" by default); `platform` one name or a list (the
     union); `head` the head envelope rectangle (R-6.4); rtl adds the mirrored layout (the LTR one stays). Each overlap:
-    {zone, rect, overlap, severity P1|P2, basis, platform, text, fallback}; [] when the box is clear or cannot be
-    read. An unknown or damaged platform name is checked against today's built-in numbers (never a silent pass) and
-    its overlaps carry fallback=True; so do the overlaps of a list where only some names were usable. Never raises."""
+    {zone, rect, overlap, severity P1|P2, basis, platform, text, fallback}; [] when the box is clear. An unknown or damaged platform name is checked against today's built-in numbers (never a silent pass) and
+    its overlaps carry fallback=True; so do the overlaps of a list where only some names were usable. Never raises:
+    when the box cannot be read (not 4 finite numbers with x1 > x0 and y1 > y0) or the check itself fails, the list
+    holds ONE item with zone CHECK_ERROR, severity P1, rect/overlap None and `error` (the reason), so a caller that
+    reads an empty list as "clear" never passes a box that was not checked."""
     try:
         b = dict(box) if isinstance(box, dict) else {"rect": box}
         b.setdefault("kind", "text")
         if _box_rect(b) is None:
-            return []
+            return [_check_error("the box is not readable: 4 finite numbers x0 < x1, y0 < y1 are needed")]
         names = [platform] if isinstance(platform, str) else [n for n in platform if isinstance(n, (str, Profile))] \
             if isinstance(platform, (list, tuple)) else []
         prof = union(names, frame=(w, h), rtl=rtl, path=path)
         keep = ("zone", "rect", "overlap", "severity", "basis", "platform", "text")
         partial = prof.fallback or bool(prof.unknown or prof.damaged)     # a requested platform was not checked
         return [dict({k: f[k] for k in keep}, fallback=partial) for f in violations([b], prof, face=head)]
-    except Exception:  # noqa: BLE001  G10: a public helper never raises for a user
-        return []
+    except Exception as e:  # noqa: BLE001  G10: a public helper never raises for a user, and never fakes "clear"
+        return [_check_error(f"the safe-zone check could not run ({e.__class__.__name__}: {str(e)[:120]})")]
+
+
+def _check_error(why: str) -> dict:
+    return {"zone": CHECK_ERROR, "rect": None, "overlap": None, "severity": "P1", "basis": None, "platform": None,
+            "text": "فحص مناطق المنصة ماشتغلش للعنصر ده، راجعه بنفسك", "fallback": True, "error": why}
 
 
 def safe_area_for(profile=None, frame=None, *, rtl=False, path=None) -> dict:
@@ -815,7 +869,8 @@ def parse_ebur128(text) -> dict:
 
 
 def _default_runner(argv, **kw):
-    return subprocess.run(argv, capture_output=True, text=True, errors="replace", timeout=kw.get("timeout", 300), check=False)
+    return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          timeout=kw.get("timeout", 300), check=False)
 
 
 def _abs(p):

@@ -3,14 +3,22 @@
 """Word and character error rates for transcripts (Phase 4 T4.14; the 6B eval set, benchmark G-06/G-17, reuses it).
 
 ONE normalisation for both sides (`tokens`): plan.norm (NFKC, Arabic diacritics and tatweel removed, أ/إ/آ -> ا,
-ة -> ه, ى -> ي, ؤ/ئ seats, ئو = ؤو, Arabic-Indic and Persian digits -> ASCII, punctuation dropped, lower case), except
-that a number with a decimal point stays ONE token and keeps it: "3.5", "٣٫٥" and "3,5" are all "3.5" (a dose must
-never compare equal to "35"). A point already spoken as its own word ("3 . 5") is two tokens. Thousands separators
-read the same way ("1,000" -> "1.000") on both sides, so they still compare equal.
+ة -> ه, ى -> ي, ؤ/ئ seats, ئو = ؤو, Arabic-Indic and Persian digits -> ASCII, punctuation dropped, lower case; alef
+wasla ٱ -> ا as well), except for numbers (a dose must never compare equal to "35" or "5"):
+- a number with a decimal point is ONE token and keeps it, wherever it is in the word: "3.5", "٣٫٥", "3,5", "٣،٥"
+  are all "3.5"; "و٣٫٥" is "و" + "3.5"; "2.5-3.5" is "2.5" + "3.5"; ".5" and "و٫٥" give "0.5". A point spoken as its own
+  word ("3 . 5") is two tokens;
+- thousands separators are dropped: a comma or ٬ before groups of exactly 3 digits, after a first group that is not
+  0 ("3,000", "٣٬٠٠٠", "2,500.5" read 3000 / 2500.5). Locale assumption for the ambiguous "1,500": thousands (1500),
+  as transcripts write it; "0,125" and a comma before any other digit count ("1,5") are decimal commas;
+- a number at the start of a word is its own token, so a glued unit is its own word ("5mg" = "5 mg", "٥مجم" =
+  "5 مجم", "2nd" = "2 nd"); an integer after letters stays in the word ("b12", "mp4"). Known, alike on both sides:
+  "-5" = "5" (signs are punctuation), "1,2,3" = "1.2.3".
 WER = (substitutions + deletions + insertions) / reference words; CER = character edit distance over the normalised
 text with the spaces removed, so Arabic word-splitting variants ("عبد الله" / "عبدالله") cost nothing in CER but
-count in WER. An empty reference gives None (undefined), never a division by zero. Corpus totals add the counts
-(`total`), never average the per-clip rates. Standard library only.
+count in WER; between two number tokens a space stays, so "3 . 5" is never "35" in CER either. An empty reference
+gives None (undefined), never a division by zero. Corpus totals add the counts (`total`), never average the per-clip
+rates. Standard library only.
 """
 from __future__ import annotations
 
@@ -20,9 +28,13 @@ import unicodedata
 from .plan import norm
 
 _DIGITS = str.maketrans({**{chr(0x660 + i): str(i) for i in range(10)}, **{chr(0x6F0 + i): str(i) for i in range(10)}})
-_SEP = "[.,٫،]"                  # point, comma, Arabic decimal separator, Arabic comma
-_DECIMAL = re.compile(rf"\d+(?:{_SEP}\d+)+")
-_GLUED = re.compile(rf"(\d+(?:{_SEP}\d+)+)(\D.*)")         # "3.5mg", "3.5مجم": the number, then the unit
+_SEP = "[.,٫،٬]"                 # point, comma, Arabic decimal separator, Arabic comma, Arabic thousands separator
+# a number at the start of the word (what follows is a glued unit: "5mg"), a leading point after letters ("و٫٥" is
+# و + 0.5), or a decimal anywhere in it ("و٣٫٥")
+_NUMBER = re.compile(rf"^\d+(?:{_SEP}\d+)*|(?<=[^\W\d_])[.٫]\d+(?:{_SEP}\d+)*|\d+(?:{_SEP}\d+)+")
+_THOUSANDS = re.compile(r"(?!0)\d{1,3}(?:[,،٬]\d{3})+(?:[.٫]\d+)?")   # "3,000", "٣٬٠٠٠", "2,500.5"; never "0,125"
+_LEAD_POINT = re.compile(r"(?:^|[^.٫])[.٫]$")                # ".5": one point (not an ellipsis) right before the digits
+_WASLA = str.maketrans({"ٱ": "ا", "ٲ": "ا", "ٳ": "ا"})       # alef wasla / wavy hamza forms: NFKC keeps them
 
 
 def _no_format(t: str) -> str:
@@ -48,15 +60,31 @@ def tokens(x) -> list:
         text = x if isinstance(x, str) else ""
     out = []
     for raw in _no_format(text).split():
-        t = _strip_edges(unicodedata.normalize("NFKC", raw).translate(_DIGITS))
-        g = _GLUED.fullmatch(t)
-        if _DECIMAL.fullmatch(t) or g:
-            out.append(re.sub(_SEP, ".", g.group(1) if g else t))
-            if g:
-                out += norm(g.group(2)).split()
-            continue
-        out += norm(raw).split()
+        w = unicodedata.normalize("NFKC", raw).translate(_DIGITS).translate(_WASLA)
+        t = _strip_edges(w)
+        at = 0
+        for n in _NUMBER.finditer(t):
+            out += norm(t[at:n.start()]).split()
+            num = n.group()
+            num = re.sub("[.٫]", ".", re.sub("[,،٬]", "", num)) if _THOUSANDS.fullmatch(num) else re.sub(_SEP, ".", num)
+            if num.startswith("."):
+                num = "0" + num
+            elif n.start() == 0 and _LEAD_POINT.search(w[:w.find(t)]):
+                num = "0." + num
+            out.append(num)
+            at = n.end()
+        out += norm(t[at:]).split()
     return out
+
+
+def _joined(toks: list) -> str:
+    """The tokens as one string for CER: no spaces (word splits cost nothing), except between two number tokens."""
+    out = []
+    for i, x in enumerate(toks):
+        if i and x[:1].isdigit() and toks[i - 1][-1:].isdigit():
+            out.append(" ")
+        out.append(x)
+    return "".join(out)
 
 
 def _trim(a: list, b: list) -> tuple:
@@ -139,7 +167,7 @@ def _distance(a: str, b: str) -> int:
 
 def cer(ref, hyp) -> float | None:
     """Character error rate over the normalised text without spaces; None for an empty reference with a hypothesis."""
-    r, h = "".join(tokens(ref)), "".join(tokens(hyp))
+    r, h = _joined(tokens(ref)), _joined(tokens(hyp))
     if not r:
         return 0.0 if not h else None
     return round(_distance(r, h) / len(r), 4)

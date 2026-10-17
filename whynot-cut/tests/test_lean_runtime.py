@@ -716,5 +716,65 @@ class TestReview1(unittest.TestCase):
         self.assertIsNone(ref())
 
 
+# --------------------------------------------------------------------------- executor acceptance review, batch A
+class TestBatchAPriorityFlag(unittest.TestCase):
+    """P3: "don't lower" comes from the explicit WHYNOT_PRIORITY=normal flag (tests/_isolation.py sets it), never from
+    which modules happen to be imported."""
+
+    def test_no_module_name_check(self):
+        src = (ENGINE / "lib" / "priority.py").read_text(encoding="utf-8")
+        self.assertNotIn("sys.modules", src)
+        self.assertNotIn('"_isolation"', src)
+
+    def test_the_flag_seen_at_start_survives_a_cleared_environment(self):
+        with mock.patch.object(priority, "_START", "normal"), mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(priority, "_win_set", side_effect=AssertionError("would lower the runner")), \
+                mock.patch.object(os, "nice", side_effect=AssertionError("would lower the runner"), create=True):
+            self.assertEqual(priority.apply("below_normal", os_name="nt"), "normal")
+            self.assertEqual(priority.wanted("below_normal"), "normal")
+
+    def test_without_the_flag_an_isolated_process_is_lowered(self):
+        # the old rule (a loaded module named _isolation) no longer decides: no flag at start or now -> lowered
+        self.assertIn("_isolation", sys.modules)
+        seen = []
+        with mock.patch.object(priority, "_START", None), mock.patch.dict(os.environ, {}, clear=True), \
+                mock.patch.object(priority, "_win_get", return_value=0x20), \
+                mock.patch.object(priority, "_win_set", side_effect=seen.append):
+            self.assertEqual(priority.apply("below_normal", os_name="nt"), "below_normal")
+        self.assertEqual(seen, [0x4000])
+
+    def test_an_explicit_env_argument_ignores_the_start_flag(self):
+        calls = []
+        with mock.patch.object(priority, "_START", "normal"):
+            self.assertEqual(priority.apply(None, os_name="nt", setter=calls.append, env={}), "below_normal")
+        self.assertEqual(calls, [0x4000])
+
+    def test_a_child_started_with_the_flag_stays_normal_after_clearing_it(self):
+        """Real OS, in a child: WHYNOT_PRIORITY=normal at start, os.environ cleared in-process, then apply()."""
+        code = textwrap.dedent(f"""
+            import os, sys
+            sys.path.insert(0, {str(ENGINE)!r})
+            from lib import priority
+            os.environ.clear()
+            print(priority.apply("below_normal"))
+            if os.name == "nt":
+                import ctypes
+                k = ctypes.windll.kernel32
+                k.GetCurrentProcess.restype = ctypes.c_void_p
+                k.GetPriorityClass.argtypes = [ctypes.c_void_p]
+                print(k.GetPriorityClass(k.GetCurrentProcess()))
+            else:
+                print(os.nice(0))
+        """)
+        env = dict(os.environ, WHYNOT_PRIORITY="normal")
+        r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, env=env, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        state, cls = r.stdout.split()
+        self.assertEqual(state, "normal")
+        # the child inherits the runner's class; it must not have moved from it (read-only query of the runner)
+        mine = priority._win_get() if os.name == "nt" else os.nice(0)
+        self.assertEqual(int(cls), mine)
+
+
 if __name__ == "__main__":
     unittest.main()
