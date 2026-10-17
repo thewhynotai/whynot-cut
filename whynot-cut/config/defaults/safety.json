@@ -1,0 +1,16 @@
+{
+  "note": "Doctor safety and QC (Addendum K1, Phase 4 Tasks 61-68). Engine: engine/reel/lib/safety/. A client may override any key in reel-profile/safety.json.",
+  "switches": {
+    "k_t1_plan_block": false,
+    "k_t4_qc_safezone_hard_fail": false,
+    "k_t6_hook_check_in_plan": false,
+    "k_t3_builder_fades": false,
+    "k_t5_arabic_qc_in_motion_qc": false,
+    "task25_plan_proposals": false
+  },
+  "switches_note": "Off until the Gate 4 tag; the executor turns them on in the first Phase 6 commit (K1, K5). A switch is on only when its value is JSON true. k_t1_plan_block: risk-first words to confirm (subtitle-review.md block, NEEDS-YOU order, and `reel plan` refuses a graphic showing an unconfirmed high-risk word). k_t4_qc_safezone_hard_fail: `reel qc` fails on a platform safe-zone intrusion. k_t6_hook_check_in_plan: the hook rules run inside `reel plan` / `reels-plan`. k_t3_builder_fades: short audio fades at every cut in the Premiere build. k_t5_arabic_qc_in_motion_qc: the Arabic integrity line in `reel motion-qc` (a fifth switch, added so Gate 4's QC output stays unchanged: K5). task25_plan_proposals: Task 25 cut proposals inside the plan (an accepted take cut whole, the \"Proposed cuts\" table in edit-plan.md, the Premiere markers); `reel cut-proposals` itself always runs.",
+  "risk_words": {
+    "low_probability_threshold": 0.9,
+    "low_probability_threshold_basis": "measured 2026-10-17 on 8 corrected transcripts (whynot-test copies; 661 words, 51 corrected by the editor): below 0.5 none of the corrected words is caught, below 0.9 35 of 51 (69 %) are, with 31 % of the right words listed too; the list is ranked, so the risky ones still come first"
+  }
+}
