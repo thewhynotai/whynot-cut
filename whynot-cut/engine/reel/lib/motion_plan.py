@@ -452,7 +452,8 @@ class _Compiler:
                            "draw_frames": [None, cues[-1]]})
 
     def _manifest(self) -> list[dict]:
-        return (read_json(self.paths.client_db / "asset-manifest.json", {"assets": []}) or {}).get("assets", [])
+        from . import client_db
+        return (client_db.load(self.paths, "asset-manifest.json", {"assets": []}) or {}).get("assets", [])
 
     def _person(self, sid, sc, theme, els):
         who = sc.get("who")
