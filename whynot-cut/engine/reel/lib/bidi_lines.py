@@ -34,6 +34,8 @@ control_findings().
 """
 from __future__ import annotations
 
+import math
+import numbers
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -351,6 +353,12 @@ _PHONE_SPACE = " \u00a0\u202f\u2007"                    # a phone's groups may b
 _PHONE_CHAIN = re.compile(rf"(?<![\w+.,٫٬/])\+?[{_D}]+(?:[{_PHONE_SPACE}\-–][{_D}]+)*")
 _PHONE_GROUP = re.compile(rf"\+?[^{_PHONE_SPACE}\-–]+")
 _ZEROS = "0٠۰"
+_INTL = {z + z for z in _ZEROS}                                # «00» + country code: dialled like «+»
+# the token after a number chain, past spaced ranges and alternatives («1000 – 2000 مجم», «1000 أو 2000 مجم»)
+# marks and zero-width characters (ZWSP, ZWNJ, ZWJ, WJ, BOM) between a chain and its unit are passed over
+_GAP = "".join(sorted(_MARKS)) + "".join(map(chr, (0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF)))
+_CONNECT = rf"(?:[-–—−]|(?<=[\s{_GAP}])(?:أو|او|إلى|الى|to|or)(?=[\s{_GAP}]))"
+_NEXT_TOKEN = re.compile(rf"(?:[\s{_GAP}]*{_CONNECT}[\s{_GAP}]*[{_D}]+){{0,15}}[\s{_GAP}]+(\S+)")   # ≤ 15: linear
 
 
 _YEAR = re.compile(r"(?:19|20|١٩|٢٠|۱۹|۲۰)[0-9٠-٩۰-۹]{2}")
@@ -395,9 +403,20 @@ def phone_spans(text: str) -> list[tuple[int, int]]:
     """Phone numbers, as dialled: 7–15 digits in groups joined by single spaces (a no-break space too) or hyphens, and
     either
     - «+» and a country code («+20 100 123 4567», «+966 5 1234 5678», «+201001234567»), or
+    - «00», a country code in the same group, 2+ groups, the last of 3+ digits, and 7–15 digits after the «00»
+      («00966 50 123 4567», «0020 100 123 4567»; not «00 966 …», not one unbroken group; «0030 15 200» reads as
+      dialled too), or
     - a leading zero in a first group of 2+ digits, groups of 3+ digits after it and at most 12 digits («010 1234
       5678», «02 2345 6789», «٠١٠ ١٢٣٤ ٥٦٧٨»; not «0 250 500» or «٠ ١٠٠ ٢٠٠٠»),
-    and not a list of values («05 250 500», «05 100 200 300», «+120 140 160»; see _value_list).
+    and not a list of values: round values («05 250 500», «05 100 200 300», «+120 140 160»; see _value_list), or a
+    chain that runs into a measuring or money unit: then no part of it is a phone («05 250 500 1000 مجم», «02 500
+    1000 2000 وحدة», «05 120 135 15 %»). Time and count words and everyday words that are also units do not count
+    («010 1234 5678 مرة تانية», «… يوم الجمعة», «… سعر الكشف», «… كيلو 21»; see _is_value_unit). Values joined by
+    dashes or «أو / إلى / or / to» (up to 15) still lead to the unit («05 250 500 1000 أو 2000 مجم»). The cost: a phone
+    followed straight by an amount and its unit («010 1234 5678 2 جنيه», «… أو 5 جنيه») is read as values too, and so
+    is a second phone after « - » before a unit. A list ending in a word kept out of the units («02 500 1000 درجات»,
+    «… 2000 لكل يوم») is read as dialled. A chain with neither
+    is read as dialled: «قيس السكر 080 120 135 150» stays a phone shape (the text cannot tell).
     Numbers set off by a space before or after it are not part of it («اتصل 3 010 1234 5678», «010 1234 5678 24/7»,
     «010 1234 5678 2024»); two phones in a row are two. Not phones: lists («2020 2021 2022», «05 10 15 20»), dates
     («01-02-2024»), times, decimals, a number glued to a letter, «%», «/» or a hyphenated tail («010 1234 5678/9»,
@@ -413,6 +432,9 @@ def phone_spans(text: str) -> list[tuple[int, int]]:
             short_from[k] = short_from[k + 1] and groups[k][1] - groups[k][0] < 3
         glued_end = bool(nxt[:1]) and (re.match(r"[\w%٪]", nxt[:1]) is not None
                                        or (nxt[:1] in ".,٫٬/:" and nxt[1:2].isdigit()))
+        after = _NEXT_TOKEN.match(text, m.end())
+        if after and not _HARD.search(after.group()) and _is_value_unit(after.group(1).strip(_GAP)):
+            continue                                        # values with their unit: no part of the chain is a phone
 
         def valid(st, en):
             if st and seps[st] != " ":
@@ -430,6 +452,8 @@ def phone_spans(text: str) -> list[tuple[int, int]]:
                 return False
             if gs[0].startswith("+"):
                 return (len(gs) == 1 or len(gs[-1]) >= 3) and 7 <= digits <= 15
+            if gs[0][:2] in _INTL and len(gs[0]) >= 3 and len(gs) > 1 and len(gs[-1]) >= 3 and 7 <= digits - 2 <= 15:
+                return True
             return gs[0][:1] in _ZEROS and len(gs[0]) >= 2 and len(gs) > 1 and all(len(g) >= 3 for g in gs[1:]) \
                 and 7 <= digits <= 12
 
@@ -673,8 +697,9 @@ def line_pieces(line) -> list[Piece]:
 
 def host_text(source, base: int | None = None, start: int = 0, end: int | None = None) -> str:
     """One line for a renderer that runs its own UAX #9 (macOS CoreText; the hosts are measured in M2-T2), spelled so
-    that any conforming engine draws this module's order. `source` is a Line from lay_out() (a wrapped line), a
-    Paragraph with the line's `start`/`end`, or a whole one-line paragraph as text (`base`, else HL1).
+    that any conforming engine draws this module's order. `source` is a Line from lay_out() (a wrapped line) or a
+    Paragraph with the line's `start`/`end` (the whole paragraph by default). A bare string is refused (TypeError): it
+    cannot say whether it is a whole paragraph or one wrapped line cut from one. `base`, when given, must match.
 
     The levels come from the WHOLE paragraph: a line handed to the host on its own would lose W2, W7, N0 and N1 across
     the break («Vitamin D 1000 - 2000 وحدة» wrapped before «1000» reverses the range, on the Mac only) and could look
@@ -694,8 +719,11 @@ def host_text(source, base: int | None = None, start: int = 0, end: int | None =
         if base is not None and base != int(source.rtl):
             raise ValueError("base differs from the line's")
         par, start, end = source.par, source.par_start, source.par_end
+    elif not isinstance(source, Paragraph):
+        raise TypeError("host_text takes a Line from lay_out() or a Paragraph from paragraph(), not "
+                        f"{type(source).__name__}: text alone cannot tell a whole paragraph from one wrapped line")
     else:
-        par = paragraph(source, base=base) if isinstance(source, str) else source
+        par = source
         if base is not None and base != par.base:
             raise ValueError("base differs from the paragraph's")
     end = len(par.text) if end is None else end
@@ -759,11 +787,13 @@ _LATIN_UNITS = {
     "mmol/mol", "µmol/l", "umol/l", "ml/min", "mm/h", "°", "°c", "°f", "℃", "℉", "tablet", "tablets", "tab", "tabs",
     "capsule", "capsules", "cap", "caps", "dose", "doses", "drop", "drops", "puff", "puffs", "times", "lbs", "lb",
     "cc", "tsp", "tbsp", "cm2", "cm3", "cm²", "cm³", "mm2", "mm3", "mm²", "mm³", "m2", "m3", "m²", "m³", "ampoule",
-    "ampoules", "amp", "amps", "patch", "patches", "sachet", "sachets", "vial", "vials",
+    "ampoules", "amp", "amps", "patch", "patches", "sachet", "sachets", "vial", "vials", "day", "days", "week",
+    "weeks", "wk", "le", "l.e",
 }
 # compared after _fold: no harakat, «أ إ آ» -> «ا», «ة» -> «ه», «ى» -> «ي» (Whisper writes «دقيقه», «وحده», «مره»)
 _ARABIC_UNITS = {
-    "٪", "مجم", "ملجم", "ملغ", "مغ", "مل", "ملل", "مللي", "ملي", "مليجرام", "ميكروجرام", "جم", "جرام", "جرامات",
+    "٪", "مجم", "مج", "م.ج", "ملجم", "ملغ", "مغ", "مل", "ملل", "مللي", "ملي", "ميلي", "ميللي", "مليجرام", "ملليجرام", "ميليجرام",
+    "مليغرام", "ملليغرام", "ميكروجرام", "جم", "جرام", "جرامات",
     "غرام", "غرامات", "كجم", "كيلو", "كيلوجرام", "كم", "سم", "مم", "لتر", "سيسي",
     "جنيه", "جنيهات", "ج.م", "دولار", "ريال", "درهم", "يورو", "دينار", "ساعة", "ساعات", "دقيقة", "دقايق", "دقائق",
     "ثانية", "ثواني", "سنة", "سنين", "سنوات", "يوم", "أيام", "شهر", "شهور", "أشهر", "أسبوع", "أسابيع",
@@ -772,7 +802,7 @@ _ARABIC_UNITS = {
     "أمبول", "أمبولة", "أمبولات", "لزقة", "لزقات", "كيس", "أكياس", "ظرف", "أظرف", "فيال", "غ", "مجم/كجم", "مل/كجم",
     "ملجم/كجم", "وحدة/كجم", "سم٣", "سم٢", "مم٣", "م٢", "م٣",
     "نقطة", "نقط", "سعر", "سعرة", "سعرات", "كالوري", "وحدة", "وحدات", "مليون", "ألف", "آلاف", "مليار",
-    "بالمية", "بالمئة", "درجة", "درجات",
+    "بالمية", "بالمئة", "بالمائة", "درجة", "درجات",
 }
 _CURRENCY_BEFORE = {"$", "€", "£", "¥", "us$", "e£", "egp", "usd", "sar", "aed", "eur", "gbp", "ج.م"}
 _NUM = re.compile(r"^[+\-−]?[$€£]?\d+(?:[.,٫٬:/\-–]\d+)*[%٪]?$")
@@ -815,11 +845,44 @@ def _fold(word: str) -> str:
 
 
 _ARABIC_UNITS_FOLDED = {_fold(u) for u in _ARABIC_UNITS}
+# Arabic duals of the counted units name their singular: «قرصين» -> «قرص», «ملعقتين» / «ملعقتان» -> «ملعقه»
+_DUALS = {_fold(d): _fold(u) for u in (
+    "قرص", "حبة", "حباية", "كبسولة", "حقنة", "ملعقة", "معلقة", "كوب", "كوباية", "فنجان", "بخة", "جرعة", "أمبول",
+    "أمبولة", "لزقة", "كيس", "ظرف", "نقطة", "وحدة", "جرام", "كيلو", "لتر", "جنيه", "دولار", "ريال", "درهم", "دينار",
+    "ساعة", "دقيقة", "ثانية", "سنة", "يوم", "شهر", "أسبوع", "مرة", "درجة")
+    for d in ((u[:-1] + "تين", u[:-1] + "تان") if u.endswith("ة") else (u + "ين", u + "ان"))}
+# not values when a phone runs into them: time and count words, and everyday words that are also units («010 1234
+# 5678 مرة تانية», «… سعر الكشف», «… كيلو 21 الساحل», «… ألف مبروك», «… كم مرة», «… حبة حبة», «… في ظرف ساعة»)
+_NOT_VALUE = {"h", "hr", "hrs", "min", "mins", "sec", "s", "ms", "x", "times", "day", "days", "week", "weeks", "wk",
+              "m"} | {
+    _fold(u) for u in ("ساعة", "ساعات", "دقيقة", "دقايق", "دقائق", "ثانية", "ثواني", "سنة", "سنين", "سنوات", "يوم",
+                       "أيام", "شهر", "شهور", "أشهر", "أسبوع", "أسابيع", "مرة", "مرات", "سعر", "سعرة", "كيلو", "ألف",
+                       "آلاف", "مليون", "مليار", "كم", "حبة", "ظرف", "درجة", "درجات", "نقطة", "نقط", "كيس")}
+
+
+def _unit_word(word: str) -> str | None:
+    """The unit a word names (its casefolded or folded form; a dual names its singular), or None."""
+    if word.casefold() in _LATIN_UNITS:
+        return word.casefold()
+    f = _fold(word)
+    return f if f in _ARABIC_UNITS_FOLDED else _DUALS.get(f)
 
 
 def _is_unit(tok: str) -> bool:
+    """A unit after a number: «مجم», «مَجم», «ملعقتين», «mg», or a compound of units («مجم/مل», «ml/kg/h»)."""
+    if tok in ("%", "٪"):
+        return True
     c = _core(tok) or tok
-    return c.casefold() in _LATIN_UNITS or _fold(c) in _ARABIC_UNITS_FOLDED or tok in ("%", "٪")
+    return _unit_word(c) is not None or ("/" in c and all(_unit_word(p) for p in c.split("/")))
+
+
+def _is_value_unit(tok: str) -> bool:
+    """A unit that makes the numbers before it values (a dose, a reading, a price), never a phone: not one of
+    _NOT_VALUE (a compound such as «مرة/يوم» is a rate: a value)."""
+    c = _core(tok) or tok
+    if c.casefold() == "le":
+        return c == "LE"                                    # the Egyptian pound; «Call … Le Caire» is French
+    return _is_unit(tok) and _unit_word(c) not in _NOT_VALUE
 
 
 def _al_prefix(tok: str) -> bool:
@@ -916,6 +979,19 @@ def breaks(text: str) -> list[tuple[int, int, str]]:
 BALANCE_MAX_BREAKS = 120     # above this many break opportunities `balanced` keeps the greedy lines (O(k · n²))
 
 
+def _check_width(max_width) -> None:
+    """ValueError unless `max_width` is a positive finite number (not a bool, a string, NaN or infinity; a Decimal NaN
+    too)."""
+    if isinstance(max_width, bool) or not isinstance(max_width, numbers.Number):
+        raise ValueError(f"max_width must be a positive finite number, not {max_width!r}")
+    try:
+        w = float(max_width)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"max_width must be a positive finite number, not {max_width!r}") from e
+    if not (w > 0 and math.isfinite(w)):
+        raise ValueError(f"max_width must be a positive finite number, not {max_width!r}")
+
+
 def wrap(text: str, max_width: float, measure=len, balanced: bool = False) -> list[tuple[int, int]]:
     """Line breaking: [(start, end)] per line, the breaking spaces left out. Greedy: the last "ok" break that fits
     wins; an "avoid" break is used only when no "ok" break fits; when nothing fits, the first "ok" break (else the
@@ -923,8 +999,7 @@ def wrap(text: str, max_width: float, measure=len, balanced: bool = False) -> li
     text grows (a width), so a line's candidates are measured only until one does not fit. `balanced` (graphics,
     AE-style titles): the same number of lines, with the breaks moved so the lines are as even as possible (see
     _balance); a paragraph with more than BALANCE_MAX_BREAKS break opportunities keeps the greedy lines."""
-    if not max_width or max_width <= 0:
-        raise ValueError("max_width must be positive")
+    _check_width(max_width)
     a = len(text) - len(text.lstrip(" \t"))
     z = len(text.rstrip(" \t"))
     if a >= z:
@@ -1024,7 +1099,8 @@ def lay_out(text: str, max_width: float | None = None, measure=len, force_rtl: b
             balanced: bool = False) -> list[Line]:
     """A caption or graphic paragraph as lines: the direction is decided once for the whole text (hard line breaks
     included), each hard segment is resolved with it, broken (when `max_width` is given), then each line reordered.
-    A blank hard line stays one empty line. `max_width` None = no wrapping; 0 or less is refused, as in wrap()."""
+    A blank hard line stays one empty line. `max_width` None = no wrapping; 0 or less, NaN or infinity is refused, as
+    in wrap()."""
     base = direction(text, force_rtl=force_rtl)
     out = []
     for seg_text, off in _hard_segments(text):
@@ -1117,13 +1193,31 @@ def control_findings(text: str) -> list[dict]:
     """Explicit bidi controls in transcript or caption text (LRE, RLE, LRO, RLO, PDF, LRI, RLI, FSI, PDI): a pasted
     or hostile control silently changes what the viewer reads («خد [RLO]500 mg[PDF]» draws the dose as «gm 005»). The
     module honours them (X1–X10), so each one is a finding for the editor: an override (LRO, RLO) "reverses the text
-    after it", the others "change the order". The directional marks (LRM, RLM, ALM) are not findings. Detect only; the
-    text is never rewritten (the transcript is the editor's)."""
-    out = []
+    after it", the others "change the order". A directional mark (LRM, RLM, ALM) is a finding when the nearest
+    letter-or-digit on either side of it is a digit: spaces, punctuation, signs, brackets, joiners, other marks and
+    controls between them do not cut its effect (W2, W7 and N1 take the nearest strong character), so it can turn a
+    range or a list around («خد [LRM] 1000 - 2000 وحدة» reads 2000 → 1000; «250[LRM] 500» reads 500, 250), in a
+    right-to-left or a left-to-right line. Such a finding may be harmless («الساعة 5[RLM].»): the editor checks the
+    line. A mark between letters is left alone. Detect only; the text is never rewritten (the transcript is the
+    editor's). Linear in the text."""
+    def stop(ch):                                    # a letter, a digit or a paragraph separator: the rest is skipped
+        return ch not in _MARKS and _cls(ch) in ("L", "R", "AL", "EN", "AN", "B")
+
+    def digit(ch):
+        return _cls(ch) in ("EN", "AN")
+    digit_after = [False] * (len(text) + 1)          # digit_after[i]: the first stop from i on is a digit
+    for i in range(len(text) - 1, -1, -1):
+        digit_after[i] = digit(text[i]) if stop(text[i]) else digit_after[i + 1]
+    out, digit_before = [], False
     for i, ch in enumerate(text):
         c = _cls(ch)
         if c in _INVISIBLE:
             out.append({"index": i, "char": ch, "name": unicodedata.name(ch),
                         "why": "bidi override: reverses the text after it" if c in _OVERRIDES
                         else "bidi control: changes the order of the text around it"})
+        elif ch in _MARKS and (digit_before or digit_after[i + 1]):
+            out.append({"index": i, "char": ch, "name": unicodedata.name(ch),
+                        "why": "directional mark near a number: it can change the order the numbers are read in"})
+        if stop(ch):
+            digit_before = digit(ch)
     return out

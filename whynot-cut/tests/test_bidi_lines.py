@@ -19,6 +19,8 @@ import random
 import time
 import unicodedata
 import unittest
+from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from unittest import mock
 
@@ -461,17 +463,17 @@ class TestContract(unittest.TestCase):
 
     def test_host_text_gives_a_full_uax9_engine_this_modules_order(self):
         # every logical run in embeddings up to its level, the last one an override of its direction; RLM/LRM first
-        self.assertEqual(bl.host_text("AI بيغيّر الطب"),
+        self.assertEqual(bl.host_text(bl.paragraph("AI بيغيّر الطب")),
                          "\u200f\u202a\u202dAI\u202c\u202c\u202e بيغيّر الطب\u202c")
-        self.assertEqual(bl.host_text("hello world", base=0), "\u200e\u202dhello world\u202c")
-        self.assertEqual(bl.host_text("كلمنا \u2066010 1234 5678\u2069").count("\u2066"), 0)   # resolved already
-        self.assertIn("\u200d", bl.host_text("لا\u200dمركزية a\u200cb"))                       # joiners stay
+        self.assertEqual(bl.host_text(bl.paragraph("hello world", base=0)), "\u200e\u202dhello world\u202c")
+        self.assertEqual(bl.host_text(bl.paragraph("كلمنا \u2066010 1234 5678\u2069")).count("\u2066"), 0)   # resolved already
+        self.assertIn("\u200d", bl.host_text(bl.paragraph("لا\u200dمركزية a\u200cb")))                       # joiners stay
         with self.assertRaises(ValueError):
-            bl.host_text("x", base=3)
+            bl.host_text(bl.paragraph("x"), base=3)
         for e in LINES:                                         # a full UAX #9 engine + host_text = our order
             with self.subTest(e["id"]):
                 par = bl.paragraph(e["text"])
-                ref = get_display(bl.host_text(e["text"]), base_dir=None)
+                ref = get_display(bl.host_text(par), base_dir=None)
                 self.assertEqual("".join(c for c in ref if c not in CONTROLS), bl.visual(par, mirror=False))
 
     def test_deep_nesting_overflow_is_safe(self):
@@ -501,7 +503,7 @@ class TestHostTextPerLine(unittest.TestCase):
         for ln in out:
             with self.subTest(ln.text):
                 self.assertEqual(host_order(bl.host_text(ln)), drawn(ln))
-        self.assertEqual(host_order(bl.host_text(out[2].text, 1)), "ةدحو 2000 - 1000")   # the line alone: reversed
+        self.assertEqual(host_order(bl.host_text(bl.paragraph(out[2].text, 1))), "ةدحو 2000 - 1000")   # the line alone: reversed
 
     def test_every_wrapped_line_matches_a_full_uax9_engine(self):
         words = ["عملت", "الـ", "MRI", "٥٠٠", "mg", "(", "insulin", ")", "«", "AI", "»", "010", "1234", "5678",
@@ -525,12 +527,13 @@ class TestHostTextPerLine(unittest.TestCase):
         self.assertEqual([ln.text for ln in out], ["اتصل", "010 1234 5678", "123"])
         self.assertEqual(drawn(out[1]), "5678 1234 010")
         self.assertEqual(host_order(bl.host_text(out[1])), "5678 1234 010")
-        self.assertEqual(host_order(bl.host_text(out[1].text, 1)), "010 1234 5678")      # the line alone: a phone
+        self.assertEqual(host_order(bl.host_text(bl.paragraph(out[1].text, 1))), "010 1234 5678")      # the line alone: a phone
 
     def test_line_paragraph_and_text_sources_agree(self):
         text = "قال الدكتور الـ MRI بيكشف 90% من الحالات"
         par = bl.paragraph(text)
-        self.assertEqual(bl.host_text(text), bl.host_text(par))
+        with self.assertRaises(TypeError):                         # review 29d31c5 P3-7: a bare string is refused
+            bl.host_text(text)
         for ln in bl.lay_out(text, 12):
             self.assertEqual(bl.host_text(ln), bl.host_text(par, start=ln.start, end=ln.end))
         with self.assertRaises(ValueError):
@@ -570,7 +573,7 @@ class TestHostTextPerLine(unittest.TestCase):
 
     def test_one_line_per_call(self):
         with self.assertRaises(ValueError):
-            bl.host_text("abc\nعربي 123 456")
+            bl.host_text(bl.paragraph("abc\nعربي 123 456"))
         with self.assertRaises(ValueError):
             bl.host_text(bl.Line("abc", 0, 3, False, []))                # not from lay_out: no paragraph
         two = bl.lay_out("abc\nعربي 123 456")
@@ -583,7 +586,7 @@ class TestHostTextPerLine(unittest.TestCase):
         self.assertEqual(host_order(bl.host_text(par)), bl.visual(par, mirror=False))
         ladder = "س" + "\u202bس" * 62                                     # every odd level 1 … 125 holds a letter
         with self.assertRaises(ValueError):
-            bl.host_text(ladder)
+            bl.host_text(bl.paragraph(ladder))
 
 
 class TestReviewRound1(unittest.TestCase):
@@ -714,6 +717,180 @@ class TestReviewRound1(unittest.TestCase):
         self.assertEqual(bl.BALANCE_MAX_BREAKS, 120)
         big = " ".join(["كلمة"] * (bl.BALANCE_MAX_BREAKS + 2))
         self.assertEqual(bl.wrap(big, 12, balanced=True), bl.wrap(big, 12))
+
+
+def ladder(n):
+    """A right-to-left paragraph with a letter at every odd level 1 … 2n + 1."""
+    return bl.paragraph("س" + "\u202bس" * n)
+
+
+class TestReviewRound2(unittest.TestCase):
+    """Review 29d31c5 P3: values before a unit, «00» phones, boundary constants, compound and dual units, marks next
+    to digits, host_text(str), a NaN width."""
+
+    def test_a_number_chain_before_a_value_unit_is_never_a_phone(self):
+        for t in ("الجرعات 05 250 500 1000 مجم", "خد 02 500 1000 mg", "نسب 05 120 135 %", "الجرعات 05 250 500 1000 مجم.",
+                  "قيس 080 120 135 150 mg/dl", "خد ٠٢ ٥٠٠ ١٠٠٠ مجم", "السعر 0100 1234 5678 جنيه"):
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans(t), [])
+                self.assertEqual(bl.visual(bl.paragraph(t)),
+                                 bl.visual(bl.paragraph(t, base=bl.direction(t), hl1=False)))   # plain UAX #9
+        for t, tail in (("اتصل 010 1234 5678", " مرة تانية"), ("كلمنا 010 1234 5678", " يوم الجمعة"),
+                        ("اتصل 010 1234 5678", " 24 ساعة"), ("اتصل 010 1234 5678", " بعد ساعة"),
+                        ("call 010 1234 5678", " 2 times"), ("اتصل 010 1234 5678", "\u00a0مرتين")):
+            with self.subTest(t + tail):                       # time and count words follow a phone: still a phone
+                self.assertEqual(bl.phone_spans(t + tail), [(len(t) - 13, len(t))])
+
+    def test_no_part_of_a_chain_before_a_value_unit_is_a_phone(self):
+        # self-review r1 P2-1: a dropped «year» or short tail must not leave a "phone" in front of the unit
+        for t in ("خد 02 500 1000 2000 وحدة", "الجرعات 05 250 500 1000 2000 مجم", "نسب 05 120 135 15 %",
+                  "الجرعات 05 250 500 1000 – 2000 مجم", "الجرعات 05 250 500 1000 - 2000 mg", "قيس +5 2500 3000 mg",
+                  "خد 05 250 500 مرة/يوم", "خد 02 500 1000 ملليجرام", "خد 02 500 1000 ميللي", "خصم 05 120 135 بالمائة",
+                  "السعر 02 500 1000 LE", "السعر 02 500 1000 L.E", "خد 02 500 1000\u2009mg", "خد 02 500 1000\tمجم",
+                  "خد 02 500 1000\u00a0مجم", "خد 02 500 1000 مجم،"):
+            with self.subTest(ascii(t)):
+                self.assertEqual(bl.phone_spans(t), [])
+                self.assertEqual(bl.visual(bl.paragraph(t)),
+                                 bl.visual(bl.paragraph(t, base=bl.direction(t), hl1=False)))   # plain UAX #9
+        self.assertEqual(bl.phone_spans("قيس +5 2500 3000"), [(4, 16)])          # no unit: dialled
+        for t, tail in (("اتصل 010 1234 5678", " سعر الكشف 300 جنيه"), ("اتصل 010 1234 5678", " كيلو 21 الساحل"),
+                        ("اتصل 010 1234 5678", " ألف مبروك"), ("اتصل 010 1234 5678", " كم مرة"),
+                        ("اتصل 010 1234 5678", " حبة حبة"), ("call 010 1234 5678", " days only"),
+                        ("اتصل 010 1234 5678", "\nمجم"), ("اتصل +20 100 123 4567", " في ظرف ساعة")):
+            with self.subTest(ascii(t + tail)):                # everyday words, and a unit on the next line
+                self.assertEqual(bl.phone_spans(t + tail)[:1], [(len(t) - len(t.split(" ", 1)[1]), len(t))])
+
+    def test_a_phone_with_the_00_international_prefix(self):
+        for t in ("00966 50 123 4567", "0020 100 123 4567", "٠٠٩٦٦ ٥٠ ١٢٣ ٤٥٦٧", "00966-50-123-4567", "001 202 555 0100",
+                  "0020 1001234567", "00201 001234567890", "00966 5 123"):
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans("اتصل " + t), [(5, 5 + len(t))])
+        for t in ("00966 50", "00 15", "005 250 500", "002011 001234567890", "00201001234567", "0096 5 123",
+                  "00 966 50 123 4567", "00966-5012-34"):
+            with self.subTest(t):                              # < 7 digits, no country code, a list, > 15, one group, 6, a lone «00», a short last group
+                self.assertEqual(bl.phone_spans("اتصل " + t), [])
+        self.assertEqual(bl.visual(bl.paragraph("اتصل 00966 50 123 4567")), "00966 50 123 4567 لصتا")
+
+    def test_phone_digit_bounds(self):
+        yes = ("05 25001", "+20 12345", "0100 1234 5678", "+201 100 123 456789")    # 7, 7, 12, 15 digits
+        no = ("05 2500", "+20 1234", "01000 1234 5678", "+2011 100 123 456789")    # 6, 6, 13, 16 digits
+        for t in yes:
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans("رقمنا " + t), [(6, 6 + len(t))])
+        for t in no:
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans("رقمنا " + t), [])
+
+    def test_value_list_bounds(self):
+        self.assertEqual(bl.phone_spans("رقمنا 010 500 250 750"), [(6, 21)])     # turns: not a list
+        self.assertEqual(bl.phone_spans("رقمنا 0100 100 200"), [(6, 18)])        # head not below every value
+        self.assertEqual(bl.phone_spans("رقمنا 0100 101 200"), [(6, 18)])        # not round
+        self.assertEqual(bl.phone_spans("رقمنا 099 100 200"), [])                # head below every value
+
+    def test_the_next_phone_after_a_phone_is_7_to_12_digits(self):
+        t = "رقمنا 010 1234 5678 012 3456"                                       # 7 digits: the next phone
+        self.assertEqual(bl.phone_spans(t), [(6, 19), (20, 28)])
+        t = "رقمنا 010 1234 5678 0100 1234 5678"                                 # 12 digits
+        self.assertEqual(bl.phone_spans(t), [(6, 19), (20, 34)])
+        self.assertEqual(bl.phone_spans("رقمنا 010 1234 5678 0123 4567 89012"), [])   # 13: not a phone's tail
+
+    def test_unit_spelling_folds(self):
+        for u in ("مللى", "مل\u0670ي", "مُلِّي", "إقراص", "ملعقه"):                          # ى, dagger alef, harakat, alef, ة
+            with self.subTest(ascii(u)):
+                self.assertEqual(bl.word_breaks(["خد", "2", u]), ["ok", "never"])
+
+    def test_compound_and_dual_units_stay_with_their_number(self):
+        for u in ("مجم/مل", "مل/ساعة", "ml/kg/h", "mg/kg/day", "وحدة/كجم/ساعة", "ملعقتين", "قرصين", "حبتين",
+                  "مرتين", "كبسولتين", "جرعتين", "ساعتين", "يومين", "ملعقتان"):
+            with self.subTest(u):
+                self.assertEqual(bl.word_breaks(["خد", "20", u]), ["ok", "never"])
+        for w in ("24/7", "كمان", "سمين", "a/b", "ناس/ناس", "/مل", "مل/", "اثنين", "بين", "مليان", "ألفين", "سعرين"):
+            with self.subTest(w):
+                self.assertEqual(bl.word_breaks(["خد", "20", w]), ["ok", "ok"])
+
+    def test_a_directional_mark_next_to_a_digit_is_a_finding(self):
+        def marks(t):
+            return [(x["index"], x["char"]) for x in bl.control_findings(t) if x["char"] in "\u200e\u200f\u061c"]
+        self.assertEqual(marks("خد \u200e1000 - 2000\u200e وحدة"), [(3, "\u200e"), (15, "\u200e")])
+        self.assertEqual(marks("خد 250\u200e 500 وحدة"), [(6, "\u200e")])
+        self.assertEqual(marks("٥٠٠\u061c مجم"), [(3, "\u061c")])
+        self.assertEqual(marks("Dose 250\u200f 500 mg"), [(8, "\u200f")])          # reorders a Latin line too
+        self.assertEqual(marks("خد 250\u200e\u200f\u2066 500"), [(6, "\u200e"), (7, "\u200f")])   # through controls
+        self.assertEqual(marks("خد 250\u200e\u200f سكر"), [(6, "\u200e"), (7, "\u200f")])        # through a mark
+        # self-review r1 P2-2: spaces, brackets, signs and joiners between the mark and the digit do not cut its effect
+        for t, at in (("خد \u200e 1000 - 2000 وحدة", 3), ("خد\u200e 1000 - 2000 وحدة", 2), ("خد \u200e(1000 - 2000) وحدة", 3),
+                      ("Dose \u200f 1000 - 2000 mg", 5), ("خد 250\u200d\u200e 500", 7), ("خد 50%\u200e سكر", 6),
+                      ("الساعة 5\u200f.", 8)):                                  # the last one is harmless: still checked
+            with self.subTest(ascii(t)):
+                self.assertEqual(marks(t), [(at, t[at])])
+        for t in ("مرحبا\u200f.", "\u200fسكر 500", "سكر \u200e(a) 5", "a\u200e b 5", "5 سكر \u200f. علم", "5\nسكر\u200f"):
+            with self.subTest(ascii(t)):
+                self.assertEqual(marks(t), [])
+        f = bl.control_findings("خد 250\u200e 500")
+        self.assertIn("number", f[0]["why"])
+        self.assertEqual(bl.visual(bl.paragraph("خد 250\u200e 500 وحدة")), "ةدحو 250 500 دخ")   # honoured: read 500, 250
+        self.assertEqual([x["index"] for x in bl.control_findings("\u200fسكر \u2066a\u2069 \u202ab\u202c \u061c")],
+                         [5, 7, 9, 11])
+
+    def test_review_round_3_minors(self):
+        # ranges and alternatives before the unit, a mark or joiner before the unit, abbreviations
+        for t in ("الجرعات 05 250 500 1000 – 2000 – 3000 مجم", "خد 02 500 1000 أو 2000 مجم", "خد 02 500 1000 2000 إلى 3000 مجم",
+                  "خد 02 500 1000 2000 — 3000 mg", "خد 02 500 1000 2000 − 3000 mg", "take 02 500 1000 2000 or 3000 mg",
+                  "خد 02 500 1000 2000 \u200eمجم", "خد 02 500 1000 2000\u200f مجم", "خد 02 500 1000 2000\u200d مجم", "خد 02 500 1000 2000 مجم\u200f",
+                  "خد 02 500 1000 مج", "خد 02 500 1000 م.ج"):
+            with self.subTest(ascii(t)):
+                self.assertEqual(bl.phone_spans(t), [])
+        for t, tail in (("Call 010 1234 5678", " Le Caire"), ("Call 010 1234 5678", " m"),
+                        ("اتصل 010 1234 5678", " درجة أولى"), ("اتصل 010 1234 5678", " نقطة"),
+                        ("اتصل 010 1234 5678", " كيس"), ("اتصل 010 1234 5678", " ظرف ساعة"),
+                        ("اتصل 010 1234 5678", " مليون مبروك"),
+                        ("اتصل 010 1234 5678", " مجم")):
+            with self.subTest(ascii(t + tail)):
+                self.assertEqual(bl.phone_spans(t + tail), [(5, len(t))])
+        self.assertEqual(bl.word_breaks(["خد", "20", "يومان"]), ["ok", "never"])          # the «…ان» dual
+        f = [x["index"] for x in bl.control_findings("خد \u200e\n1000") if x["char"] == "\u200e"]
+        self.assertEqual(f, [])                                       # a paragraph separator stops the look
+        t0 = time.perf_counter()
+        bl.phone_spans("05 250" + " " * 100000 + "x")
+        bl.phone_spans(("05 250 - " * 20000) + "مجم")
+        bl.phone_spans("05 " + "- 05 " * 20000)                       # self-review r3: each «05» is a chain; was
+        bl.phone_spans("05 " + "أو 5 " * 20000)                       # quadratic (10.5 s at 8,000 repeats)
+        bl.lay_out("خد " + "1 - " * 10000 + "مجم", 20)
+        self.assertLess(time.perf_counter() - t0, 3.0)
+
+    def test_control_findings_are_linear(self):
+        t0 = time.perf_counter()
+        bl.control_findings("5" + "\u200e" * 200000 + "5")
+        self.assertLess(time.perf_counter() - t0, 2.0)
+
+    def test_host_text_refuses_a_bare_string(self):
+        for src in ("abc", "خد 1000 - 2000 وحدة", ""):
+            with self.subTest(src), self.assertRaises(TypeError) as cm:
+                bl.host_text(src)
+            self.assertIn("lay_out", str(cm.exception))
+        with self.assertRaises(TypeError):
+            bl.host_text(None)
+
+    def test_the_host_depth_limit_is_exactly_125(self):
+        ok = ladder(61)                                       # levels 1 … 123: renumbered 3 … 125
+        self.assertEqual(max(ok.levels), 123)
+        self.assertEqual(host_order(bl.host_text(ok)), bl.visual(ok, mirror=False))
+        with self.assertRaises(ValueError) as cm:
+            bl.host_text(ladder(62))                          # … 127
+        self.assertIn("125", str(cm.exception))
+
+    def test_a_width_that_is_not_a_positive_finite_number_is_refused(self):
+        for w in (float("nan"), float("inf"), -float("inf"), Decimal("NaN"), Decimal("sNaN"), Decimal("Infinity"),
+                  True, "5", b"5", 3j):
+            with self.subTest(repr(w)):
+                with self.assertRaises(ValueError):
+                    bl.lay_out("سطر طويل", w)
+                with self.assertRaises(ValueError):
+                    bl.wrap("سطر طويل", w)
+        with self.assertRaises(ValueError):
+            bl.wrap("سطر طويل", None)
+        for w in (Decimal("4"), Fraction(9, 2), 4.5):                 # any positive finite number
+            self.assertEqual(lines("سطر طويل", w), ["سطر", "طويل"])
 
 
 if __name__ == "__main__":
