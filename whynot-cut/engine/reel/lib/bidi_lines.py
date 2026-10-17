@@ -16,18 +16,21 @@ L3 is left to the shaper (runs keep their logical text, so marks stay on their l
 `rtl` True is shaped right-to-left and HarfBuzz/CoreText mirror its brackets. `visual()` mirrors brackets itself.
 
 Line breaks fall only at spaces, never:
-- between «الـ» and its Latin word («الـ MRI»), a number and its unit («٥٠٠ mg», «50 %», «١٠٠ جنيه»), a currency sign and
-  its number («$ 50»), the digit groups of a phone number, the numbers of a range («10 - 20»);
+- between «الـ» and its Latin word («الـ MRI»), a number and its unit («٥٠٠ mg», «50 %», «١٠٠ جنيه»), a currency sign
+  and its number («$ 50»), the digit groups of a phone number, the numbers of a range («10 - 20»);
 - after an opening bracket or quote, or before a closing bracket, quote or punctuation mark;
 and, when another break fits, not inside a short Latin run (≤ 3 words: «blood sugar level», «iPhone 15 Pro»).
-Breaking at a no-break space (U+00A0, U+202F, U+2007) never happens.
+Breaking at a no-break space (U+00A0, U+202F, U+2007) never happens. A unit is matched with its harakat dropped and
+the Whisper spellings folded («دقيقه», «مرّات», «وحده»).
 
-Pure functions, no files, no platform branch. The bracket pairs come from the Unicode Character Database
-(BidiBrackets.txt, Unicode License v3; the notice is in tests/fixtures/bidi/UNICODE-LICENSE.txt).
+Pure functions, no files, no platform branch: Windows and macOS get the same lines and runs; a renderer that runs
+its own UAX #9 (CoreText) gets host_text(). The bracket pairs come from the Unicode Character Database 15.0
+(BidiBrackets.txt, Unicode License v3; the notice is in tests/fixtures/bidi/UNICODE-LICENSE.txt and, with the M2-T1
+licence-notice patch, in the third-party notices); the tests pin `unicodedata.unidata_version` to the same 15.0.
 
 API: direction(), paragraph(), line_runs(), logical_runs(), visual(), reorder(), word_pieces(), line_pieces(),
-host_text(),
-phone_spans(), breaks(), word_breaks(), wrap(), lay_out(), set_digits(), punctuation_findings().
+host_text(), phone_spans(), breaks(), word_breaks(), wrap(), lay_out(), set_digits(), punctuation_findings(),
+control_findings().
 """
 from __future__ import annotations
 
@@ -96,8 +99,8 @@ def _first_strong(cls: list[str], start: int, end: int, stop_at_pdi: bool = Fals
 
 def direction(text: str, force_rtl: bool = False, hl1: bool = True) -> int:
     """The paragraph embedding level: 1 (RTL) or 0 (LTR). HL1: any Arabic letter (bidi class AL, a letter: not the
-    Arabic punctuation «؟ ؛» that is AL too) outside an isolate makes the paragraph RTL; otherwise P2/P3. `force_rtl` is the client setting for an Arabic-first client. `hl1=False` is plain
-    P2/P3 (the conformance test)."""
+    Arabic punctuation «؟ ؛» that is AL too) outside an isolate makes the paragraph RTL; otherwise P2/P3.
+    `force_rtl` is the client setting for an Arabic-first client. `hl1=False` is plain P2/P3 (the conformance test)."""
     if force_rtl:
         return 1
     cls = [_cls(c) for c in text]
@@ -344,33 +347,57 @@ def _resolve_sequence(seq: list[int], text: str, cls: list[str], types: list[str
 
 
 _D = "0-9٠-٩۰-۹"
-_PHONE_CHAIN = re.compile(rf"(?<![\w+.,٫٬/])\+?[{_D}]+(?:[ \-–][{_D}]+)*")
+_PHONE_SPACE = " \u00a0\u202f\u2007"                    # a phone's groups may be joined by a no-break space
+_PHONE_CHAIN = re.compile(rf"(?<![\w+.,٫٬/])\+?[{_D}]+(?:[{_PHONE_SPACE}\-–][{_D}]+)*")
+_PHONE_GROUP = re.compile(rf"\+?[^{_PHONE_SPACE}\-–]+")
 _ZEROS = "0٠۰"
 
 
 _YEAR = re.compile(r"(?:19|20|١٩|٢٠|۱۹|۲۰)[0-9٠-٩۰-۹]{2}")
 
 
-def _droppable_tail(text: str, tail: list[tuple[int, int]], glued_end: bool, all_short: bool) -> bool:
-    """Groups after a phone that are not part of it: short numbers («24 ساعة», «24/7»; `all_short`), a year («2024»),
-    or the next phone (≤ 4 groups). A long group glued to more text («5678/9») is the phone's own last group, never a
-    tail."""
+def _droppable_tail(text: str, groups: list[tuple[int, int]], en: int, glued_end: bool, all_short: bool) -> bool:
+    """`groups[en:]`, the groups after a phone, are not part of it: short numbers («24 ساعة», «24/7»; `all_short`), a
+    year («2024»), or the next phone (≤ 4 groups). A long group glued to more text («5678/9») is the phone's own last
+    group, never a tail."""
     if all_short:
         return True
-    if len(tail) > 4 or glued_end:
+    if len(groups) - en > 4 or glued_end:
         return False
-    gs = [text[x:y] for x, y in tail]
+    gs = [text[x:y] for x, y in groups[en:]]
     if len(gs) == 1 and _YEAR.fullmatch(gs[0]):
         return True
     return gs[0][:1] in _ZEROS and len(gs) > 1 and all(len(g) >= 3 for g in gs[1:]) and \
         7 <= sum(len(g) for g in gs) <= 12
 
 
+def _value_list(gs: list[str]) -> bool:
+    """«05 250 500», «090 120 140», «+150 250 350», «05 500 250 125»: doses, readings and scores, not a phone. Two
+    or more groups after the head, each of exactly 3 digits and round (a multiple of 10 or 25), all rising or all
+    falling, and the head smaller than every one of them. A phone's groups are not round («0555 123 456», «+966 512
+    600 789») or end in 4+ digits («02 2400 1100», «+1 800 300 2000»). The cost, on random digits: about 1 in 70
+    numbers of the shape 0X XXX XXX (Lebanese landlines: «05 250 500» is a valid one, and also a dose list; the
+    rule reads it as the list), about 1 in 300 of the shape 0XXX XXX XXX, and about 1 in 2,000 written with a
+    country code in 3-digit groups. Left as phones: a list whose values reach 4 digits («05 250 500 1000») or that
+    turns («010 500 250 750»)."""
+    tail = gs[1:]
+    if len(tail) < 2 or any(len(g) != 3 for g in tail):
+        return False
+    vals = [int(g) for g in tail]
+    if any(v % 10 and v % 25 for v in vals):
+        return False
+    rising = all(a <= b for a, b in zip(vals, vals[1:]))
+    falling = all(a >= b for a, b in zip(vals, vals[1:]))
+    return (rising or falling) and int(gs[0].lstrip("+")) < min(vals)
+
+
 def phone_spans(text: str) -> list[tuple[int, int]]:
-    """Phone numbers, as dialled: 7–15 digits in groups joined by single spaces or hyphens, and either
+    """Phone numbers, as dialled: 7–15 digits in groups joined by single spaces (a no-break space too) or hyphens, and
+    either
     - «+» and a country code («+20 100 123 4567», «+966 5 1234 5678», «+201001234567»), or
-    - a leading zero, groups of 3+ digits after the first and at most 12 digits («010 1234 5678», «02 2345 6789»,
-      «٠١٠ ١٢٣٤ ٥٦٧٨»).
+    - a leading zero in a first group of 2+ digits, groups of 3+ digits after it and at most 12 digits («010 1234
+      5678», «02 2345 6789», «٠١٠ ١٢٣٤ ٥٦٧٨»; not «0 250 500» or «٠ ١٠٠ ٢٠٠٠»),
+    and not a list of values («05 250 500», «05 100 200 300», «+120 140 160»; see _value_list).
     Numbers set off by a space before or after it are not part of it («اتصل 3 010 1234 5678», «010 1234 5678 24/7»,
     «010 1234 5678 2024»); two phones in a row are two. Not phones: lists («2020 2021 2022», «05 10 15 20»), dates
     («01-02-2024»), times, decimals, a number glued to a letter, «%», «/» or a hyphenated tail («010 1234 5678/9»,
@@ -378,8 +405,8 @@ def phone_spans(text: str) -> list[tuple[int, int]]:
     5678.»). Linear in the text: a phone has at most 15 groups."""
     out = []
     for m in _PHONE_CHAIN.finditer(text):
-        groups = [(g.start() + m.start(), g.end() + m.start()) for g in re.finditer(r"\+?[^ \-–]+", m.group())]
-        seps = [text[x - 1] for x, _ in groups]             # seps[k]: the separator in front of group k (k ≥ 1)
+        groups = [(g.start() + m.start(), g.end() + m.start()) for g in _PHONE_GROUP.finditer(m.group())]
+        seps = [" " if text[x - 1] in _PHONE_SPACE else text[x - 1] for x, _ in groups]   # before group k ≥ 1
         nxt = text[m.end():m.end() + 2]
         short_from = [True] * (len(groups) + 1)            # short_from[k]: every group from k on has < 3 digits
         for k in range(len(groups) - 1, -1, -1):
@@ -395,13 +422,16 @@ def phone_spans(text: str) -> list[tuple[int, int]]:
                     return False                            # glued to more text
             elif seps[en] != " " or (en + 1 < len(groups) and seps[en + 1] != " "):
                 return False                                # «… 5678-9»: the tail is hyphenated to the phone or itself
-            elif not _droppable_tail(text, groups[en:], glued_end, short_from[en]):
+            elif not _droppable_tail(text, groups, en, glued_end, short_from[en]):
                 return False
             gs = [text[x:y] for x, y in groups[st:en]]
             digits = sum(len(g.lstrip("+")) for g in gs)
+            if _value_list(gs):
+                return False
             if gs[0].startswith("+"):
                 return (len(gs) == 1 or len(gs[-1]) >= 3) and 7 <= digits <= 15
-            return gs[0][:1] in _ZEROS and len(gs) > 1 and all(len(g) >= 3 for g in gs[1:]) and 7 <= digits <= 12
+            return gs[0][:1] in _ZEROS and len(gs[0]) >= 2 and len(gs) > 1 and all(len(g) >= 3 for g in gs[1:]) \
+                and 7 <= digits <= 12
 
         st = 0
         while st < len(groups):
@@ -641,23 +671,69 @@ def line_pieces(line) -> list[Piece]:
     return pieces
 
 
-def host_text(text: str, base: int | None = None) -> str:
-    """The line for a renderer that runs its own UAX #9 (macOS CoreText; the hosts are measured in M2-T2), with the
-    explicit controls that make it give this module's order: LRO … PDF around each phone number of a right-to-left
-    paragraph (HL3; not when the author's own controls are there), and RLM (or LRM) first when the paragraph direction
-    (`base`, else HL1) differs from what P2/P3 would find."""
-    if base is None:
-        base = direction(text)
-    elif base not in (0, 1):
-        raise ValueError("base must be 0 or 1")
-    out = text
-    if base == 1 and not any(_cls(c) in _INVISIBLE for c in text):
-        for a, b in reversed(phone_spans(text)):
-            out = out[:a] + "\u202d" + out[a:b] + "\u202c" + out[b:]
-    cls = [_cls(c) for c in out]
-    if (_first_strong(cls, 0, len(cls)) or 0) != base:
-        out = ("\u200f" if base else "\u200e") + out
-    return out
+def host_text(source, base: int | None = None, start: int = 0, end: int | None = None) -> str:
+    """One line for a renderer that runs its own UAX #9 (macOS CoreText; the hosts are measured in M2-T2), spelled so
+    that any conforming engine draws this module's order. `source` is a Line from lay_out() (a wrapped line), a
+    Paragraph with the line's `start`/`end`, or a whole one-line paragraph as text (`base`, else HL1).
+
+    The levels come from the WHOLE paragraph: a line handed to the host on its own would lose W2, W7, N0 and N1 across
+    the break («Vitamin D 1000 - 2000 وحدة» wrapped before «1000» reverses the range, on the Mac only) and could look
+    like a phone the paragraph rejected. So every logical run is wrapped in embeddings up to its level, the last one an
+    override of the run's direction (LRO/RLO … PDF): the host's W/N rules have nothing left to decide, and its L2 gives
+    our order. The levels are renumbered from the base up, keeping their order and parity (the same L2 order; a run
+    at the base level needs base + 2 to take an override); the host's own L1 resets trailing whitespace and tabs to
+    the base, as ours did. A paragraph mark (RLM/LRM) comes first, so the host's P2/P3 finds the base.
+    Every character L2 sees stays, at its level: a directional mark as itself, an isolate control as a mark (it is
+    never drawn, but it splits a reversal: «٥٠٠ RLM ٢٥٠», «LRI ٥٠٠ PDI LRI mg PDI»); the author's embeddings,
+    overrides and PDFs are left out (X9 removes them; their effect is in the levels); joiners stay in their run for
+    the shaper. ValueError for a paragraph separator inside the line (one line per call: lay_out splits them), and
+    when the renumbered levels pass the host's depth limit (125: only text built from dozens of nested controls)."""
+    if isinstance(source, Line):
+        if source.par is None:
+            raise ValueError("a Line from lay_out() carries its paragraph; build one with lay_out()")
+        if base is not None and base != int(source.rtl):
+            raise ValueError("base differs from the line's")
+        par, start, end = source.par, source.par_start, source.par_end
+    else:
+        par = paragraph(source, base=base) if isinstance(source, str) else source
+        if base is not None and base != par.base:
+            raise ValueError("base differs from the paragraph's")
+    end = len(par.text) if end is None else end
+    if not 0 <= start <= end <= len(par.text):
+        raise ValueError("line range outside the paragraph")
+    if any(c == "B" for c in par.classes[start:end]):
+        raise ValueError("a paragraph separator inside the line: lay the text out with lay_out() first")
+    base, lv = par.base, _line_levels(par, start, end)
+    runs: list[list] = []                                    # [level, text], logical order
+    for k in range(end - start):
+        i = start + k
+        c = par.classes[i]
+        if c in _EMBED or c == "PDF":
+            continue
+        ch = par.text[i]
+        if c in _ISO_INIT or c == "PDI":
+            ch = "\u200f" if lv[k] & 1 else "\u200e"
+        if runs and runs[-1][0] == lv[k]:
+            runs[-1][1] += ch
+        else:
+            runs.append([lv[k], ch])
+    remap, prev = {}, base
+    for lvl in sorted({r[0] for r in runs}):
+        prev = remap[lvl] = prev + 1 if (prev + 1) % 2 == lvl % 2 else prev + 2
+    if prev > MAX_DEPTH:
+        raise ValueError("the line nests deeper than a host engine resolves (125 levels)")
+    out = ["\u200f" if base else "\u200e"]
+    for level, text in runs:
+        target, lvl, opened = remap[level], base, 0
+        while lvl < target:
+            lvl = lvl + 2 if lvl + 2 == target else lvl + 1      # embeddings one level at a time, the override last
+            if lvl == target:
+                out.append("\u202e" if lvl & 1 else "\u202d")    # RLO / LRO
+            else:
+                out.append("\u202b" if lvl & 1 else "\u202a")    # RLE / LRE
+            opened += 1
+        out.append(text + "\u202c" * opened)
+    return "".join(out)
 
 
 def visual(par: Paragraph, start: int = 0, end: int | None = None, mirror: bool = True) -> str:
@@ -679,13 +755,24 @@ _LATIN_UNITS = {
     "mmol/l", "mg/dl", "mmhg", "bpm", "kcal", "cal", "hz", "khz", "kb", "mb", "gb", "tb", "x", "h", "hr", "hrs",
     "min", "mins", "sec", "s", "ms", "k", "egp", "usd", "sar", "aed", "kwd", "qar", "eur", "gbp", "units", "unit",
     "$", "€", "£", "¥", "mg/kg", "ml/kg", "mcg/kg", "g/dl", "units/kg", "km/h", "mg/l", "g/l", "ml/h",
+    "ng", "pg", "ng/ml", "pg/ml", "mg/ml", "mcg/ml", "µg/ml", "iu/kg", "iu/ml", "units/ml", "meq", "meq/l",
+    "mmol/mol", "µmol/l", "umol/l", "ml/min", "mm/h", "°", "°c", "°f", "℃", "℉", "tablet", "tablets", "tab", "tabs",
+    "capsule", "capsules", "cap", "caps", "dose", "doses", "drop", "drops", "puff", "puffs", "times", "lbs", "lb",
+    "cc", "tsp", "tbsp", "cm2", "cm3", "cm²", "cm³", "mm2", "mm3", "mm²", "mm³", "m2", "m3", "m²", "m³", "ampoule",
+    "ampoules", "amp", "amps", "patch", "patches", "sachet", "sachets", "vial", "vials",
 }
+# compared after _fold: no harakat, «أ إ آ» -> «ا», «ة» -> «ه», «ى» -> «ي» (Whisper writes «دقيقه», «وحده», «مره»)
 _ARABIC_UNITS = {
-    "٪", "مجم", "ملجم", "ملغ", "مغ", "مل", "ملل", "جم", "جرام", "غرام", "كجم", "كيلو", "كم", "سم", "مم", "لتر",
+    "٪", "مجم", "ملجم", "ملغ", "مغ", "مل", "ملل", "مللي", "ملي", "مليجرام", "ميكروجرام", "جم", "جرام", "جرامات",
+    "غرام", "غرامات", "كجم", "كيلو", "كيلوجرام", "كم", "سم", "مم", "لتر", "سيسي",
     "جنيه", "جنيهات", "ج.م", "دولار", "ريال", "درهم", "يورو", "دينار", "ساعة", "ساعات", "دقيقة", "دقايق", "دقائق",
-    "ثانية", "ثواني", "سنة", "سنين", "سنوات", "يوم", "أيام", "ايام", "شهر", "شهور", "أشهر", "اشهر", "أسبوع", "اسبوع",
-    "أسابيع", "مرة", "مرات", "حباية", "حبة", "حبوب", "قرص", "أقراص", "نقطة", "نقط", "سعر", "سعرة", "سعرات", "كالوري",
-    "وحدة", "وحدات", "مليون", "ألف", "الف", "مليار", "بالمية", "بالمئة", "درجة", "درجات",
+    "ثانية", "ثواني", "سنة", "سنين", "سنوات", "يوم", "أيام", "شهر", "شهور", "أشهر", "أسبوع", "أسابيع",
+    "مرة", "مرات", "حباية", "حبايات", "حبة", "حبات", "حبوب", "قرص", "أقراص", "كبسولة", "كبسولات", "حقنة", "حقن",
+    "ملعقة", "معلقة", "ملاعق", "معالق", "كوب", "كوباية", "أكواب", "فنجان", "بخة", "بخات", "جرعة", "جرعات",
+    "أمبول", "أمبولة", "أمبولات", "لزقة", "لزقات", "كيس", "أكياس", "ظرف", "أظرف", "فيال", "غ", "مجم/كجم", "مل/كجم",
+    "ملجم/كجم", "وحدة/كجم", "سم٣", "سم٢", "مم٣", "م٢", "م٣",
+    "نقطة", "نقط", "سعر", "سعرة", "سعرات", "كالوري", "وحدة", "وحدات", "مليون", "ألف", "آلاف", "مليار",
+    "بالمية", "بالمئة", "درجة", "درجات",
 }
 _CURRENCY_BEFORE = {"$", "€", "£", "¥", "us$", "e£", "egp", "usd", "sar", "aed", "eur", "gbp", "ج.م"}
 _NUM = re.compile(r"^[+\-−]?[$€£]?\d+(?:[.,٫٬:/\-–]\d+)*[%٪]?$")
@@ -718,9 +805,21 @@ def _is_num(tok: str) -> bool:
     return bool(_NUM.match(_core(tok) or tok))
 
 
+_FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ة": "ه", "ى": "ي"})
+
+
+def _fold(word: str) -> str:
+    """An Arabic word for the unit list: harakat (and the dagger alef) dropped, the alef, tah marbuta and alef
+    maqsura spellings folded."""
+    return "".join(c for c in word if not ("\u064b" <= c <= "\u065f" or c == "\u0670")).translate(_FOLD)
+
+
+_ARABIC_UNITS_FOLDED = {_fold(u) for u in _ARABIC_UNITS}
+
+
 def _is_unit(tok: str) -> bool:
     c = _core(tok) or tok
-    return c.casefold() in _LATIN_UNITS or c in _ARABIC_UNITS or tok in ("%", "٪")
+    return c.casefold() in _LATIN_UNITS or _fold(c) in _ARABIC_UNITS_FOLDED or tok in ("%", "٪")
 
 
 def _al_prefix(tok: str) -> bool:
@@ -786,8 +885,13 @@ def _gap_kinds(words: list[str]) -> list[str]:
 
 
 def _phone_bound(text: str, gaps: list[tuple[int, int]], kinds: list[str]) -> list[str]:
-    spans = phone_spans(text)
-    return ["never" if any(a < g0 and g1 < b for a, b in spans) else k for (g0, g1), k in zip(gaps, kinds)]
+    """A gap inside a phone number is "never". The spans and the gaps both come in text order: one sweep."""
+    spans, out, q = phone_spans(text), [], 0
+    for (g0, g1), k in zip(gaps, kinds):
+        while q < len(spans) and spans[q][1] <= g1:
+            q += 1
+        out.append("never" if q < len(spans) and spans[q][0] < g0 and g1 < spans[q][1] else k)
+    return out
 
 
 def word_breaks(words: list[str]) -> list[str]:
@@ -809,11 +913,16 @@ def breaks(text: str) -> list[tuple[int, int, str]]:
     return [(s, e, k) for (s, e), k in zip(gaps, kinds) if k != "never"]
 
 
+BALANCE_MAX_BREAKS = 120     # above this many break opportunities `balanced` keeps the greedy lines (O(k · n²))
+
+
 def wrap(text: str, max_width: float, measure=len, balanced: bool = False) -> list[tuple[int, int]]:
     """Line breaking: [(start, end)] per line, the breaking spaces left out. Greedy: the last "ok" break that fits
     wins; an "avoid" break is used only when no "ok" break fits; when nothing fits, the first "ok" break (else the
-    first break), so a unit wider than `max_width` stays whole on its own line. `balanced` (graphics, AE-style
-    titles): the same number of lines, with the breaks moved so the lines are as even as possible (see _balance)."""
+    first break), so a unit wider than `max_width` stays whole on its own line. `measure` must not shrink when the
+    text grows (a width), so a line's candidates are measured only until one does not fit. `balanced` (graphics,
+    AE-style titles): the same number of lines, with the breaks moved so the lines are as even as possible (see
+    _balance); a paragraph with more than BALANCE_MAX_BREAKS break opportunities keeps the greedy lines."""
     if not max_width or max_width <= 0:
         raise ValueError("max_width must be positive")
     a = len(text) - len(text.lstrip(" \t"))
@@ -821,18 +930,33 @@ def wrap(text: str, max_width: float, measure=len, balanced: bool = False) -> li
     if a >= z:
         return []
     opps = [o for o in breaks(text) if a < o[0] and o[1] <= z]
-    lines, start = [], a
+    next_ok = [len(opps)] * (len(opps) + 1)         # next_ok[q]: the first "ok" break at or after q
+    for q in range(len(opps) - 1, -1, -1):
+        next_ok[q] = q if opps[q][2] == "ok" else next_ok[q + 1]
+    lines, start, nxt = [], a, 0                    # opps[nxt:] lie after `start`
     while True:
-        cands = [o for o in opps if o[0] > start]
-        if not cands or measure(text[start:z]) <= max_width:
+        last_ok = last_fit = None
+        k = nxt
+        while k < len(opps) and measure(text[start:opps[k][0]]) <= max_width:
+            last_fit = k
+            if opps[k][2] == "ok":
+                last_ok = k
+            k += 1
+        if k == len(opps) and measure(text[start:z]) <= max_width:
             lines.append((start, z))
             break
-        fit = [o for o in cands if measure(text[start:o[0]]) <= max_width]
-        ok = [o for o in fit if o[2] == "ok"]
-        pick = ok[-1] if ok else (fit[-1] if fit else next((o for o in cands if o[2] == "ok"), cands[0]))
-        lines.append((start, pick[0]))
-        start = pick[1]
-    if balanced and 1 < len(lines) and len(opps) <= 120:
+        if nxt == len(opps):
+            lines.append((start, z))                # nothing left to break at: the rest stays whole
+            break
+        if last_ok is not None:
+            pick = last_ok
+        elif last_fit is not None:
+            pick = last_fit
+        else:
+            pick = next_ok[nxt] if next_ok[nxt] < len(opps) else nxt
+        lines.append((start, opps[pick][0]))
+        start, nxt = opps[pick][1], pick + 1
+    if balanced and 1 < len(lines) and len(opps) <= BALANCE_MAX_BREAKS:
         lines = _balance(text, a, z, opps, len(lines), max_width, measure)
     return lines
 
@@ -885,23 +1009,30 @@ class Line:
     end: int
     rtl: bool
     runs: list
+    # the resolved hard segment the line was cut from, and the line's range in it (host_text needs the levels of the
+    # characters that are never drawn too)
+    par: Paragraph | None = field(default=None, repr=False, compare=False)
+    par_start: int = field(default=0, repr=False, compare=False)
+    par_end: int = field(default=0, repr=False, compare=False)
 
 
-_HARD = re.compile(r"\r\n|[\n\r\u2028\u2029\x85]")
+# hard breaks: the UAX #9 paragraph separators (class B: LF, CR, FS, GS, RS, NEL, PS), LS, and VT/FF (UAX #14 BK)
+_HARD = re.compile(r"\r\n|[\n\r\x0b\x0c\x1c-\x1e\x85\u2028\u2029]")
 
 
 def lay_out(text: str, max_width: float | None = None, measure=len, force_rtl: bool = False,
             balanced: bool = False) -> list[Line]:
     """A caption or graphic paragraph as lines: the direction is decided once for the whole text (hard line breaks
     included), each hard segment is resolved with it, broken (when `max_width` is given), then each line reordered.
-    A blank hard line stays one empty line."""
+    A blank hard line stays one empty line. `max_width` None = no wrapping; 0 or less is refused, as in wrap()."""
     base = direction(text, force_rtl=force_rtl)
     out = []
     for seg_text, off in _hard_segments(text):
         par = paragraph(seg_text, base=base)
-        spans = (wrap(seg_text, max_width, measure, balanced) if max_width else [(0, len(seg_text))]) or [(0, 0)]
+        spans = (wrap(seg_text, max_width, measure, balanced) if max_width is not None
+                 else [(0, len(seg_text))]) or [(0, 0)]
         for s, e in spans:
-            out.append(Line(seg_text[s:e], off + s, off + e, bool(base), line_runs(par, s, e)))
+            out.append(Line(seg_text[s:e], off + s, off + e, bool(base), line_runs(par, s, e), par, s, e))
     return out
 
 
@@ -917,7 +1048,7 @@ def _hard_segments(text: str):
 _WEST, _ARAB, _PERS = "0123456789", "٠١٢٣٤٥٦٧٨٩", "۰۱۲۳۴۵۶۷۸۹"
 _DG = "0-9٠-٩۰-۹"
 _NUMBER = re.compile(rf"[{_DG}]{{1,3}}(?:[,٬][{_DG}]{{3}})+(?:[.٫][{_DG}]+)?[%٪]?|[{_DG}]+(?:[.٫][{_DG}]+)?[%٪]?")
-_VERSION = re.compile(rf"[{_DG}]+(?:\.[{_DG}]+){{2,}}")
+_VERSION = re.compile(rf"(?<![{_DG}])[{_DG}]+(?:\.[{_DG}]+){{2,}}")      # starts at a digit run: linear
 _GLUED_UNIT = re.compile(rf"^([(\[«\"']*)([{_DG}.,٫٬\-–]+)([A-Za-zµμ/]+)([.,;:!?)\]»\"'،؛؟]*)$")
 _TO_AR = str.maketrans({**{w: a for w, a in zip(_WEST, _ARAB)}, **{p: a for p, a in zip(_PERS, _ARAB)},
                         ".": "٫", ",": "٬", "%": "٪"})
@@ -962,8 +1093,8 @@ _LAT_PUNCT = {v: k for k, v in _AR_PUNCT.items()}
 
 
 def punctuation_findings(text: str) -> list[dict]:
-    """Arabic punctuation (، ؛ ؟) belongs to Arabic context only: findings for «،» in a Latin context and for «,» «;» «?»
-    right after an Arabic word. Detect only; the text is never rewritten (the transcript is the editor's)."""
+    """Arabic punctuation (، ؛ ؟) belongs to Arabic context only: findings for «،» in a Latin context and for «,» «;»
+    «?» right after an Arabic word. Detect only; the text is never rewritten (the transcript is the editor's)."""
     out = []
     for i, ch in enumerate(text):
         if ch not in _AR_PUNCT and ch not in _LAT_PUNCT:
@@ -976,4 +1107,23 @@ def punctuation_findings(text: str) -> list[dict]:
             out.append({"index": i, "char": ch, "suggest": _AR_PUNCT[ch], "why": "Arabic punctuation in a Latin line"})
         elif ch in _LAT_PUNCT and arabic_before:
             out.append({"index": i, "char": ch, "suggest": _LAT_PUNCT[ch], "why": "Latin punctuation after Arabic"})
+    return out
+
+
+_OVERRIDES = {"LRO", "RLO"}
+
+
+def control_findings(text: str) -> list[dict]:
+    """Explicit bidi controls in transcript or caption text (LRE, RLE, LRO, RLO, PDF, LRI, RLI, FSI, PDI): a pasted
+    or hostile control silently changes what the viewer reads («خد [RLO]500 mg[PDF]» draws the dose as «gm 005»). The
+    module honours them (X1–X10), so each one is a finding for the editor: an override (LRO, RLO) "reverses the text
+    after it", the others "change the order". The directional marks (LRM, RLM, ALM) are not findings. Detect only; the
+    text is never rewritten (the transcript is the editor's)."""
+    out = []
+    for i, ch in enumerate(text):
+        c = _cls(ch)
+        if c in _INVISIBLE:
+            out.append({"index": i, "char": ch, "name": unicodedata.name(ch),
+                        "why": "bidi override: reverses the text after it" if c in _OVERRIDES
+                        else "bidi control: changes the order of the text around it"})
     return out

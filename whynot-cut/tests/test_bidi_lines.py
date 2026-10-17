@@ -12,9 +12,12 @@ Run:  bash tools/test.sh -p test_bidi_lines.py
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
+import ast
 import builtins
-import importlib
 import json
+import random
+import time
+import unicodedata
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -24,6 +27,7 @@ SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
 from lib import bidi_lines as bl  # noqa: E402
+from bidi import get_display  # noqa: E402  python-bidi 0.6.11 (LGPL, test-only), pinned in the engine locks
 
 FX = SK / "tests" / "fixtures" / "bidi"
 LINES = json.loads((FX / "lines.json").read_text(encoding="utf-8"))["lines"]
@@ -62,10 +66,6 @@ class TestFixtureTable(unittest.TestCase):
                 self.assertEqual([[r.level, r.text] for r in bl.line_runs(par)], e["runs"])
 
     def test_every_line_matches_an_independent_uax9_implementation(self):
-        try:
-            from bidi import get_display
-        except ImportError:                                   # pragma: no cover - the engine runtime ships it
-            self.skipTest("python-bidi missing: the cross-check needs the engine runtime (tools/test.sh)")
         for e in LINES:
             with self.subTest(e["id"]):
                 par = bl.paragraph(e["text"])
@@ -423,6 +423,8 @@ class TestContract(unittest.TestCase):
             b = [(ln.text, ln.runs) for e in LINES for ln in bl.lay_out(e["text"], 12)]
             bl.set_digits("1", "arabic")
             bl.punctuation_findings("a، b")
+            bl.control_findings("a b")
+            [bl.host_text(ln) for e in LINES for ln in bl.lay_out(e["text"], 12)]
         self.assertEqual(a, b)
 
     def test_refusals_raise_cleanly(self):
@@ -433,15 +435,23 @@ class TestContract(unittest.TestCase):
         with self.assertRaises(ValueError):
             bl.line_runs(bl.paragraph("abc"), 2, 9)
 
-    def test_same_result_on_darwin(self):
-        want = [[[r.level, r.text] for r in bl.line_runs(bl.paragraph(e["text"]))] for e in LINES]
-        try:
-            with mock.patch.object(sys, "platform", "darwin"):
-                mod = importlib.reload(bl)
-                got = [[[r.level, r.text] for r in mod.line_runs(mod.paragraph(e["text"]))] for e in LINES]
-        finally:
-            importlib.reload(bl)
-        self.assertEqual(got, want)
+    def test_one_code_path_on_windows_and_macos(self):
+        # no platform branch: the module imports no os/sys/platform/subprocess/pathlib and opens nothing, so
+        # Windows and macOS run the same lines (the old darwin reload could not fail)
+        tree = ast.parse((SK / "engine" / "reel" / "lib" / "bidi_lines.py").read_text(encoding="utf-8"))
+        names = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+        names |= {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
+        self.assertEqual(names & {"os", "sys", "platform", "subprocess", "pathlib", "ctypes"}, set())
+        self.assertFalse([n for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id == "open"])
+
+    def test_the_unicode_data_is_the_bracket_tables_version(self):
+        # _BRACKETS is BidiBrackets.txt 15.0 and the conformance sample is 15.0.0: a Python whose unicodedata moves
+        # on must re-check them first
+        self.assertEqual(unicodedata.unidata_version, "15.0.0")
+        head = (FX / "BidiCharacterTest-sample.txt").read_text(encoding="utf-8").splitlines()[:8]
+        self.assertIn("# BidiCharacterTest-15.0.0.txt", head)
+        self.assertIn("# © 2022 Unicode®, Inc.", head)
+        self.assertFalse([h for h in head if "1991" in h])
 
     def test_hl3_never_overrides_the_authors_own_controls(self):
         self.assertEqual(runs("كلمنا \u202e010 1234 5678\u202c"), [[3, "010 1234 5678"], [1, "كلمنا "]])
@@ -450,18 +460,14 @@ class TestContract(unittest.TestCase):
         self.assertEqual(bl.paragraph(deep).levels[130:143], bl.paragraph(deep, hl1=False).levels[130:143])
 
     def test_host_text_gives_a_full_uax9_engine_this_modules_order(self):
-        self.assertEqual(bl.host_text("AI بيغيّر الطب"), "\u200fAI بيغيّر الطب")
-        self.assertEqual(bl.host_text("بيغيّر AI"), "بيغيّر AI")
-        self.assertEqual(bl.host_text("complete blood count test.", base=1), "\u200fcomplete blood count test.")
-        self.assertEqual(bl.host_text("שלום world", base=0), "\u200eשלום world")
-        self.assertEqual(bl.host_text("كلمنا 010 1234 5678."), "كلمنا \u202d010 1234 5678\u202c.")
-        self.assertEqual(bl.host_text("كلمنا \u2066010 1234 5678\u2069"), "كلمنا \u2066010 1234 5678\u2069")
+        # every logical run in embeddings up to its level, the last one an override of its direction; RLM/LRM first
+        self.assertEqual(bl.host_text("AI بيغيّر الطب"),
+                         "\u200f\u202a\u202dAI\u202c\u202c\u202e بيغيّر الطب\u202c")
+        self.assertEqual(bl.host_text("hello world", base=0), "\u200e\u202dhello world\u202c")
+        self.assertEqual(bl.host_text("كلمنا \u2066010 1234 5678\u2069").count("\u2066"), 0)   # resolved already
+        self.assertIn("\u200d", bl.host_text("لا\u200dمركزية a\u200cb"))                       # joiners stay
         with self.assertRaises(ValueError):
             bl.host_text("x", base=3)
-        try:
-            from bidi import get_display
-        except ImportError:                                   # pragma: no cover
-            return
         for e in LINES:                                         # a full UAX #9 engine + host_text = our order
             with self.subTest(e["id"]):
                 par = bl.paragraph(e["text"])
@@ -473,6 +479,241 @@ class TestContract(unittest.TestCase):
         par = bl.paragraph(text)
         self.assertLessEqual(max(par.levels), bl.MAX_DEPTH + 1)
         self.assertEqual("".join(r.text for r in bl.line_runs(par)).replace(" ", ""), "مرحباabc")
+
+
+def host_order(host):
+    """What a full UAX #9 engine (python-bidi, standing in for CoreText) draws from host text: controls dropped."""
+    return "".join(c for c in get_display(host, base_dir=None) if c not in CONTROLS)
+
+
+def drawn(line):
+    return "".join(r.text[::-1] if r.rtl else r.text for r in line.runs)
+
+
+class TestHostTextPerLine(unittest.TestCase):
+    """Review 530e2e7 P1: a wrapped line handed to the host on its own lost the paragraph's W2/W7/N0/N1 context."""
+
+    def test_a_wrapped_dose_range_keeps_its_order_on_the_host(self):
+        text = "خد Vitamin D 1000 - 2000 وحدة يوميا"
+        out = bl.lay_out(text, 16)
+        self.assertEqual([ln.text for ln in out], ["خد", "Vitamin D", "1000 - 2000 وحدة", "يوميا"])
+        self.assertEqual(drawn(out[2]), "ةدحو 1000 - 2000")
+        for ln in out:
+            with self.subTest(ln.text):
+                self.assertEqual(host_order(bl.host_text(ln)), drawn(ln))
+        self.assertEqual(host_order(bl.host_text(out[2].text, 1)), "ةدحو 2000 - 1000")   # the line alone: reversed
+
+    def test_every_wrapped_line_matches_a_full_uax9_engine(self):
+        words = ["عملت", "الـ", "MRI", "٥٠٠", "mg", "(", "insulin", ")", "«", "AI", "»", "010", "1234", "5678",
+                 "-", "10", "%", "٪", "$", "50", "blood", "sugar", "الطِّبُّ", "لا\u200cمركزية", "a\u200db",
+                 "x\u00a0y", "\u2066abc\u2069",
+                 "،", "؟", "2–3", "+20", "iPhone", "15", "Vitamin", "D", "1000", "2000", "وحدة", "1.5", "CT", "-5",
+                 "$99", "[", "]", "!", "\u202eعكس\u202c", "\u2067x 1\u2069", "\u202d٥٠٠ مجم\u202c", "٢٠٢٤", "١٫٥", "\t"]
+        rnd, n = random.Random(54), 0
+        for _ in range(500):
+            text = " ".join(rnd.choice(words) for _ in range(rnd.randint(1, 14)))
+            for w in (4, 9, 15, 24):
+                for ln in bl.lay_out(text, w, balanced=w == 15):
+                    n += 1
+                    self.assertEqual(host_order(bl.host_text(ln)), drawn(ln), (text, w, ln.text))
+        self.assertGreater(n, 4000)
+
+    def test_a_number_list_the_paragraph_rejected_is_not_a_phone_on_the_host(self):
+        text = "اتصل 010 1234 5678 123"                            # ambiguous: no HL3 for the paragraph
+        self.assertEqual(bl.phone_spans(text), [])
+        out = bl.lay_out(text, 13, measure=lambda s: len(s) + 2 * sum("\u0600" <= c <= "\u06ff" for c in s))
+        self.assertEqual([ln.text for ln in out], ["اتصل", "010 1234 5678", "123"])
+        self.assertEqual(drawn(out[1]), "5678 1234 010")
+        self.assertEqual(host_order(bl.host_text(out[1])), "5678 1234 010")
+        self.assertEqual(host_order(bl.host_text(out[1].text, 1)), "010 1234 5678")      # the line alone: a phone
+
+    def test_line_paragraph_and_text_sources_agree(self):
+        text = "قال الدكتور الـ MRI بيكشف 90% من الحالات"
+        par = bl.paragraph(text)
+        self.assertEqual(bl.host_text(text), bl.host_text(par))
+        for ln in bl.lay_out(text, 12):
+            self.assertEqual(bl.host_text(ln), bl.host_text(par, start=ln.start, end=ln.end))
+        with self.assertRaises(ValueError):
+            bl.host_text(par, base=0)
+        with self.assertRaises(ValueError):
+            bl.host_text(bl.lay_out(text)[0], base=0)
+        with self.assertRaises(ValueError):
+            bl.host_text(par, start=5, end=999)
+
+    def test_tabs_and_trailing_space_reset_by_the_hosts_own_l1(self):
+        for text in ("سكر\tsugar 50", "sugar\tسكر 50 ", "a b\tج د\te f"):
+            par = bl.paragraph(text)
+            with self.subTest(text):
+                self.assertEqual(host_order(bl.host_text(par)), bl.visual(par, mirror=False))
+
+    def test_marks_and_isolates_still_split_reversals_on_the_host(self):
+        # review round 2: an undrawn mark or isolate control holds a level that splits an L2 reversal
+        for text in ("الجرعة 500\u200f250 mg", "Speakers \u2068أحمد\u2069\u2068محمد\u2069 today",
+                     "خد \u2066500\u2069\u2066mg\u2069 مرتين", "x<\u061c) \u200f", "٥٠٠\u061c٢٥٠ مجم"):
+            par = bl.paragraph(text)
+            with self.subTest(ascii(text)):
+                self.assertEqual(host_order(bl.host_text(par)), bl.visual(par, mirror=False))
+        self.assertEqual(bl.visual(bl.paragraph("الجرعة 500\u200f250 mg")), "mg 250500 ةعرجلا")
+
+    def test_words_joined_without_spaces_with_marks_and_isolates(self):
+        words = ["عملت", "MRI", "٥٠٠", "mg", "(", ")", "AI", "010", "1234", "-", "%", "$", "50", "أحمد", "x<", "<", ">",
+                 "\u200f", "\u200e", "\u061c", "\u2066", "\u2067", "\u2068", "\u2069", "\t", "\u0301", "\u202bنص\u202c",
+                 "a\u200db", "١٫٥", "!"]
+        rnd, n = random.Random(2), 0
+        for _ in range(500):
+            text = "".join(rnd.choice(words) + rnd.choice((" ", "")) for _ in range(rnd.randint(1, 14)))
+            for w in (5, 12, 30):
+                for ln in bl.lay_out(text, w):
+                    n += 1
+                    self.assertEqual(host_order(bl.host_text(ln)), drawn(ln), (ascii(text), w))
+        self.assertGreater(n, 1500)
+
+    def test_one_line_per_call(self):
+        with self.assertRaises(ValueError):
+            bl.host_text("abc\nعربي 123 456")
+        with self.assertRaises(ValueError):
+            bl.host_text(bl.Line("abc", 0, 3, False, []))                # not from lay_out: no paragraph
+        two = bl.lay_out("abc\nعربي 123 456")
+        self.assertEqual([host_order(bl.host_text(ln)) for ln in two], ["abc", "456 123 يبرع"])
+
+    def test_nesting_is_renumbered_and_too_deep_a_line_is_refused(self):
+        deep = "\u202b" * 62 + "سكر a" + "\u202c" * 62 + " سكر"          # levels 1, 125, 126: renumbered 3, 5, 6
+        par = bl.paragraph(deep)
+        self.assertEqual(sorted(set(par.levels)), [1, 125, 126])
+        self.assertEqual(host_order(bl.host_text(par)), bl.visual(par, mirror=False))
+        ladder = "س" + "\u202bس" * 62                                     # every odd level 1 … 125 holds a letter
+        with self.assertRaises(ValueError):
+            bl.host_text(ladder)
+
+
+class TestReviewRound1(unittest.TestCase):
+    """Review 530e2e7 P2/P3: phones, units, hostile controls, hard breaks and the test gaps the mutation run found."""
+
+    def test_number_lists_are_not_phones(self):
+        for t in ("خد 0 250 500 mg", "الجرعة 0-250-500 mg", "قيم 05 100 200 300", "زاد +100 200 300 نقطة",
+                  "٠ ١٠٠ ٢٠٠٠", "الجرعة 05 250 500 مجم", "خد ٠٥ ٢٥٠ ٥٠٠ مجم", "قيم 05 125 250",
+                  "زاد +150 250 350 نقطة", "+120 140 160", "الضغط 090 120 140 مم", "قلل 05 500 250 125",
+                  "قيم 05 100 100 100", "قيم 05 100 100 200"):
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans(t), [])
+                self.assertEqual(bl.visual(bl.paragraph(t)),
+                                 bl.visual(bl.paragraph(t, base=bl.direction(t), hl1=False)))   # plain UAX #9
+        self.assertEqual(bl.visual(bl.paragraph("خد 0 250 500 mg")), "mg 500 250 0 دخ")
+        self.assertEqual(bl.phone_spans("خد 0 251 503 mg"), [])               # a one-digit zero head is a list
+        for t in ("+1 202 555 0100", "050 123 4567", "02 2345 6780", "010 1234 5678", "+20 100 123 4567",
+                  "٠١٠ ١٢٣٤ ٥٦٧٨", "02 2345 6789", "010 1230 5670", "050 1234500", "02 2400 1100",
+                  "+1 800 300 2000", "012 0000 0000", "+20 10 12 345", "+966 50 123 4567", "07911 123 456",
+                  "0555 123 456", "0501 234 567", "٠٥٥٥ ١٢٣ ٤٥٦", "+966 512 600 789", "+962 791 534 267",
+                  "+971 501 502 503", "+34 612 700 800", "050 123 456", "0555 120 140"):
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans("رقمنا " + t), [(6, 6 + len(t))])
+
+    def test_a_phone_written_with_no_break_spaces_reads_as_dialled(self):
+        for sp in ("\u00a0", "\u202f", "\u2007"):
+            t = "كلمنا 010" + sp + "1234" + sp + "5678"
+            with self.subTest(hex(ord(sp))):
+                self.assertEqual(bl.phone_spans(t), [(6, len(t))])
+                self.assertEqual(bl.visual(bl.paragraph(t)), "010" + sp + "1234" + sp + "5678 انملك")
+                t = "اتصل 3" + sp + "010" + sp + "1234" + sp + "5678"           # a number joined in front is not part
+                self.assertEqual(bl.phone_spans(t), [(7, len(t))])
+
+    def test_phone_spans_is_linear(self):
+        t0 = time.perf_counter()
+        bl.phone_spans(" ".join(["0123"] * 30000))                  # was 39.8 s (a slice per candidate)
+        bl.breaks(" ".join(["010 1234 5678"] * 3000))
+        self.assertLess(time.perf_counter() - t0, 3.0)
+
+    def test_more_units_stay_with_their_number(self):
+        self.assertEqual(lines("خد ٢ ملعقة بعد الأكل", 4), ["خد", "٢ ملعقة", "بعد", "الأكل"])
+        for u in ("ملعقة", "ملاعق", "مللي", "ملي", "جرامات", "كبسولة", "كبسولات", "حقنة", "دقيقه", "وحده", "مره",
+                  "مرّات", "مَجم", "ng/ml", "°C", "°F", "tablets", "mEq", "IU/kg", "mg/ml", "drops", "مجم/كجم", "سم٣",
+                  "أمبول", "أمبولات", "لزقة", "غ", "tsp", "tbsp", "cm³"):
+            with self.subTest(u):
+                self.assertEqual(bl.word_breaks(["5", u, "كمان"]), ["never", "ok"])
+        for w in ("ناس", "كلمة", "سكر", "مريض", "بعد"):                 # an ordinary word after a number: a break
+            with self.subTest(w):
+                self.assertEqual(bl.word_breaks(["٣", w]), ["ok"])
+
+    def test_hostile_bidi_controls_are_findings(self):
+        f = bl.control_findings("خد \u202e500 mg\u202c مرتين")
+        self.assertEqual([(x["index"], x["name"]) for x in f],
+                         [(3, "RIGHT-TO-LEFT OVERRIDE"), (10, "POP DIRECTIONAL FORMATTING")])
+        self.assertIn("reverses", f[0]["why"])
+        self.assertNotIn("reverses", f[1]["why"])
+        self.assertEqual([x["index"] for x in bl.control_findings("\u200fسكر \u2066a\u2069 \u202ab\u202c \u061c")],
+                         [5, 7, 9, 11])
+        self.assertEqual(bl.control_findings("خد ٥٠٠ mg مرتين"), [])
+        self.assertEqual(bl.visual(bl.paragraph("خد \u202e500 mg\u202c مرتين")), "نيترم gm 005 دخ")   # still honoured
+
+    def test_every_hard_break(self):
+        for sep in ("\n", "\r", "\r\n", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"):
+            with self.subTest(hex(ord(sep[-1]))):
+                self.assertEqual(lines("سطر" + sep + "تاني", None), ["سطر", "تاني"])
+                self.assertEqual(lines("سطر" + sep + "تاني", 20), ["سطر", "تاني"])
+
+    def test_lay_out_refuses_a_zero_or_negative_width_like_wrap(self):
+        for w in (0, -3):
+            with self.assertRaises(ValueError):
+                bl.lay_out("سطر طويل", w)
+        self.assertEqual(lines("سطر طويل", None), ["سطر طويل"])
+
+    def test_bracket_pairs_nested_four_deep_resolve(self):
+        self.assertEqual(runs("a ((((b)))) سكر"), [[1, " سكر"], [2, "a ((((b))))"]])
+
+    def test_canonically_equivalent_brackets_pair(self):
+        self.assertEqual(runs("a \u2329b\u3009 سكر"), [[1, " سكر"], [2, "a \u2329b\u3009"]])
+        self.assertEqual(runs("a \u3008b\u232a سكر"), [[1, " سكر"], [2, "a \u3008b\u232a"]])
+
+    def test_a_combining_mark_after_a_paired_bracket_takes_its_direction(self):
+        self.assertEqual(runs("a(b)\u0301 سكر"), [[1, " سكر"], [2, "a(b)\u0301"]])
+
+    def test_a_leading_removed_character_takes_the_first_level(self):
+        self.assertEqual(runs("\u200dabc سكر"), [[1, " سكر"], [2, "\u200dabc"]])
+
+    def test_the_bare_article_and_padded_words(self):
+        self.assertEqual(bl.word_breaks(["عملت", "ال", "MRI"]), ["ok", "never"])
+        self.assertEqual(bl.word_breaks(["50 ", " mg"]), ["never"])
+        self.assertEqual(bl.word_breaks([" الـ", "MRI "]), ["never"])
+
+    def test_set_digits_is_linear_on_a_huge_token(self):
+        t0 = time.perf_counter()
+        self.assertEqual(bl.set_digits("1" * 40000, "arabic"), "١" * 40000)        # was 13 s (_VERSION.search)
+        bl.set_digits("1." * 20000, "arabic")
+        self.assertLess(time.perf_counter() - t0, 2.0)
+
+    def test_set_digits_leaves_a_url_or_handle_without_latin_letters(self):
+        self.assertEqual(bl.set_digits("تابعنا @2024 و 50", "arabic"), "تابعنا @2024 و ٥٠")
+
+    def test_balanced_tie_breaks_avoid_and_overflow_lines(self):
+        def bal(t, w):
+            return [t[a:b] for a, b in bl.wrap(t, w, balanced=True)]
+        self.assertEqual(bal("دم MRI MRI ضغط", 9), ["دم", "MRI MRI", "ضغط"])       # fewer "avoid" breaks
+        self.assertEqual(bal("sugar MRI دم", 8), ["sugar", "MRI دم"])              # fewer overflowing lines
+
+    def test_balanced_is_never_worse_than_greedy(self):
+        words = ["كلمة", "سكر", "ضغط", "insulin", "resistance", "blood", "sugar", "الـ", "MRI", "٥٠٠", "mg", "عالية",
+                 "(", ")", "010", "1234", "5678", "iPhone", "15", "Pro"]
+        rnd = random.Random(530)
+        for _ in range(1500):
+            t = " ".join(rnd.choice(words) for _ in range(rnd.randint(2, 18)))
+            w = rnd.randint(3, 30)
+            g, b = bl.wrap(t, w), bl.wrap(t, w, balanced=True)
+            avoid = {s for s, _, k in bl.breaks(t) if k == "avoid"}
+            og, ob = sum(e - s > w for s, e in g), sum(e - s > w for s, e in b)
+            ag, ab = sum(e in avoid for _, e in g[:-1]), sum(e in avoid for _, e in b[:-1])
+            self.assertEqual(len(b), len(g), (t, w))
+            self.assertTrue(ob < og or (ob == og and ab <= ag), (t, w, g, b))
+
+    def test_greedy_wrap_is_linear_and_the_balance_cap_is_named(self):
+        rnd = random.Random(1)
+        text = " ".join(rnd.choice(["كلمة", "test", "500", "mg", "الـ", "MRI"]) for _ in range(5000))
+        t0 = time.perf_counter()
+        bl.wrap(text, 30)
+        bl.lay_out(text, 30)
+        self.assertLess(time.perf_counter() - t0, 1.0)              # was 1.5 s for wrap alone
+        self.assertEqual(bl.BALANCE_MAX_BREAKS, 120)
+        big = " ".join(["كلمة"] * (bl.BALANCE_MAX_BREAKS + 2))
+        self.assertEqual(bl.wrap(big, 12, balanced=True), bl.wrap(big, 12))
 
 
 if __name__ == "__main__":
