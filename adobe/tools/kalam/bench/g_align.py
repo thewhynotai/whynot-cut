@@ -3,20 +3,26 @@
 """G-ALIGN (3.0 Task 18b): which CTC forced aligner places WhyNot Kalam's Arabic words more accurately?
 
 Dev benchmark, NOT shipped. Runs in a scratch venv with torch + torchaudio 2.8 + transformers (never the engine
-runtime). Corpus: Arabic Speech Corpus v2.0 (free for research, commercial by agreement) -> benchmark only: nothing
-from it is written into the repo; results.json holds utterance file ids and numbers only.
+runtime). Default corpus: Arabic Speech Corpus v2.0 (benchmark only: nothing from it is written into the repo;
+results.json holds utterance file ids and numbers only). Any corpus laid out as <set dir>/wav/*.wav +
+<set dir>/textgrid/<same stem>.TextGrid with a "words" tier works: --set-dir NAME=DIR (repeatable), --text, --pauses.
 
-Variants (same jittered input times for all):
-  mms-kalam A0  upstream Kalam engine/kalam/align.py itself (torchaudio forced_align), loaded from _upstream by path
-  mms-kalam A1  whynot-cut/engine/reel/lib/align_w2v.py kind "mms" (numpy forced_align) - must equal A0 word for word
-  ar            align_w2v kind "ar"  (jonatasgrosman/wav2vec2-large-xlsr-53-arabic), no separator
-  ar-sep        align_w2v kind "ar", "|" between words
+Variants (same input times for all):
+  mms-kalam A0   upstream Kalam engine/kalam/align.py itself (torchaudio forced_align), loaded from _upstream by path
+  mms-kalam A1   whynot-cut/engine/reel/lib/align_w2v.py kind "mms" (numpy forced_align) - must equal A0 word for word
+  ar             align_w2v kind "ar"  (jonatasgrosman/wav2vec2-large-xlsr-53-arabic), no separator
+  ar-sep         align_w2v kind "ar", "|" between words
+  ar-sep-harakat ar-sep with the round-0 tokenizer (harakat kept as targets): the "before" of fix round 1 (I4)
 Every align_w2v window is also run through torchaudio.functional.forced_align on the same emissions: labels must be
 identical and frame scores within 1e-6, else the run stops.
+Input times: the truth jittered (seeded uniform +-150 ms, monotonic), or --input-times DIR with <stem>.json = the
+real transcriber's times for exactly the truth words ([[s, e], ...] or [{"s":, "e":}, ...]; other lengths: skipped
+and counted). Text: --text buckwalter (diacritics removed, ASC), buckwalter-vocalised (diacritics kept, as fully
+vocalised input), arabic (labels already in Arabic script, used as written).
 
   python g_align.py selftest --out DIR                    numpy forced_align vs torchaudio on random emissions
   python g_align.py run --out DIR [--sets test,main]      one device per process: CUDA_VISIBLE_DEVICES=-1 -> CPU
-  python g_align.py report --gpu A/results.json --cpu B/results.json   Markdown tables to stdout
+  python g_align.py report --gpu A/results.json --cpu B/results.json   Markdown tables (raw and debiased) to stdout
 Environment: HF_HOME = the scratch model cache, HF_HUB_OFFLINE=1.
 """
 from __future__ import annotations
@@ -43,12 +49,13 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[3]
 UPSTREAM = REPO / "adobe" / "tools" / "kalam" / "_upstream" / "engine" / "kalam"
 ENGINE = REPO / "whynot-cut" / "engine" / "reel"
-CORPUS = Path(r"D:\ClaudeData\Temp\wnc-p4\align\data\asc\arabic-speech-corpus")
-SETS = {"test": CORPUS / "test set", "main": CORPUS}
+CORPUS = Path(r"D:\ClaudeData\Temp\wnc-p4\align\data\asc\arabic-speech-corpus")   # default (ASC v2.0)
+ASC_SETS = {"test": "test set", "main": "."}
 SEED = 20261016
 JITTER = 0.150
-PAUSES = {"sil", "sp", "-", "", "dist"}      # README: "-" / "sil" pauses, "dist" corrupt; "sp" = short pause (HTK)
+PAUSES = {"sil", "sp", "-", "", "dist"}      # ASC: "-" / "sil" pauses, "dist" corrupt; "sp" = short pause (HTK)
 VARIANTS = ["mms-kalam-A0", "mms-kalam-A1", "ar", "ar-sep"]
+EXTRA_VARIANTS = ["ar-sep-harakat"]
 RATE = 16000
 
 # Buckwalter as used by ASC ("^" is tha alongside the standard "v"); harakat / shadda / sukun / dagger alef dropped
@@ -56,7 +63,8 @@ _BW = {"'": "ء", "|": "آ", ">": "أ", "&": "ؤ", "<": "إ", "}": "ئ", "A": "�
        "^": "ث", "j": "ج", "H": "ح", "x": "خ", "d": "د", "*": "ذ", "r": "ر", "z": "ز", "s": "س", "$": "ش", "S": "ص",
        "D": "ض", "T": "ط", "Z": "ظ", "E": "ع", "g": "غ", "_": "ـ", "f": "ف", "q": "ق", "k": "ك", "l": "ل", "m": "م",
        "n": "ن", "h": "ه", "w": "و", "Y": "ى", "y": "ي", "{": "ٱ"}
-_BW_DIAC = set("FNKaui~o`")
+_BW_DIAC = {"F": "\u064b", "N": "\u064c", "K": "\u064d", "a": "\u064e", "u": "\u064f", "i": "\u0650",
+            "~": "\u0651", "o": "\u0652", "`": "\u0670"}
 _BW_JUNK = set(" -.0123456789")   # stray label characters seen in 15 word labels (trailing "-", ".", "5", spaces)
 
 
@@ -67,11 +75,13 @@ def _load_path(name, path):
     return mod
 
 
-def bw_to_arabic(t: str):
-    """-> (arabic without diacritics, cleaned?, unknown chars)"""
+def bw_to_arabic(t: str, vocalised: bool = False):
+    """-> (arabic, cleaned?, unknown chars); diacritics removed unless vocalised"""
     out, cleaned, unknown = [], False, []
     for c in t:
         if c in _BW_DIAC:
+            if vocalised:
+                out.append(_BW_DIAC[c])
             continue
         if c in _BW_JUNK:
             cleaned = True
@@ -110,8 +120,20 @@ def jitter(truth, dur, uid):
     return out
 
 
-def load_set(name, audio_mod, stats):
-    root = SETS[name]
+def label_text(t: str, mode: str):
+    if mode == "arabic":
+        return "".join(t.split()), False, []
+    return bw_to_arabic(t, vocalised=mode == "buckwalter-vocalised")
+
+
+def read_input_times(path):
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
+    return [(float(x["s"]), float(x["e"])) if isinstance(x, dict) else (float(x[0]), float(x[1])) for x in raw]
+
+
+def load_set(root, audio_mod, stats, text_mode="buckwalter", pauses=PAUSES, input_dir=None):
+    root = Path(root)
     items = []
     for wav in sorted(glob.glob(str(root / "wav" / "*.wav"))):
         uid = Path(wav).stem
@@ -120,9 +142,9 @@ def load_set(name, audio_mod, stats):
         dur = len(a) / RATE
         truth, texts = [], []
         for s, e, t in words_tier(tg):
-            if t.strip() in PAUSES:
+            if t.strip() in pauses:
                 continue
-            ar, cleaned, unknown = bw_to_arabic(t)
+            ar, cleaned, unknown = label_text(t, text_mode)
             stats["cleaned"] += cleaned
             stats["unknown_chars"] += len(unknown)
             if not ar:
@@ -132,7 +154,14 @@ def load_set(name, audio_mod, stats):
                 stats["nonpositive"] += 1
             truth.append((s, e))
             texts.append(ar)
-        inp = jitter(truth, dur, uid)
+        if input_dir:
+            ip = Path(input_dir) / (uid + ".json")
+            inp = read_input_times(ip) if ip.exists() else None
+            if inp is None or len(inp) != len(truth):
+                stats["input_missing_or_mismatch"] = stats.get("input_missing_or_mismatch", 0) + 1
+                continue
+        else:
+            inp = jitter(truth, dur, uid)
         items.append({"id": uid, "a": a, "dur": dur, "truth": truth, "input": inp,
                       "words": [{"w": w, "s": s, "e": e} for w, (s, e) in zip(texts, inp)]})
     return items
@@ -170,6 +199,21 @@ class CheckedFA:
         return lab, sc
 
 
+def _old_ar_tokens(word: str, vocab: dict) -> str:
+    """the round-0 align_w2v.ar_tokens (harakat and dagger alef kept as targets; NFC only): the I4 "before" variant"""
+    import unicodedata
+    old_map = {"\u0671": "\u0627", "\u0672": "\u0623", "\u0673": "\u0625", "\u06a9": "\u0643",
+               "\u06aa": "\u0643", "\u06cc": "\u064a", "\u06d2": "\u064a", "\u06be": "\u0647",
+               "\u06c1": "\u0647", "\u06d5": "\u0647", "\u06c0": "\u0647", "\u06af": "\u062c",
+               "\u067e": "\u0628", "\u06a4": "\u0641", "\u0686": "\u062c", "\u0640": "", "|": "", "-": ""}
+    out = []
+    for c in unicodedata.normalize("NFC", word):
+        c = old_map.get(c, c)
+        if c and len(c) == 1 and c in vocab and not c.isdigit():
+            out.append(c)
+    return "".join(out)
+
+
 def metrics(items, preds):
     on, off, lost, scores, fallback, nonover = [], [], 0, [], 0, 0
     son, soff = [], []                       # signed errors (pred - true): a systematic bias shows here
@@ -178,7 +222,7 @@ def metrics(items, preds):
         u_on, u_off, u_lost, u_sc = [], [], 0, []
         for (ts, te), (is_, ie), p in zip(it["truth"], it["input"], pw):
             ps, pe, sc = p["s"], p["e"], p.get("score", 0.0)
-            fb = ps == is_ and pe == ie and sc in (0.5, 0.0)
+            fb = p.get("aligned") is False or (ps == is_ and pe == ie and sc in (0.5, 0.0))
             no = pe <= ts or ps >= te
             u_lost += fb or no
             fallback += fb
@@ -292,19 +336,24 @@ def cmd_run(args):
     cuda = torch.cuda.is_available()
     dev_name = torch.cuda.get_device_name(0) if cuda else platform.processor()
     sets = [s for s in args.sets.split(",") if s]
+    set_dirs = {k: Path(args.corpus) / v for k, v in ASC_SETS.items()}
+    for sd in args.set_dir or []:
+        k, _, v = sd.partition("=")
+        set_dirs[k] = Path(v)
+    pauses = set(args.pauses.split(",")) if args.pauses is not None else PAUSES
     variants = [v for v in args.variants.split(",") if v]
     os.makedirs(args.out, exist_ok=True)
-    log = open(os.path.join(args.out, "run.log"), "a", encoding="utf-8")
+    log_path = os.path.join(args.out, "run.log")
 
     def say(*a):
         msg = " ".join(str(x) for x in a)
         print(msg, flush=True)
-        log.write(msg + "\n")
-        log.flush()
+        with open(log_path, "a", encoding="utf-8") as log:
+            log.write(msg + "\n")
 
     t0 = time.perf_counter()
     stats = {"cleaned": 0, "unknown_chars": 0, "empty_after_clean": 0, "nonpositive": 0}
-    data = {s: load_set(s, up_audio, stats) for s in sets}
+    data = {s: load_set(set_dirs[s], up_audio, stats, args.text, pauses, args.input_times) for s in sets}
     say(f"loaded {', '.join(f'{s}={len(v)} utt / {sum(len(i['truth']) for i in v)} words' for s, v in data.items())}"
         f" in {time.perf_counter() - t0:.1f}s; label stats {stats}; device {'cuda' if cuda else 'cpu'} {dev_name}")
     mms_dir = _snapshot(aw.MMS_REPO, aw.MMS_REV)
@@ -314,7 +363,8 @@ def cmd_run(args):
         "transformers": transformers.__version__, "numpy": np.__version__, "platform": platform.platform(),
         "device": "cuda" if cuda else "cpu", "device_name": dev_name, "cudnn_deterministic": True,
         "models": {"mms": [aw.MMS_REPO, aw.MMS_REV], "ar": [aw.AR_REPO, aw.AR_REV]},
-        "seed": SEED, "jitter_s": JITTER, "pause_labels": sorted(PAUSES), "label_stats": stats,
+        "seed": SEED, "jitter_s": None if args.input_times else JITTER, "pause_labels": sorted(pauses),
+        "label_stats": stats, "text": args.text, "input_times": "real" if args.input_times else "jittered truth",
         "sets": {s: {"utterances": len(v), "words": sum(len(i["truth"]) for i in v),
                      "audio_s": round(sum(i["dur"] for i in v), 2)} for s, v in data.items()}},
         "aggregates": {}, "rows": {}, "timing": {}, "parity": {}}
@@ -335,7 +385,8 @@ def cmd_run(args):
         if os.path.exists(pj):
             with open(pj, encoding="utf-8") as f:
                 part = json.load(f)
-            if part.get("sets") == sets and part.get("device") == results["meta"]["device"]:
+            if part.get("sets") == sets and part.get("device") == results["meta"]["device"] \
+                    and part.get("text", "buckwalter") == args.text:
                 for k in ("aggregates", "rows", "timing"):
                     results[k][var] = part[k]
                 if part.get("np_parity"):
@@ -359,8 +410,17 @@ def cmd_run(args):
         else:
             checker = CheckedFA(aw)
             kind = "mms" if var == "mms-kalam-A1" else "ar"
-            al = aw.Aligner(kind, mms_dir if kind == "mms" else ar_dir, device="auto", word_sep=var == "ar-sep",
-                            fa=checker)
+            cls = aw.Aligner
+            if var == "ar-sep-harakat":
+                class OldTok(aw.Aligner):
+                    def tokens(self, word):
+                        return _old_ar_tokens(word, self.vocab)
+
+                    def readable(self, word):
+                        return bool(_old_ar_tokens(word, self.vocab))
+                cls = OldTok
+            al = cls(kind, mms_dir if kind == "mms" else ar_dir, device="auto", word_sep=var.startswith("ar-sep"),
+                     fa=checker)
             al._model()
             dev = al.device
             run = al.align
@@ -410,7 +470,8 @@ def cmd_run(args):
                 "windows": checker.windows, "label_mismatch": checker.label_mismatch,
                 "max_score_diff": checker.max_score_diff, "numpy_fa_s": round(checker.np_time, 2),
                 "torchaudio_fa_s": round(checker.check_time, 2)}
-        part = {"sets": sets, "device": results["meta"]["device"], "aggregates": results["aggregates"][var],
+        part = {"sets": sets, "device": results["meta"]["device"], "text": args.text,
+                "aggregates": results["aggregates"][var],
                 "rows": results["rows"][var], "timing": results["timing"][var],
                 "np_parity": results["parity"].get("numpy_vs_torchaudio", {}).get(var),
                 "preds": {s: [[[w["s"], w["e"], w.get("score")] for w in u] for u in preds[(var, s)]] for s in sets}}
@@ -454,7 +515,6 @@ def cmd_run(args):
     with open(os.path.join(args.out, "results.json"), "w", encoding="utf-8") as f:
         json.dump(results, f, indent=1, ensure_ascii=False)
     say(f"written {os.path.join(args.out, 'results.json')} total {results['meta']['total_wall_s']}s")
-    log.close()
 
 
 def cmd_report(args):
@@ -464,7 +524,7 @@ def cmd_report(args):
         if p:
             with open(p, encoding="utf-8") as f:
                 res[k] = json.load(f)
-    order = ["input (jittered)"] + VARIANTS
+    order = ["input (jittered)"] + VARIANTS + EXTRA_VARIANTS
     for k, r in res.items():
         for s in r["meta"]["sets"]:
             print(f"\n#### {k.upper()} - {s} set ({r['meta']['sets'][s]['utterances']} utt, "
@@ -492,7 +552,44 @@ def cmd_report(args):
         print(f"\nparity ({k}): {json.dumps(r['parity'], ensure_ascii=False)}")
         side = os.path.join(os.path.dirname(os.path.abspath(getattr(args, k))), "word_errors.npz")
         if os.path.exists(side):
-            bootstrap(np.load(side), r, k)
+            with np.load(side) as z:
+                debiased(z, r, k)
+                bootstrap(z, r, k)
+
+
+def debiased(z, r, label):
+    """raw vs bias-corrected error: the signed median (a constant lead-in / hold) removed. "own" = each set's own
+    median (an oracle: the best a constant can do); "main->test" = the main set's median applied to the test set (a
+    calibration that does not see the test labels). The input row is the no-aligner baseline."""
+    sets = list(r["meta"]["sets"])
+    for s in sets:
+        print(f"\n#### {label.upper()} - {s} set: raw vs bias-corrected (ms; med / p90 / p95, IQR of the signed error,"
+              f" share within 50 ms)\n")
+        print("| variant | onset raw | onset bias | onset debiased (own) | onset IQR | onset <=50 debiased | "
+              "offset raw | offset bias | offset debiased (own) | offset IQR | offset <=50 debiased |"
+              + (" onset debiased (main->test) | offset debiased (main->test) |" if s == "test" and "main" in sets
+                 else ""))
+        print("|---|" + "---:|" * (10 + (2 if s == "test" and "main" in sets else 0)))
+        for v in ["input (jittered)"] + VARIANTS + EXTRA_VARIANTS:
+            key = f"{v}|{s}|"
+            if key + "son" not in z:
+                continue
+            cells = []
+            cross = []
+            for which in ("son", "soff"):
+                x = z[key + which].astype(np.float64)
+                b = float(np.median(x))
+                raw, d = np.abs(x), np.abs(x - b)
+                q = np.percentile
+                cells += [f"{q(raw, 50):.1f} / {q(raw, 90):.1f} / {q(raw, 95):.1f}", f"{b:+.1f}",
+                          f"{q(d, 50):.1f} / {q(d, 90):.1f} / {q(d, 95):.1f}", f"{q(x, 75) - q(x, 25):.1f}",
+                          f"{(d <= 50).mean() * 100:.1f} %"]
+                mk = f"{v}|main|{which}"
+                if s == "test" and mk in z:
+                    bm = float(np.median(z[mk].astype(np.float64)))
+                    dc = np.abs(x - bm)
+                    cross.append(f"{q(dc, 50):.1f} / {q(dc, 90):.1f} / {q(dc, 95):.1f} (bias {bm:+.1f})")
+            print(f"| {v} | " + " | ".join(cells + cross) + " |")
 
 
 def bootstrap(z, r, label, reps=2000):
@@ -514,7 +611,7 @@ def bootstrap(z, r, label, reps=2000):
               f"difference to mms-kalam-A0 in ms, point [95 % interval]\n")
         print("| variant | onset median | onset p95 | offset median | offset p95 |")
         print("|---|---:|---:|---:|---:|")
-        for v in VARIANTS[1:] + ["input (jittered)"]:
+        for v in VARIANTS[1:] + EXTRA_VARIANTS + ["input (jittered)"]:
             key = f"{v}|{s}|"
             if key + "son" not in z:
                 continue
@@ -537,7 +634,12 @@ def main(argv=None):
     p = sub.add_parser("run")
     p.add_argument("--out", required=True)
     p.add_argument("--sets", default="test,main")
-    p.add_argument("--variants", default=",".join(VARIANTS))
+    p.add_argument("--variants", default=",".join(VARIANTS), help=f"also: {', '.join(EXTRA_VARIANTS)}")
+    p.add_argument("--corpus", default=str(CORPUS), help="ASC root (sets test / main under it)")
+    p.add_argument("--set-dir", action="append", help="NAME=DIR with wav/ and textgrid/ (overrides / adds a set)")
+    p.add_argument("--text", choices=["buckwalter", "buckwalter-vocalised", "arabic"], default="buckwalter")
+    p.add_argument("--pauses", help="comma-separated pause labels (default: ASC's sil,sp,-,dist and empty)")
+    p.add_argument("--input-times", help="DIR of <stem>.json real word times (default: jittered truth)")
     p = sub.add_parser("report")
     p.add_argument("--gpu")
     p.add_argument("--cpu")

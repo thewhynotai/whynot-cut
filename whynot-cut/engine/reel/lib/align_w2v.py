@@ -6,13 +6,17 @@ WhyNot Kalam places every transcribed word on the audio with a CTC model (the up
 engine/kalam/align.py). Upstream calls torchaudio.functional.forced_align / merge_tokens, which torchaudio removes
 after 2.8, so this module carries the same Viterbi in numpy (same contract and tie-breaking) and keeps the rest of
 the upstream algorithm verbatim: the 25 s windows cut at the biggest gap, the audio window bounds, the input
-normalisation, the fallbacks and the rounding. Only the tokenizer and forced_align are swapped.
+normalisation, the fallbacks and the rounding. Only the tokenizer and forced_align are swapped. Two deviations, both
+where upstream gave up: an unreadable word falls back on its own (upstream: its whole window), and a window whose
+targets cannot fit its frames (len + repeats > T) falls back (score 0.0) where upstream raised. Every word gets
+"aligned" (True / False).
 
-Two models (the benchmark adobe/tools/kalam/bench/G-ALIGN-RESULTS.md decides which one ships, Addendum I1):
+Two models (adobe/tools/kalam/bench/G-ALIGN-RESULTS.md; licences: docs/legal/third-party-licences.md G8 and §4):
   kind "mms": MahmoudAshraf/mms-300m-1130-forced-aligner (CC-BY-NC-4.0), latin vocab; words romanized exactly like
-              upstream roman() (mms_tokens);
+              upstream roman() (mms_tokens). v3.0.0, the full trial edition, keeps MMS (owner decision G8).
   kind "ar":  jonatasgrosman/wav2vec2-large-xlsr-53-arabic (Apache-2.0), Arabic letter vocab with "|" as the word
-              delimiter (word_sep=True puts it between words); ar_tokens maps the letters.
+              delimiter (word_sep=True puts it between words); aligns Arabic-script words only (ar_tokens /
+              ar_readable). The commercial edition's candidate for Arabic under the §4 bake-off (provisional).
 Both use blank id 0. numpy only at import: torch and transformers are imported inside the model runner.
 """
 from __future__ import annotations
@@ -170,21 +174,54 @@ _AR_MAP = {
     "پ": "ب",   # پ peh -> ب
     "ڤ": "ف",   # ڤ veh -> ف
     "چ": "ج",   # چ tcheh -> ج
-    "ـ": "",         # ـ tatweel: no sound (inside the vocab, but never a frame of speech)
+    "ڨ": "ق",   # ڨ qaf with three dots (Gulf / Maghrebi g) -> ق
+    "ڭ": "ك",   # ڭ ng (Maghrebi) -> ك
     "|": "",              # the vocab's word delimiter never comes from a word
     "-": "",
 }
 
 
-def ar_tokens(word: str, vocab: dict) -> str:
-    """xlsr-arabic characters for a word: NFC, a few letters mapped (_AR_MAP), digits and anything else outside the
-    vocab dropped ("" = cannot be read)"""
-    out = []
+def _silent(c: str) -> bool:
+    """harakat, Quranic marks, dagger alef and tatweel: in the vocab or not, the model never emits them as speech
+    (its card decodes fully vocalised references without one), and forcing each as a target costs >= 1 frame"""
+    o = ord(c)
+    return 0x064B <= o <= 0x065F or o in (0x0670, 0x0640) or 0x06D6 <= o <= 0x06ED
+
+
+def _ar_chars(word: str):
+    """NFC (hamza / madda compose first), then NFKC for Arabic presentation forms and ligatures (U+FB50-FDFF,
+    U+FE70-FEFF: copied / OCR text, ﷺ, ﻻ); silent marks removed -> the word's sounding characters"""
     for c in unicodedata.normalize("NFC", word):
+        o = ord(c)
+        exp = unicodedata.normalize("NFKC", c) if 0xFB50 <= o <= 0xFDFF or 0xFE70 <= o <= 0xFEFF else c
+        for x in exp:
+            if not _silent(x):
+                yield x
+
+
+def ar_tokens(word: str, vocab: dict) -> str:
+    """xlsr-arabic characters for a word: NFC (+ NFKC for presentation forms), harakat / dagger alef / tatweel
+    stripped, a few letters mapped (_AR_MAP), digits and anything else outside the vocab dropped ("" = cannot be
+    read)"""
+    out = []
+    for c in _ar_chars(word):
         c = _AR_MAP.get(c, c)
         if c and len(c) == 1 and c in vocab and not c.isdigit():
             out.append(c)
     return "".join(out)
+
+
+def ar_readable(word: str, vocab: dict) -> bool:
+    """True when the Arabic model can place the whole word: at least one token and no letter or digit without a sound
+    in the vocab (Latin, digits, other scripts -> False: "بالـMRI" is not aligned as "بال"). Punctuation is ignored."""
+    has = False
+    for c in _ar_chars(word):
+        m = _AR_MAP.get(c, c)
+        if m and len(m) == 1 and m in vocab and not m.isdigit():
+            has = True
+        elif m and unicodedata.category(c)[0] in "LN":
+            return False
+    return has
 
 
 # ------------------------------------------------------------------------------------------------ upstream algorithm
@@ -254,7 +291,8 @@ class TorchRunner:
 
 
 class Aligner:
-    """align(audio_16k, words) -> words with "s", "e" (s, rounded to ms) and "score" (0..1) set.
+    """align(audio_16k, words) -> words with "s", "e" (s, rounded to ms), "score" (0..1) and "aligned" (False = the
+    transcriber's time was kept for that word) set.
 
     kind "mms" | "ar"; model_dir = a local snapshot of the model (config, weights, vocab.json); device "auto" (CUDA
     when a 0.2 s probe pass works there, else CPU), "cuda" or "cpu". word_sep (kind "ar"): put the "|" token between
@@ -287,10 +325,35 @@ class Aligner:
     def tokens(self, word: str) -> str:
         return mms_tokens(word, self.vocab) if self.kind == "mms" else ar_tokens(word, self.vocab)
 
-    def align(self, a: np.ndarray, words: list) -> list:
+    def readable(self, word: str) -> bool:
+        """can the model place this word: kind "ar" ar_readable (every letter / digit has a sound); kind "mms" the
+        upstream rule (roman() gives at least one character)"""
+        return bool(mms_tokens(word, self.vocab)) if self.kind == "mms" else ar_readable(word, self.vocab)
+
+    def align(self, audio_16k: np.ndarray, words: list) -> list:
+        """audio_16k: mono float samples at 16 kHz (the caller decodes and resamples; Kalam: audio.load_16k).
+
+        Per word (fix round 1, I1): a word the model cannot represent (readable False: for "ar" Latin, digits, other
+        scripts; for "mms" a script roman() cannot read) is left out of the targets and keeps its transcriber time
+        (clamped between its aligned neighbours so the list stays monotonic) with score 0.5 and aligned False; the
+        window's other words are aligned. A clip with no readable word never runs the model.
+        A window whose targets need more frames than its audio has (len(targets) + repeats > T) keeps the
+        transcriber's times with score 0.0 instead of raising.
+        A0 deviations (upstream align.py), both only where upstream gave up: upstream fell back for the WHOLE window
+        when one word was unreadable, and raised on len + repeats > T."""
+        a = np.asarray(audio_16k)
+        if a.ndim != 1 or not np.issubdtype(a.dtype, np.floating):
+            raise ValueError(f"audio_16k must be mono float samples at 16 kHz, got shape {a.shape} {a.dtype}")
         words = [dict(w) for w in words]
         dur = len(a) / RATE
         sep = [self.vocab["|"]] if self.word_sep else []
+        readable = [self.tokens(w["w"]) if self.readable(w["w"]) else "" for w in words]
+        for w in words:
+            w["aligned"] = False
+        if not any(readable):                     # e.g. an English-only clip under "ar": no aligner at all
+            for w in words:
+                w["score"] = 0.5
+            return words
         for i, j in _windows(words):
             ws = words[i:j + 1]
             prev_e = words[i - 1]["e"] if i else 0.0
@@ -298,20 +361,22 @@ class Aligner:
             # audio window: up to 1.5 s around the words, never past the middle of the gap to a neighbour
             a0 = max(0.0, ws[0]["s"] - 1.5, (prev_e + ws[0]["s"]) / 2 if i else 0.0)
             a1 = min(dur, ws[-1]["e"] + 1.5, max(ws[-1]["e"] + 0.3, (ws[-1]["e"] + next_s) / 2))
-            rs = [self.tokens(w["w"]) for w in ws]
-            if not all(rs):
-                # a script the tokenizer cannot read (Cyrillic, CJK, ...): keep the transcriber's own times
-                for w in ws:
+            rs = readable[i:j + 1]
+            idx = [k for k, r in enumerate(rs) if r]
+            for k, w in enumerate(ws):
+                if not rs[k]:
                     w["score"] = 0.5
+            if not idx:
                 continue
             chunk = a[int(a0 * RATE):int(a1 * RATE)]
             targets = []
-            for k, r in enumerate(rs):
-                if k:
+            for n, k in enumerate(idx):
+                if n:
                     targets += sep
-                targets += [self.vocab[c] for c in r]
+                targets += [self.vocab[c] for c in rs[k]]
             em = self._model()(chunk)
-            if not targets or len(targets) >= em.shape[0]:
+            repeats = sum(1 for t in range(1, len(targets)) if targets[t] == targets[t - 1])
+            if not targets or len(targets) >= em.shape[0] or len(targets) + repeats > em.shape[0]:
                 for w in ws:
                     w["score"] = 0.0
                 continue
@@ -319,10 +384,36 @@ class Aligner:
             spans = merge_tokens(lab, np.exp(sc))
             ratio = len(chunk) / em.shape[0] / RATE
             pos = 0
-            for w, r in zip(ws, rs):
+            for k in idx:
+                w, r = ws[k], rs[k]
                 sp = spans[pos:pos + len(r)]
                 pos += len(r) + len(sep)
                 w["s"] = round(a0 + sp[0].start * ratio, 3)
                 w["e"] = round(a0 + sp[-1].end * ratio, 3)
                 w["score"] = round(float(np.mean([t.score for t in sp])), 3)
+                w["aligned"] = True
+        _clamp_unaligned(words)
         return words
+
+
+def _clamp_unaligned(words: list) -> None:
+    """an unaligned word keeps its transcriber time, moved only as far as needed to sit after the previous word and
+    before the next aligned word (monotonic, non-overlapping)"""
+    nxt, next_s = [None] * len(words), None
+    for k in range(len(words) - 1, -1, -1):
+        nxt[k] = next_s
+        if words[k]["aligned"]:
+            next_s = words[k]["s"]
+    prev_e = None
+    for k, w in enumerate(words):
+        if not w["aligned"]:
+            s, e = w["s"], w["e"]
+            if prev_e is not None:
+                s = max(s, prev_e)
+            if nxt[k] is not None:
+                s = min(s, nxt[k])
+            e = max(e, s)
+            if nxt[k] is not None:
+                e = min(e, nxt[k])
+            w["s"], w["e"] = s, e
+        prev_e = w["e"]

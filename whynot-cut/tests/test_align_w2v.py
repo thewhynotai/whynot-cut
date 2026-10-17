@@ -247,7 +247,18 @@ class Tokenizers(unittest.TestCase):
     def test_ar_tokens(self):
         cases = {
             "مرحبا": "مرحبا",
-            "السَّلامُ": "السَّلامُ",             # harakat are in the vocab: kept
+            "السَّلامُ": "السلام",                # harakat: in the vocab but never emitted by the model: stripped (I4)
+            "وَلِلَّهِ": "ولله",                   # fully vocalised (Quranic) text: only the letters remain
+            "اٰ": "ا",                 # dagger alef stripped
+            "هٰذا": "هذا",   # هٰذا: dagger alef stripped
+            "إ": "إ",                 # NFC first: alef + hamza below -> alef with hamza below
+            "بٓ": "ب",                 # a madda that does not compose is stripped
+            "ﻻ": "لا",                      # presentation form lam-alef (NFKC, M1)
+            "ﷲ": "الله",                    # ligature Allah (NFKC); its small alef is stripped
+            "ﷺ": "صلىاللهعليهوسلم",         # ligature sallallahu alayhi wa sallam (NFKC, spaces dropped)
+            "ﺍﺑﺩ": "ابد",         # isolated / initial presentation forms
+            "ڨال": "قال",                        # Gulf / Maghrebi qaf with three dots -> qaf (M1)
+            "ڭلب": "كلب",                        # ng (Maghrebi) -> kaf (M1)
             "ٱلكتاب": "الكتاب",                  # alef wasla -> alef
             "کتاب": "كتاب",                      # Persian kaf -> Arabic kaf
             "یوم": "يوم",                        # Persian yeh -> Arabic yeh
@@ -271,6 +282,14 @@ class Tokenizers(unittest.TestCase):
             self.assertEqual(got, want, repr(w))
             self.assertTrue(all(c in AR_VOCAB for c in got))
             self.assertEqual(got, unicodedata.normalize("NFC", got))
+            self.assertFalse(any(0x064B <= ord(c) <= 0x0655 or ord(c) in (0x0670, 0x0640) for c in got), repr(w))
+
+    def test_ar_readable(self):
+        # a word is aligned only when every letter and digit in it has a sound in the Arabic vocab (I1)
+        for w in ["مرحبا", "السَّلامُ", "ٱلكتاب", "کتاب", "ﷺ", "مرحبا،", "«قال»", "قال؟"]:
+            self.assertTrue(aw.ar_readable(w, AR_VOCAB), repr(w))
+        for w in ["MRI", "2024", "٢٠٢٤", "covid-19", "بالـMRI", "عام2026", "Hello", "привет", "", "!!", "ـــ"]:
+            self.assertFalse(aw.ar_readable(w, AR_VOCAB), repr(w))
 
 
 class Windows(unittest.TestCase):
@@ -383,17 +402,38 @@ class AlignFakeModel(unittest.TestCase):
             self.assertEqual(len(ch), int(a1 * RATE) - int(a0 * RATE))
         self.assertTrue(all(0.0 <= w["score"] <= 1.0 for w in out))
 
-    def test_unromanizable_word_keeps_times_score_half(self):
+    def test_unromanizable_word_keeps_its_times_only(self):
+        # per word for every kind (fix round 1, I1 as corrected): upstream gave BOTH words 0.5 and transcriber times;
+        # now only the unreadable word keeps its time (aligned False), "با" is aligned
         words = [{"w": "привет", "s": 1.0, "e": 1.5}, {"w": "با", "s": 2.0, "e": 2.4}]
+        v = MMS_VOCAB
+        fr = FakeRunner(len(v), [[(v["b"], 100, 105, 0.9), (v["a"], 105, 110, 0.9)]])
+        out = aw.Aligner("mms", runner=fr, vocab=v).align(self.audio, words)
+        self.assertEqual(len(fr.chunks), 1)
+        self.assertEqual((out[0]["s"], out[0]["e"], out[0]["score"], out[0]["aligned"]), (1.0, 1.5, 0.5, False))
+        self.assertIs(out[1]["aligned"], True)
+        self.assertLessEqual(out[0]["e"], out[1]["s"])
+
+    def test_mms_aligns_latin_words_and_flags_every_word(self):
+        words = [{"w": "MRI", "s": 1.0, "e": 1.5}, {"w": "با", "s": 2.0, "e": 2.4}]
+        out = aw.Aligner("mms", runner=FakeRunner(len(MMS_VOCAB), []), vocab=MMS_VOCAB).align(self.audio, words)
+        self.assertEqual([w["aligned"] for w in out], [True, True])        # "mri" is in MMS's latin vocab
+        words = [{"w": "日本", "s": 1.0, "e": 1.5}]                          # nothing readable: no model call
         fr = FakeRunner(len(MMS_VOCAB), [])
         out = aw.Aligner("mms", runner=fr, vocab=MMS_VOCAB).align(self.audio, words)
-        self.assertEqual(fr.chunks, [])
-        self.assertEqual([(w["s"], w["e"], w["score"]) for w in out], [(1.0, 1.5, 0.5), (2.0, 2.4, 0.5)])
+        self.assertEqual((fr.chunks, out[0]["aligned"], out[0]["score"]), ([], False, 0.5))
 
-    def test_ar_unknown_word_keeps_times_score_half(self):
+    def test_ar_unknown_word_keeps_its_times_only(self):
+        # I1: per word, not per window - "سلام" is still aligned (was: both words 0.5 with transcriber times)
         words = [{"w": "Hello", "s": 1.0, "e": 1.5}, {"w": "سلام", "s": 2.0, "e": 2.4}]
-        out = aw.Aligner("ar", runner=FakeRunner(len(AR_VOCAB), []), vocab=AR_VOCAB).align(self.audio, words)
-        self.assertEqual([(w["s"], w["e"], w["score"]) for w in out], [(1.0, 1.5, 0.5), (2.0, 2.4, 0.5)])
+        v = AR_VOCAB                                          # "سلام" placed near its transcriber time (~2.0-2.4 s)
+        fr = FakeRunner(len(v), [[(v["س"], 100, 105, 0.9), (v["ل"], 105, 110, 0.9), (v["ا"], 110, 115, 0.9),
+                                  (v["م"], 115, 120, 0.9)]])
+        out = aw.Aligner("ar", runner=fr, vocab=AR_VOCAB).align(self.audio, words)
+        self.assertEqual(len(fr.chunks), 1)
+        self.assertEqual((out[0]["s"], out[0]["e"], out[0]["score"], out[0]["aligned"]), (1.0, 1.5, 0.5, False))
+        self.assertIs(out[1]["aligned"], True)
+        self.assertLessEqual(out[0]["e"], out[1]["s"])
 
     def test_too_many_targets_score_zero(self):
         words = [{"w": "بابا", "s": 1.0, "e": 1.5}]          # "baba": 4 targets
@@ -430,6 +470,145 @@ class AlignFakeModel(unittest.TestCase):
     def test_bad_kind(self):
         with self.assertRaises(ValueError):
             aw.Aligner("xx", runner=FakeRunner(3, []), vocab={"<pad>": 0})
+
+
+class AlignArPerWord(unittest.TestCase):
+    """kind "ar": a word the Arabic model cannot represent (Latin, digits) keeps its transcriber time, is flagged
+    aligned=False and never costs its window's other words their alignment (I1); every ar word carries the flag"""
+
+    V = AR_VOCAB
+
+    def setUp(self):
+        self.audio = np.zeros(20 * RATE, dtype=np.float32)
+
+    def _words(self, odd=None, odd_s=None, odd_e=None):
+        ws = []
+        for k in range(20):
+            s = 1.0 + 0.5 * k
+            ws.append({"w": "با", "s": s, "e": s + 0.4, "k": k})
+        if odd is not None:
+            ws[10]["w"] = odd
+            if odd_s is not None:
+                ws[10]["s"], ws[10]["e"] = odd_s, odd_e
+        return ws
+
+    def _plan(self, ks, sep=False):
+        """word k's two tokens at frames [50+25k, 56+25k) and [56+25k, 62+25k): near its transcriber time"""
+        v = self.V
+        plan = []
+        for n, k in enumerate(ks):
+            if sep and n:
+                plan.append((v["|"], 50 + 25 * k - 6, 50 + 25 * k - 2, 0.9))
+            plan += [(v["ب"], 50 + 25 * k, 56 + 25 * k, 0.9), (v["ا"], 56 + 25 * k, 62 + 25 * k, 0.8)]
+        return plan
+
+    def _check(self, out, words, fr, skipped):
+        self.assertEqual(len(fr.chunks), 1)
+        n = len(fr.chunks[0])
+        a0 = max(0.0, words[0]["s"] - 1.5)
+        ratio = n / (n // 320) / RATE
+        for k, w in enumerate(out):
+            self.assertEqual(w["k"], k)
+            if k in skipped:
+                self.assertIs(w["aligned"], False)
+                self.assertEqual(w["score"], 0.5)
+            else:
+                self.assertIs(w["aligned"], True, k)
+                self.assertEqual(w["s"], round(a0 + (50 + 25 * k) * ratio, 3), k)
+                self.assertEqual(w["e"], round(a0 + (62 + 25 * k) * ratio, 3), k)
+                self.assertEqual(w["score"], round((0.9 + 0.8) / 2, 3))
+        for a, b in zip(out, out[1:]):                    # monotonic, non-overlapping
+            self.assertLessEqual(a["s"], a["e"])
+            self.assertLessEqual(a["e"], b["s"])
+
+    def test_latin_word_inside_arabic_window(self):
+        for sep in (False, True):
+            words = self._words("MRI")
+            fr = FakeRunner(len(self.V), [self._plan([k for k in range(20) if k != 10], sep)])
+            out = aw.Aligner("ar", runner=fr, vocab=self.V, word_sep=sep).align(self.audio, words)
+            self._check(out, words, fr, {10})
+            self.assertEqual((out[10]["s"], out[10]["e"]), (6.0, 6.4))       # transcriber time kept
+
+    def test_digits_only_word_inside_arabic_window(self):
+        for odd in ("2024", "٢٠٢٤", "covid-19", "بالـMRI"):
+            words = self._words(odd)
+            fr = FakeRunner(len(self.V), [self._plan([k for k in range(20) if k != 10])])
+            out = aw.Aligner("ar", runner=fr, vocab=self.V).align(self.audio, words)
+            self._check(out, words, fr, {10})
+            self.assertEqual((out[10]["s"], out[10]["e"]), (6.0, 6.4), odd)
+
+    def test_unaligned_word_is_clamped_between_aligned_neighbours(self):
+        words = self._words("MRI", 5.2, 7.1)                  # overlaps words 9 and 11 as aligned
+        fr = FakeRunner(len(self.V), [self._plan([k for k in range(20) if k != 10])])
+        out = aw.Aligner("ar", runner=fr, vocab=self.V).align(self.audio, words)
+        self._check(out, words, fr, {10})
+        self.assertEqual(out[10]["s"], out[9]["e"])
+        self.assertEqual(out[10]["e"], out[11]["s"])
+
+    def test_english_only_clip_keeps_transcriber_times_without_a_model(self):
+        clip = ["This", "is", "an", "MRI", "scan", "2024"]
+        words = [{"w": w, "s": 0.5 + k, "e": 0.9 + k} for k, w in enumerate(clip)]
+        fr = FakeRunner(len(self.V), [])
+        out = aw.Aligner("ar", runner=fr, vocab=self.V).align(self.audio, words)
+        self.assertEqual(fr.chunks, [])                       # no aligner at all
+        self.assertEqual([(w["s"], w["e"]) for w in out], [(w["s"], w["e"]) for w in words])
+        self.assertTrue(all(w["aligned"] is False for w in out))
+        al = aw.Aligner("ar", model_dir=None, vocab=self.V)   # no runner, no model dir: never loads a model
+        out = al.align(self.audio, words)
+        self.assertTrue(all(w["aligned"] is False for w in out))
+
+    def test_whole_unreadable_window_next_to_an_aligned_one(self):
+        words = [{"w": "Hello", "s": 1.0, "e": 1.4}, {"w": "world", "s": 1.5, "e": 1.9},
+                 {"w": "با", "s": 40.0, "e": 40.4}]
+        audio = np.zeros(45 * RATE, dtype=np.float32)
+        fr = FakeRunner(len(self.V), [[(self.V["ب"], 60, 64, 0.9), (self.V["ا"], 64, 70, 0.9)]])
+        out = aw.Aligner("ar", runner=fr, vocab=self.V).align(audio, words)
+        self.assertEqual(len(fr.chunks), 1)
+        self.assertEqual([w["aligned"] for w in out], [False, False, True])
+        self.assertEqual([(w["s"], w["e"]) for w in out[:2]], [(1.0, 1.4), (1.5, 1.9)])
+
+
+class AlignNeverRaises(unittest.TestCase):
+    """a window whose targets need more frames than the audio has (L + repeats > T) falls back instead of raising
+    (I5); upstream raised out of align() here (torchaudio error) - recorded A0 deviation: crash -> score 0.0"""
+
+    def test_forty_heh_laughter_in_a_short_file(self):
+        audio = np.zeros(int(1.25 * RATE), dtype=np.float32)
+        words = [{"w": "ه" * 40, "s": 0.1, "e": 1.1}]
+        fr = FakeRunner(len(AR_VOCAB), [], frames=60)         # T = 60 >= L = 40 but < L + R = 79
+        out = aw.Aligner("ar", runner=fr, vocab=AR_VOCAB).align(audio, words)
+        self.assertEqual((out[0]["s"], out[0]["e"], out[0]["score"]), (0.1, 1.1, 0.0))
+        self.assertIs(out[0]["aligned"], False)
+
+    def test_repeats_need_blanks(self):
+        audio = np.zeros(5 * RATE, dtype=np.float32)
+        for kind, vocab in (("ar", AR_VOCAB), ("mms", MMS_VOCAB)):
+            words = [{"w": "ببب", "s": 1.0, "e": 1.5}, {"w": "دم", "s": 2.0, "e": 2.4}]
+            fr = FakeRunner(len(vocab), [], frames=6)             # L = 5 < T = 6 < L + R = 7
+            out = aw.Aligner(kind, runner=fr, vocab=vocab).align(audio, words)
+            self.assertEqual([(w["s"], w["e"], w["score"]) for w in out], [(1.0, 1.5, 0.0), (2.0, 2.4, 0.0)], kind)
+
+    def test_cross_word_repeat_without_separator(self):
+        audio = np.zeros(5 * RATE, dtype=np.float32)
+        words = [{"w": "ها", "s": 1.0, "e": 1.5}, {"w": "اب", "s": 2.0, "e": 2.4}]   # ...ا ا... : one repeat
+        fr = FakeRunner(len(AR_VOCAB), [], frames=4)               # L = 4 = T: the ">=" guard, as before
+        out = aw.Aligner("ar", runner=fr, vocab=AR_VOCAB).align(audio, words)
+        self.assertEqual([w["score"] for w in out], [0.0, 0.0])
+        fr = FakeRunner(len(AR_VOCAB), [], frames=5)               # T = 5 = L + R: fits exactly
+        out = aw.Aligner("ar", runner=fr, vocab=AR_VOCAB).align(audio, words)
+        self.assertTrue(all(w["aligned"] for w in out))
+
+
+class AlignInputContract(unittest.TestCase):
+    def test_audio_must_be_mono_float(self):
+        words = [{"w": "با", "s": 1.0, "e": 1.5}]
+        al = aw.Aligner("ar", runner=FakeRunner(len(AR_VOCAB), []), vocab=AR_VOCAB)
+        with self.assertRaises(ValueError):
+            al.align(np.zeros((2, 3 * RATE), dtype=np.float32), words)          # stereo
+        with self.assertRaises(ValueError):
+            al.align(np.zeros(3 * RATE, dtype=np.int16), words)                 # integer PCM
+        out = al.align(audio_16k=np.zeros(3 * RATE, dtype=np.float32), words=words)
+        self.assertEqual(len(out), 1)
 
 
 class DevicePlacement(unittest.TestCase):
