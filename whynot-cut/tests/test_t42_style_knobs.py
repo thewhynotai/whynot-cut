@@ -734,6 +734,22 @@ class TestArabicCaptionStills(KnobCase):
         r = self.ok(self.compile({"cut_words": [3]}))
         self.assertEqual(len([x for x in r["warnings"] if "captions-short.srt" in x]), 1, r["warnings"])
 
+    def test_m2b_a_spelling_only_hand_fix_is_seen_too(self):
+        # «اللى»→«اللي», «ة»→«ه», a hamza seat: the plan's matching normaliser folds these, the hand-edit check must not
+        from lib import srt as srtlib
+        f = self.p.p("02_transcription/captions-short.srt")
+        old = f.read_bytes()
+        self.addCleanup(f.write_bytes, old)
+        cues = srtlib.read_srt(f)
+        swap = {"ي": "ى", "ى": "ي", "ة": "ه", "ه": "ة", "أ": "ا", "إ": "ا", "ا": "أ"}
+        i, t = next((i, c["text"]) for i, c in enumerate(cues) if any(ch in swap for ch in c["text"]))
+        k = next(j for j, ch in enumerate(t) if ch in swap)
+        cues[i]["text"] = t[:k] + swap[t[k]] + t[k + 1:]
+        srtlib.write_srt(f, cues)
+        self.style({"caption_size_px": 140})
+        r = self.ok(self.compile())
+        self.assertEqual(len([x for x in r["warnings"] if "captions-short.srt" in x]), 1, r["warnings"])
+
     def test_m3a_empty_words_with_a_size_falls_back_to_the_srt(self):
         f = self.p.p("02_transcription/words.json")
         old = f.read_bytes()
@@ -799,7 +815,8 @@ class TestArabicCaptionStills(KnobCase):
             r = self.ok(self.compile())                                           # no KeyError, with or without a size
             w = [x for x in r["warnings"] if "words.json" in x]
             self.assertEqual(len(w), 1, r["warnings"])
-            self.assertIn("2", w[0])                                              # two words skipped
+            self.assertIn(": 2 word(s)", w[0])                                    # two words skipped
+            self.assertTrue(w[0].startswith("في 2 كلمة"), w[0])                   # Arabic first
 
     def test_r2f_after_effects_one_line_wider_than_the_safe_width_is_a_plan_warning(self):
         self.words("Isotretinoin-hydrochloride-solution works")

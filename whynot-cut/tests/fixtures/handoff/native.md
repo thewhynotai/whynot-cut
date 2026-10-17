@@ -38,7 +38,7 @@ Generated <TS> by the `whynot-cut` plugin (by The Why Not AI). QC: **PASSED** (s
 | A3 SFX L | 1 |
 | A4 SFX R | 1 |
 
-4. Captions: the Caption lanes **V6 Caption bars (sweep)**, **V7 Captions (animated)** hold the animated caption stills (bar + text) and the sequence also has an editable caption track (C01); keep one of the two visible so captions don't appear twice. Caption wording lives in those stills: to correct it, fix `02_transcription/captions-short.srt` and re-run the pipeline (`reel previews`, then `reel ppro-build --force`), don't retype it in Premiere.
+4. Captions: the Caption lanes **V6 Caption bars (sweep)**, **V7 Captions (animated)** hold the animated caption stills (bar + text) and the sequence also has an editable caption track (C01); keep one of the two visible so captions don't appear twice. Caption wording lives in those stills: to correct it, fix the transcript (`02_transcription/transcript-corrections.json`, then `reel transcript-correct`) and re-run the pipeline (`reel plan`, `reel previews`, then `reel ppro-build --force`), don't retype it in Premiere. Edits made only in `captions-short.srt` are lost whenever the captions are rebuilt from the transcript words (a chosen caption size or cut words).
 5. The project stays at `07_premiere/project/CLIP1_RE_EDIT.prproj`: **File › Save** after your changes. A rebuild (`reel ppro-build --force`) refuses to overwrite changes you saved unless `--replace-edited` is added, and it would not carry your edits over.
 
 Main footage: source is 25 fps in a 24.00 fps sequence, kept at native speed (no interpretation change), so dialogue sync is exact; base scale 100.0%. Punch-ins are separate V1 clips with Scale/Position in Motion.

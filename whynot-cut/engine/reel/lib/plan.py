@@ -699,8 +699,19 @@ def _hand_edits_lost(inp: PlanInputs) -> list[str]:
     srt_cues = getattr(inp, "short_srt", None)
     if not srt_cues:
         return []
-    said = norm(" ".join(c["text"].replace("\n", " ") for c in srt_cues))
-    return [HAND_EDITS_LOST] if said != norm(" ".join(w["word"] for w in inp.words)) else []
+    if getattr(inp, "bad_words", 0):                     # the SRT was built from words read_inputs skipped: no fair compare
+        return []
+    said = _exact_words(" ".join(c["text"].replace("\n", " ") for c in srt_cues))
+    return [HAND_EDITS_LOST] if said != _exact_words(" ".join(w["word"] for w in inp.words)) else []
+
+
+def _exact_words(s: str) -> str:
+    """Words compared as spelled: NFKC, case and spacing folded, punctuation dropped (captions may strip it), but no
+    Arabic letter folding (هـ/ة, ي/ى, hamza seats, diacritics stay), so a spelling-only hand fix is still seen."""
+    import unicodedata
+    s = unicodedata.normalize("NFKC", s).casefold()
+    s = "".join(" " if unicodedata.category(ch).startswith("P") else ch for ch in s)
+    return " ".join(s.split())
 
 
 def _word_ok(w) -> bool:
@@ -713,7 +724,8 @@ def _word_ok(w) -> bool:
 def check_words(inp: PlanInputs):
     """The words.json entries read_inputs skipped (no id, word or times): one warning, never a KeyError."""
     n = getattr(inp, "bad_words", 0) or 0
-    return {}, [], ([f"02_transcription/words.json: {n} word(s) without an id, the word or start/end times were "
+    return {}, [], ([f"في {n} كلمة في words.json ناقصة (من غير رقم أو الكلمة أو التوقيت) واتسابت من الكابشن والقص — "
+                     f"02_transcription/words.json: {n} word(s) without an id, the word or start/end times were "
                      "skipped (captions and word cuts ignore them) — run `reel transcribe` again or fix the file"]
                     if n else [])
 

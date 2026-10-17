@@ -239,8 +239,10 @@ def build(paths: Paths) -> dict:
                     " hold the animated caption stills (bar + text)" +
                     (" and the sequence also has an editable caption track (C01); keep one of the two visible so captions don't appear twice."
                      if native_caps else ".") +
-                    " Caption wording lives in those stills: to correct it, fix `02_transcription/captions-short.srt` and re-run the pipeline "
-                    "(`reel previews`, then `reel ppro-build --force`), don't retype it in Premiere.")
+                    " Caption wording lives in those stills: to correct it, fix the transcript (`02_transcription/transcript-corrections.json`, "
+                    "then `reel transcript-correct`) and re-run the pipeline (`reel plan`, `reel previews`, then `reel ppro-build --force`), "
+                    "don't retype it in Premiere. Edits made only in `captions-short.srt` are lost whenever the captions are rebuilt "
+                    "from the transcript words (a chosen caption size or cut words).")
         sec1 = ["## 1. Open in Premiere Pro (≈1 min)", "",
                 f"1. Premiere Pro → **File › Open Project…** → `{prproj_rel}`. The sequence **{seq_name}** is already built with its "
                 "media, graphics, captions, markers and audio tracks. **Do not import the XML interchange**: it would add a second sequence."]
