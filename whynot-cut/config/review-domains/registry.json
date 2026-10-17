@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "_about": "The review domains (Addendum M1). A new domain is one entry here plus its checker guidance (skills/medical-accuracy/references/<reference>), its trigger lexicon (lexicons/<id>.json) and its eval cases (evals/review-<id>-<name>/case.yaml); no engine change. medical and ai stay always on.",
+  "domains": {
+    "medical": {"label": {"ar": "طبي", "en": "Medical"}, "reference": "medical-accuracy.md",
+                "lexicon": "lexicons/medical.json", "approver": {"ar": "الطبيب", "en": "the doctor"},
+                "verdicts": ["ok", "reword-to-match", "needs-doctor-approval", "remove"], "always_on": true},
+    "religious": {"label": {"ar": "ديني", "en": "Religious"}, "reference": "religious-content.md",
+                  "lexicon": "lexicons/religious.json", "approver": {"ar": "صاحب المحتوى", "en": "the content owner"},
+                  "verdicts": ["ok", "reword-to-match", "needs-approval", "remove"], "always_on": false},
+    "business": {"label": {"ar": "بيزنس", "en": "Business"}, "reference": "business-claims.md",
+                 "lexicon": "lexicons/business.json",
+                 "approver": {"ar": "صاحب البيزنس أو المستشار القانوني", "en": "the business owner or their legal adviser"},
+                 "verdicts": ["ok", "reword-to-match", "needs-approval", "needs-evidence", "remove"], "always_on": false},
+    "ai": {"label": {"ar": "ذكاء اصطناعي", "en": "AI"}, "reference": "ai-claims-and-disclosure.md",
+           "lexicon": "lexicons/ai.json", "approver": {"ar": "العميل", "en": "the client"},
+           "verdicts": ["ok", "reword-to-match", "needs-approval", "needs-disclosure", "remove"], "always_on": true}
+  }
+}

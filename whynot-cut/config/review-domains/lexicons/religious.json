@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "domain": "religious",
+  "provenance": "Written for WhyNot Cut by its own team from everyday Arabic (Egyptian forms included) and English vocabulary; no third-party word list was copied or adapted (K0 rule 5 licence check: nothing to attribute).",
+  "licence": "GPL-3.0-or-later, as part of WhyNot Cut",
+  "_syntax": "terms: words separated by spaces form a phrase; a trailing * on a word matches any ending; an Arabic word also matches after a joined prefix (و ف ب ل ك ال, the Egyptian بـ/هـ verb prefixes); Latin words ignore case unless the rule says case: true. pattern: a regular expression over the normalised text (no diacritics or tatweel, one alef, ى as ي, ة as ه, Arabic-Indic digits as 0-9, ٪ as %); flags i ignores case. supporting rules are reported only on a line where a rule hit. zones (a scripture quotation) count for this domain, and no other domain's words inside them are reported. Detection is a hint for the reviewer, never a filter.",
+  "rules": [
+    {"id": "citation", "terms": ["قال تعالى", "قال الله", "قوله تعالى", "يقول الله", "ربنا قال", "قال ربنا", "في كتابه", "كتاب الله", "سبحانه وتعالى", "صلى الله عليه وسلم", "عليه الصلاة والسلام", "رسول الله", "الرسول", "قال النبي", "النبي محمد", "سنة النبي", "سيدنا محمد", "قرآن", "آية كريمة", "الآية الكريمة", "في الآية", "سورة", "الحديث الشريف", "حديث شريف", "حديث النبي", "حديث صحيح", "صحيح البخاري", "صحيح مسلم", "the prophet", "allah says", "allah said", "quran", "koran", "hadith", "prophet muhammad"]},
+    {"id": "faith", "terms": ["التقوى", "الشريعة", "الشرائع", "الإيمان", "إيمانهم", "إيمانك", "إيماننا", "إيمانكم", "الصالحات", "العمل الصالح", "الآخرة", "يوم القيامة", "التوبة", "المعاصي", "الذنوب", "العبادة", "العبادات", "الزكاة", "صيام رمضان", "دخول الجنة", "التسليم لله", "طاعة ربنا", "أوامر ربنا", "أوامر الله", "الأنبياء", "الصحابة", "worship", "afterlife", "repentance"]},
+    {"id": "ruling", "terms": ["حلال ولا حرام", "الحلال والحرام", "حلال شرعا", "حرام شرعا", "حكم شرعي", "الشرع", "شرعا", "فتوى", "halal", "haram", "fatwa", "sharia"]}
+  ],
+  "supporting": [],
+  "zones": [
+    {"id": "quran-verse", "open": "﴿", "close": "﴾"},
+    {"id": "quoted-scripture", "after": ["قال تعالى", "قوله تعالى", "قال الله", "يقول الله", "قال رسول الله", "قال النبي", "ربنا قال", "قال ربنا"], "between": ["تعالى", "عز وجل", "سبحانه", "سبحانه وتعالى", "في كتابه", "في كتابه العزيز", "في القرآن", "صلى الله عليه وسلم", "عليه الصلاة والسلام"], "quotes": ["«»", "“”"]}
+  ]
+}

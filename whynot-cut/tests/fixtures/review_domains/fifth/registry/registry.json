@@ -1,0 +1,11 @@
+{"schema": 1, "domains": {
+  "medical": {"label": {"ar": "طبي", "en": "Medical"}, "reference": "medical-claims.md", "lexicon": "lexicons/medical.json",
+              "approver": {"ar": "الطبيب", "en": "the doctor"},
+              "verdicts": ["ok", "reword-to-match", "needs-doctor-approval", "remove"], "always_on": true},
+  "ai": {"label": {"ar": "ذكاء اصطناعي", "en": "AI"}, "reference": "ai-claims.md", "lexicon": "lexicons/ai.json",
+         "approver": {"ar": "العميل", "en": "the client"},
+         "verdicts": ["ok", "reword-to-match", "needs-approval", "needs-disclosure", "remove"], "always_on": true},
+  "legal": {"label": {"ar": "قانوني", "en": "Legal"}, "reference": "legal-claims.md", "lexicon": "lexicons/legal.json",
+            "approver": {"ar": "المستشار القانوني", "en": "the legal adviser"},
+            "verdicts": ["ok", "reword-to-match", "needs-approval", "remove"], "always_on": false}
+}}

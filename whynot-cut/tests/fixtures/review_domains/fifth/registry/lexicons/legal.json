@@ -1,0 +1,2 @@
+{"schema": 1, "domain": "legal", "provenance": "test fixture", "licence": "GPL-3.0-or-later",
+ "rules": [{"id": "binding", "terms": ["ملزم قانونيا", "legally binding", "عقد*"]}], "supporting": []}

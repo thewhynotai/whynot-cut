@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "domain": "business",
+  "provenance": "Written for WhyNot Cut by its own team from everyday Arabic (Egyptian forms included) and English vocabulary; no third-party word list was copied or adapted (K0 rule 5 licence check: nothing to attribute).",
+  "licence": "GPL-3.0-or-later, as part of WhyNot Cut",
+  "_syntax": "terms: words separated by spaces form a phrase; a trailing * on a word matches any ending; an Arabic word also matches after a joined prefix (و ف ب ل ك ال, the Egyptian بـ/هـ verb prefixes); Latin words ignore case unless the rule says case: true. pattern: a regular expression over the normalised text (no diacritics or tatweel, one alef, ى as ي, ة as ه, Arabic-Indic digits as 0-9, ٪ as %); flags i ignores case. supporting rules are reported only on a line where a rule hit. zones (a scripture quotation) count for this domain, and no other domain's words inside them are reported. Detection is a hint for the reviewer, never a filter.",
+  "rules": [
+    {"id": "currency-amount", "flags": "i", "pattern": "(?<!\\d[.,])(?<!\\d)\\d[\\d,.]*\\s*(?:الف|الاف|مليون|k)?\\s*(?:جنيه\\w*|ج\\.\\s?م(?!\\w)|ج(?!\\w)|ريال\\w*|درهم\\w*|دولار\\w*|يورو|egp(?![a-z])|usd(?![a-z])|sar(?![a-z])|aed(?![a-z])|l\\.e\\.?(?![a-z])|le(?![a-z])|\\$|€|£)|(?:\\$|€|£|(?<![a-z])(?:egp|usd|sar|aed)(?![a-z]))\\s*\\d[\\d,.]*"},
+    {"id": "only-for-price", "pattern": "(?<!\\w)بس\\s*ب\\s*\\d[\\d,.]*"},
+    {"id": "price-word", "pattern": "(?<!\\w)(?:(?:و|ف|ب)?(?:ال)?سعر(?:ه|ها|هم|نا|ك|و)?|(?:و|ف)?(?:بال|ال|ب)(?:تمن|ثمن)|(?:تمن|ثمن)(?:ه|ها|هم|نا|ك|و))(?!\\w)(?!\\s+(?:ال)?حراري)"},
+    {"id": "pricing", "terms": ["جنيه*", "ريال*", "دولار*", "درهم*", "أسعار", "بكام", "ببلاش", "مجاني*", "مجانا", "خصم", "خصومات", "تخفيض*", "عرض خاص", "يبدأ من", "تبدأ من", "شامل الضريبة", "ضريبة القيمة المضافة", "اشتراك شهري", "الاشتراك الشهري", "بالتقسيط", "تقسيط", "price*", "pricing", "discount*", "free trial", "starting from", "per month", "vat", "money back", "cheapest", "أرخص*"]},
+    {"id": "earnings-roi", "terms": ["ربح*", "أرباح*", "مربح*", "عائد مضمون", "عائد شهري", "العائد على", "نسبة العائد", "عائد استثمار", "عائد على الاستثمار", "دخل شهري", "دخل إضافي", "دخل ثابت", "فلوسك", "فلوس كتير", "هتعمل فلوس", "استثمر فلوسك", "profit*", "earn*", "income", "return on investment", "passive income", "double your", "make money"]},
+    {"id": "earnings-amount", "pattern": "(?:كسب|ضاعف|قبض|تكسب)\\w*(?:\\s+\\S+){0,4}?\\s+(?:\\d[\\d,.]*\\s*(?:الف|الاف|مليون|k)|فلوس|دخل\\w*|ربح\\w*|ارباح\\w*|مرتب\\w*|راتب\\w*)"},
+    {"id": "earnings-roi-acronym", "case": true, "terms": ["ROI"]},
+    {"id": "guarantee", "terms": ["ضمان", "نضمن", "أضمن", "ضامن*", "مية في المية", "مية بالمية", "مئة بالمئة", "مئة في المئة", "بدون مخاطر", "من غير مخاطرة", "guarantee*", "risk-free", "risk free"]},
+    {"id": "guarantee-word", "pattern": "(?<!\\w)(?:و|ف|ب)?مضمون(?:(?:ه|ين)(?!\\w)|(?!\\w)(?!\\s+ال))"},
+    {"id": "guarantee-hundred", "flags": "i", "pattern": "(?<![\\d.])100\\s*(?:%|(?:في|ب)\\s*(?:ال)?مي[هة](?!\\w)|(?:في|ب)\\s*(?:ال)?ما[ئي][هة](?!\\w)|percent)"},
+    {"id": "comparison", "terms": ["أحسن من", "أفضل من", "أرخص من", "الأول في", "الأفضل في", "رقم واحد في", "مفيش زي", "لا يوجد مثيل", "أحسن دكتور", "أحسن مركز", "أحسن عيادة", "أفضل دكتور", "أفضل مركز", "أفضل عيادة", "أول مركز في", "أول عيادة في", "الوحيدين في مصر", "الوحيدين في السوق", "الوحيد في مصر", "الوحيد في السوق", "نمبر وان", "منافس*", "better than", "the best", "best in", "best clinic", "best doctor", "number one", "unlike other", "competitor*"]},
+    {"id": "comparison-rank", "flags": "i", "pattern": "#\\s*1(?!\\d)|(?<![a-z])no\\.?\\s*1(?!\\d)|(?<![a-z])number\\s*1(?!\\d)|رقم\\s*1(?!\\d)"},
+    {"id": "compliance", "terms": ["مرخص", "مرخصة", "مرخصين", "ترخيص", "معتمد من", "معتمدة من", "معتمدين من", "معتمد دوليا", "معتمدة دوليا", "شهادة معتمدة", "مركز معتمد", "دكتور معتمد", "طبيب معتمد", "حاصل على موافقة", "حاصلين على موافقة", "موافقة وزارة الصحة", "وزارة الصحة", "هيئة الدواء", "licensed", "certified", "approved by", "accredited", "fda approved"]},
+    {"id": "compliance-acronym", "case": true, "terms": ["FDA", "ISO"]},
+    {"id": "urgency", "terms": ["لفترة محدودة", "لمدة محدودة", "آخر فرصة", "العرض ساري", "الكمية محدودة", "الأماكن محدودة", "احجز دلوقتي", "limited time", "last chance", "act now", "offer ends", "today only"]}
+  ],
+  "supporting": [
+    {"id": "earnings-word", "terms": ["كسب*", "ضاعف*", "استثمار*", "عائد", "مكسب*", "ضمانات"]}
+  ]
+}
