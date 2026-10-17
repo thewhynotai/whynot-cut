@@ -124,6 +124,9 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     (`lib/safety/decision_log.py`), K-T12 (`lib/safety/cover_check.py`), K-T17 (`lib/resolve_export.py`,
     `tests/test_resolve_export*.py`), M4-T1 (`lib/asset_manifest.py`, `tests/test_asset_manifest.py`) and M4-T4
     (`hooks/magnific_guard.py`, `tests/test_magnific_guard*.py`). Call sites, cli, skills and config arrive as patches.
+  - looks & motion track, AE wave 1 R-6.2 (2026-10-17): new `whynot-cut/engine/reel/lib/motion_scenes.py`,
+    `whynot-cut/tests/test_motion_scenes*.py`, `whynot-cut/tests/fixtures/motion_scenes/**`; the `build_scene` branch in
+    `lib/motion_plan.py` and the type names in `lib/motion_script.py` arrive as a diff for the executor.
   - API backlog (2026-10-17 20:05, `D:\ClaudeData\claude-api-lane\BACKLOG.md`; any API lane claims an item, the executor
     accepts and pushes): BL-01 `hooks/read_once.py`, `tests/test_read_once*.py`, `evals/read-once/**`; BL-02 root `LICENSE`,
     `TRADEMARKS.md`, `CONTRIBUTING.md`, `THIRD-PARTY-NOTICES.md`, `tools/build_notices.py`, `tools/spdx_headers.py`, their
