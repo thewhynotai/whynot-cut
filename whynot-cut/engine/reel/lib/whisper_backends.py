@@ -14,12 +14,16 @@ Models load from the complete local snapshot when there is one (no network: offl
 T4.11 (G13-RUN): on an NVIDIA GPU the batch is fitted to the free VRAM at load time, leaving room for Premiere
 (`fit_batch`); nothing fits -> the CPU, with a message, never an out-of-memory loop. `run.release()` drops the model
 after the job (transcribe / bench call it), so the next GPU job finds the memory free.
+T4.14 (G13): one GPU precision per model, `transcription.json` gpu_compute_types (the old gpu_compute_type is still
+read; a wrong or missing entry falls back to float16); the CPU stays int8. `reel bench --compute-type --device
+--reference` measures speed and, against a reference transcript, WER/CER (lib/wer.py).
 """
 from __future__ import annotations
 
 import gc
 import os
 import platform
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -227,6 +231,21 @@ def mlx_model_source(model: str) -> str:
 
 
 # --------------------------------------------------------------------------- CTranslate2 loading
+GPU_COMPUTE_TYPES = ("float16", "int8_float16", "bfloat16", "int8_bfloat16", "float32", "int8_float32", "int8")
+_DEVICE_DEFAULT_CT = {"cuda": "float16", "cpu": "int8", "metal": "float16"}   # what every pre-T4.14 bench measured
+
+
+def gpu_compute_type_for(model: str, cfg: dict) -> str:
+    """The GPU precision for `model`: cfg gpu_compute_types[model] (exact model name), else the old gpu_compute_type,
+    else float16. A value CTranslate2 does not know is skipped (falls through to the next)."""
+    per = cfg.get("gpu_compute_types") if isinstance(cfg, dict) else None
+    for v in ((per.get(model) if isinstance(per, dict) and isinstance(model, str) else None),
+              cfg.get("gpu_compute_type") if isinstance(cfg, dict) else None):
+        if isinstance(v, str) and v in GPU_COMPUTE_TYPES:
+            return v
+    return "float16"
+
+
 def _device_tries(cfg: dict, device: str | None, compute_type: str) -> list:
     want = (device or cfg.get("device") or "auto").lower()
     tries = []
@@ -248,11 +267,14 @@ def _offline() -> bool:
     return os.environ.get("HF_HUB_OFFLINE", "").strip().lower() in ("1", "true", "yes", "on")
 
 
-def load_ct2(model_size: str, compute_type: str = "int8", device: str | None = None):
+def load_ct2(model_size: str, compute_type: str = "int8", device: str | None = None,
+             gpu_compute_type: str | None = None):
     """faster-whisper on an NVIDIA GPU when usable, else on the CPU. `transcription.json` device: auto | cpu | cuda.
-    Returns (model, device, compute_type)."""
+    The GPU precision is the model's (gpu_compute_type_for) unless `gpu_compute_type` overrides it (reel bench);
+    `compute_type` is the CPU's. Returns (model, device, compute_type)."""
     from faster_whisper import WhisperModel
     cfg = load_config("transcription.json")
+    cfg = dict(cfg, gpu_compute_type=gpu_compute_type or gpu_compute_type_for(model_size, cfg))
     tries = _device_tries(cfg, device, compute_type)
     snap = snapshot_dir(model_size)
     how = (f"run `reel model-download --model {model_size}` (about 3 GB for large-v3; it resumes an interrupted "
@@ -352,10 +374,13 @@ def redecode_span(raws: list, k: int, total_s: float) -> tuple[float, float]:
 
 # --------------------------------------------------------------------------- VRAM fit (T4.11)
 HEADROOM_MB = 1536              # left free for Premiere (and the desktop) when Whisper takes the GPU
-PER_BATCH_MB = 700              # each item of a batched decode
+PER_BATCH_MB = 900              # each item of a batched decode: T4.14 measured 816 (float16) / 544 (int8_float16) + 10 %
 _MODEL_VRAM_MB_START = {("large-v3", "float16"): 3300, ("large-v3", "int8_float16"): 1900,
                         ("large-v3-turbo", "float16"): 1800, ("large-v3-turbo", "int8_float16"): 1100}
-MODEL_VRAM_MB = dict(_MODEL_VRAM_MB_START)     # starting constants; T4.14 replaces them with measured peaks
+# T4.14 (RTX 4060 Laptop 8 GB, 2026-10-17): the intercept of the measured peak-vs-batch line + 10 % (float16 2981,
+# int8_float16 2021 MB; docs/superpowers/evidence/2026-10-17-g13-transcription-precision.md). large-v3-turbo is not
+# downloaded on the measuring PC: its rows keep the starting values (Not verified).
+MODEL_VRAM_MB = {**_MODEL_VRAM_MB_START, ("large-v3", "float16"): 3279, ("large-v3", "int8_float16"): 2223}
 _FALLBACK_ROW = ("large-v3", "float16")        # an unknown model or type: the most conservative row
 
 
@@ -413,10 +438,13 @@ def _oom(e: Exception) -> bool:
 
 # --------------------------------------------------------------------------- runners
 def _ct2_runner(model_size: str, vad: bool, log_to, batch_size: int, cfg: dict, compute_type: str = "int8",
-                device: str | None = None):
-    """`device`: "cpu" loads on the CPU (the GPU slot was not had, T4.10); None: the GPU when usable (the config)."""
+                device: str | None = None, gpu_compute_type: str | None = None):
+    """`device`: "cpu" loads on the CPU (the GPU slot was not had, T4.10); None: the GPU when usable (the config).
+    `gpu_compute_type`: the GPU precision (default: the model's, gpu_compute_type_for)."""
     state: dict = {"backend": LABEL["ct2"], "vad": vad, "redecoded": []}
     want = device
+    gct = gpu_compute_type or gpu_compute_type_for(model_size, cfg)
+    cfg = dict(cfg, gpu_compute_type=gct)
 
     def effective_batch(device: str) -> int:
         return batch_size if (vad and device == "cuda" and batch_size > 1) else 0
@@ -426,12 +454,14 @@ def _ct2_runner(model_size: str, vad: bool, log_to, batch_size: int, cfg: dict, 
         dev_req, fit = device or want, None
         if dev_req != "cpu" and _device_tries(cfg, dev_req, compute_type)[0][0] == "cuda":
             free = vram_free_mb()      # inside the job's GPU slot: another engine job's model is never counted
-            fit = fit_batch(model_size, _gpu_compute_type(cfg), effective_batch("cuda"), free)
+            fit = fit_batch(model_size, gct, effective_batch("cuda"), free)
             if fit[1] == "cpu":       # Premiere (or another app) holds the card: the CPU now, not an OOM loop
                 log(log_to, f"The graphics card is busy ({free / 1024:.1f} GB free): transcribing on the processor")
                 state.setdefault("fallback_from", expected or signature())
                 dev_req = "cpu"
-        state["model"], state["device"], state["compute_type"] = load_ct2(model_size, compute_type, device=dev_req)
+        over = {"gpu_compute_type": gpu_compute_type} if gpu_compute_type else {}   # else load_ct2 picks the same
+        state["model"], state["device"], state["compute_type"] = load_ct2(model_size, compute_type, device=dev_req,
+                                                                          **over)
         state["cpu_threads"] = cpu_threads(cfg)
         bs = effective_batch(state["device"])
         if fit and state["device"] == "cuda" and fit[0] < bs:      # a smaller batch fits: the run still WANTED bs,
@@ -539,10 +569,6 @@ def _ct2_runner(model_size: str, vad: bool, log_to, batch_size: int, cfg: dict, 
     return run
 
 
-def _gpu_compute_type(cfg: dict) -> str:
-    return str(cfg.get("gpu_compute_type") or "float16")
-
-
 def _mlx_holders() -> list:
     """mlx-whisper's cached model holder(s) (it keeps the last model in a class attribute)."""
     out = []
@@ -599,7 +625,7 @@ def _mlx_runner(model_size: str, vad: bool, log_to):
 
 
 def make_runner(model_size: str, vad: bool, log_to=None, backend: str | None = None, batch_size: int | None = None,
-                compute_type: str = "int8", device: str | None = None):
+                compute_type: str = "int8", device: str | None = None, gpu_compute_type: str | None = None):
     """run(audio, start_ms, language, prompt) -> the schema above. The backend is chosen now (cheap); the model loads
     at the first call (or `run.load()`). run.state: backend label, device, compute_type, batch_size, cpu_threads,
     redecoded (batched segments decoded again); run.signature(): the decoder checkpoints record.
@@ -616,7 +642,8 @@ def make_runner(model_size: str, vad: bool, log_to=None, backend: str | None = N
         run = _mlx_runner(model_size, vad, log_to)
     else:
         bs = cfg.get("batch_size", 4) if batch_size is None else batch_size
-        run = _ct2_runner(model_size, vad, log_to, max(0, int(bs or 0)), cfg, compute_type, device=device)
+        run = _ct2_runner(model_size, vad, log_to, max(0, int(bs or 0)), cfg, compute_type, device=device,
+                          gpu_compute_type=gpu_compute_type)
     run.state["backend_note"] = note
     return run
 
@@ -643,16 +670,61 @@ def bench_file() -> Path:
     return engine_home() / "bench" / "whisper-bench.json"
 
 
+class BenchArgError(ValueError):
+    """A `reel bench` request that cannot be measured as asked (shown to the user as guidance)."""
+
+
+def _reference_words(path) -> list:
+    """[(word, start_ms, end_ms)] of a transcript (words.json / transcript.json `words`, or `segments` text: every word
+    of a segment gets the segment's times); BenchArgError when the file is missing, not JSON or holds no words."""
+    import json
+    try:
+        d = json.loads(Path(path).read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError, TypeError) as e:
+        raise BenchArgError(f"the reference transcript {path} cannot be read ({type(e).__name__})") from None
+    out = []
+
+    def num(v, default):
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else default
+    if isinstance(d, dict) and isinstance(d.get("words"), list):
+        out = [(w["word"], num(w.get("start_ms"), 0), num(w.get("end_ms"), num(w.get("start_ms"), 0)))
+               for w in d["words"] if isinstance(w, dict) and isinstance(w.get("word"), str)]
+    elif isinstance(d, dict) and isinstance(d.get("segments"), list):
+        for sg in d["segments"]:
+            if isinstance(sg, dict) and isinstance(sg.get("text"), str):
+                a = num(sg.get("start_ms"), 0)
+                out += [(w, a, num(sg.get("end_ms"), a)) for w in sg["text"].split()]
+    if not out:
+        raise BenchArgError(f"the reference {path} holds no transcript words (words[] or segments[] with text)")
+    return out
+
+
 def bench(audio, model: str = "large-v3", backend: str | None = None, batch_size: int | None = None,
-          source: str | None = None, clock=None) -> dict:
+          source: str | None = None, clock=None, compute_type: str | None = None, device: str | None = None,
+          reference=None, reference_kind: str = "given") -> dict:
     """Decode `audio` (16 kHz float32, ~5 minutes of speech) once with VAD, as an episode chunk is decoded, and
     record the real-time factor (minutes of audio per minute of decoding) for `reel doctor`. Advisory: it runs outside
     the engine GPU slot and measures the machine as it is (the VRAM fit counts whatever else holds the card). The client's vocabulary
     hint is used when the request has a client (`--root`): it changes the speed (prompt tokens x beams x batch), so
-    the cache key records it and the exact batch size."""
+    the cache key records it and the exact batch size.
+    T4.14: `compute_type` (float16 | int8_float16 | int8) and `device` (auto | cpu | cuda) pick the decoder; the key
+    names a precision that is not the device's historic default (cuda float16, cpu int8), so older entries stay valid.
+    `reference` (a transcript: words[] or segments[]) adds wer / cer over the decoded window (the last 500 ms left out
+    on both sides; a segments-only reference drops a segment that runs past the audio, so prefer words.json);
+    without one, the hypothesis words are saved next to the cache (agreement, never called WER)."""
     import time
+    from . import wer as W
     clock = clock or time.perf_counter
-    run = make_runner(model, vad=True, backend=backend, batch_size=batch_size)
+    dev_req = None if device in (None, "", "auto") else device
+    if dev_req == "cpu" and compute_type not in (None, "int8"):
+        raise BenchArgError(f"the processor runs Whisper in int8 only (got --compute-type {compute_type})")
+    ref = _reference_words(reference) if reference is not None else None     # refused before the model loads
+    extra = {}
+    if dev_req:
+        extra["device"] = dev_req
+    if compute_type and dev_req != "cpu":
+        extra["gpu_compute_type"] = compute_type
+    run = make_runner(model, vad=True, backend=backend, batch_size=batch_size, **extra)
     prompt = load_config("transcription.json").get("initial_prompt")
     try:
         t0 = clock()
@@ -666,6 +738,9 @@ def bench(audio, model: str = "large-v3", backend: str | None = None, batch_size
         if callable(rel):
             rel()
     st = run.state
+    if dev_req == "cuda" and st.get("device") != "cuda":
+        raise BenchArgError(f"the graphics card was asked for but Whisper loaded on {st.get('device')} (no usable "
+                            "CUDA, or the card is full): nothing recorded")
     audio_s = round(len(audio) / 16000, 1)
     el = max(t3 - t2, 1e-6)
     entry = {"measured": now_iso(), "source": source, "audio_s": audio_s, "model": model, "backend": run.backend,
@@ -675,15 +750,76 @@ def bench(audio, model: str = "large-v3", backend: str | None = None, batch_size
              "words": len(r.get("words", [])), "language": r.get("language"), "hint": bool(prompt),
              "hint_chars": len(prompt or ""), "redecoded": len(st.get("redecoded") or []),
              "system": f"{platform.system()} {platform.machine()}"}
-    key = (f"{entry['backend']}/{model}/{entry['device']}/"
+    ct = entry.get("compute_type")
+    dev_part = entry["device"] if not ct or ct == _DEVICE_DEFAULT_CT.get(entry["device"]) else f"{entry['device']}+{ct}"
+    key = (f"{entry['backend']}/{model}/{dev_part}/"
            f"{'batch' + str(entry['batch_size']) if entry['batch_size'] else 'sequential'}/"
            f"{'hint' if prompt else 'no-hint'}")
+    if compute_type and dev_req != "cpu" and (st.get("device") != "cuda" or st.get("compute_type") != compute_type):
+        entry["fell_back"] = True          # asked for a GPU precision, measured something else: never mixed up
+    win_ms = audio_s * 1000 - 500
+    hyp = [w.get("word", "") for w in r.get("words", []) if (w.get("start_ms") or 0) < win_ms]
+    if ref is not None:
+        rw = [w for w, a, b in ref if a < win_ms and b <= audio_s * 1000]     # whole words / segments inside the audio
+        counts = W.wer(rw, hyp)
+        entry.update(wer=counts["wer"], cer=W.cer(" ".join(rw), " ".join(hyp)), wer_counts=counts,
+                     reference=str(reference), reference_kind=reference_kind, reference_words=len(rw))
     f = bench_file()
     cache = read_json(f, {}) or {}
     cache.setdefault("results", {})[key] = entry
     cache["latest"] = key
-    write_json(f, cache)
+    write_json(f, cache)                  # the measurement first; the hypothesis file is a side product
+    if ref is None:
+        hf = f.parent / "hypotheses" / (re.sub(r"[^A-Za-z0-9._+-]+", "_", key) + ".json")
+        try:
+            write_json(hf, {"key": key, "measured": entry["measured"], "source": source, "words": hyp})
+            entry["hypothesis"] = str(hf)
+        except OSError:
+            entry["hypothesis"] = None
     return dict(entry, key=key, cache=str(f))
+
+
+QUALITY_WER_PP = 0.5            # T4.14 rule, as written in the plan (not tuned after measuring)
+QUALITY_CER_PP = 0.3
+FASTER_BY = 0.10
+LESS_VRAM_MB = 1024
+
+
+def pick_compute_type(rows: list) -> dict:
+    """One GPU precision per model (T4.14 Step 5). rows: one per clip {"clip", "reference": bool, "float16": m,
+    "int8_float16": m} with m = {"wer", "cer" (fractions), "rtf" (median of runs), "peak_vram_mb"}.
+    int8_float16 wins only if, on EVERY reference clip, WER rises <= 0.5 pp and CER <= 0.3 pp, AND on every clip it is
+    >= 10 % faster or uses >= 1 GB less peak VRAM. Otherwise float16 (G8: the strongest result). No reference clip ->
+    float16, "Not verified: no reference"; nothing measured -> float16, "Not verified: not measured"."""
+    rows = [r for r in rows or [] if isinstance(r, dict)]   # reference: True / "verified" (editor-verified) only
+    if not rows:
+        return {"choice": "float16", "verified": False, "reason": "Not verified: not measured"}
+    for r in rows:                         # a clip measured on one side only blocks the pick, never silently dropped
+        if not r.get("float16") or not r.get("int8_float16"):
+            return {"choice": "float16", "verified": False, "reason": f"Not verified: incomplete on {r.get('clip')}"}
+    refs = [r for r in rows if r.get("reference") in (True, "verified")]     # an arbitrary given file never counts
+    if not refs:
+        return {"choice": "float16", "verified": False,
+                "reason": "Not verified: no reference (an editor-verified transcript); agreement is shown, not used"}
+    eps = 1e-9
+    for r in refs:
+        a, b = r["float16"], r["int8_float16"]
+        if None in (a.get("wer"), b.get("wer"), a.get("cer"), b.get("cer")):
+            return {"choice": "float16", "verified": False, "reason": f"Not verified: no WER/CER on {r.get('clip')}"}
+        if b["wer"] - a["wer"] > QUALITY_WER_PP / 100 + eps or b["cer"] - a["cer"] > QUALITY_CER_PP / 100 + eps:
+            return {"choice": "float16", "verified": True,
+                    "reason": f"int8_float16 loses quality on {r.get('clip')} (WER {a['wer']:.4f} -> {b['wer']:.4f}, "
+                              f"CER {a['cer']:.4f} -> {b['cer']:.4f})"}
+    for r in rows:
+        a, b = r["float16"], r["int8_float16"]
+        faster = bool(a.get("rtf") and b.get("rtf") and b["rtf"] >= a["rtf"] * (1 + FASTER_BY) - eps)
+        lighter = bool(a.get("peak_vram_mb") is not None and b.get("peak_vram_mb") is not None
+                       and a["peak_vram_mb"] - b["peak_vram_mb"] >= LESS_VRAM_MB)
+        if not (faster or lighter):
+            return {"choice": "float16", "verified": True,
+                    "reason": f"int8_float16 is neither >= 10 % faster nor >= 1 GB lighter on {r.get('clip')}"}
+    return {"choice": "int8_float16", "verified": True,
+            "reason": "within the quality bar on every reference clip and faster or lighter on every clip"}
 
 
 def read_bench() -> dict:
@@ -718,6 +854,13 @@ BENCH_ARGS = [
                                             "--video-id/--episode: that project's 02_transcription audio"}),
     (("--seconds",), {"type": float, "default": 300.0, "help": "how much of it to decode (default 300)"}),
     (("--model",), {"default": None, "help": "default: preferences whisper_model, else large-v3"}),
+    (("--compute-type",), {"dest": "compute_type", "default": None, "choices": ["float16", "int8_float16", "int8"],
+                           "help": "precision to measure (default: the model's from transcription.json on the GPU, int8 on "
+                                   "the processor)"}),
+    (("--device",), {"default": None, "choices": ["auto", "cpu", "cuda"], "help": "where to decode (default auto)"}),
+    (("--reference",), {"default": None, "help": "a transcript (words.json / transcript.json) of the same audio: adds "
+                                                 "WER and CER; default with --root and --video-id: the project's own "
+                                                 "transcript when the editor verified it"}),
 ]
 
 
@@ -741,7 +884,22 @@ def cli_bench(a, project=None) -> dict:
     if not a.model:
         from . import settings as S
         a.model = S.load().get("whisper_model") or "large-v3"
+    ref, kind = getattr(a, "reference", None), "given"
+    if ref is None and not a.audio and project is not None and getattr(project, "video_id", None):
+        from .transcribe import transcript_verified     # the project's own audio: its verified words are the reference
+        try:
+            if transcript_verified(project):
+                ref, kind = project.p("02_transcription/words.json"), "verified"
+        except Exception:  # noqa: BLE001  no verification: no reference (agreement only)
+            ref = None
     with tempfile.TemporaryDirectory(prefix="whynot-bench-") as td:
         wav = extract_audio(src, Path(td) / "bench.wav", {"in_ms": 0, "out_ms": int(a.seconds * 1000)})
         audio = whisper_audio(wav)
-    return bench(audio, model=a.model, backend=a.backend, batch_size=a.batch_size, source=str(src))
+    try:
+        return bench(audio, model=a.model, backend=a.backend, batch_size=a.batch_size, source=str(src),
+                     compute_type=getattr(a, "compute_type", None), device=getattr(a, "device", None), reference=ref,
+                     reference_kind=kind)
+    except BenchArgError as e:
+        from .errors import Guidance
+        raise Guidance(str(e), "reel bench --reference <words.json or transcript.json of the same audio>; on the "
+                               "processor use --compute-type int8 (or leave it out)") from None
