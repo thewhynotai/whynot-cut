@@ -73,3 +73,10 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     `whynot-cut/config/defaults/safe-zones.json`, `whynot-cut/tests/test_safe_zones*.py`,
     `whynot-cut/tests/fixtures/safe_zones/**`, `docs/superpowers/evidence/2026-10-17-safe-zones-sources.md`.
     Hooks in qc.py / motion_readback.py / previews.py / cli.py arrive as patches; the executor applies and pushes.
+  - API-credit lane 1, assignment 2 (2026-10-17): T4.11 lean runtime + T4.14 transcription precision + Task 24 R-4.2
+    burned-in captions, in that order, after the T4.10 commit: new `lib/priority.py`, `lib/wer.py`,
+    `lib/burned_captions.py`; hunks in `lib/settings.py`, `lib/whisper_backends.py`, `lib/transcribe.py`,
+    `config/defaults/transcription.json` (gpu_compute_types), `tests/_isolation.py` (WHYNOT_PRIORITY line);
+    `tests/test_lean_runtime.py`, `tests/test_transcribe_precision.py`, `tests/test_burned_captions.py`,
+    `tests/fixtures/burned_captions/**`; the G13 evidence file. cli.py / plan.py / ppro_build.py / previews.py /
+    intake hooks arrive as patches.
