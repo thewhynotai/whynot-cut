@@ -400,8 +400,9 @@ def main(argv=None):
     # dev only (hidden): a runtime that may see the system site-packages, installed with --ignore-installed /
     # --reinstall so every locked package still lands inside the runtime
     ap.add_argument("--system-site-packages", dest="dev_system_site", action="store_true", help=argparse.SUPPRESS)
-    ap.add_argument("--runtime", choices=["base", "full"], default="base",
-                    help="base: the standard runtime (default); full: with PyTorch for this computer's hardware")
+    ap.add_argument("--runtime", choices=["base", "full"], default=None,
+                    help="base: the standard runtime; full: with PyTorch for this computer's hardware (default: what "
+                         "is installed now, base the first time)")
     ap.add_argument("--class", dest="klass", choices=list(R.CLASSES), default=None,
                     help=argparse.SUPPRESS)                              # builds and tests: force a hardware class
     a = ap.parse_args(argv)
@@ -422,7 +423,10 @@ def main(argv=None):
         for w in warns:
             say(f"warning: {w['item']}. Fix: {w['fix']}")
     klass = None
-    if a.runtime == "full":
+    kept = R.current_class(home) if a.runtime is None else None      # a later `reel setup` keeps the chosen class
+    if kept:
+        klass = a.klass or kept
+    elif a.runtime == "full":
         klass = a.klass or R.hardware_class(key, nvidia_present())
         if klass is None:
             rep["note_runtime"] = INTEL_MAC_NOTE if key == "mac-x64" else "this platform has no full runtime: standard"

@@ -480,12 +480,33 @@ def isolation(rt: dict, lock: dict[str, dict], modules: list[str] | None = None,
     return {"isolated": not problems, "problems": problems, "modules": mods}
 
 
+def current_class(home: Path) -> str | None:
+    """The hardware class of the current runtime (T4.12): the class whose lock (setup/locks/runtime-<class>.txt) its
+    stamp records, else None (a base runtime, no runtime, or an unreadable stamp)."""
+    try:
+        rid = plat.current_runtime_id(home)
+        st = read_stamp(runtime_dir(home, rid)) if rid else {"runtime": {}}
+        name = Path(str((st["runtime"] or {}).get("lock_file") or "")).name
+    except (OSError, ValueError, TypeError):
+        return None
+    for k in CLASSES:
+        if name == f"runtime-{k}.txt":
+            return k
+    return None
+
+
 def status(home: Path, key: str | None = None, comp: dict | None = None) -> dict:
     """The runtime part of `reel doctor` without importing anything: which interpreter the wrappers pick, the id this
-    plugin's lock expects and whether the current runtime was built from it."""
+    plugin's lock expects and whether the current runtime was built from it. A runtime built from a hardware-class
+    lock (T4.12) is judged against that class lock, not the base one."""
     key = key or platform_key()
     rt = plat.engine_runtime(home)
-    ent = lock_entry(key, comp)
+    klass = current_class(home)
+    ent = lock_entry(key, comp, klass=klass)
+    if klass and ent["klass"] is None:                  # the shipped class lock (components.json may not list it yet)
+        cand = PLUGIN_DIR / "setup" / "locks" / f"runtime-{klass}.txt"
+        if cand.is_file():
+            ent = {"file": cand, "declared_id": None, "klass": klass}
     try:
         data = ent["file"].read_bytes()
     except OSError:
@@ -495,7 +516,7 @@ def status(home: Path, key: str | None = None, comp: dict | None = None) -> dict
     st = read_stamp(Path(rt["dir"])) if rt["kind"] == "runtime" else {"runtime": {}, "lock_sha256": None}
     return {"kind": rt["kind"], "id": rt["id"], "broken": rt.get("broken"),
             "dir": str(rt["dir"]) if rt["dir"] else None,
-            "python": str(rt["python"]) if rt["python"] else None, "platform": key,
+            "python": str(rt["python"]) if rt["python"] else None, "platform": key, "klass": ent["klass"],
             "lock_file": str(ent["file"]) if data is not None else None, "expected_id": want_id,
             "lock_sha256": want_sha, "stamp": st["runtime"], "stamp_lock_sha256": st["lock_sha256"],
             "up_to_date": bool(rt["kind"] == "runtime" and want_sha and st["lock_sha256"] == want_sha

@@ -263,6 +263,8 @@ class TestTls(unittest.TestCase):
         from http.server import BaseHTTPRequestHandler, HTTPServer
         d = Path(tempfile.mkdtemp())
         ca, cert, key = _make_ca(d)
+        if not (cert.is_file() and key.is_file()):          # the J-T1 loopback fixture lands with Addendum J's commit
+            self.skipTest("tests/fixtures/brand_web/tls is not committed yet (J-T1)")
 
         class H(BaseHTTPRequestHandler):
             def do_GET(self):  # noqa: N802
@@ -348,6 +350,60 @@ def _make_ca(d: Path):
     trust store the test hands to trust_context(cafile=)."""
     tls = SK / "tests" / "fixtures" / "brand_web" / "tls"
     return tls / "localhost-cert.pem", tls / "localhost-cert.pem", tls / "localhost-key.pem"
+
+# --------------------------------------------------------------------------- full-suite findings (366b0de on the cuda runtime)
+class TestClassRuntimeKept(unittest.TestCase):
+    """A runtime built from a class lock is judged against THAT lock (doctor, isolation), and a later `reel setup`
+    without --runtime keeps the class instead of silently going back to the base runtime."""
+
+    def make(self, lock_name):
+        home = Path(tempfile.mkdtemp(prefix="whynot-t412c-"))
+        self.addCleanup(shutil.rmtree, home, True)
+        lock = LOCKS / lock_name
+        rid = R.runtime_id(lock.read_bytes())
+        rt = R.runtime_dir(home, rid)
+        (rt / "Scripts").mkdir(parents=True)
+        (rt / "Scripts" / "python.exe").write_bytes(b"")
+        (rt / "bin").mkdir()
+        (rt / "bin" / "python").write_bytes(b"")
+        R.write_stamps(rt, rid=rid, key="win-x64", python="3.12.15", lock_file=f"setup/locks/{lock_name}",
+                       lock_sha=R.lock_sha256(lock.read_bytes()), by="test")
+        R.write_current(home, rid)
+        return home, rid
+
+    def test_status_uses_the_class_lock_of_the_current_runtime(self):
+        home, rid = self.make("runtime-cuda.txt")
+        with mock.patch.object(R.plat, "engine_runtime", return_value={"kind": "runtime", "id": rid,
+                                                                       "dir": R.runtime_dir(home, rid),
+                                                                       "python": None}):
+            st = R.status(home, "win-x64", {})
+        self.assertEqual(Path(st["lock_file"]).name, "runtime-cuda.txt")
+        self.assertEqual(st["klass"], "cuda")
+        self.assertTrue(st["up_to_date"])
+        self.assertEqual(R.current_class(home), "cuda")
+        home2, _ = self.make("runtime-win-x64.lock")
+        self.assertIsNone(R.current_class(home2))
+
+    def test_setup_without_runtime_keeps_the_current_class(self):
+        import setup_env as SE
+        home, rid = self.make("runtime-cuda.txt")
+        calls = []
+
+        def fake_build(h, **kw):
+            calls.append(kw["lock_file"].name)
+            return {"id": rid, "action": "none"}
+        for argv, want in (([], "runtime-cuda.txt"), (["--runtime", "base"], "runtime-win-x64.lock")):
+            calls.clear()
+            with mock.patch.object(SE, "build", side_effect=fake_build), \
+                    mock.patch.object(SE.R, "platform_key", return_value="win-x64"), \
+                    mock.patch.object(SE, "nvidia_present", return_value=True), \
+                    mock.patch.object(SE, "find_uv", return_value=(Path("C:/uv.exe"), None)), \
+                    mock.patch.object(SE.plat, "engine_runtime", return_value={"kind": "runtime", "id": rid,
+                                                                                "python": None}), \
+                    mock.patch.object(SE.plat, "adobe_report", return_value={"all": []}), quiet():
+                SE.main(["--home", str(home), *argv])
+            self.assertEqual(calls, [want], argv)
+
 
 if __name__ == "__main__":
     unittest.main()
