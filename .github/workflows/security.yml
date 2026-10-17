@@ -1,0 +1,59 @@
+# WhyNot Cut 3.0 security scan (Addendum L, L-T3). What it costs and when it runs: docs/ci.md, "Security scan".
+#   Linux only (ubuntu-24.04, billed x1), no macOS job, no secrets, read-only token.
+#   Starts ONLY on a tag `sec-*` (a test tag, or a gate's own scan), on a phase tag `v3.0.0-*`, or by hand. There is no
+#   per-push run and no `schedule`: a scheduled workflow runs only from the default branch, which holds no 3.0 files.
+#   `workflow_dispatch` also needs this file on the default branch; if the Run button is missing, use a `sec-*` tag.
+# It runs the same single entry point as the local gate: tools/security/scan.py --all --history. Scanners are the pinned,
+# sha256-checked ones in tools/security/versions.json (installed by tools/security/install_tools.py, hashed dev lock).
+# The history scan output stays in this job's log as file, line, rule and commit only; nothing is uploaded or cached.
+# Exit codes of scan.py: 0 clean, 1 new High/Critical, 3 degraded (a database was not reachable), 4 a scanner is
+# missing or failed. Every non-zero code fails the job on purpose: a scan that could not run is not a pass.
+name: Security scan
+
+on:
+  push:
+    tags: ["sec-*", "v3.0.0-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHONUTF8: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  SEMGREP_SEND_METRICS: "off"
+  SEMGREP_ENABLE_VERSION_CHECK: "0"
+  DO_NOT_TRACK: "1"
+  NPM_CONFIG_UPDATE_NOTIFIER: "false"
+
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0          # the secrets scan reads the full history
+          persist-credentials: false
+
+      - name: Point the scanner install at the runner's temp folder (never the Windows default path in versions.json)
+        run: echo "WNC_SEC_TOOLS=${RUNNER_TEMP}/sec-tools" >> "${GITHUB_ENV}"
+
+      - name: Install the pinned scanners
+        run: python3 tools/security/install_tools.py
+
+      - name: Install the ESLint security plugins (once the Adobe track has added them)
+        if: hashFiles('adobe/eslint.security.config.mjs') != ''
+        working-directory: adobe
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Scan (SAST, secrets in tree and history, dependencies, SBOM, lock hashes)
+        run: python3 tools/security/scan.py --all --history --gate "ci-${GITHUB_REF_NAME}" --no-report --raw "${RUNNER_TEMP}/sec-raw"
