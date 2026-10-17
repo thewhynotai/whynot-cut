@@ -160,23 +160,43 @@ def run_qc(paths: Paths) -> dict:
             r.add("technical", "Every jump cut changes the zoom (cut masked)", not same, ", ".join(same[:6]))
         # graphics stay inside the platform-safe area (full-screen templates excluded)
         sa = load_config("subtitle-style.json").get("safe_area", {})
+        from . import safe_zones      # R-4.5: nothing changes unless the reel names its platform(s) (timeline-spec "safe_zone_profiles")
+        zprofiles = spec.get("safe_zone_profiles")
+        zprofiles = [zprofiles] if isinstance(zprofiles, str) else list(zprofiles or [])
+        if zprofiles:                 # the chosen platform(s) replace the subtitle-style.json defaults
+            sa = safe_zones.safe_area_for(zprofiles, (W, H), rtl=bool(spec.get("safe_zone_rtl"))) or sa
         out_sa = []
+        zone_boxes = []               # the same graphics, tested against the platform's UI zones below
+        TEXT_EDU = {"checklist", "broll_card"}     # educational stills that carry words: text (P1-capable), not decoration
         if sa:
-            from PIL import Image
+            from PIL import Image, ImageChops
             for e in spec["events"]:
-                if e["template"] in FULL_SCREEN:
+                full = e["template"] in FULL_SCREEN
+                if full and not (zprofiles and e["template"] in TEXT_EDU):   # a full-screen card's words: zone check only
                     continue
                 cat = still_category(e["template"])
                 png = paths.p(f"03_broll/{cat}/{e['event_id']}.png")
                 if not png.exists():
                     continue
                 with Image.open(png) as im_:
-                    bb = im_.getchannel("A").point(lambda v: 255 if v > 24 else 0).getbbox()
-                if bb and (bb[1] < sa.get("top", 0) or bb[3] > H - sa.get("bottom", 0)
-                           or bb[0] < sa.get("left", 0) - 40 or bb[2] > W - sa.get("right", 0) + 40):
+                    if full:          # opaque paper: the headline is what differs from the paper above the photo card
+                        tc = load_config("graphics-templates.json").get("templates", {}).get(e["template"], {})
+                        cut = int((tc.get("card_y", H) - tc.get("card_h", 0) / 2) * H / 1920) - 60   # card + its shadow
+                        rgb = im_.convert("RGB").crop((0, 0, W, max(1, cut)))
+                        bb = ImageChops.difference(rgb, Image.new("RGB", rgb.size, rgb.getpixel((0, 0)))).convert("L") \
+                            .point(lambda v: 255 if v > 24 else 0).getbbox()
+                    else:
+                        bb = im_.getchannel("A").point(lambda v: 255 if v > 24 else 0).getbbox()
+                if not full and bb and (bb[1] < sa.get("top", 0) or bb[3] > H - sa.get("bottom", 0)
+                                        or bb[0] < sa.get("left", 0) - 40 or bb[2] > W - sa.get("right", 0) + 40):
                     out_sa.append(f"{e['event_id']} {e['template']} y {bb[1]}–{bb[3]} x {bb[0]}–{bb[2]}")
+                if bb:
+                    zone_boxes.append({"id": e["event_id"], "rect": list(bb), "label": f"الرسم {e['event_id']}",
+                                       "kind": "text" if cat == "typography" or e["template"] in TEXT_EDU else "shape"})
             r.add("creative", f"Graphics inside the safe area (top {sa.get('top')}, bottom {sa.get('bottom')} px)",
                   not out_sa, "; ".join(out_sa[:5]))
+            for it in safe_zones.qc_items(zone_boxes, zprofiles, (W, H), rtl=bool(spec.get("safe_zone_rtl"))):
+                r.add("creative", it["name"], it["ok"], it["detail"], mandatory=False)   # advisory (G10); P1 vs P2 is in the name
         # K-T4 (Addendum K1, Task 64): an element inside a platform's UI zone is a hard failure, behind its switch
         from .safety.safezone_gate import qc_item as _safezone_item
         _sz = _safezone_item(paths)
