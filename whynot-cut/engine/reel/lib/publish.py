@@ -260,7 +260,8 @@ def render_thumbnails(ep) -> dict:
     info = load_episode(ep)
     src = episode_file(ep)
     b = Brand(ep.client_db)
-    man = read_json(ep.client_db / "asset-manifest.json", {"assets": []}) or {"assets": []}
+    from . import client_db
+    man = client_db.load(ep, "asset-manifest.json", {"assets": []}) or {"assets": []}
     logo = next((a.get("display_derivative") for a in man.get("assets", []) if a.get("category") == "logo"), None)
     out_dir = ep.p("publish/thumbnail")
     files, warnings, errors, highlights = [], [], [], []

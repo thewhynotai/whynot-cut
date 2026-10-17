@@ -251,7 +251,8 @@ def run_qc(paths: Paths) -> dict:
     r.add("project", "Edit decisions traceable to transcript (plan validation)", pv.get("ok", False), "; ".join(pv.get("errors", [])[:3]))
 
     # ---------------- fonts
-    typ = read_json(paths.client_db / "branding/typography.json", {})
+    from . import client_db
+    typ = client_db.load(paths, "branding/typography.json", {})
     # graphics reach Premiere as rendered stills (shaped from the font FILES), so installed fonts are only required for
     # live text: the AE/PS extras or a native caption track. Otherwise a missing install is advisory.
     needs_fonts = bool(read_json(paths.p("04_after_effects/ae-build-result.json")) or

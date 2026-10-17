@@ -17,7 +17,8 @@ from .ae_builder import fonts_map
 def generate(paths: Paths) -> dict:
     ed = read_json(paths.p("01_analysis/edit-decisions.json"), {})
     jobs = ed.get("global", {}).get("photoshop_jobs", [])
-    man = read_json(paths.client_db / "asset-manifest.json", {"assets": []})
+    from . import client_db
+    man = client_db.load(paths, "asset-manifest.json", {"assets": []})
     by_rel = {a["rel"]: a for a in man["assets"]}
     logo = next((a for a in man["assets"] if a["category"] == "logo"), None)
     tok = read_json(paths.client_db / "branding/brand-tokens.json", {})

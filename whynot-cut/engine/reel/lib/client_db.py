@@ -261,3 +261,126 @@ def build(paths: Paths, inventory: dict) -> dict:
                        and any(a["category"] == "logo" for a in assets)}
     write_json(db / "client-database-status.json", status)
     return status
+
+
+# --------------------------------------------------------------------------- portable paths (3.0 Phase 4 T4.5)
+# The files of output/client_database/ that carry paths, and where (a "*" walks every dict value or list item). 3.0
+# stores them relative to the client root (POSIX); 2.x and older 3.0 files hold absolute paths, maybe of the folder
+# the client was copied from. Every reader goes through load(), which hands back paths it can open; nothing else
+# reads these files (tests/test_t45_guard.py).
+PATH_FIELDS: dict[str, tuple] = {
+    "asset-manifest.json": (("assets", "*", "file"), ("assets", "*", "display_derivative"),
+                            ("assets", "*", "raw_derivative")),
+    "branding/typography.json": (("families", "*", "weights", "*", "file"), ("missing_or_uninstalled", "*")),
+    "reference_analysis/cache.json": (("*", "video"), ("*", "contact_sheets", "*"), ("*", "cut_frames", "*")),
+    "reference_analysis/reference-measurements.json": (("references", "*", "video"),
+                                                       ("references", "*", "contact_sheets", "*")),
+    "reference_analysis/*/measurements.json": (("video",), ("contact_sheets", "*"), ("cut_frames", "*")),
+}
+PATH_FIELDS["assets/asset-manifest.json"] = PATH_FIELDS["asset-manifest.json"]
+ANCHORS = ("assets", "data", "output")            # the client root's own folders: where a copied path's tail starts
+
+
+def path_fields(rel: str) -> tuple:
+    rel = str(rel).replace("\\", "/")
+    if rel in PATH_FIELDS:
+        return PATH_FIELDS[rel]
+    import fnmatch
+    parts = rel.split("/")
+    for pat, spec in PATH_FIELDS.items():
+        pp = pat.split("/")
+        if "*" in pat and len(pp) == len(parts) and all(fnmatch.fnmatchcase(a, b) for a, b in zip(parts, pp)):
+            return spec
+    return ()
+
+
+def is_relative(v) -> bool:
+    """A root-relative value: not absolute in Windows or POSIX form, no drive, no UNC, never climbing out (..)."""
+    from pathlib import PurePosixPath, PureWindowsPath
+    if not isinstance(v, str) or not v.strip():
+        return False
+    w = PureWindowsPath(v)
+    if w.drive or w.root or PurePosixPath(v).is_absolute():
+        return False
+    return ".." not in v.replace("\\", "/").split("/")
+
+
+def _norm(v: str, sep: str, fold: bool) -> str:
+    s = v.replace("\\", sep).replace("/", sep).rstrip(sep)
+    return s.casefold() if fold else s
+
+
+def inside_root(v: str, root: str, fold: bool | None = None, sep: str | None = None) -> bool:
+    """Is absolute `v` the client root or under it? Case folded where the file system folds it; when the strings
+    differ (a junction, macOS /var vs /private/var) the real paths are compared too, on this computer's own form."""
+    import os
+    from . import client_move_paths as cmp
+    fold = cmp.FOLD_CASE if fold is None else fold
+    sep = os.sep if sep is None else sep
+    for a, b in ((v, root), (cmp.real(v), cmp.real(root))):
+        a, b = _norm(a, sep, fold), _norm(b, sep, fold)
+        if a == b or a.startswith(b + sep):
+            return True
+    return False
+
+
+def anchor_tails(p) -> list[str]:
+    """The POSIX tails of an absolute path from each of its anchor folders (assets | data | output), earliest first:
+    D:/data/old/C/assets/a.png -> [data/old/C/assets/a.png, assets/a.png]."""
+    parts = list(p.parts[1:]) if p.anchor else list(p.parts)
+    return ["/".join(parts[i:]) for i, s in enumerate(parts) if s.lower() in ANCHORS and i < len(parts) - 1]
+
+
+def resolve(root, v):
+    """A stored value -> a path this computer can open: relative -> under the root; absolute inside the root -> kept;
+    absolute elsewhere -> the same file under this root when its tail from an anchor folder exists here (a client
+    copied or moved by hand), else kept as it is (never invented)."""
+    from pathlib import Path, PurePosixPath, PureWindowsPath
+    if not isinstance(v, str) or not v:
+        return v
+    root = Path(root)
+    if is_relative(v):
+        return str(root.joinpath(*PurePosixPath(v.replace("\\", "/")).parts))
+    win = bool(PureWindowsPath(v).drive) or "\\" in v
+    if not win and not PurePosixPath(v).is_absolute():
+        return v                                   # "../x" and the like: not a path we resolve
+    if inside_root(v, str(root)):
+        return v
+    for tail in anchor_tails(PureWindowsPath(v) if win else PurePosixPath(v)):
+        cand = root.joinpath(*tail.split("/"))
+        if cand.exists():
+            return str(cand)
+    return v
+
+
+def _walk(node, spec: tuple, fn):
+    if not spec:
+        return fn(node)
+    key, rest = spec[0], spec[1:]
+    if key == "*":
+        if isinstance(node, list):
+            for i, x in enumerate(node):
+                node[i] = _walk(x, rest, fn)
+        elif isinstance(node, dict):
+            for k in list(node):
+                node[k] = _walk(node[k], rest, fn)
+    elif isinstance(node, dict) and key in node:
+        node[key] = _walk(node[key], rest, fn)
+    return node
+
+
+def load(paths, rel: str, default=None):
+    """A client-database file (`rel` under output/client_database/) with every path field resolved for this computer
+    (`resolve`). `paths` is a Paths (or EpisodePaths, or anything with `client_db`), or the client_database folder
+    itself; without a `root` the client root is two levels above client_database. Missing -> a copy of `default`;
+    damaged -> errors.FileFormatError like read_json. Never writes."""
+    import copy
+    db = Path(paths) if isinstance(paths, (str, Path)) else Path(paths.client_db)
+    root = getattr(paths, "root", None) if not isinstance(paths, (str, Path)) else None
+    root = Path(root) if root else db.parent.parent
+    doc = read_json(db / rel)
+    if doc is None:
+        return copy.deepcopy(default)
+    for spec in path_fields(rel):
+        _walk(doc, spec, lambda v: resolve(root, v))
+    return doc
