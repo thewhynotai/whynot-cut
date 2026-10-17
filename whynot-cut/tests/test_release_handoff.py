@@ -54,8 +54,9 @@ _TEMPLATE = {}
 
 
 def _template_repo() -> Path:
-    """Built once per run (git is slow on a loaded Windows machine); every test gets a copy."""
-    if "path" not in _TEMPLATE:
+    """Built once per run (git is slow on a loaded Windows machine); every test gets a copy. Rebuilt when its folder
+    is gone: it lives under the per-test sandbox temp, which a later test class may already have cleaned up."""
+    if "path" not in _TEMPLATE or not _TEMPLATE["path"].is_dir():
         _TEMPLATE["td"] = tempfile.TemporaryDirectory()
         _TEMPLATE["path"] = _build_template(Path(_TEMPLATE["td"].name) / "template")
     return _TEMPLATE["path"]

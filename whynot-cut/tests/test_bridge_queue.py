@@ -387,10 +387,21 @@ class TestExpiryCancelCleanup(_Home):
     def test_a_bridge_that_stops_before_the_claim_cancels_the_wait(self):
         with FakeBridge(self.q, mute=True) as fb:
             with mock.patch.object(cep_queue, "CLAIM_CHECK_S", 0.2), \
-                    mock.patch.object(cep_queue, "status", side_effect=[{"alive": False, "detail": "gone"}]):
+                    mock.patch.object(cep_queue, "status", side_effect=[{"alive": False, "detail": "gone"}] * cep_queue.CLAIM_DEAD_CHECKS):
                 r = cep_queue.submit(self.q, self.script, "ping", timeout=30, st={"alive": True})
         self.assertFalse(r["ok"])
         self.assertTrue(r.get("cancelled"), r)
+        self.assertEqual(fb.ran, [])
+
+    def test_one_stale_read_between_live_ones_does_not_cancel(self):
+        # H6: only CLAIM_DEAD_CHECKS stale heartbeats IN A ROW cancel; an antivirus stall of one write must not.
+        gone, alive = {"alive": False, "detail": "gone"}, {"alive": True}
+        reads = [gone, alive] + [gone] * cep_queue.CLAIM_DEAD_CHECKS
+        with FakeBridge(self.q, mute=True) as fb:
+            with mock.patch.object(cep_queue, "CLAIM_CHECK_S", 0.2),                     mock.patch.object(cep_queue, "status", side_effect=reads) as st:
+                r = cep_queue.submit(self.q, self.script, "ping", timeout=30, st={"alive": True})
+        self.assertTrue(r.get("cancelled"), r)
+        self.assertEqual(st.call_count, len(reads))
         self.assertEqual(fb.ran, [])
 
     def test_the_sweeper_removes_day_old_files_only(self):

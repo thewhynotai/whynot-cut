@@ -605,7 +605,7 @@ class TestDefaultFootageRelative(_Tmp):
         self.assertIn("NOT_A_CLIP", why)
         inp = plan.PlanInputs(ctx=common.current_context(), base={}, rng={}, main_file=rel, main_default=rel,
                               main_default_why=why, exists=lambda r: True, flagged=[], profile={},
-                              video_id="NOT_A_CLIP")
+                              video_id="NOT_A_CLIP", paths=Paths(root, "NOT_A_CLIP"), root=root)
         _, errors, warnings = plan.final_checks(inp, [])
         self.assertEqual(errors, [])
         w = next(x for x in warnings if "main_footage not set" in x)
