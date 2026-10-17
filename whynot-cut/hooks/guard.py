@@ -18,7 +18,9 @@ Rules enforced in code (prose rules get forgotten in long sessions):
 Covers the Write/Edit tools, Bash (macOS/Linux shells and Git Bash on Windows, incl. /d/... paths) and PowerShell
 (cmdlets, aliases, redirection, pipelines, script blocks `{ }`, `$( )` bodies, [IO.File]:: and .Delete()-style
 calls, Invoke-Expression), and what they start: `cmd /c|//c` (with its own & && || | and ^), `powershell|pwsh
--Command|-EncodedCommand`, `bash|sh -c`, `eval`, shell heredocs and here-strings, `xargs`, `timeout`/`nice`/`env`/...
+-Command|-EncodedCommand`, `bash|sh -c`, `eval`, shell heredocs and here-strings, `xargs`, `timeout`/`nice`/`env`/...,
+Start-Process / start / [Diagnostics.Process]::Start. The engine is recognised by any path to engine/reel/cli.py or
+the reel launcher (rule 4 gates; a launcher variable set in an earlier call or a call expression fails closed).
 Paths are expanded first: globs (against the real folder), $PWD, $(pwd), $HOME, $env:USERPROFILE, ~, and variables
 assigned from a client source within the same command (`for f in data/Raw/*`, `$f = Get-ChildItem data`,
 `foreach ($f in ...)`, `$_` in a block fed by such a pipeline).
@@ -1006,6 +1008,7 @@ def run_bash(stmts: list[tuple[list[str], bool]], cwd: Path, agent: str | None):
             if src:
                 TAINT[m.group(1).lower()] = src
                 SH_VARS.add(m.group(1).lower())
+            VALUES[m.group(1).lower()] = m.group(2)          # c=.../cli.py; "$c" approve-plan (reel gate rules)
         if decl:
             continue
         argv = strip_prefixes(argv)
@@ -1176,8 +1179,11 @@ def check_argv(argv: list[str], cwd: Path, agent: str | None) -> Path:
         check_text(body[0], body[1], cwd, agent)
         return cwd
     script = next((a for a in argv[1:] if not a.startswith("-")), None) if exe in SHELLS else None
-    if script and norm_exe(script) == "reel":                     # bash [-e] "$CLAUDE_PLUGIN_ROOT/bin/reel" ...
-        argv, exe = argv[argv.index(script):], "reel"
+    if script and is_reel_launcher(script, cwd):                  # bash [-e] "$CLAUDE_PLUGIN_ROOT/bin/reel" ...
+        argv, exe = argv[argv.index(script):], "reel"             # (or .../cli.py: fails, but closed)
+    if exe == "start" and len(argv) > 1:                          # Git Bash `start` is cmd's: start python cli.py ...
+        check_text("cmd", " ".join(["start"] + [f'"{t}"' if re.search(r"\s", t) else t for t in argv[1:]
+                                                if t not in (">", ">>", ">|")]), cwd, agent)
     if exe == "parallel" and ":::" in argv:                       # parallel rm ::: data/Raw/*
         i = argv.index(":::")
         cmd = [a for a in argv[1:i] if not a.startswith("-")]
@@ -1336,29 +1342,108 @@ def _slash(s: str) -> str:
     return s.strip("'\"").replace("\\", "/")
 
 
+# engine/reel/ + cli, cli.py, cli.pyw, or its byte-code (cli.pyc, __pycache__/cli.cpython-312.pyc): Windows runs
+# `...\engine\reel\cli` through PATHEXT, python runs a .pyc as it runs the script
+_REEL_FILE = re.compile(r"(?:^|/)engine/reel/(?:__pycache__/)?cli(?:\.pyw?|(?:\.[\w.-]+)?\.py[co])?$")
+_OWN_CLI = Path(__file__).resolve().parents[1] / "engine" / "reel" / "cli.py"
+# a lone variable (`$c`, `${c}`, `$env:C`, `"$c"`, `$cfg.cli`, `$a[0]`, `%C%`): group 2 = property / index access
+_VAR_WORD = re.compile(r"^(?:\$\{?((?:env:)?\w+)\}?((?:\.\w+|\[[^\]]*\])*)|%(\w+)%)$", re.I)
+_INTERP = re.compile(r"^(?:python[\w.]*|py)(?:\s|$)")
+
+
+def _win_word(word: str) -> str:
+    """A path word as Windows opens it: quotes off, `/` slashes, no `::$DATA` stream suffix, no trailing dots or
+    spaces (`cli.py.` and `cli.py ` open cli.py)."""
+    w = re.sub(r"::?\$data$", "", _slash(word), flags=re.I)
+    return w.rstrip(". ") or w
+
+
 def is_reel_script(word: str, cwd: Path) -> bool:
-    """The word names the engine CLI: any path ending in engine/reel/cli.py (either slash, `.`/`..` segments
-    normalised, variables kept as written: `$root\\engine\\reel\\cli.py`); a relative one joined to the tracked cwd
-    (`cd .../engine/reel && python cli.py`)."""
-    w = _slash(word)
-    if not w.lower().endswith("cli.py"):
-        return False
+    """The word names the engine CLI: any path ending in engine/reel/cli.py (either slash, any case, `.`/`..`
+    segments normalised, variables kept as written: `$root\\engine\\reel\\cli.py`; also without `.py` and its byte-
+    code, see _REEL_FILE); a relative one joined to the tracked cwd (`cd .../engine/reel && python cli.py`). 8.3 short
+    names keep these segments (all are 8.3-sized). An existing file under another name that IS the engine CLI (a hard
+    link or a symlink to it) counts too. Fails closed: any engine/reel/cli.py is taken as ours."""
+    w = _win_word(word)
     if not (w.startswith(("/", "$", "%", "~")) or re.match(r"^[A-Za-z]:/", w)):
         w = _slash(str(cwd)).rstrip("/") + "/" + w
-    return posixpath.normpath(w).lower().endswith("/engine/reel/cli.py")
+    if _REEL_FILE.search(posixpath.normpath(w).lower()):
+        return True
+    if w[:1] in ("$", "%") or "*" in w or "?" in w:
+        return False
+    try:
+        p = Path(native(w)).expanduser()
+        if not p.is_file():
+            return False
+        if _REEL_FILE.search(posixpath.normpath(_slash(os.path.realpath(p))).lower()):
+            return True
+        return os.path.samefile(p, _OWN_CLI)
+    except (OSError, ValueError):
+        return False
+
+
+def is_reel_launcher(word: str, cwd: Path) -> bool:
+    """The word starts the engine by itself: the `reel` launcher by any path (`bin\\reel.cmd`, `REEL.CMD.`) or the
+    engine CLI script (is_reel_script)."""
+    name = _win_word(word).split("/")[-1].lower()
+    return re.sub(r"\.(?:exe|cmd|bat|com|ps1|sh)$", "", name) == "reel" or is_reel_script(word, cwd)
+
+
+def var_word(word: str) -> tuple[bool, str | None]:
+    """(True, its value) for a lone variable word whose plain string value this command set (`$c = '...'`,
+    `c=...`), (True, None) for one the guard cannot know (set in an earlier call, a property, an index), else
+    (False, None)."""
+    m = _VAR_WORD.match(word.strip("'\""))
+    if not m:
+        return False, None
+    if m.group(2):
+        return True, None
+    return True, VALUES.get((m.group(1) or m.group(3)).lower())
+
+
+def _call_expr_rest(argv: list[str]) -> list[str] | None:
+    """argv[0] opens a call expression (`& (Join-Path $r 'engine\\reel\\cli.py') ...`, `$(command -v reel) ...`,
+    `` `which reel` ... ``): the words after it; else None."""
+    a0 = argv[0]
+    if not a0.startswith(("(", "$(", "`")):
+        return None
+    depth = 0
+    for k, t in enumerate(argv):
+        if a0.startswith("`"):
+            depth += t.count("`")
+            if depth % 2 == 0:
+                return argv[k + 1:]
+        else:
+            depth += t.count("(") - t.count(")")
+            if depth <= 0:
+                return argv[k + 1:]
+    return []
 
 
 def reel_args(exe: str, argv: list[str], cwd: Path) -> list[str] | None:
-    """The engine's own arguments when this command starts the reel CLI, else None: `reel ...`, the script run
-    directly, or an interpreter (python*, py, a variable such as `$py` / `%PY%`) with any number of its own options
-    (G1 C1/C2: `-X utf8`, `-W ignore`, `-s -B -E -I`) before the script, or `-m reel.cli` (`-m cli` from
-    engine/reel). `-c` code and other modules are not the CLI."""
-    if exe == "reel":
+    """The engine's own arguments when this command starts the reel CLI, else None: `reel ...`, the script or the
+    launcher run directly by any path (P4 review: `& "D:\\...\\engine\\reel\\cli.py" approve-plan`), or an
+    interpreter (python*, py, a variable such as `$py` / `%PY%`) with any number of its own options (G1 C1/C2:
+    `-X utf8`, `-W ignore`, `-s -B -E -I`) before the script, or `-m reel.cli` (`-m cli` from engine/reel). `-c` code
+    and other modules are not the CLI. A variable set in this command is read for its value; a launcher the guard
+    cannot name (a variable set elsewhere, a call expression) fails closed: its words are read as the engine's."""
+    if exe == "reel" or is_reel_launcher(argv[0], cwd):
         return argv[1:]
-    if is_reel_script(argv[0], cwd):
-        return argv[1:]
-    if not (exe.startswith("python") or exe == "py" or exe[:1] in ("$", "%")):
-        return None
+    unknown = False
+    rest = _call_expr_rest(argv)
+    if rest is not None:
+        argv, unknown = ["$(expr)"] + rest, True
+    else:
+        is_var, val = var_word(argv[0])
+        if is_var and val is not None:
+            if is_reel_launcher(val.strip(), cwd):
+                return argv[1:]
+            if not _INTERP.match(norm_exe(val.strip())):
+                return None
+        elif is_var:
+            unknown = True
+        elif not (exe.startswith("python") or exe == "py" or exe[:1] in ("$", "%")):
+            return None
     i = 1
     while i < len(argv):
         a = argv[i].strip("'\"")
@@ -1386,9 +1471,13 @@ def reel_args(exe: str, argv: list[str], cwd: Path) -> list[str] | None:
                     return None
                 break
         i += used
-    if i < len(argv) and is_reel_script(argv[i], cwd):
-        return argv[i + 1:]
-    return None
+    if i < len(argv):
+        if is_reel_script(argv[i], cwd):
+            return argv[i + 1:]
+        sv, sval = var_word(argv[i])                 # python $cli ...: its value, or (unknown) fail closed
+        if sv and (sval is None or is_reel_script(sval.strip(), cwd)):
+            return argv[i + 1:]
+    return argv[1:] if unknown else None
 
 
 def reel_sub(args: list[str]) -> str | None:
@@ -1591,6 +1680,90 @@ def strip_filter_values(args: list[str]) -> list[str]:
     return out
 
 
+PS_START = {"start-process", "saps", "start"}
+# Start-Process parameters that take a value (first match wins on an abbreviation: -File, -Arg, -Work)
+_SP_VALUE = ("filepath", "path", "pspath", "argumentlist", "args", "workingdirectory", "credential",
+             "redirectstandarderror", "redirectstandardinput", "redirectstandardoutput", "verb", "windowstyle",
+             "environment")
+_CMD_START_SW = re.compile(r"^/(?:b|wait|min|max|i|low|normal|high|realtime|abovenormal|belownormal|separate|shared)$",
+                           re.I)
+_PROC_START = re.compile(r"\[(?:System\.)?Diagnostics\.Process\]::Start\s*\(", re.I)
+
+
+def _ps_quote(s: str) -> str:
+    return "'" + s.replace("'", "''") + "'"
+
+
+def _sp_args(items: list[str]) -> str:
+    """-ArgumentList values as one command line: an array (`'a','b'`, `@('a','b')`) one word per element, a single
+    string as written (it is the command line)."""
+    elems = [e.strip() for it in items for e in re.sub(r"^@?\(|\)$", "", it).split(",") if e.strip()]
+    many = len(elems) > 1
+    return " ".join(f'"{e}"' if many and re.search(r"\s", e) and '"' not in e else e for e in elems)
+
+
+def start_process_cmds(args: list[str], cwd: Path) -> list[tuple[str, Path]]:
+    """`Start-Process FILE ARGS` (also saps / start, named, abbreviated or -Name:value parameters, and cmd's own
+    `start ["title"] [/b /wait ...] prog args`) -> the command line(s) it starts, with their working folder: checked
+    like a command of their own (P4 review: `Start-Process python -ArgumentList 'cli.py approve-plan'`)."""
+    file, alist, wd, pos, i = None, [], cwd, [], 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("-") and len(a) > 1:
+            key, colon, inline = a[1:].partition(":")
+            key = key.lower()
+            hit = next((n for n in _SP_VALUE if n == key), None) or next((n for n in _SP_VALUE if n.startswith(key)),
+                                                                          None)
+            if hit and not ("passthru".startswith(key) and key != "p"):
+                val = inline if colon else (args[i + 1] if i + 1 < len(args) else "")
+                i += 1 if colon else 2
+                if hit in ("filepath", "path", "pspath"):
+                    file = val
+                elif hit in ("argumentlist", "args"):
+                    alist.append(val)
+                elif hit == "workingdirectory" and val:
+                    t = Path(native(expand(val, cwd))).expanduser()
+                    wd = t if t.is_absolute() else cwd / t
+                continue
+            i += 1                                              # a switch (-Wait, -NoNewWindow, -PassThru)
+            continue
+        if re.match(r"^/(?:d|node|affinity)$", a, re.I):        # cmd start /D folder, /NODE n, /AFFINITY m
+            i += 2
+            continue
+        if not _CMD_START_SW.match(a):
+            pos.append(a)
+        i += 1
+    out = []
+    if file is not None:
+        out.append((file, pos + alist))
+    elif pos:
+        out.append((pos[0], pos[1:] + alist))
+        if len(pos) > 1:                                        # cmd: start "title" prog ...: the title is no program
+            out.append((pos[1], pos[2:] + alist))
+    return [("& " + _ps_quote(f) + " " + _sp_args(rest), wd) for f, rest in out if f]
+
+
+def process_starts(text: str) -> list[str]:
+    """[Diagnostics.Process]::Start(FILE, ARGS) calls -> PowerShell command lines that start the same program."""
+    out = []
+    for m in _PROC_START.finditer(text):
+        depth, j = 1, m.end()
+        while j < len(text) and depth:
+            depth += {"(": 1, ")": -1}.get(text[j], 0)
+            j += 1
+        words = []
+        for a in split_args(text[m.end():j - 1]):
+            parts = split_args(a[2:-1]) if a.startswith("@(") and a.endswith(")") else [a]
+            for p in parts:
+                p = p.strip()
+                lit = re.fullmatch(r"(['\"])(.*)\1", p, re.S)
+                words.append((True, lit.group(2)) if lit else (False, p))
+        if words:
+            (lit0, f), rest = words[0], words[1:]
+            out.append("& " + (_ps_quote(f) if lit0 else f) + " " + " ".join(w for _, w in rest))
+    return out
+
+
 def check_powershell(cmd: str, cwd: Path, agent: str | None):
     cmd = cmd.replace("\r\n", "\n").replace("\r", "\n")      # T2.19: CRLF and a lone CR end a line; a backtick
                                                              # before either continues it (like backtick + LF)
@@ -1665,12 +1838,16 @@ def check_powershell(cmd: str, cwd: Path, agent: str | None):
             if hit:
                 block(f"a file method call on the client's source folder ({hit}) is not allowed — assets/ and data/ "
                       f"are read-only.")
+        if argv[0].startswith(("(", "$(")):      # & (Join-Path $root 'engine\reel\cli.py') approve-plan: the call
+            check_reel("", argv, agent, cwd)     # expression's program is unknown -> its words are the engine's
         argv[0] = argv[0].lstrip("(") or argv[0]
         if argv and argv[0] in ("&", "."):
             argv = argv[1:]
         if not argv:
             continue
         name = norm_exe(argv[0]) if not argv[0].lower().endswith(".ps1") else argv[0].lower()
+        if is_reel_launcher(argv[0], cwd):      # P4 review: `& "D:\...\engine\reel\cli.py" ...`, `.\cli.py ...` --
+            name = "reel"                       # the basename alone (`cli.py`) hid the engine from the gate rules
         for i, t in enumerate(argv):
             if t == ">" and i + 1 < len(argv):
                 hit = protected(argv[i + 1], cwd)
@@ -1682,6 +1859,10 @@ def check_powershell(cmd: str, cwd: Path, agent: str | None):
         if name in ("invoke-expression", "iex"):
             words = [VALUES.get(a[1:].lower(), a) if a.startswith("$") else a for a in args if a.lower() != "-command"]
             check_powershell(" ".join(words), cwd, agent)
+            continue
+        if name in PS_START:                    # Start-Process FILE -ArgumentList ...: the started command line
+            for text_, wd in start_process_cmds(args, cwd):
+                check_powershell(text_, wd, agent)
             continue
         if name in PS_CD:
             tgt = next((a for a in args if not a.startswith("-")), None)
@@ -1716,6 +1897,8 @@ def check_powershell(cmd: str, cwd: Path, agent: str | None):
             continue
         # native programs (ffmpeg, tar, cmd, reel...) follow the same rules as in Bash
         cwd = check_argv([name] + args, cwd, agent)
+    for text_ in process_starts(cmd):           # [Diagnostics.Process]::Start('python', 'cli.py approve-plan')
+        check_powershell(text_, cwd, agent)
 
 
 def heartbeat():
