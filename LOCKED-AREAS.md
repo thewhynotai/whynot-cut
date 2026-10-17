@@ -80,13 +80,13 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     `tests/test_lean_runtime.py`, `tests/test_transcribe_precision.py`, `tests/test_burned_captions.py`,
     `tests/fixtures/burned_captions/**`; the G13 evidence file. cli.py / plan.py / ppro_build.py / previews.py /
     intake hooks arrive as patches.
-  - Addendum M (2026-10-17, M6): `whynot-cut/engine/reel/lib/bidi_lines.py` and `lib/client_brief.py` executor;
+  - Addendum M (2026-10-17, M6): `whynot-cut/engine/reel/lib/bidi_lines.py` and `lib/client_brief.py` lane 4 (see below);
     `lib/looks_pairing.py` looks & motion track (covered by `looks*.py`); the `typography.pairing` field in
     `lib/client_db.py` wnc-queue (hunk only).
   - Safety track = API-credit lane 2 (2026-10-17, Addendum K1, Tasks 61–68): `whynot-cut/engine/reel/lib/safety/**`,
     `whynot-cut/tests/test_safety*.py`, `whynot-cut/tests/fixtures/safety/**`. `config/defaults/safety.json` (the K1
     switches) is executor-owned; cli.py / plan / reels-plan / qc call sites, skills, agents and hooks arrive as patches;
-    K-T3's ppro_build fade goes to the Adobe track; K-T4's Task 27 delta goes as a patch to lane 1's `safe_zones*`.
+    K-T3's ppro_build fade goes to the Adobe track; K-T4's Task 27 delta: lane 2 edits `safe_zones*` directly (lane 1's lock released 2026-10-17 after Task 27 was accepted).
   - API-credit lane 3 (2026-10-17, Addendum L Tasks 39, 40, 41, 48 = L-T1 scan kit, L-T2 secrets sweep, L-T3 security
     CI, L-T10 fuzzing Python part): `tools/security/**`, `.semgrep/**`, `.gitleaks.toml`,
     `.github/workflows/security.yml`, `docs/security/scan-*.md` + `docs/security/baseline*.json`,
@@ -124,6 +124,15 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     (`lib/safety/decision_log.py`), K-T12 (`lib/safety/cover_check.py`), K-T17 (`lib/resolve_export.py`,
     `tests/test_resolve_export*.py`), M4-T1 (`lib/asset_manifest.py`, `tests/test_asset_manifest.py`) and M4-T4
     (`hooks/magnific_guard.py`, `tests/test_magnific_guard*.py`). Call sites, cli, skills and config arrive as patches.
+  - **ONE writer per shared file (2026-10-17, ownership audit; this overrides any grant above):**
+    - executor is the only committer of `lib/plan.py`, `config/defaults/style.json`, `lib/qc.py`, `lib/previews.py`,
+      `lib/handoff.py`, `lib/ps_builder.py`, `lib/publish.py`. Every other owner (Adobe T4.1/T4.6, lanes, wnc-queue swaps,
+      backlog items) sends hunks as a patch or a named diff; the executor applies them in arrival order;
+    - Adobe track: `lib/preview_video.py` (T4.1 fades), `docs/adobe/**`;
+    - installer track: `whynot-cut/tests/test_installer.py` (T4.10's TestEngineLocks hunks arrive as a patch);
+    - executor: `whynot-cut/tests/test_t42_style_knobs.py`, `skills/revise/SKILL.md` (T4.2);
+    - `docs/legal/third-party-licences.md` + `THIRD-PARTY-NOTICES.md`: backlog item BL-02 only; lane 1 reports its rows
+      in REPORT.md and does not edit these files.
   - looks & motion track, AE wave 1 R-6.2 (2026-10-17): new `whynot-cut/engine/reel/lib/motion_scenes.py`,
     `whynot-cut/tests/test_motion_scenes*.py`, `whynot-cut/tests/fixtures/motion_scenes/**`; the `build_scene` branch in
     `lib/motion_plan.py` and the type names in `lib/motion_script.py` arrive as a diff for the executor.
