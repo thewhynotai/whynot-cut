@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ENGINE = ROOT / "whynot-cut" / "engine" / "reel"
 _sys.path.insert(0, str(ENGINE))
 
-OPEN = {"serve-security-which", "bootstrap-staging-delete"}
+OPEN = {"bootstrap-staging-delete"}
 WINDOWS = unittest.skipUnless(os.name == "nt", "Windows only: the hazard is the Windows search order")
 
 
