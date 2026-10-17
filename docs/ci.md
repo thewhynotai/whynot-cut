@@ -143,7 +143,7 @@ The scan is hard. A finding, an error, a timeout (30 min), a file it could not r
 
 **What it watches**
 - A push by a login outside the allowlist, or with a commit author or committer email outside it. A noreply address (`<id>+<login>@users.noreply.github.com`) counts only when that login is allowed.
-- A force-push (history rewrite), or a deleted branch or tag, even from the owner.
+- A force-push (history rewrite), even from the owner. (A deleted branch or tag is NOT seen; see below.)
 - A push that changes anything under `.github/` or `tools/ci/security_watch.py`, even from the owner. You get an issue whenever the watch itself changes. That is rare, and it is intended.
 - The repository being made public.
 
@@ -161,18 +161,19 @@ The scan is hard. A finding, an error, a timeout (30 min), a file it could not r
 - **A push with more than 300 changed files.** GitHub's `paths:` filter sees only the first 300 changed files. So an owner push of more than 300 files whose `.github/` (or `tools/ci/security_watch.py`) change comes after the first 300 starts neither workflow: the twin's filter misses it and the main file's `if:` skips an owner push. An outsider login still starts the main file. Step 6 of the monthly check covers it.
 - **More than three tags at once.** Pushing or deleting more than three tags in one push creates no event.
 - **`public` only runs from the default branch's copy of the workflow.** It alerts only once this file is on the default branch. The default branch is `main`, which holds no 3.0 files until release day, so a repo made public before then is NOT alerted (the monthly check covers it). For the same reason a new branch or tag is checked against `release/3.0` (`TRUSTED_BASE` in both files); switch it to the default branch when 3.0 lands on main.
-- **A deleted branch or tag.** It is covered only if GitHub starts a push workflow for a deletion push. GitHub's docs don't say, so treat it as unverified. The `delete` event is not subscribed, so one deletion never opens two issues.
+- **A deleted branch or tag: NOT covered (measured 2026-10-17).** GitHub started no workflow run for the two `sec-*` tag deletions of the L-T3 test, so a deletion push never reaches security-watch. A `delete:` trigger runs only from the default branch (`main`, which has no workflows until the public repo exists), so it cannot be added here. The monthly check below (branches and tags step) is the only protection until then; on the public-repo day, branch rules block deletions (Addendum I4 / L-T14).
 - **A push that edits the workflow file.** That push can switch the watch off from the same push. The pre-push checkout and the `.github/` finding flag it, but only if the edited workflow still runs.
 - **A push that looks like the owner.** A stolen token pushing with the owner's email passes the allowlist. The push email and the local and Mac clones are the protection.
 - Branch rules (no force-push, no deletion) are not available on a private Free repo; they go on with the public repo (Addendum I4).
 
-**Monthly manual check** (about 5 minutes; this covers what the watch cannot see)
+**Monthly manual check** (about 6 minutes; this covers what the watch cannot see)
 1. Repo Settings → Collaborators: only `thewhynotai` and people you know.
 2. Repo Settings → Deploy keys: none you did not add.
 3. Account Settings → SSH and GPG keys: only your own machines.
 4. Settings → Developer settings → Personal access tokens: delete any you don't recognise or no longer use.
 5. Settings → Security log: scan the month for logins, key or token events and repository changes you did not make.
 6. In your clone: `git log --since="1 month ago" --stat -- .github tools/ci/security_watch.py` on `release/3.0` (and `main`): every change listed should be one you made.
+7. In your clone: `git ls-remote --heads --tags origin`: every branch and tag should be one you expect (`main`, `release/3.0`, the `v3.0.0-*` phase tags); a missing one was deleted, an unknown one was added.
 
 **How to read an issue.** Open it from the email. The title says the event and ref. The body lists one line per finding (ref, short before..after SHAs, pusher, offending emails or paths, each in a code span) and links the run.
 - If it was you, close the issue.
