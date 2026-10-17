@@ -551,6 +551,13 @@ def cmd_review_flags(a):
          "cleared": doc["cleared"], "verdicts": counts, "domain": doc["domain"], "plan_fingerprint": doc["plan_fingerprint"]})
 
 
+def cmd_episode_sheet(a):
+    """T4.4: a podcast episode's sheet template in output/episodes/<EP>/ for the editor to fill in and move into
+    data/Episodes/ (the engine never writes into data/)."""
+    from lib.episode_sheet import init
+    out(init(a.root, a.init, force=a.force))
+
+
 def cmd_verify(a):
     from lib import verify
     from lib.motion_config import is_motion
@@ -919,7 +926,7 @@ def next_doc(p: Paths) -> dict:
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
 NO_ROOT = {"board", "serve", "perf-report", "setup", "doctor", "py", "model-download", "gpu-enable", "bench", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
            "ae-status", "ae-probe", "motion-icons", "motion-library", "validate"}
-NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox", "lock"}
+NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox", "lock", "episode-sheet"}
 OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (onboarding), per video with one
 
 # One writer per client folder (3.0 T1.8). Every command chooses (test_writer_lock checks each is in exactly one):
@@ -933,7 +940,8 @@ OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (
 CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze", "preflight", "transcribe",
                "transcript-correct", "transcript-verify", "transcript-relisten", "audio-clean", "plan",
                "review-flags", "approve-plan", "previews", "sfx", "preview-video", "ppro-build", "ppro-frames", "premiere", "verify",
-               "qc", "handoff", "mogrt-build", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build"}
+               "qc", "handoff", "mogrt-build", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build",
+               "episode-sheet"}
 # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
 # and works while another session holds the client (gate G2).
 CORE_READS = {"board", "serve", "perf-report", "setup", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
@@ -991,6 +999,12 @@ def take_writer_lock(a):
         raise Guidance(f"{root} is not a client folder: it needs assets/ and data/ (nothing was written)",
                        "Pass --root the client folder itself (the one that holds assets/ and data/), not a folder "
                        "inside it; `reel scaffold --root <new folder>` creates a new client.", where=str(root))
+    from lib import writer_lock as _wl
+    from lib.client_move_paths import first_refusal      # T4.4 review: output/ (or its logs/ or the lock) a link into
+    linked = first_refusal(root, (root / "output", root / _wl.LOG_REL, root / _wl.LOCK_REL))   # data/ or assets/ ->
+    if linked:                                           # the lock and the log lines written before the command
+        out(linked)
+        raise SystemExit(2)
     from lib import writer_lock
     mark_legacy_client(root)
     shown = ["reel", a.cmd] + [f"{o} {v}" for o, v in (("--video-id", a.video_id), ("--episode", a.episode)) if v]
@@ -1430,6 +1444,8 @@ CORE_COMMANDS: dict[str, str] = {
     "py": "run Python with the engine runtime: reel py <script.py> | -m <module> | -c <code> [args]",
     "scaffold": "create a client folder (assets/, data/, START_HERE.md, .whynot-client)",
     "inbox": "list the new raw clips of a client folder and their video ids",
+    "episode-sheet": "write a podcast episode's sheet template (show, host, guest, links, sponsor, avoid) into "
+                     "output/episodes/<EP>/ for the editor to fill in and move into data/Episodes/",
     "settings": "show or change the editor's WhyNot Cut preferences",
     "model-download": "download a Whisper model once (large-v3 is about 3 GB)",
     "gpu-enable": "install NVIDIA cuBLAS so Whisper runs on an NVIDIA GPU",
@@ -1644,6 +1660,12 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--name", help="client display name for START_HERE.md")
         if name == "inbox":
             sp.add_argument("--no-refresh", action="store_true", help="use the last discovery instead of rescanning")
+        if name == "episode-sheet":
+            sp.add_argument("--init", required=True, metavar="EP",
+                            help="the episode id (`reel episodes` lists them; a sheet can come before its episode)")
+            sp.add_argument("--force", action="store_true",
+                            help="write a fresh template even when the episode already has a sheet in data/Episodes, "
+                                 "or replace an edited template in output/")
         if name == "preview-video":
             sp.add_argument("--width", type=int, default=540)
             sp.add_argument("--no-label", action="store_true")

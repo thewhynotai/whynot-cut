@@ -25,7 +25,11 @@ reel profile --root "<CLIENT>"                          # client profile (NONE -
   and the publish copy follow the episode's own language.
 - An episode is a finished 16:9 file in `data/Episodes/`, optionally with `<same name>.md` (the episode sheet: show,
   host, guest, links, sponsor, `avoid`). Names and links in the publish package come **only** from that sheet; if it's
-  missing, ask the editor for it (they add it; `data/` is read-only for you).
+  missing, run `reel episode-sheet --init <EP>`: it writes an empty template, named like the episode file, to
+  `output/episodes/<EP>/` and prints where it goes, plus the client's people[] (`people`) for the editor to copy a
+  person's name, gender and honorifics from. Give the editor that file to fill in and move into `data/Episodes/` (they
+  move it; `data/` is read-only for you), then run `episode-prep` again so it reads the sheet. Never fill it in from
+  guesses.
 - `reel inbox` lists episodes too and warns when a long 16:9 file sits in `data/Raw` (tell the editor to move it).
 - `<EP>` = the id `reel episodes` prints (Arabic file names get a short hash). Reels become clip projects named
   `<EP>_<RID>`, e.g. `EP12_R03`.
