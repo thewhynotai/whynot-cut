@@ -1,0 +1,452 @@
+{
+ "note": "Egyptian Arabic with English terms: uhh, retake, false start ri-reel, stretched طب, على على, 3 twice on purpose, yes-اه, mid يعني.",
+ "language": "ar",
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "النهارده",
+   "start_ms": 300,
+   "end_ms": 745,
+   "probability": 0.98
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "هنتكلم",
+   "start_ms": 831,
+   "end_ms": 1192,
+   "probability": 0.88
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "عن",
+   "start_ms": 1240,
+   "end_ms": 1483,
+   "probability": 0.96
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "الـ",
+   "start_ms": 1559,
+   "end_ms": 1795,
+   "probability": 0.91
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "engagement",
+   "start_ms": 1892,
+   "end_ms": 2342,
+   "probability": 0.92
+  },
+  {
+   "id": 6,
+   "segment_id": 1,
+   "word": "على",
+   "start_ms": 2447,
+   "end_ms": 2722,
+   "probability": 0.86
+  },
+  {
+   "id": 7,
+   "segment_id": 1,
+   "word": "على",
+   "start_ms": 2827,
+   "end_ms": 3102,
+   "probability": 0.86
+  },
+  {
+   "id": 8,
+   "segment_id": 1,
+   "word": "الـ",
+   "start_ms": 3178,
+   "end_ms": 3414,
+   "probability": 0.91
+  },
+  {
+   "id": 9,
+   "segment_id": 1,
+   "word": "Instagram.",
+   "start_ms": 3499,
+   "end_ms": 3949,
+   "probability": 0.9
+  },
+  {
+   "id": 10,
+   "segment_id": 1,
+   "word": "uhh",
+   "start_ms": 4449,
+   "end_ms": 5349,
+   "probability": 0.45
+  },
+  {
+   "id": 11,
+   "segment_id": 1,
+   "word": "الـ",
+   "start_ms": 5425,
+   "end_ms": 5661,
+   "probability": 0.91
+  },
+  {
+   "id": 12,
+   "segment_id": 1,
+   "word": "content",
+   "start_ms": 5774,
+   "end_ms": 6207,
+   "probability": 0.89
+  },
+  {
+   "id": 13,
+   "segment_id": 1,
+   "word": "اللي",
+   "start_ms": 6303,
+   "end_ms": 6594,
+   "probability": 0.86
+  },
+  {
+   "id": 14,
+   "segment_id": 1,
+   "word": "بتنزله",
+   "start_ms": 6669,
+   "end_ms": 7059,
+   "probability": 0.93
+  },
+  {
+   "id": 15,
+   "segment_id": 1,
+   "word": "الـ",
+   "start_ms": 7759,
+   "end_ms": 7995,
+   "probability": 0.91
+  },
+  {
+   "id": 16,
+   "segment_id": 1,
+   "word": "content",
+   "start_ms": 8108,
+   "end_ms": 8541,
+   "probability": 0.89
+  },
+  {
+   "id": 17,
+   "segment_id": 1,
+   "word": "اللي",
+   "start_ms": 8637,
+   "end_ms": 8928,
+   "probability": 0.86
+  },
+  {
+   "id": 18,
+   "segment_id": 1,
+   "word": "بتنزله",
+   "start_ms": 9003,
+   "end_ms": 9393,
+   "probability": 0.93
+  },
+  {
+   "id": 19,
+   "segment_id": 1,
+   "word": "لازم",
+   "start_ms": 9480,
+   "end_ms": 9802,
+   "probability": 0.93
+  },
+  {
+   "id": 20,
+   "segment_id": 1,
+   "word": "يكون",
+   "start_ms": 9855,
+   "end_ms": 10183,
+   "probability": 0.92
+  },
+  {
+   "id": 21,
+   "segment_id": 1,
+   "word": "قصير.",
+   "start_ms": 10292,
+   "end_ms": 10566,
+   "probability": 0.88
+  },
+  {
+   "id": 22,
+   "segment_id": 1,
+   "word": "ده",
+   "start_ms": 10763,
+   "end_ms": 10980,
+   "probability": 0.96
+  },
+  {
+   "id": 23,
+   "segment_id": 1,
+   "word": "يعني",
+   "start_ms": 11077,
+   "end_ms": 11379,
+   "probability": 0.92
+  },
+  {
+   "id": 24,
+   "segment_id": 1,
+   "word": "ريل",
+   "start_ms": 11459,
+   "end_ms": 11709,
+   "probability": 0.87
+  },
+  {
+   "id": 25,
+   "segment_id": 1,
+   "word": "ri",
+   "start_ms": 11816,
+   "end_ms": 11996,
+   "probability": 0.35
+  },
+  {
+   "id": 26,
+   "segment_id": 1,
+   "word": "reel",
+   "start_ms": 12050,
+   "end_ms": 12359,
+   "probability": 0.87
+  },
+  {
+   "id": 27,
+   "segment_id": 1,
+   "word": "مش",
+   "start_ms": 12441,
+   "end_ms": 12648,
+   "probability": 0.86
+  },
+  {
+   "id": 28,
+   "segment_id": 1,
+   "word": "فيديو",
+   "start_ms": 12727,
+   "end_ms": 13086,
+   "probability": 0.94
+  },
+  {
+   "id": 29,
+   "segment_id": 1,
+   "word": "طويل.",
+   "start_ms": 13142,
+   "end_ms": 13453,
+   "probability": 0.89
+  },
+  {
+   "id": 30,
+   "segment_id": 1,
+   "word": "اه",
+   "start_ms": 13716,
+   "end_ms": 13969,
+   "probability": 0.98
+  },
+  {
+   "id": 31,
+   "segment_id": 1,
+   "word": "أول",
+   "start_ms": 14069,
+   "end_ms": 14329,
+   "probability": 0.89
+  },
+  {
+   "id": 32,
+   "segment_id": 1,
+   "word": "3",
+   "start_ms": 14387,
+   "end_ms": 14585,
+   "probability": 0.96
+  },
+  {
+   "id": 33,
+   "segment_id": 1,
+   "word": "ثواني،",
+   "start_ms": 14674,
+   "end_ms": 14993,
+   "probability": 0.95
+  },
+  {
+   "id": 34,
+   "segment_id": 1,
+   "word": "3",
+   "start_ms": 15051,
+   "end_ms": 15249,
+   "probability": 0.96
+  },
+  {
+   "id": 35,
+   "segment_id": 1,
+   "word": "ثواني",
+   "start_ms": 15344,
+   "end_ms": 15699,
+   "probability": 0.87
+  },
+  {
+   "id": 36,
+   "segment_id": 1,
+   "word": "بس.",
+   "start_ms": 15780,
+   "end_ms": 16006,
+   "probability": 0.95
+  },
+  {
+   "id": 37,
+   "segment_id": 1,
+   "word": "طب",
+   "start_ms": 16406,
+   "end_ms": 17206,
+   "probability": 0.7
+  },
+  {
+   "id": 38,
+   "segment_id": 1,
+   "word": "الـ",
+   "start_ms": 17606,
+   "end_ms": 17842,
+   "probability": 0.91
+  },
+  {
+   "id": 39,
+   "segment_id": 1,
+   "word": "hook",
+   "start_ms": 17950,
+   "end_ms": 18253,
+   "probability": 0.89
+  },
+  {
+   "id": 40,
+   "segment_id": 1,
+   "word": "لازم",
+   "start_ms": 18340,
+   "end_ms": 18662,
+   "probability": 0.93
+  },
+  {
+   "id": 41,
+   "segment_id": 1,
+   "word": "يكون",
+   "start_ms": 18715,
+   "end_ms": 19043,
+   "probability": 0.92
+  },
+  {
+   "id": 42,
+   "segment_id": 1,
+   "word": "قوي.",
+   "start_ms": 19122,
+   "end_ms": 19361,
+   "probability": 0.98
+  },
+  {
+   "id": 43,
+   "segment_id": 1,
+   "word": "وبعد",
+   "start_ms": 19602,
+   "end_ms": 19903,
+   "probability": 0.9
+  },
+  {
+   "id": 44,
+   "segment_id": 1,
+   "word": "كده",
+   "start_ms": 20014,
+   "end_ms": 20285,
+   "probability": 0.87
+  },
+  {
+   "id": 45,
+   "segment_id": 1,
+   "word": "اشرح",
+   "start_ms": 20398,
+   "end_ms": 20716,
+   "probability": 0.91
+  },
+  {
+   "id": 46,
+   "segment_id": 1,
+   "word": "الفكرة",
+   "start_ms": 20806,
+   "end_ms": 21181,
+   "probability": 0.93
+  },
+  {
+   "id": 47,
+   "segment_id": 1,
+   "word": "بسرعة",
+   "start_ms": 21274,
+   "end_ms": 21637,
+   "probability": 0.86
+  },
+  {
+   "id": 48,
+   "segment_id": 1,
+   "word": "وبوضوح.",
+   "start_ms": 21718,
+   "end_ms": 22104,
+   "probability": 0.98
+  },
+  {
+   "id": 49,
+   "segment_id": 1,
+   "word": "تمام؟",
+   "start_ms": 22312,
+   "end_ms": 22610,
+   "probability": 0.9
+  }
+ ],
+ "labels": [
+  {
+   "word_id": 6,
+   "label": "W"
+  },
+  {
+   "word_id": 10,
+   "label": "F"
+  },
+  {
+   "word_id": 11,
+   "label": "R"
+  },
+  {
+   "word_id": 12,
+   "label": "R"
+  },
+  {
+   "word_id": 13,
+   "label": "R"
+  },
+  {
+   "word_id": 14,
+   "label": "R"
+  },
+  {
+   "word_id": 23,
+   "label": "-"
+  },
+  {
+   "word_id": 25,
+   "label": "S"
+  },
+  {
+   "word_id": 26,
+   "label": "-"
+  },
+  {
+   "word_id": 30,
+   "label": "-"
+  },
+  {
+   "word_id": 32,
+   "label": "-"
+  },
+  {
+   "word_id": 34,
+   "label": "-"
+  },
+  {
+   "word_id": 37,
+   "label": "F"
+  }
+ ]
+}

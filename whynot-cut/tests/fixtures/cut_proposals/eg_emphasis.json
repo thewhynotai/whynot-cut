@@ -1,0 +1,308 @@
+{
+ "note": "Made-up transcript for Task 25 cut proposals (no client speech). labels: what an editor removes (R retake, S false start, F filler, W repeated word); '-' = must never be proposed. A doubled word's second copy carries no label: the first is the one proposed.",
+ "language": "ar",
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "ده",
+   "start_ms": 0,
+   "end_ms": 200,
+   "probability": 0.95
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "مهم",
+   "start_ms": 260,
+   "end_ms": 560,
+   "probability": 0.95
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "جدا.",
+   "start_ms": 620,
+   "end_ms": 920,
+   "probability": 0.95
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "مهم",
+   "start_ms": 1020,
+   "end_ms": 1320,
+   "probability": 0.95
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "جدا.",
+   "start_ms": 1380,
+   "end_ms": 1680,
+   "probability": 0.95
+  },
+  {
+   "id": 6,
+   "segment_id": 1,
+   "word": "الأكل",
+   "start_ms": 2180,
+   "end_ms": 2480,
+   "probability": 0.95
+  },
+  {
+   "id": 7,
+   "segment_id": 1,
+   "word": "الصحي",
+   "start_ms": 2540,
+   "end_ms": 2940,
+   "probability": 0.95
+  },
+  {
+   "id": 8,
+   "segment_id": 1,
+   "word": "بيفرق",
+   "start_ms": 3000,
+   "end_ms": 3400,
+   "probability": 0.95
+  },
+  {
+   "id": 9,
+   "segment_id": 1,
+   "word": "معاكي",
+   "start_ms": 3460,
+   "end_ms": 3860,
+   "probability": 0.95
+  },
+  {
+   "id": 10,
+   "segment_id": 1,
+   "word": "الأكل",
+   "start_ms": 4260,
+   "end_ms": 4560,
+   "probability": 0.95
+  },
+  {
+   "id": 11,
+   "segment_id": 1,
+   "word": "الصحي",
+   "start_ms": 4620,
+   "end_ms": 5020,
+   "probability": 0.95
+  },
+  {
+   "id": 12,
+   "segment_id": 1,
+   "word": "بيفرق",
+   "start_ms": 5080,
+   "end_ms": 5480,
+   "probability": 0.95
+  },
+  {
+   "id": 13,
+   "segment_id": 1,
+   "word": "معاكي",
+   "start_ms": 5540,
+   "end_ms": 5940,
+   "probability": 0.95
+  },
+  {
+   "id": 14,
+   "segment_id": 1,
+   "word": "جدا",
+   "start_ms": 6000,
+   "end_ms": 6300,
+   "probability": 0.95
+  },
+  {
+   "id": 15,
+   "segment_id": 1,
+   "word": "في",
+   "start_ms": 6360,
+   "end_ms": 6560,
+   "probability": 0.95
+  },
+  {
+   "id": 16,
+   "segment_id": 1,
+   "word": "الطاقة.",
+   "start_ms": 6620,
+   "end_ms": 7020,
+   "probability": 0.95
+  },
+  {
+   "id": 17,
+   "segment_id": 1,
+   "word": "آآه",
+   "start_ms": 7520,
+   "end_ms": 8320,
+   "probability": 0.5
+  },
+  {
+   "id": 18,
+   "segment_id": 1,
+   "word": "النوم",
+   "start_ms": 8620,
+   "end_ms": 8920,
+   "probability": 0.95
+  },
+  {
+   "id": 19,
+   "segment_id": 1,
+   "word": "كمان",
+   "start_ms": 8980,
+   "end_ms": 9280,
+   "probability": 0.95
+  },
+  {
+   "id": 20,
+   "segment_id": 1,
+   "word": "مهم.",
+   "start_ms": 9340,
+   "end_ms": 9640,
+   "probability": 0.95
+  },
+  {
+   "id": 21,
+   "segment_id": 1,
+   "word": "لو",
+   "start_ms": 10240,
+   "end_ms": 10440,
+   "probability": 0.95
+  },
+  {
+   "id": 22,
+   "segment_id": 1,
+   "word": "نمتي",
+   "start_ms": 10500,
+   "end_ms": 10800,
+   "probability": 0.95
+  },
+  {
+   "id": 23,
+   "segment_id": 1,
+   "word": "بدري",
+   "start_ms": 10860,
+   "end_ms": 11160,
+   "probability": 0.95
+  },
+  {
+   "id": 24,
+   "segment_id": 1,
+   "word": "هتصحي",
+   "start_ms": 11220,
+   "end_ms": 11620,
+   "probability": 0.95
+  },
+  {
+   "id": 25,
+   "segment_id": 1,
+   "word": "لو",
+   "start_ms": 13420,
+   "end_ms": 13620,
+   "probability": 0.95
+  },
+  {
+   "id": 26,
+   "segment_id": 1,
+   "word": "نمتي",
+   "start_ms": 13680,
+   "end_ms": 13980,
+   "probability": 0.95
+  },
+  {
+   "id": 27,
+   "segment_id": 1,
+   "word": "بدري",
+   "start_ms": 14040,
+   "end_ms": 14340,
+   "probability": 0.95
+  },
+  {
+   "id": 28,
+   "segment_id": 1,
+   "word": "هتصحي",
+   "start_ms": 14400,
+   "end_ms": 14800,
+   "probability": 0.95
+  },
+  {
+   "id": 29,
+   "segment_id": 1,
+   "word": "فايقة.",
+   "start_ms": 14860,
+   "end_ms": 15260,
+   "probability": 0.95
+  },
+  {
+   "id": 30,
+   "segment_id": 1,
+   "word": "آه",
+   "start_ms": 15760,
+   "end_ms": 16010,
+   "probability": 0.95
+  },
+  {
+   "id": 31,
+   "segment_id": 1,
+   "word": "فعلا.",
+   "start_ms": 16310,
+   "end_ms": 16610,
+   "probability": 0.95
+  }
+ ],
+ "labels": [
+  {
+   "word_id": 3,
+   "label": "-"
+  },
+  {
+   "word_id": 4,
+   "label": "-"
+  },
+  {
+   "word_id": 5,
+   "label": "-"
+  },
+  {
+   "word_id": 6,
+   "label": "R"
+  },
+  {
+   "word_id": 7,
+   "label": "R"
+  },
+  {
+   "word_id": 8,
+   "label": "R"
+  },
+  {
+   "word_id": 9,
+   "label": "R"
+  },
+  {
+   "word_id": 17,
+   "label": "F"
+  },
+  {
+   "word_id": 21,
+   "label": "R"
+  },
+  {
+   "word_id": 22,
+   "label": "R"
+  },
+  {
+   "word_id": 23,
+   "label": "R"
+  },
+  {
+   "word_id": 24,
+   "label": "R"
+  },
+  {
+   "word_id": 30,
+   "label": "-"
+  }
+ ]
+}

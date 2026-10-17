@@ -1,0 +1,336 @@
+{
+ "note": "Made-up transcript for Task 25 cut proposals (no client speech). labels: what an editor removes (R retake, S false start, F filler, W repeated word); '-' = must never be proposed. A doubled word's second copy carries no label: the first is the one proposed.",
+ "language": "en",
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "the",
+   "start_ms": 0,
+   "end_ms": 150,
+   "probability": 0.95
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "first",
+   "start_ms": 210,
+   "end_ms": 510,
+   "probability": 0.95
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "thing",
+   "start_ms": 570,
+   "end_ms": 870,
+   "probability": 0.95
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "you",
+   "start_ms": 930,
+   "end_ms": 1080,
+   "probability": 0.95
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "the",
+   "start_ms": 1480,
+   "end_ms": 1630,
+   "probability": 0.95
+  },
+  {
+   "id": 6,
+   "segment_id": 1,
+   "word": "first",
+   "start_ms": 1690,
+   "end_ms": 1990,
+   "probability": 0.95
+  },
+  {
+   "id": 7,
+   "segment_id": 1,
+   "word": "thing",
+   "start_ms": 2050,
+   "end_ms": 2350,
+   "probability": 0.95
+  },
+  {
+   "id": 8,
+   "segment_id": 1,
+   "word": "you",
+   "start_ms": 2410,
+   "end_ms": 2560,
+   "probability": 0.95
+  },
+  {
+   "id": 9,
+   "segment_id": 1,
+   "word": "need",
+   "start_ms": 2620,
+   "end_ms": 2920,
+   "probability": 0.95
+  },
+  {
+   "id": 10,
+   "segment_id": 1,
+   "word": "is",
+   "start_ms": 2980,
+   "end_ms": 3130,
+   "probability": 0.95
+  },
+  {
+   "id": 11,
+   "segment_id": 1,
+   "word": "sleep.",
+   "start_ms": 3190,
+   "end_ms": 3590,
+   "probability": 0.95
+  },
+  {
+   "id": 12,
+   "segment_id": 1,
+   "word": "um",
+   "start_ms": 3990,
+   "end_ms": 4490,
+   "probability": 0.95
+  },
+  {
+   "id": 13,
+   "segment_id": 1,
+   "word": "so",
+   "start_ms": 4790,
+   "end_ms": 5490,
+   "probability": 0.95
+  },
+  {
+   "id": 14,
+   "segment_id": 1,
+   "word": "we",
+   "start_ms": 5890,
+   "end_ms": 6090,
+   "probability": 0.95
+  },
+  {
+   "id": 15,
+   "segment_id": 1,
+   "word": "tried",
+   "start_ms": 6150,
+   "end_ms": 6450,
+   "probability": 0.95
+  },
+  {
+   "id": 16,
+   "segment_id": 1,
+   "word": "the",
+   "start_ms": 6510,
+   "end_ms": 6660,
+   "probability": 0.95
+  },
+  {
+   "id": 17,
+   "segment_id": 1,
+   "word": "the",
+   "start_ms": 6720,
+   "end_ms": 6870,
+   "probability": 0.95
+  },
+  {
+   "id": 18,
+   "segment_id": 1,
+   "word": "new",
+   "start_ms": 6930,
+   "end_ms": 7230,
+   "probability": 0.95
+  },
+  {
+   "id": 19,
+   "segment_id": 1,
+   "word": "plan.",
+   "start_ms": 7290,
+   "end_ms": 7590,
+   "probability": 0.95
+  },
+  {
+   "id": 20,
+   "segment_id": 1,
+   "word": "uhh",
+   "start_ms": 8090,
+   "end_ms": 8490,
+   "probability": 0.95
+  },
+  {
+   "id": 21,
+   "segment_id": 1,
+   "word": "it",
+   "start_ms": 8790,
+   "end_ms": 8940,
+   "probability": 0.95
+  },
+  {
+   "id": 22,
+   "segment_id": 1,
+   "word": "was",
+   "start_ms": 9000,
+   "end_ms": 9200,
+   "probability": 0.95
+  },
+  {
+   "id": 23,
+   "segment_id": 1,
+   "word": "very",
+   "start_ms": 9260,
+   "end_ms": 9560,
+   "probability": 0.95
+  },
+  {
+   "id": 24,
+   "segment_id": 1,
+   "word": "very",
+   "start_ms": 9620,
+   "end_ms": 9920,
+   "probability": 0.95
+  },
+  {
+   "id": 25,
+   "segment_id": 1,
+   "word": "good.",
+   "start_ms": 9980,
+   "end_ms": 10280,
+   "probability": 0.95
+  },
+  {
+   "id": 26,
+   "segment_id": 1,
+   "word": "like",
+   "start_ms": 10780,
+   "end_ms": 10980,
+   "probability": 0.95
+  },
+  {
+   "id": 27,
+   "segment_id": 1,
+   "word": "really",
+   "start_ms": 11040,
+   "end_ms": 11340,
+   "probability": 0.95
+  },
+  {
+   "id": 28,
+   "segment_id": 1,
+   "word": "good.",
+   "start_ms": 11400,
+   "end_ms": 11700,
+   "probability": 0.95
+  },
+  {
+   "id": 29,
+   "segment_id": 1,
+   "word": "haha",
+   "start_ms": 12200,
+   "end_ms": 12600,
+   "probability": 0.95
+  },
+  {
+   "id": 30,
+   "segment_id": 1,
+   "word": "erm",
+   "start_ms": 12900,
+   "end_ms": 13300,
+   "probability": 0.95
+  },
+  {
+   "id": 31,
+   "segment_id": 1,
+   "word": "anyway",
+   "start_ms": 13600,
+   "end_ms": 14000,
+   "probability": 0.95
+  },
+  {
+   "id": 32,
+   "segment_id": 1,
+   "word": "thanks.",
+   "start_ms": 14060,
+   "end_ms": 14460,
+   "probability": 0.95
+  },
+  {
+   "id": 33,
+   "segment_id": 1,
+   "word": "hmm",
+   "start_ms": 14960,
+   "end_ms": 15460,
+   "probability": 0.95
+  },
+  {
+   "id": 34,
+   "segment_id": 1,
+   "word": "okay.",
+   "start_ms": 15760,
+   "end_ms": 16060,
+   "probability": 0.95
+  }
+ ],
+ "labels": [
+  {
+   "word_id": 1,
+   "label": "R"
+  },
+  {
+   "word_id": 2,
+   "label": "R"
+  },
+  {
+   "word_id": 3,
+   "label": "R"
+  },
+  {
+   "word_id": 4,
+   "label": "R"
+  },
+  {
+   "word_id": 12,
+   "label": "F"
+  },
+  {
+   "word_id": 13,
+   "label": "F"
+  },
+  {
+   "word_id": 16,
+   "label": "W"
+  },
+  {
+   "word_id": 20,
+   "label": "F"
+  },
+  {
+   "word_id": 23,
+   "label": "-"
+  },
+  {
+   "word_id": 24,
+   "label": "-"
+  },
+  {
+   "word_id": 26,
+   "label": "-"
+  },
+  {
+   "word_id": 29,
+   "label": "-"
+  },
+  {
+   "word_id": 30,
+   "label": "F"
+  },
+  {
+   "word_id": 33,
+   "label": "F"
+  }
+ ]
+}

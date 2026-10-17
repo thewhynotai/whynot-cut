@@ -1,0 +1,169 @@
+{
+ "note": "Made-up transcript for Task 25 cut proposals (no client speech). labels: what an editor removes (R retake, S false start, F filler, W repeated word); '-' = must never be proposed. A doubled word's second copy carries no label: the first is the one proposed.",
+ "language": "ar",
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "النهارده",
+   "start_ms": 0,
+   "end_ms": 400,
+   "probability": 0.95
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "اتكلمنا",
+   "start_ms": 460,
+   "end_ms": 860,
+   "probability": 0.95
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "عن",
+   "start_ms": 920,
+   "end_ms": 1120,
+   "probability": 0.95
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "السكر.",
+   "start_ms": 1180,
+   "end_ms": 1580,
+   "probability": 0.95
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "اممم",
+   "start_ms": 2080,
+   "end_ms": 2780,
+   "probability": 0.4
+  },
+  {
+   "id": 6,
+   "segment_id": 1,
+   "word": "خلي",
+   "start_ms": 3080,
+   "end_ms": 3380,
+   "probability": 0.95
+  },
+  {
+   "id": 7,
+   "segment_id": 1,
+   "word": "بالك",
+   "start_ms": 3440,
+   "end_ms": 3740,
+   "probability": 0.95
+  },
+  {
+   "id": 8,
+   "segment_id": 1,
+   "word": "من",
+   "start_ms": 3800,
+   "end_ms": 4000,
+   "probability": 0.95
+  },
+  {
+   "id": 9,
+   "segment_id": 1,
+   "word": "نفسك.",
+   "start_ms": 4060,
+   "end_ms": 4460,
+   "probability": 0.95
+  },
+  {
+   "id": 10,
+   "segment_id": 1,
+   "word": "وإلى",
+   "start_ms": 5260,
+   "end_ms": 5560,
+   "probability": 0.95
+  },
+  {
+   "id": 11,
+   "segment_id": 1,
+   "word": "اللقاء",
+   "start_ms": 5620,
+   "end_ms": 6020,
+   "probability": 0.95
+  },
+  {
+   "id": 12,
+   "segment_id": 1,
+   "word": "اممم",
+   "start_ms": 6080,
+   "end_ms": 6780,
+   "probability": 0.4
+  },
+  {
+   "id": 13,
+   "segment_id": 1,
+   "word": "مع",
+   "start_ms": 7080,
+   "end_ms": 7280,
+   "probability": 0.95
+  },
+  {
+   "id": 14,
+   "segment_id": 1,
+   "word": "مع",
+   "start_ms": 7340,
+   "end_ms": 7540,
+   "probability": 0.95
+  },
+  {
+   "id": 15,
+   "segment_id": 1,
+   "word": "دكتورة",
+   "start_ms": 7600,
+   "end_ms": 8000,
+   "probability": 0.95
+  },
+  {
+   "id": 16,
+   "segment_id": 1,
+   "word": "سلمى.",
+   "start_ms": 8060,
+   "end_ms": 8460,
+   "probability": 0.95
+  }
+ ],
+ "labels": [
+  {
+   "word_id": 5,
+   "label": "F"
+  },
+  {
+   "word_id": 10,
+   "label": "-"
+  },
+  {
+   "word_id": 11,
+   "label": "-"
+  },
+  {
+   "word_id": 12,
+   "label": "-"
+  },
+  {
+   "word_id": 13,
+   "label": "-"
+  },
+  {
+   "word_id": 14,
+   "label": "-"
+  },
+  {
+   "word_id": 15,
+   "label": "-"
+  },
+  {
+   "word_id": 16,
+   "label": "-"
+  }
+ ],
+ "sign_off": "وإلى اللقاء"
+}

@@ -1,0 +1,576 @@
+{
+ "note": "English talking head: um/uh/hmm, stretched so/like, the the, retake, false start, very very, number twice, drug name, laughter.",
+ "language": "en",
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "Hey",
+   "start_ms": 300,
+   "end_ms": 560,
+   "probability": 0.89
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "everyone.",
+   "start_ms": 650,
+   "end_ms": 1085,
+   "probability": 0.9
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "um",
+   "start_ms": 1332,
+   "end_ms": 2132,
+   "probability": 0.5
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "today",
+   "start_ms": 2238,
+   "end_ms": 2564,
+   "probability": 0.9
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "I",
+   "start_ms": 2618,
+   "end_ms": 2822,
+   "probability": 0.97
+  },
+  {
+   "id": 6,
+   "segment_id": 1,
+   "word": "want",
+   "start_ms": 2898,
+   "end_ms": 3179,
+   "probability": 0.88
+  },
+  {
+   "id": 7,
+   "segment_id": 1,
+   "word": "to",
+   "start_ms": 3246,
+   "end_ms": 3458,
+   "probability": 0.98
+  },
+  {
+   "id": 8,
+   "segment_id": 1,
+   "word": "talk",
+   "start_ms": 3531,
+   "end_ms": 3859,
+   "probability": 0.93
+  },
+  {
+   "id": 9,
+   "segment_id": 1,
+   "word": "about",
+   "start_ms": 3926,
+   "end_ms": 4283,
+   "probability": 0.95
+  },
+  {
+   "id": 10,
+   "segment_id": 1,
+   "word": "ibuprofen",
+   "start_ms": 4396,
+   "end_ms": 4846,
+   "probability": 0.88
+  },
+  {
+   "id": 11,
+   "segment_id": 1,
+   "word": "and",
+   "start_ms": 4932,
+   "end_ms": 5198,
+   "probability": 0.95
+  },
+  {
+   "id": 12,
+   "segment_id": 1,
+   "word": "when",
+   "start_ms": 5291,
+   "end_ms": 5579,
+   "probability": 0.87
+  },
+  {
+   "id": 13,
+   "segment_id": 1,
+   "word": "to",
+   "start_ms": 5646,
+   "end_ms": 5858,
+   "probability": 0.98
+  },
+  {
+   "id": 14,
+   "segment_id": 1,
+   "word": "take",
+   "start_ms": 5960,
+   "end_ms": 6247,
+   "probability": 0.91
+  },
+  {
+   "id": 15,
+   "segment_id": 1,
+   "word": "it.",
+   "start_ms": 6321,
+   "end_ms": 6570,
+   "probability": 0.94
+  },
+  {
+   "id": 16,
+   "segment_id": 1,
+   "word": "You",
+   "start_ms": 6786,
+   "end_ms": 7057,
+   "probability": 0.95
+  },
+  {
+   "id": 17,
+   "segment_id": 1,
+   "word": "should",
+   "start_ms": 7106,
+   "end_ms": 7480,
+   "probability": 0.98
+  },
+  {
+   "id": 18,
+   "segment_id": 1,
+   "word": "take",
+   "start_ms": 7582,
+   "end_ms": 7869,
+   "probability": 0.91
+  },
+  {
+   "id": 19,
+   "segment_id": 1,
+   "word": "it",
+   "start_ms": 7923,
+   "end_ms": 8182,
+   "probability": 0.98
+  },
+  {
+   "id": 20,
+   "segment_id": 1,
+   "word": "with",
+   "start_ms": 8248,
+   "end_ms": 8519,
+   "probability": 0.91
+  },
+  {
+   "id": 21,
+   "segment_id": 1,
+   "word": "food",
+   "start_ms": 8579,
+   "end_ms": 8894,
+   "probability": 0.93
+  },
+  {
+   "id": 22,
+   "segment_id": 1,
+   "word": "You",
+   "start_ms": 10394,
+   "end_ms": 10665,
+   "probability": 0.95
+  },
+  {
+   "id": 23,
+   "segment_id": 1,
+   "word": "should",
+   "start_ms": 10714,
+   "end_ms": 11088,
+   "probability": 0.98
+  },
+  {
+   "id": 24,
+   "segment_id": 1,
+   "word": "take",
+   "start_ms": 11190,
+   "end_ms": 11477,
+   "probability": 0.91
+  },
+  {
+   "id": 25,
+   "segment_id": 1,
+   "word": "it",
+   "start_ms": 11531,
+   "end_ms": 11790,
+   "probability": 0.98
+  },
+  {
+   "id": 26,
+   "segment_id": 1,
+   "word": "with",
+   "start_ms": 11856,
+   "end_ms": 12127,
+   "probability": 0.91
+  },
+  {
+   "id": 27,
+   "segment_id": 1,
+   "word": "a",
+   "start_ms": 12183,
+   "end_ms": 12399,
+   "probability": 0.91
+  },
+  {
+   "id": 28,
+   "segment_id": 1,
+   "word": "full",
+   "start_ms": 12446,
+   "end_ms": 12758,
+   "probability": 0.98
+  },
+  {
+   "id": 29,
+   "segment_id": 1,
+   "word": "meal.",
+   "start_ms": 12819,
+   "end_ms": 13115,
+   "probability": 0.88
+  },
+  {
+   "id": 30,
+   "segment_id": 1,
+   "word": "It",
+   "start_ms": 13348,
+   "end_ms": 13571,
+   "probability": 0.93
+  },
+  {
+   "id": 31,
+   "segment_id": 1,
+   "word": "is",
+   "start_ms": 13621,
+   "end_ms": 13876,
+   "probability": 0.94
+  },
+  {
+   "id": 32,
+   "segment_id": 1,
+   "word": "like",
+   "start_ms": 13986,
+   "end_ms": 14281,
+   "probability": 0.86
+  },
+  {
+   "id": 33,
+   "segment_id": 1,
+   "word": "a",
+   "start_ms": 14337,
+   "end_ms": 14553,
+   "probability": 0.91
+  },
+  {
+   "id": 34,
+   "segment_id": 1,
+   "word": "painkiller",
+   "start_ms": 14647,
+   "end_ms": 15097,
+   "probability": 0.94
+  },
+  {
+   "id": 35,
+   "segment_id": 1,
+   "word": "haha",
+   "start_ms": 15194,
+   "end_ms": 15466,
+   "probability": 0.94
+  },
+  {
+   "id": 36,
+   "segment_id": 1,
+   "word": "but",
+   "start_ms": 15523,
+   "end_ms": 15780,
+   "probability": 0.89
+  },
+  {
+   "id": 37,
+   "segment_id": 1,
+   "word": "it",
+   "start_ms": 15834,
+   "end_ms": 16093,
+   "probability": 0.98
+  },
+  {
+   "id": 38,
+   "segment_id": 1,
+   "word": "is",
+   "start_ms": 16143,
+   "end_ms": 16398,
+   "probability": 0.94
+  },
+  {
+   "id": 39,
+   "segment_id": 1,
+   "word": "very",
+   "start_ms": 16467,
+   "end_ms": 16751,
+   "probability": 0.86
+  },
+  {
+   "id": 40,
+   "segment_id": 1,
+   "word": "very",
+   "start_ms": 16820,
+   "end_ms": 17104,
+   "probability": 0.86
+  },
+  {
+   "id": 41,
+   "segment_id": 1,
+   "word": "important.",
+   "start_ms": 17163,
+   "end_ms": 17612,
+   "probability": 0.89
+  },
+  {
+   "id": 42,
+   "segment_id": 1,
+   "word": "so",
+   "start_ms": 18012,
+   "end_ms": 18762,
+   "probability": 0.8
+  },
+  {
+   "id": 43,
+   "segment_id": 1,
+   "word": "the",
+   "start_ms": 19162,
+   "end_ms": 19406,
+   "probability": 0.94
+  },
+  {
+   "id": 44,
+   "segment_id": 1,
+   "word": "the",
+   "start_ms": 19460,
+   "end_ms": 19704,
+   "probability": 0.94
+  },
+  {
+   "id": 45,
+   "segment_id": 1,
+   "word": "dose",
+   "start_ms": 19784,
+   "end_ms": 20059,
+   "probability": 0.87
+  },
+  {
+   "id": 46,
+   "segment_id": 1,
+   "word": "is",
+   "start_ms": 20109,
+   "end_ms": 20364,
+   "probability": 0.94
+  },
+  {
+   "id": 47,
+   "segment_id": 1,
+   "word": "ten",
+   "start_ms": 20451,
+   "end_ms": 20728,
+   "probability": 0.88
+  },
+  {
+   "id": 48,
+   "segment_id": 1,
+   "word": "milligrams.",
+   "start_ms": 20830,
+   "end_ms": 21280,
+   "probability": 0.95
+  },
+  {
+   "id": 49,
+   "segment_id": 1,
+   "word": "Ten",
+   "start_ms": 21496,
+   "end_ms": 21737,
+   "probability": 0.96
+  },
+  {
+   "id": 50,
+   "segment_id": 1,
+   "word": "milligrams",
+   "start_ms": 21801,
+   "end_ms": 22251,
+   "probability": 0.95
+  },
+  {
+   "id": 51,
+   "segment_id": 1,
+   "word": "only.",
+   "start_ms": 22347,
+   "end_ms": 22638,
+   "probability": 0.94
+  },
+  {
+   "id": 52,
+   "segment_id": 1,
+   "word": "uh",
+   "start_ms": 22865,
+   "end_ms": 23565,
+   "probability": 0.5
+  },
+  {
+   "id": 53,
+   "segment_id": 1,
+   "word": "peo",
+   "start_ms": 23645,
+   "end_ms": 23825,
+   "probability": 0.4
+  },
+  {
+   "id": 54,
+   "segment_id": 1,
+   "word": "people",
+   "start_ms": 23901,
+   "end_ms": 24292,
+   "probability": 0.94
+  },
+  {
+   "id": 55,
+   "segment_id": 1,
+   "word": "forget",
+   "start_ms": 24340,
+   "end_ms": 24713,
+   "probability": 0.97
+  },
+  {
+   "id": 56,
+   "segment_id": 1,
+   "word": "that.",
+   "start_ms": 24785,
+   "end_ms": 25102,
+   "probability": 0.91
+  },
+  {
+   "id": 57,
+   "segment_id": 1,
+   "word": "hmm",
+   "start_ms": 25452,
+   "end_ms": 26352,
+   "probability": 0.45
+  },
+  {
+   "id": 58,
+   "segment_id": 1,
+   "word": "like",
+   "start_ms": 26702,
+   "end_ms": 27502,
+   "probability": 0.8
+  },
+  {
+   "id": 59,
+   "segment_id": 1,
+   "word": "ask",
+   "start_ms": 27852,
+   "end_ms": 28113,
+   "probability": 0.98
+  },
+  {
+   "id": 60,
+   "segment_id": 1,
+   "word": "your",
+   "start_ms": 28204,
+   "end_ms": 28510,
+   "probability": 0.95
+  },
+  {
+   "id": 61,
+   "segment_id": 1,
+   "word": "doctor.",
+   "start_ms": 28603,
+   "end_ms": 28961,
+   "probability": 0.94
+  }
+ ],
+ "labels": [
+  {
+   "word_id": 3,
+   "label": "F"
+  },
+  {
+   "word_id": 10,
+   "label": "-"
+  },
+  {
+   "word_id": 16,
+   "label": "R"
+  },
+  {
+   "word_id": 17,
+   "label": "R"
+  },
+  {
+   "word_id": 18,
+   "label": "R"
+  },
+  {
+   "word_id": 19,
+   "label": "R"
+  },
+  {
+   "word_id": 20,
+   "label": "R"
+  },
+  {
+   "word_id": 21,
+   "label": "R"
+  },
+  {
+   "word_id": 32,
+   "label": "-"
+  },
+  {
+   "word_id": 35,
+   "label": "-"
+  },
+  {
+   "word_id": 39,
+   "label": "-"
+  },
+  {
+   "word_id": 40,
+   "label": "-"
+  },
+  {
+   "word_id": 42,
+   "label": "F"
+  },
+  {
+   "word_id": 43,
+   "label": "W"
+  },
+  {
+   "word_id": 47,
+   "label": "-"
+  },
+  {
+   "word_id": 49,
+   "label": "-"
+  },
+  {
+   "word_id": 52,
+   "label": "F"
+  },
+  {
+   "word_id": 53,
+   "label": "S"
+  },
+  {
+   "word_id": 57,
+   "label": "F"
+  },
+  {
+   "word_id": 58,
+   "label": "F"
+  }
+ ]
+}

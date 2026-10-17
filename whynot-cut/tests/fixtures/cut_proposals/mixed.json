@@ -1,0 +1,260 @@
+{
+ "note": "Made-up transcript for Task 25 cut proposals (no client speech). labels: what an editor removes (R retake, S false start, F filler, W repeated word); '-' = must never be proposed. A doubled word's second copy carries no label: the first is the one proposed.",
+ "language": "ar",
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "الـ",
+   "start_ms": 0,
+   "end_ms": 150,
+   "probability": 0.95
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "vitamin",
+   "start_ms": 210,
+   "end_ms": 610,
+   "probability": 0.95
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "D",
+   "start_ms": 670,
+   "end_ms": 870,
+   "probability": 0.95
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "مهم",
+   "start_ms": 930,
+   "end_ms": 1230,
+   "probability": 0.95
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "الـ",
+   "start_ms": 1630,
+   "end_ms": 1780,
+   "probability": 0.95
+  },
+  {
+   "id": 6,
+   "segment_id": 1,
+   "word": "vitamin",
+   "start_ms": 1840,
+   "end_ms": 2240,
+   "probability": 0.95
+  },
+  {
+   "id": 7,
+   "segment_id": 1,
+   "word": "D",
+   "start_ms": 2300,
+   "end_ms": 2500,
+   "probability": 0.95
+  },
+  {
+   "id": 8,
+   "segment_id": 1,
+   "word": "مهم",
+   "start_ms": 2560,
+   "end_ms": 2860,
+   "probability": 0.95
+  },
+  {
+   "id": 9,
+   "segment_id": 1,
+   "word": "جدا",
+   "start_ms": 2920,
+   "end_ms": 3220,
+   "probability": 0.95
+  },
+  {
+   "id": 10,
+   "segment_id": 1,
+   "word": "للعضم.",
+   "start_ms": 3280,
+   "end_ms": 3680,
+   "probability": 0.95
+  },
+  {
+   "id": 11,
+   "segment_id": 1,
+   "word": "ممم",
+   "start_ms": 4180,
+   "end_ms": 4780,
+   "probability": 0.4
+  },
+  {
+   "id": 12,
+   "segment_id": 1,
+   "word": "خدي",
+   "start_ms": 5080,
+   "end_ms": 5380,
+   "probability": 0.95
+  },
+  {
+   "id": 13,
+   "segment_id": 1,
+   "word": "Omega",
+   "start_ms": 5440,
+   "end_ms": 5840,
+   "probability": 0.95
+  },
+  {
+   "id": 14,
+   "segment_id": 1,
+   "word": "3",
+   "start_ms": 5900,
+   "end_ms": 6100,
+   "probability": 0.95
+  },
+  {
+   "id": 15,
+   "segment_id": 1,
+   "word": "كل",
+   "start_ms": 6160,
+   "end_ms": 6360,
+   "probability": 0.95
+  },
+  {
+   "id": 16,
+   "segment_id": 1,
+   "word": "يوم.",
+   "start_ms": 6420,
+   "end_ms": 6720,
+   "probability": 0.95
+  },
+  {
+   "id": 17,
+   "segment_id": 1,
+   "word": "٣",
+   "start_ms": 7220,
+   "end_ms": 7520,
+   "probability": 0.95
+  },
+  {
+   "id": 18,
+   "segment_id": 1,
+   "word": "٣",
+   "start_ms": 7580,
+   "end_ms": 7880,
+   "probability": 0.95
+  },
+  {
+   "id": 19,
+   "segment_id": 1,
+   "word": "حبايات",
+   "start_ms": 7940,
+   "end_ms": 8340,
+   "probability": 0.95
+  },
+  {
+   "id": 20,
+   "segment_id": 1,
+   "word": "في",
+   "start_ms": 8400,
+   "end_ms": 8600,
+   "probability": 0.95
+  },
+  {
+   "id": 21,
+   "segment_id": 1,
+   "word": "الأسبوع.",
+   "start_ms": 8660,
+   "end_ms": 9060,
+   "probability": 0.95
+  },
+  {
+   "id": 22,
+   "segment_id": 1,
+   "word": "يعني",
+   "start_ms": 9560,
+   "end_ms": 9860,
+   "probability": 0.95
+  },
+  {
+   "id": 23,
+   "segment_id": 1,
+   "word": "ده",
+   "start_ms": 9920,
+   "end_ms": 10120,
+   "probability": 0.95
+  },
+  {
+   "id": 24,
+   "segment_id": 1,
+   "word": "رأيي.",
+   "start_ms": 10180,
+   "end_ms": 10480,
+   "probability": 0.95
+  },
+  {
+   "id": 25,
+   "segment_id": 1,
+   "word": "like",
+   "start_ms": 10980,
+   "end_ms": 11880,
+   "probability": 0.95
+  },
+  {
+   "id": 26,
+   "segment_id": 1,
+   "word": "المهم",
+   "start_ms": 12280,
+   "end_ms": 12580,
+   "probability": 0.95
+  },
+  {
+   "id": 27,
+   "segment_id": 1,
+   "word": "الاستمرار.",
+   "start_ms": 12640,
+   "end_ms": 13140,
+   "probability": 0.95
+  }
+ ],
+ "labels": [
+  {
+   "word_id": 1,
+   "label": "R"
+  },
+  {
+   "word_id": 2,
+   "label": "R"
+  },
+  {
+   "word_id": 3,
+   "label": "R"
+  },
+  {
+   "word_id": 4,
+   "label": "R"
+  },
+  {
+   "word_id": 11,
+   "label": "F"
+  },
+  {
+   "word_id": 17,
+   "label": "-"
+  },
+  {
+   "word_id": 18,
+   "label": "-"
+  },
+  {
+   "word_id": 22,
+   "label": "-"
+  },
+  {
+   "word_id": 25,
+   "label": "F"
+  }
+ ]
+}

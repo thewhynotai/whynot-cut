@@ -1,0 +1,476 @@
+{
+ "note": "Dermatologist, Egyptian Arabic: long-pause retake, false start, hesitations, doubled word, traps (yes-اه, إيه, يعني?, drug, number twice).",
+ "language": "ar",
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "أهلا",
+   "start_ms": 300,
+   "end_ms": 621,
+   "probability": 0.97
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "بيكم.",
+   "start_ms": 681,
+   "end_ms": 986,
+   "probability": 0.88
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "النهارده",
+   "start_ms": 1201,
+   "end_ms": 1646,
+   "probability": 0.98
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "هنتكلم",
+   "start_ms": 1732,
+   "end_ms": 2093,
+   "probability": 0.88
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "عن",
+   "start_ms": 2141,
+   "end_ms": 2384,
+   "probability": 0.96
+  },
+  {
+   "id": 6,
+   "segment_id": 1,
+   "word": "حب",
+   "start_ms": 2486,
+   "end_ms": 2693,
+   "probability": 0.96
+  },
+  {
+   "id": 7,
+   "segment_id": 1,
+   "word": "الشباب.",
+   "start_ms": 2752,
+   "end_ms": 3116,
+   "probability": 0.98
+  },
+  {
+   "id": 8,
+   "segment_id": 1,
+   "word": "ممم",
+   "start_ms": 3816,
+   "end_ms": 4816,
+   "probability": 0.45
+  },
+  {
+   "id": 9,
+   "segment_id": 1,
+   "word": "الغسول",
+   "start_ms": 4872,
+   "end_ms": 5253,
+   "probability": 0.92
+  },
+  {
+   "id": 10,
+   "segment_id": 1,
+   "word": "لازم",
+   "start_ms": 5340,
+   "end_ms": 5662,
+   "probability": 0.93
+  },
+  {
+   "id": 11,
+   "segment_id": 1,
+   "word": "يكون",
+   "start_ms": 5715,
+   "end_ms": 6043,
+   "probability": 0.92
+  },
+  {
+   "id": 12,
+   "segment_id": 1,
+   "word": "لطيف",
+   "start_ms": 6150,
+   "end_ms": 6452,
+   "probability": 0.97
+  },
+  {
+   "id": 13,
+   "segment_id": 1,
+   "word": "الغسول",
+   "start_ms": 7952,
+   "end_ms": 8333,
+   "probability": 0.92
+  },
+  {
+   "id": 14,
+   "segment_id": 1,
+   "word": "لازم",
+   "start_ms": 8420,
+   "end_ms": 8742,
+   "probability": 0.93
+  },
+  {
+   "id": 15,
+   "segment_id": 1,
+   "word": "يكون",
+   "start_ms": 8795,
+   "end_ms": 9123,
+   "probability": 0.92
+  },
+  {
+   "id": 16,
+   "segment_id": 1,
+   "word": "لطيف",
+   "start_ms": 9230,
+   "end_ms": 9532,
+   "probability": 0.97
+  },
+  {
+   "id": 17,
+   "segment_id": 1,
+   "word": "على",
+   "start_ms": 9637,
+   "end_ms": 9912,
+   "probability": 0.86
+  },
+  {
+   "id": 18,
+   "segment_id": 1,
+   "word": "البشرة.",
+   "start_ms": 9991,
+   "end_ms": 10385,
+   "probability": 0.97
+  },
+  {
+   "id": 19,
+   "segment_id": 1,
+   "word": "وبعدين",
+   "start_ms": 10624,
+   "end_ms": 10993,
+   "probability": 0.93
+  },
+  {
+   "id": 20,
+   "segment_id": 1,
+   "word": "الكر",
+   "start_ms": 11074,
+   "end_ms": 11274,
+   "probability": 0.4
+  },
+  {
+   "id": 21,
+   "segment_id": 1,
+   "word": "الكريم",
+   "start_ms": 11385,
+   "end_ms": 11761,
+   "probability": 0.95
+  },
+  {
+   "id": 22,
+   "segment_id": 1,
+   "word": "بتاعك",
+   "start_ms": 11810,
+   "end_ms": 12149,
+   "probability": 0.91
+  },
+  {
+   "id": 23,
+   "segment_id": 1,
+   "word": "لازم",
+   "start_ms": 12236,
+   "end_ms": 12558,
+   "probability": 0.93
+  },
+  {
+   "id": 24,
+   "segment_id": 1,
+   "word": "يتحط",
+   "start_ms": 12636,
+   "end_ms": 12939,
+   "probability": 0.92
+  },
+  {
+   "id": 25,
+   "segment_id": 1,
+   "word": "في",
+   "start_ms": 13027,
+   "end_ms": 13250,
+   "probability": 0.97
+  },
+  {
+   "id": 26,
+   "segment_id": 1,
+   "word": "في",
+   "start_ms": 13338,
+   "end_ms": 13561,
+   "probability": 0.97
+  },
+  {
+   "id": 27,
+   "segment_id": 1,
+   "word": "الليل.",
+   "start_ms": 13633,
+   "end_ms": 13975,
+   "probability": 0.86
+  },
+  {
+   "id": 28,
+   "segment_id": 1,
+   "word": "ده",
+   "start_ms": 14172,
+   "end_ms": 14389,
+   "probability": 0.96
+  },
+  {
+   "id": 29,
+   "segment_id": 1,
+   "word": "يعني",
+   "start_ms": 14486,
+   "end_ms": 14788,
+   "probability": 0.92
+  },
+  {
+   "id": 30,
+   "segment_id": 1,
+   "word": "إن",
+   "start_ms": 14846,
+   "end_ms": 15089,
+   "probability": 0.88
+  },
+  {
+   "id": 31,
+   "segment_id": 1,
+   "word": "الجلد",
+   "start_ms": 15190,
+   "end_ms": 15521,
+   "probability": 0.91
+  },
+  {
+   "id": 32,
+   "segment_id": 1,
+   "word": "بيتجدد.",
+   "start_ms": 15623,
+   "end_ms": 15980,
+   "probability": 0.94
+  },
+  {
+   "id": 33,
+   "segment_id": 1,
+   "word": "فاهمين؟",
+   "start_ms": 16189,
+   "end_ms": 16558,
+   "probability": 0.86
+  },
+  {
+   "id": 34,
+   "segment_id": 1,
+   "word": "اه",
+   "start_ms": 16821,
+   "end_ms": 17074,
+   "probability": 0.98
+  },
+  {
+   "id": 35,
+   "segment_id": 1,
+   "word": "طبعا.",
+   "start_ms": 17163,
+   "end_ms": 17447,
+   "probability": 0.92
+  },
+  {
+   "id": 36,
+   "segment_id": 1,
+   "word": "بص",
+   "start_ms": 17947,
+   "end_ms": 18797,
+   "probability": 0.7
+  },
+  {
+   "id": 37,
+   "segment_id": 1,
+   "word": "الأيزوتريتينوين",
+   "start_ms": 19247,
+   "end_ms": 19697,
+   "probability": 0.87
+  },
+  {
+   "id": 38,
+   "segment_id": 1,
+   "word": "دوا",
+   "start_ms": 19758,
+   "end_ms": 20029,
+   "probability": 0.97
+  },
+  {
+   "id": 39,
+   "segment_id": 1,
+   "word": "قوي.",
+   "start_ms": 20108,
+   "end_ms": 20347,
+   "probability": 0.98
+  },
+  {
+   "id": 40,
+   "segment_id": 1,
+   "word": "ده",
+   "start_ms": 20544,
+   "end_ms": 20761,
+   "probability": 0.96
+  },
+  {
+   "id": 41,
+   "segment_id": 1,
+   "word": "معناه",
+   "start_ms": 20822,
+   "end_ms": 21143,
+   "probability": 0.92
+  },
+  {
+   "id": 42,
+   "segment_id": 1,
+   "word": "إيه؟",
+   "start_ms": 21224,
+   "end_ms": 21495,
+   "probability": 0.95
+  },
+  {
+   "id": 43,
+   "segment_id": 1,
+   "word": "تاخده",
+   "start_ms": 21676,
+   "end_ms": 22012,
+   "probability": 0.88
+  },
+  {
+   "id": 44,
+   "segment_id": 1,
+   "word": "مرتين",
+   "start_ms": 22104,
+   "end_ms": 22456,
+   "probability": 0.97
+  },
+  {
+   "id": 45,
+   "segment_id": 1,
+   "word": "في",
+   "start_ms": 22544,
+   "end_ms": 22767,
+   "probability": 0.97
+  },
+  {
+   "id": 46,
+   "segment_id": 1,
+   "word": "اليوم،",
+   "start_ms": 22840,
+   "end_ms": 23163,
+   "probability": 0.89
+  },
+  {
+   "id": 47,
+   "segment_id": 1,
+   "word": "مرتين",
+   "start_ms": 23255,
+   "end_ms": 23607,
+   "probability": 0.97
+  },
+  {
+   "id": 48,
+   "segment_id": 1,
+   "word": "بس.",
+   "start_ms": 23688,
+   "end_ms": 23914,
+   "probability": 0.95
+  },
+  {
+   "id": 49,
+   "segment_id": 1,
+   "word": "ده",
+   "start_ms": 24111,
+   "end_ms": 24328,
+   "probability": 0.96
+  },
+  {
+   "id": 50,
+   "segment_id": 1,
+   "word": "خطر",
+   "start_ms": 24438,
+   "end_ms": 24688,
+   "probability": 0.89
+  },
+  {
+   "id": 51,
+   "segment_id": 1,
+   "word": "يعني؟",
+   "start_ms": 24764,
+   "end_ms": 25055,
+   "probability": 0.89
+  }
+ ],
+ "labels": [
+  {
+   "word_id": 8,
+   "label": "F"
+  },
+  {
+   "word_id": 9,
+   "label": "R"
+  },
+  {
+   "word_id": 10,
+   "label": "R"
+  },
+  {
+   "word_id": 11,
+   "label": "R"
+  },
+  {
+   "word_id": 12,
+   "label": "R"
+  },
+  {
+   "word_id": 20,
+   "label": "S"
+  },
+  {
+   "word_id": 25,
+   "label": "W"
+  },
+  {
+   "word_id": 29,
+   "label": "-"
+  },
+  {
+   "word_id": 34,
+   "label": "-"
+  },
+  {
+   "word_id": 36,
+   "label": "F"
+  },
+  {
+   "word_id": 37,
+   "label": "-"
+  },
+  {
+   "word_id": 42,
+   "label": "-"
+  },
+  {
+   "word_id": 44,
+   "label": "-"
+  },
+  {
+   "word_id": 47,
+   "label": "-"
+  },
+  {
+   "word_id": 51,
+   "label": "-"
+  }
+ ]
+}

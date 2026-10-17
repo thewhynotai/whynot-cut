@@ -1,0 +1,484 @@
+{
+ "note": "Casual podcast, Egyptian Arabic: laughter, yes-اه, one-word-different retake, stretched يعني, اممم/آآه, emphasis repeats, أمم (nations).",
+ "language": "ar",
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "يا",
+   "start_ms": 300,
+   "end_ms": 530,
+   "probability": 0.88
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "جماعة",
+   "start_ms": 587,
+   "end_ms": 924,
+   "probability": 0.94
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "ههههه",
+   "start_ms": 1034,
+   "end_ms": 1374,
+   "probability": 0.91
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "اممم",
+   "start_ms": 1449,
+   "end_ms": 2549,
+   "probability": 0.4
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "أنا",
+   "start_ms": 2636,
+   "end_ms": 2923,
+   "probability": 0.92
+  },
+  {
+   "id": 6,
+   "segment_id": 1,
+   "word": "كنت",
+   "start_ms": 2981,
+   "end_ms": 3259,
+   "probability": 0.86
+  },
+  {
+   "id": 7,
+   "segment_id": 1,
+   "word": "ماشي",
+   "start_ms": 3319,
+   "end_ms": 3624,
+   "probability": 0.97
+  },
+  {
+   "id": 8,
+   "segment_id": 1,
+   "word": "في",
+   "start_ms": 3712,
+   "end_ms": 3935,
+   "probability": 0.97
+  },
+  {
+   "id": 9,
+   "segment_id": 1,
+   "word": "الشارع",
+   "start_ms": 3990,
+   "end_ms": 4380,
+   "probability": 0.92
+  },
+  {
+   "id": 10,
+   "segment_id": 1,
+   "word": "وشفت",
+   "start_ms": 4444,
+   "end_ms": 4743,
+   "probability": 0.96
+  },
+  {
+   "id": 11,
+   "segment_id": 1,
+   "word": "واحد",
+   "start_ms": 4825,
+   "end_ms": 5122,
+   "probability": 0.91
+  },
+  {
+   "id": 12,
+   "segment_id": 1,
+   "word": "أنا",
+   "start_ms": 5722,
+   "end_ms": 6009,
+   "probability": 0.92
+  },
+  {
+   "id": 13,
+   "segment_id": 1,
+   "word": "كنت",
+   "start_ms": 6067,
+   "end_ms": 6345,
+   "probability": 0.86
+  },
+  {
+   "id": 14,
+   "segment_id": 1,
+   "word": "ماشي",
+   "start_ms": 6405,
+   "end_ms": 6710,
+   "probability": 0.97
+  },
+  {
+   "id": 15,
+   "segment_id": 1,
+   "word": "في",
+   "start_ms": 6798,
+   "end_ms": 7021,
+   "probability": 0.97
+  },
+  {
+   "id": 16,
+   "segment_id": 1,
+   "word": "الشارع",
+   "start_ms": 7076,
+   "end_ms": 7466,
+   "probability": 0.92
+  },
+  {
+   "id": 17,
+   "segment_id": 1,
+   "word": "وشفت",
+   "start_ms": 7530,
+   "end_ms": 7829,
+   "probability": 0.96
+  },
+  {
+   "id": 18,
+   "segment_id": 1,
+   "word": "راجل",
+   "start_ms": 7893,
+   "end_ms": 8182,
+   "probability": 0.91
+  },
+  {
+   "id": 19,
+   "segment_id": 1,
+   "word": "بيجري.",
+   "start_ms": 8263,
+   "end_ms": 8584,
+   "probability": 0.93
+  },
+  {
+   "id": 20,
+   "segment_id": 1,
+   "word": "اه",
+   "start_ms": 8847,
+   "end_ms": 9100,
+   "probability": 0.98
+  },
+  {
+   "id": 21,
+   "segment_id": 1,
+   "word": "والله.",
+   "start_ms": 9210,
+   "end_ms": 9520,
+   "probability": 0.93
+  },
+  {
+   "id": 22,
+   "segment_id": 1,
+   "word": "هو",
+   "start_ms": 9703,
+   "end_ms": 9936,
+   "probability": 0.94
+  },
+  {
+   "id": 23,
+   "segment_id": 1,
+   "word": "هو",
+   "start_ms": 10034,
+   "end_ms": 10267,
+   "probability": 0.94
+  },
+  {
+   "id": 24,
+   "segment_id": 1,
+   "word": "كان",
+   "start_ms": 10341,
+   "end_ms": 10635,
+   "probability": 0.89
+  },
+  {
+   "id": 25,
+   "segment_id": 1,
+   "word": "بيجري",
+   "start_ms": 10698,
+   "end_ms": 11011,
+   "probability": 0.89
+  },
+  {
+   "id": 26,
+   "segment_id": 1,
+   "word": "ورا",
+   "start_ms": 11125,
+   "end_ms": 11379,
+   "probability": 0.93
+  },
+  {
+   "id": 27,
+   "segment_id": 1,
+   "word": "أتوبيس.",
+   "start_ms": 11475,
+   "end_ms": 11856,
+   "probability": 0.9
+  },
+  {
+   "id": 28,
+   "segment_id": 1,
+   "word": "ههههه",
+   "start_ms": 12071,
+   "end_ms": 12411,
+   "probability": 0.91
+  },
+  {
+   "id": 29,
+   "segment_id": 1,
+   "word": "كنت",
+   "start_ms": 12469,
+   "end_ms": 12747,
+   "probability": 0.86
+  },
+  {
+   "id": 30,
+   "segment_id": 1,
+   "word": "عاو",
+   "start_ms": 12801,
+   "end_ms": 13075,
+   "probability": 0.95
+  },
+  {
+   "id": 31,
+   "segment_id": 1,
+   "word": "عاوز",
+   "start_ms": 13125,
+   "end_ms": 13410,
+   "probability": 0.95
+  },
+  {
+   "id": 32,
+   "segment_id": 1,
+   "word": "أضحك.",
+   "start_ms": 13463,
+   "end_ms": 13791,
+   "probability": 0.92
+  },
+  {
+   "id": 33,
+   "segment_id": 1,
+   "word": "يعني",
+   "start_ms": 14291,
+   "end_ms": 15191,
+   "probability": 0.8
+  },
+  {
+   "id": 34,
+   "segment_id": 1,
+   "word": "آآه",
+   "start_ms": 15691,
+   "end_ms": 16491,
+   "probability": 0.45
+  },
+  {
+   "id": 35,
+   "segment_id": 1,
+   "word": "الماتش",
+   "start_ms": 16542,
+   "end_ms": 16928,
+   "probability": 0.88
+  },
+  {
+   "id": 36,
+   "segment_id": 1,
+   "word": "ده",
+   "start_ms": 17020,
+   "end_ms": 17237,
+   "probability": 0.96
+  },
+  {
+   "id": 37,
+   "segment_id": 1,
+   "word": "يعني",
+   "start_ms": 17334,
+   "end_ms": 17636,
+   "probability": 0.92
+  },
+  {
+   "id": 38,
+   "segment_id": 1,
+   "word": "كأس",
+   "start_ms": 17739,
+   "end_ms": 17982,
+   "probability": 0.95
+  },
+  {
+   "id": 39,
+   "segment_id": 1,
+   "word": "أمم",
+   "start_ms": 18075,
+   "end_ms": 18328,
+   "probability": 0.95
+  },
+  {
+   "id": 40,
+   "segment_id": 1,
+   "word": "أفريقيا.",
+   "start_ms": 18394,
+   "end_ms": 18820,
+   "probability": 0.86
+  },
+  {
+   "id": 41,
+   "segment_id": 1,
+   "word": "وده",
+   "start_ms": 19021,
+   "end_ms": 19307,
+   "probability": 0.89
+  },
+  {
+   "id": 42,
+   "segment_id": 1,
+   "word": "مهم",
+   "start_ms": 19370,
+   "end_ms": 19613,
+   "probability": 0.88
+  },
+  {
+   "id": 43,
+   "segment_id": 1,
+   "word": "جدا.",
+   "start_ms": 19701,
+   "end_ms": 19959,
+   "probability": 0.95
+  },
+  {
+   "id": 44,
+   "segment_id": 1,
+   "word": "مهم",
+   "start_ms": 20147,
+   "end_ms": 20390,
+   "probability": 0.88
+  },
+  {
+   "id": 45,
+   "segment_id": 1,
+   "word": "جدا.",
+   "start_ms": 20478,
+   "end_ms": 20736,
+   "probability": 0.95
+  },
+  {
+   "id": 46,
+   "segment_id": 1,
+   "word": "حلو",
+   "start_ms": 20945,
+   "end_ms": 21239,
+   "probability": 0.97
+  },
+  {
+   "id": 47,
+   "segment_id": 1,
+   "word": "أوي",
+   "start_ms": 21299,
+   "end_ms": 21589,
+   "probability": 0.93
+  },
+  {
+   "id": 48,
+   "segment_id": 1,
+   "word": "أوي",
+   "start_ms": 21649,
+   "end_ms": 21939,
+   "probability": 0.93
+  }
+ ],
+ "labels": [
+  {
+   "word_id": 3,
+   "label": "-"
+  },
+  {
+   "word_id": 4,
+   "label": "F"
+  },
+  {
+   "word_id": 5,
+   "label": "R"
+  },
+  {
+   "word_id": 6,
+   "label": "R"
+  },
+  {
+   "word_id": 7,
+   "label": "R"
+  },
+  {
+   "word_id": 8,
+   "label": "R"
+  },
+  {
+   "word_id": 9,
+   "label": "R"
+  },
+  {
+   "word_id": 10,
+   "label": "R"
+  },
+  {
+   "word_id": 11,
+   "label": "R"
+  },
+  {
+   "word_id": 20,
+   "label": "-"
+  },
+  {
+   "word_id": 22,
+   "label": "W"
+  },
+  {
+   "word_id": 28,
+   "label": "-"
+  },
+  {
+   "word_id": 30,
+   "label": "S"
+  },
+  {
+   "word_id": 33,
+   "label": "F"
+  },
+  {
+   "word_id": 34,
+   "label": "F"
+  },
+  {
+   "word_id": 37,
+   "label": "-"
+  },
+  {
+   "word_id": 39,
+   "label": "-"
+  },
+  {
+   "word_id": 42,
+   "label": "-"
+  },
+  {
+   "word_id": 43,
+   "label": "-"
+  },
+  {
+   "word_id": 44,
+   "label": "-"
+  },
+  {
+   "word_id": 45,
+   "label": "-"
+  },
+  {
+   "word_id": 47,
+   "label": "-"
+  },
+  {
+   "word_id": 48,
+   "label": "-"
+  }
+ ]
+}

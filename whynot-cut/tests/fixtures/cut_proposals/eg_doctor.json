@@ -1,0 +1,352 @@
+{
+ "note": "Made-up transcript for Task 25 cut proposals (no client speech). labels: what an editor removes (R retake, S false start, F filler, W repeated word); '-' = must never be proposed. A doubled word's second copy carries no label: the first is the one proposed.",
+ "language": "ar",
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "أول",
+   "start_ms": 0,
+   "end_ms": 250,
+   "probability": 0.95
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "حاجة",
+   "start_ms": 310,
+   "end_ms": 610,
+   "probability": 0.95
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "لازم",
+   "start_ms": 670,
+   "end_ms": 970,
+   "probability": 0.95
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "تعرفي",
+   "start_ms": 1030,
+   "end_ms": 1380,
+   "probability": 0.95
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "أول",
+   "start_ms": 1880,
+   "end_ms": 2130,
+   "probability": 0.95
+  },
+  {
+   "id": 6,
+   "segment_id": 1,
+   "word": "حاجة",
+   "start_ms": 2190,
+   "end_ms": 2490,
+   "probability": 0.95
+  },
+  {
+   "id": 7,
+   "segment_id": 1,
+   "word": "لازم",
+   "start_ms": 2550,
+   "end_ms": 2850,
+   "probability": 0.95
+  },
+  {
+   "id": 8,
+   "segment_id": 1,
+   "word": "تعرفيها",
+   "start_ms": 2910,
+   "end_ms": 3260,
+   "probability": 0.95
+  },
+  {
+   "id": 9,
+   "segment_id": 1,
+   "word": "كويس.",
+   "start_ms": 3320,
+   "end_ms": 3620,
+   "probability": 0.95
+  },
+  {
+   "id": 10,
+   "segment_id": 1,
+   "word": "اممم",
+   "start_ms": 4020,
+   "end_ms": 4720,
+   "probability": 0.4
+  },
+  {
+   "id": 11,
+   "segment_id": 1,
+   "word": "الضغط",
+   "start_ms": 5020,
+   "end_ms": 5420,
+   "probability": 0.95
+  },
+  {
+   "id": 12,
+   "segment_id": 1,
+   "word": "العالي",
+   "start_ms": 5480,
+   "end_ms": 5880,
+   "probability": 0.95
+  },
+  {
+   "id": 13,
+   "segment_id": 1,
+   "word": "مش",
+   "start_ms": 5940,
+   "end_ms": 6140,
+   "probability": 0.95
+  },
+  {
+   "id": 14,
+   "segment_id": 1,
+   "word": "بيوجع.",
+   "start_ms": 6200,
+   "end_ms": 6600,
+   "probability": 0.95
+  },
+  {
+   "id": 15,
+   "segment_id": 1,
+   "word": "يعني",
+   "start_ms": 7050,
+   "end_ms": 7950,
+   "probability": 0.95
+  },
+  {
+   "id": 16,
+   "segment_id": 1,
+   "word": "ممكن",
+   "start_ms": 8350,
+   "end_ms": 8650,
+   "probability": 0.95
+  },
+  {
+   "id": 17,
+   "segment_id": 1,
+   "word": "يكون",
+   "start_ms": 8710,
+   "end_ms": 9010,
+   "probability": 0.95
+  },
+  {
+   "id": 18,
+   "segment_id": 1,
+   "word": "في",
+   "start_ms": 9070,
+   "end_ms": 9270,
+   "probability": 0.95
+  },
+  {
+   "id": 19,
+   "segment_id": 1,
+   "word": "في",
+   "start_ms": 9330,
+   "end_ms": 9530,
+   "probability": 0.95
+  },
+  {
+   "id": 20,
+   "segment_id": 1,
+   "word": "البيت",
+   "start_ms": 9590,
+   "end_ms": 9890,
+   "probability": 0.95
+  },
+  {
+   "id": 21,
+   "segment_id": 1,
+   "word": "جهاز",
+   "start_ms": 9950,
+   "end_ms": 10250,
+   "probability": 0.95
+  },
+  {
+   "id": 22,
+   "segment_id": 1,
+   "word": "قياس.",
+   "start_ms": 10310,
+   "end_ms": 10710,
+   "probability": 0.95
+  },
+  {
+   "id": 23,
+   "segment_id": 1,
+   "word": "الدكت",
+   "start_ms": 11210,
+   "end_ms": 11360,
+   "probability": 0.4
+  },
+  {
+   "id": 24,
+   "segment_id": 1,
+   "word": "الدكتورة",
+   "start_ms": 11460,
+   "end_ms": 11860,
+   "probability": 0.95
+  },
+  {
+   "id": 25,
+   "segment_id": 1,
+   "word": "هتقولك",
+   "start_ms": 11920,
+   "end_ms": 12320,
+   "probability": 0.95
+  },
+  {
+   "id": 26,
+   "segment_id": 1,
+   "word": "الجرعة.",
+   "start_ms": 12380,
+   "end_ms": 12780,
+   "probability": 0.95
+  },
+  {
+   "id": 27,
+   "segment_id": 1,
+   "word": "هههه",
+   "start_ms": 13280,
+   "end_ms": 13780,
+   "probability": 0.95
+  },
+  {
+   "id": 28,
+   "segment_id": 1,
+   "word": "اه",
+   "start_ms": 14080,
+   "end_ms": 14330,
+   "probability": 0.95
+  },
+  {
+   "id": 29,
+   "segment_id": 1,
+   "word": "صح.",
+   "start_ms": 14390,
+   "end_ms": 14690,
+   "probability": 0.95
+  },
+  {
+   "id": 30,
+   "segment_id": 1,
+   "word": "ايه",
+   "start_ms": 15190,
+   "end_ms": 15490,
+   "probability": 0.95
+  },
+  {
+   "id": 31,
+   "segment_id": 1,
+   "word": "رأيك",
+   "start_ms": 15550,
+   "end_ms": 15850,
+   "probability": 0.95
+  },
+  {
+   "id": 32,
+   "segment_id": 1,
+   "word": "في",
+   "start_ms": 15910,
+   "end_ms": 16110,
+   "probability": 0.95
+  },
+  {
+   "id": 33,
+   "segment_id": 1,
+   "word": "الباراسيتامول؟",
+   "start_ms": 16170,
+   "end_ms": 16770,
+   "probability": 0.95
+  },
+  {
+   "id": 34,
+   "segment_id": 1,
+   "word": "امم",
+   "start_ms": 17270,
+   "end_ms": 17570,
+   "probability": 0.95
+  },
+  {
+   "id": 35,
+   "segment_id": 1,
+   "word": "الأمم",
+   "start_ms": 17630,
+   "end_ms": 18030,
+   "probability": 0.95
+  },
+  {
+   "id": 36,
+   "segment_id": 1,
+   "word": "كلها",
+   "start_ms": 18090,
+   "end_ms": 18390,
+   "probability": 0.95
+  },
+  {
+   "id": 37,
+   "segment_id": 1,
+   "word": "بتعاني.",
+   "start_ms": 18450,
+   "end_ms": 18850,
+   "probability": 0.95
+  }
+ ],
+ "labels": [
+  {
+   "word_id": 1,
+   "label": "R"
+  },
+  {
+   "word_id": 2,
+   "label": "R"
+  },
+  {
+   "word_id": 3,
+   "label": "R"
+  },
+  {
+   "word_id": 4,
+   "label": "R"
+  },
+  {
+   "word_id": 10,
+   "label": "F"
+  },
+  {
+   "word_id": 15,
+   "label": "F"
+  },
+  {
+   "word_id": 18,
+   "label": "W"
+  },
+  {
+   "word_id": 23,
+   "label": "S"
+  },
+  {
+   "word_id": 27,
+   "label": "-"
+  },
+  {
+   "word_id": 28,
+   "label": "-"
+  },
+  {
+   "word_id": 30,
+   "label": "-"
+  },
+  {
+   "word_id": 34,
+   "label": "-"
+  }
+ ]
+}
