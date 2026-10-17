@@ -124,3 +124,12 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     (`lib/safety/decision_log.py`), K-T12 (`lib/safety/cover_check.py`), K-T17 (`lib/resolve_export.py`,
     `tests/test_resolve_export*.py`), M4-T1 (`lib/asset_manifest.py`, `tests/test_asset_manifest.py`) and M4-T4
     (`hooks/magnific_guard.py`, `tests/test_magnific_guard*.py`). Call sites, cli, skills and config arrive as patches.
+  - API backlog (2026-10-17 20:05, `D:\ClaudeData\claude-api-lane\BACKLOG.md`; any API lane claims an item, the executor
+    accepts and pushes): BL-01 `hooks/read_once.py`, `tests/test_read_once*.py`, `evals/read-once/**`; BL-02 root `LICENSE`,
+    `TRADEMARKS.md`, `CONTRIBUTING.md`, `THIRD-PARTY-NOTICES.md`, `tools/build_notices.py`, `tools/spdx_headers.py`, their
+    tests, added rows in `docs/legal/third-party-licences.md`; BL-03 `docs/legal/notices/**`; BL-04 `lib/run_state.py`;
+    BL-05 `lib/asset_needs.py`, `schemas/asset-needs.schema.json`; BL-06 `lib/assets_cmds.py`; BL-07 `whynot-cut/.mcp.json`,
+    `agents/asset-scout.md`, `skills/asset-craft/**`; BL-08 `lib/magnific_rest.py`; BL-09 `evals/mocks/magnific/**`,
+    `evals/needs-material/**`; BL-10 `lib/kashida.py`, `lib/unicode_data/**`, `tools/build_kashida_classes.py`; BL-11
+    `docs/legal/free-sources-providers.md`; BL-12 `lib/asset_placement.py`; plus each item's `tests/test_<name>*.py` and
+    `tests/fixtures/<name>/**`. Everything else (cli, guard, hooks.json, plan, handoff, skills, agents) arrives as patches.
