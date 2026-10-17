@@ -66,7 +66,8 @@ reel ref-style   --root "<CLIENT>" --record --by client-researcher   # after wri
       for a series with small captions, 72 for bigger ones). Not set = the caption template's size. Bigger captions
       get shorter lines so they stay in the frame; the plan warns when a caption is still wider than the safe area.
     - `captions_during_hook`: `"show"` keeps the captions on screen while the hook title is up (as many Arabic
-      channels do); `"hide"` (default) hides them so the hook is not read twice.
+      channels do); `"hide"` (default) hides them so the hook is not read twice. After Effects captions follow it
+      now; Premiere captions follow it after the next WhyNot Cut update (until then they stay hidden under the hook).
     - `hook_title_sfx`: `false` = no click or pop when the hook title appears; `true` (default) = its usual sound.
     - `highlight_colour`: the box behind the keyword caption: `"brand"` (default), `"accent"`, `"ink"` or a code such
       as `"#81613D"`. The plan checks it against the caption text; a colour too faint to read is swapped for the most

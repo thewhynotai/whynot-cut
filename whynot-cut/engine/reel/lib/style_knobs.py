@@ -142,13 +142,19 @@ def needs_tokens(style, glob) -> bool:
 
 
 def _value(src: dict, key: str):
-    """(present, value) of src[key]; the alias spelling (highlight_color) only when this file has no real key."""
-    if src.get(key) is not None:
-        return True, src[key]
+    """(set, value) of src[key]. An explicit null means "not set" (the next layer decides), for the real key and the
+    alias alike; the alias spelling (highlight_color) counts only when this file has no real key at all."""
+    if key in src:
+        return src[key] is not None, src[key]
     for alias, real in ALIASES.items():
         if real == key and src.get(alias) is not None:
             return True, src[alias]
     return False, None
+
+
+def _alias_clashes(src: dict, where: str) -> list[str]:
+    return [f"{where}: {alias!r} is ignored because the same file sets {real!r}" for alias, real in ALIASES.items()
+            if real in src and src.get(alias) is not None]
 
 
 def _near_misses(src: dict, where: str, knobs) -> list[str]:
@@ -180,11 +186,12 @@ def resolve(style, glob, templates: dict, tokens: dict | None, frame_w=None, lay
                             "— make it a JSON object such as {\"caption_size_px\": 72}")
             continue
         if label != "config/defaults/style.json":
-            warnings += _near_misses(data, label, tuple(DEFAULTS))
+            warnings += _near_misses(data, label, tuple(DEFAULTS)) + _alias_clashes(data, label)
         files.append((label, data))
     style = style if isinstance(style, dict) else {}
     glob = glob if isinstance(glob, dict) else {}
     warnings += _near_misses(glob, "edit-decisions global", REEL_KNOBS + ("captions_during_hook",))
+    warnings += _alias_clashes(glob, "edit-decisions global")
     tpl_cap = (templates or {}).get("highlight_caption") or {}
     width = [None]
 

@@ -827,7 +827,7 @@ def caption_width_warnings(paths: Paths, texts: list, knobs: dict) -> list[str]:
     b = Brand(paths.client_db)
     f = b.font("caption", t["size"])
     probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-    wide = []
+    wide, ae_wide = [], []
     for raw in texts:
         text = caption_text(raw, t.get("strip_punctuation"))
         if not text:
@@ -836,11 +836,26 @@ def caption_width_warnings(paths: Paths, texts: list, knobs: dict) -> list[str]:
                             max_chars=t["max_chars"], shadow=False)
         if boxes and (min(bx[0] for bx in boxes) < left or max(bx[2] for bx in boxes) > right):
             wide.append((text, max(bx[2] for bx in boxes) - min(bx[0] for bx in boxes)))
-    if not wide:
-        return []
-    shown = ", ".join(f"«{x}» ({w:.0f} px)" for x, w in wide[:3]) + (f" and {len(wide) - 3} more" if len(wide) > 3 else "")
-    return [f"{len(wide)} caption(s) wider than the safe width ({right - left} px) at caption_size_px "
-            f"{t['size']}: {shown} — choose a smaller caption_size_px (or shorter caption lines)"]
+        # After Effects draws each caption line as point text, never wrapped: measure every SRT line as one line
+        for line in (ln for ln in str(raw or "").split("\n") if ln.strip()):
+            one = caption_text(line, t.get("strip_punctuation"))
+            bx = _text_block(probe, one, f, W // 2, t["y"], b.white, line_gap=t.get("line_gap", 1.3),
+                             max_chars=10 ** 6, shadow=False) if one else []
+            if bx and (min(x[0] for x in bx) < left or max(x[2] for x in bx) > right):
+                ae_wide.append((one, max(x[2] for x in bx) - min(x[0] for x in bx)))
+
+    def listing(items):
+        return ", ".join(f"«{x}» ({w:.0f} px)" for x, w in items[:3]) + (
+            f" and {len(items) - 3} more" if len(items) > 3 else "")
+    out = []
+    if wide:
+        out.append(f"{len(wide)} caption(s) wider than the safe width ({right - left} px) at caption_size_px "
+                   f"{t['size']}: {listing(wide)} — choose a smaller caption_size_px (or shorter caption lines)")
+    if ae_wide:
+        out.append(f"After Effects: {len(ae_wide)} caption line(s) wider than the safe width ({right - left} px) at "
+                   f"caption_size_px {t['size']} (After Effects captions are one line, never wrapped): "
+                   f"{listing(ae_wide)} — choose a smaller caption_size_px for After Effects builds")
+    return out
 
 
 def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None,

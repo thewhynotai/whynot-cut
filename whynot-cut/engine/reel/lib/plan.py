@@ -255,7 +255,8 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
         podcast=load_config("podcast.json", ctx) if shots_on else {},
         speakers=(read_json(paths.p("00_inputs/speakers.json"), {}) or {}) if shots_on else {},
         words=words, pauses=pauses, srts=srts,
-        subtitle_style=load_config("subtitle-style.json", ctx) if wcut and timemap_on else None,
+        subtitle_style=load_config("subtitle-style.json", ctx)
+        if (wcut and timemap_on) or knobs[0].get("caption_short_max_chars") else None,
         flagged=flagged, profile=load_config("profile.json", ctx), sfx_kinds=_sfx_kinds(paths),
         exists=lambda rel: (paths.root / rel).exists(), is_file=lambda rel: (paths.root / rel).is_file())
 
@@ -664,6 +665,20 @@ def apply_framing(inp: PlanInputs, cam: dict):
     return {"camera": camera, "merged": merged, "bsp": bsp, "framing": framing}, errors, warnings
 
 
+def _rebuilt_captions(inp: PlanInputs, words: list, force: bool = False) -> dict:
+    """{srt name: cues} rebuilt from `words` (source clock): always with words cut (`force`), and whenever the T4.2
+    caption size scaled the short-caption length (then with that length). {} otherwise, or with no timed words."""
+    from .transcribe import caption_cues
+    knobs = (getattr(inp, "knobs", None) or ({}, [], []))[0]
+    sub_style = inp.subtitle_style
+    scaled = bool(knobs.get("caption_short_max_chars")) and isinstance(sub_style, dict)
+    if scaled:
+        sub_style = dict(sub_style, short_max_chars=knobs["caption_short_max_chars"])
+    if not (force or (scaled and words)):
+        return {}
+    return dict(zip(_CAPTION_SRTS, caption_cues(words, sub_style)))
+
+
 @_in_context
 def apply_timemap(inp: PlanInputs, camera: list, merged: list, events: list, broll: list, cues: list, box):
     """Pause removal and word cuts: the TimeMap of kept source ranges, everything moved onto the sequence clock, and
@@ -683,6 +698,13 @@ def apply_timemap(inp: PlanInputs, camera: list, merged: list, events: list, bro
         if not pz:
             errors.append("global.remove_pauses is set but 06_audio/dialogue/pauses.json is missing — run `reel audio-clean`")
     if not ((rp and pz) or wcut_ranges):
+        # T4.2: a chosen caption size rebuilds the captions with shorter lines on every build, cut or not (identity
+        # clock: the "-seq" files equal the source times)
+        rebuilt = _rebuilt_captions(inp, words_all)
+        if rebuilt:
+            out.update(captions_rebuilt=True, seq_srts={
+                name: [{"start_ms": q["start_ms"], "end_ms": q["end_ms"], "text": q["text"]} for q in cues_]
+                for name, cues_ in rebuilt.items()})
         return out, errors, warnings
     from .timemap import TimeMap
     events, cues = copy.deepcopy(events), copy.deepcopy(cues)
@@ -734,14 +756,8 @@ def apply_timemap(inp: PlanInputs, camera: list, merged: list, events: list, bro
     dropped = {b["asset_id"] for b in broll_all} - set(ev_by_id)
     cues = [c for c in cues if c.get("related_visual") not in dropped]
     # captions on the sequence clock (rebuilt without the cut words, so they never show on screen)
-    from .transcribe import caption_cues
     gone = {c["word_id"] for c in words_cut}
-    sub_style = inp.subtitle_style          # T4.2: a bigger caption size gives shorter short-caption lines
-    knobs = (getattr(inp, "knobs", None) or ({}, [], []))[0]
-    if knobs.get("caption_short_max_chars") and isinstance(sub_style, dict):
-        sub_style = dict(sub_style, short_max_chars=knobs["caption_short_max_chars"])
-    rebuilt = dict(zip(_CAPTION_SRTS, caption_cues([w for w in words_all if w["id"] not in gone], sub_style))) \
-        if gone else {}
+    rebuilt = _rebuilt_captions(inp, [w for w in words_all if w["id"] not in gone], force=bool(gone))
     seq_srts = {}
     for name in _CAPTION_SRTS:
         src = rebuilt[name] if name in rebuilt else inp.srts.get(name)
@@ -857,7 +873,8 @@ def assemble_spec(inp: PlanInputs, cam: dict, fr: dict, tm: dict, au: dict, reci
             "main_footage": inp.main_file, "base_scale_percent": fr["bsp"],
             "base_offset_x": float(cam["box"] or 0.0), "base_offset_y": float(cam["boy"] or 0.0), "framing": fr["framing"],
             "main_segments": tm["merged"], "events": sorted(tm["events"], key=lambda e: (e["start_frame"], e["track"])),
-            "caption_source": "02_transcription/captions-short-seq.srt" if tm["tmap"] else "02_transcription/captions-short.srt",
+            "caption_source": "02_transcription/captions-short-seq.srt" if tm["tmap"] or tm.get("captions_rebuilt")
+            else "02_transcription/captions-short.srt",
             "caption_highlights": caption_hl, "time_map": tm["time_map_info"],
             "music": au["music"], "recipe": recipe_info,
             # T4.2: only knobs that change something, so a client at the defaults keeps a byte-identical spec

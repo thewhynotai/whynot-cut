@@ -568,12 +568,13 @@ class TestArabicCaptionStills(KnobCase):
         h0 = _bbox_h(Path(caps[0]["fg"]))
         if h0 < 20:                                # Pillow's bitmap font does not scale: nothing to measure
             self.skipTest("no scalable font drew the caption on this machine")
-        text0 = caps[0]["text"]
-        self.style({"caption_size_px": 110})
+        words0 = " ".join(c["text"] for c in caps).split()
+        h0 = max(_bbox_h(Path(c["fg"])) for c in caps)
+        self.style({"caption_size_px": 110})                    # the captions are regrouped into shorter lines
         self.ok(self.compile())
         caps = self.render()
-        self.assertEqual(caps[0]["text"], text0)                                # logical order, same words
-        self.assertGreater(_bbox_h(Path(caps[0]["fg"])), h0 * 1.4)
+        self.assertEqual(" ".join(c["text"] for c in caps).split(), words0)     # logical order, same words
+        self.assertGreater(max(_bbox_h(Path(c["fg"])) for c in caps), h0 * 1.4)
 
     def test_h2_the_keyword_box_takes_the_highlight_colour(self):
         from PIL import Image
@@ -617,13 +618,14 @@ class TestArabicCaptionStills(KnobCase):
     def test_r2b_arabic_and_english_lines_stay_in_the_frame_at_62_100_140(self):
         W, safe = 1080, (90, 990)
         for lang, lines in self.LINES.items():
-            self.caption_srt(lines)
+            self.caption_srt(lines)                              # 62 px (the template's size) keeps this file
+            self.words(" ".join(lines))                          # a chosen size rebuilds captions from the words
             for size in (62, 100, 140):
                 self.style({"caption_size_px": size})
                 r = self.ok(self.compile())
                 caps = self.render()
                 self.assertTrue(caps, (lang, size))
-                warned = any("safe width" in w for w in r["warnings"])
+                warned = any("safe width" in w and not w.startswith("After Effects") for w in r["warnings"])
                 for c in caps:
                     from PIL import Image
                     with Image.open(c["fg"]) as im:
@@ -635,10 +637,10 @@ class TestArabicCaptionStills(KnobCase):
                         self.assertLessEqual(bb[2], safe[1] + 6, (lang, size, c["text"], bb))
 
     def test_r2c_a_line_wider_than_the_safe_width_is_a_plan_warning(self):
-        self.caption_srt(["Isotretinoin-hydrochloride-solution", "هل في حاجات"])
+        self.words("Isotretinoin-hydrochloride-solution هل في حاجات")
         self.style({"caption_size_px": 140})
         r = self.ok(self.compile())
-        w = [x for x in r["warnings"] if "safe width" in x]
+        w = [x for x in r["warnings"] if "safe width" in x and not x.startswith("After Effects")]
         self.assertEqual(len(w), 1, r["warnings"])
         self.assertIn("Isotretinoin", w[0])
         self.assertIn("caption_size_px", w[0])
@@ -651,6 +653,52 @@ class TestArabicCaptionStills(KnobCase):
             self.ok(self.compile({"cut_words": [3]}))
             return len(srtlib.read_srt(self.p.p("02_transcription/captions-short-seq.srt")))
         self.assertGreater(n_cues({"caption_size_px": 140}), n_cues({}))
+
+    # ---------------------------------------------------------------- follow-up: every build, and After Effects
+    WORDS = {"ar": "هل في حاجات معينة لازم أبقى عارفاها قبل الليزر أول حاجة التشخيص الصحيح قبل أي علاج",
+             "en": "Laser is not permanent hair removal it is reduction first comes the right diagnosis always"}
+
+    def words(self, text):
+        import test_pipeline as T
+        f = self.p.p("02_transcription/words.json")
+        old = f.read_bytes()
+        self.addCleanup(f.write_bytes, old)
+        write_json(f, {"words": T.words_from(text.split(), 200, 600)})
+
+    def test_r2e_short_captions_scale_without_cut_words_ar_and_en_at_140(self):
+        from lib import srt as srtlib
+        for lang, text in self.WORDS.items():
+            self.words(text)
+            self.style({})
+            self.ok(self.compile())
+            self.assertEqual(self.spec()["caption_source"], "02_transcription/captions-short.srt")   # default: as today
+            from lib.transcribe import caption_cues
+            n0 = len(caption_cues(read_json(self.p.p("02_transcription/words.json"))["words"],
+                                  common.load_config("subtitle-style.json"))[1])   # these words at today's length
+            self.style({"caption_size_px": 140})
+            self.ok(self.compile())                                              # no cut words, no pause removal
+            spec = self.spec()
+            self.assertIsNone(spec["time_map"])
+            self.assertEqual(spec["caption_source"], "02_transcription/captions-short-seq.srt", lang)
+            cues = srtlib.read_srt(self.p.p(spec["caption_source"]))
+            self.assertGreater(len(cues), n0, lang)
+            for c in cues:                                                       # 8 chars, or one longer word
+                self.assertTrue(len(c["text"]) <= 8 + 6 or len(c["text"].split()) == 1, (lang, c["text"]))
+            from lib.ae_builder import caption_data                              # After Effects gets the same cues
+            ae = caption_data(self.p, spec, read_json(self.p.p("01_analysis/edit-decisions.json")))
+            self.assertEqual(ae["size"], 140)
+            self.assertLessEqual(max(len(c["text"]) for c in ae["cues"]), max(len(c["text"]) for c in cues))
+
+    def test_r2f_after_effects_one_line_wider_than_the_safe_width_is_a_plan_warning(self):
+        self.words("Isotretinoin-hydrochloride-solution works")
+        self.style({"caption_size_px": 140})
+        r = self.ok(self.compile())
+        ae = [w for w in r["warnings"] if "After Effects" in w and "safe width" in w]
+        self.assertEqual(len(ae), 1, r["warnings"])
+        self.assertIn("Isotretinoin", ae[0])
+        self.words(self.WORDS["ar"])
+        r = self.ok(self.compile())
+        self.assertFalse([w for w in r["warnings"] if "After Effects" in w and "safe width" in w], r["warnings"])
 
 
 # ====================================================================== I/K. motion plans and caption looks
@@ -695,6 +743,18 @@ class TestReviewFixes(KnobCase):
         self.ok(self.compile())
         self.assertEqual(self.spec()["style"]["highlight"]["hex"], "#000000")
 
+    def test_r4b_an_explicit_null_is_not_set_and_still_blocks_the_alias_in_that_file(self):
+        self.style({"highlight_colour": None, "highlight_color": "#1E2A3B"})
+        r = self.ok(self.compile())
+        self.assertNotIn("style", self.spec())                                  # null = not set; the alias is ignored
+        self.assertTrue(any("highlight_color" in w and "highlight_colour" in w for w in r["warnings"]), r["warnings"])
+        self.style({"highlight_color": None})
+        r = self.ok(self.compile())
+        self.assertNotIn("style", self.spec())
+        self.style({"caption_size_px": None, "hook_title_sfx": None})            # null = not set for every knob
+        self.ok(self.compile())
+        self.assertNotIn("style", self.spec())
+
     def test_r7_the_contrast_warning_names_the_file_the_colour_came_from(self):
         self.style({"highlight_colour": "#E0B76B"})
         r = self.ok(self.compile())
@@ -736,6 +796,12 @@ class TestSkillText(unittest.TestCase):
         for k in self.KNOBS:
             self.assertIn(k, s, k)
         self.assertIn("«الكابشن أكبر»", s)
+
+    def test_r10_show_under_the_hook_is_honest_about_premiere(self):
+        for rel in ("client-craft/SKILL.md", "revise/SKILL.md"):
+            s = self.read(rel)
+            self.assertIn("After Effects captions follow it now", s, rel)
+            self.assertIn("Premiere captions follow it after the next WhyNot Cut update", s, rel)
 
     def test_r3_the_highlight_colour_is_premiere_only_for_now(self):
         for rel in ("client-craft/SKILL.md", "story-craft/references/edit-decision-engine.md"):

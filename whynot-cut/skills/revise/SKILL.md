@@ -52,7 +52,9 @@ agent: never guess an option name.
    knobs `reel plan` applies by itself (client-craft lists them):
    - "bigger captions" «الكابشن أكبر» → `caption_size_px`;
    - "keep the captions during the hook" «سيب الكابشن على الهوك» → `captions_during_hook: "show"` (a client
-     setting only: for one clip, the story-editor edits that clip's `captions_hidden_during` list);
+     setting only: for one clip, the story-editor edits that clip's `captions_hidden_during` list). After Effects
+     captions follow it now; Premiere captions follow it after the next WhyNot Cut update, so tell the editor that
+     until then the Premiere captions stay hidden under the hook;
    - "no click on the title" «من غير صوت على العنوان» → `hook_title_sfx: false`;
    - "the highlight colour" «لون التمييز» → `highlight_colour`.
 
