@@ -82,7 +82,8 @@
 # Fix round 6: what an uninstall keeps is recognised by content, never by name (Test-WncKeptLeftover): models\ counts
 # only when EVERY entry is a store of ours (components.json models.*.repo, every model the installer offers) or
 # Hugging Face's own bookkeeping (.locks, CACHEDIR.TAG, a marked blobs\ store, OS folder-view files), never with a link
-# inside; library\ counts by its pack manifests (motion\<pack>\pack.json), or empty beside our models\. -ReleaseStage
+# inside; library\ counts by its pack manifests (motion\<pack>\pack.json), tools\ by its own (only hush\, kalam\,
+# tidy\: the tools' data, kept by every uninstall), either one empty only beside another that counts. -ReleaseStage
 # (install.ps1 -Source): the release staged under the OS temp dir; an install keeps it in <engine>\downloads\release-
 # <sha8> only after every check above has passed (Copy-WncReleaseCache), an uninstall never writes it.
 # ASCII only: Windows PowerShell 5.1 reads a file without a BOM as ANSI.
@@ -530,10 +531,10 @@ param(
                 # (<name>.tmp, case ignored: STATE.JSON.tmp from an antivirus or indexer) is waited for, at most 2 s;
                 # it is never deleted (the core's base.transient_copy; the same names, tests/test_installer.py)
                 $transient = @('.delete-after-exit', 'ae-capabilities.json', 'ae-probe', 'ae-queue', 'ae-scripts', 'bench',
-                    'bin', 'bridge', 'cache', 'cuda', 'current', 'downloads', 'ffmpeg', 'fonts', 'library', 'logs',
+                    'bin', 'bridge', 'cache', 'cuda', 'current', 'downloads', 'ffmpeg', 'fonts', 'library', 'locks', 'logs',
                     'marketplace', 'marketplace.new', 'marketplace.prev', 'models', 'plugin-options.json',
                     'ppro-queue', 'ppro-scripts', 'python', 'runtimes', 'serve', 'state', 'state.json', 'tmp',
-                    'venv')
+                    'tools', 'venv')
                 for ($i = 0; $i -lt 10; $i++) {  # x 200 ms = 2 s, as the core
                     $left = @([IO.Directory]::GetFileSystemEntries($root) | ForEach-Object { [IO.Path]::GetFileName($_) })
                     $copies = @($left | Where-Object {
@@ -873,23 +874,53 @@ param(
         return 'packs'
     }
 
+    function Get-WncToolsState([string]$Tools) {
+        # <engine home>\tools (locks commit, L-2; the core's base.tools_state): 'tools' when it holds only real
+        # folders named exactly hush, kalam and tidy, at least one; 'empty' when it holds nothing; $null otherwise
+        # (anything else, any link). OS folder-view files are ignored; what is inside each tool's folder is never read.
+        if ((-not [IO.Directory]::Exists($Tools)) -or (Test-WncReparse $Tools)) { return $null }
+        try {
+            $names = @([IO.Directory]::GetFileSystemEntries($Tools) | Where-Object { -not (Test-WncViewFile $_) })
+        } catch {
+            return $null
+        }
+        if ($names.Count -eq 0) { return 'empty' }
+        foreach ($k in $names) {
+            if ((@('hush', 'kalam', 'tidy') -cnotcontains [IO.Path]::GetFileName($k)) -or
+                (-not [IO.Directory]::Exists($k)) -or (Test-WncReparse $k)) {
+                return $null
+            }
+        }
+        return 'tools'
+    }
+
     function Test-WncKeptLeftover([string]$Path, [bool]$PointerOk) {
         # what -Uninstall -RemoveEngine keeps of an engine home, still WhyNot Cut's own folder (fix round 5, N1; round
         # 6: the core's base.is_kept_leftover): its only entries (Get-WncOccupiedEntry) are models\ that is ours
-        # (Test-WncOurModels) and/or library\ - recognised by its pack manifests, or empty beside our models\ (never
-        # alone). Never by the names alone; a link is never ours.
+        # (Test-WncOurModels), library\ and/or tools\ - recognised by their content (pack manifests; only hush\,
+        # kalam\, tidy\), either one empty only beside another kept entry that counts (never alone). Never by the
+        # names alone; a link is never ours.
         # (round 8, R7-2) view files are ignored HERE only; a leftover still needs one recognised entry besides them
         $occupied = Get-WncOccupiedEntry -Path $Path -PointerOk $PointerOk -IgnoreView $true  # (an array already)
         if ($occupied.Count -eq 0) { return $false }
         foreach ($n in $occupied) {
-            if (@('models', 'library') -cnotcontains $n) { return $false }
+            if (@('models', 'library', 'tools') -cnotcontains $n) { return $false }
         }
         $hasModels = $occupied -ccontains 'models'
         $models = $hasModels -and (Test-WncOurModels (Join-Path $Path 'models'))
         if ($hasModels -and (-not $models)) { return $false }
-        if ($occupied -cnotcontains 'library') { return $models }
-        $lib = Get-WncLibraryState (Join-Path $Path 'library')
-        return (($lib -ceq 'packs') -or (($lib -ceq 'empty') -and $models))
+        $counts = $models
+        if ($occupied -ccontains 'library') {
+            $lib = Get-WncLibraryState (Join-Path $Path 'library')
+            if ($null -eq $lib) { return $false }
+            $counts = $counts -or ($lib -ceq 'packs')
+        }
+        if ($occupied -ccontains 'tools') {
+            $tools = Get-WncToolsState (Join-Path $Path 'tools')
+            if ($null -eq $tools) { return $false }
+            $counts = $counts -or ($tools -ceq 'tools')
+        }
+        return $counts
     }
 
     function Test-WncOurHome([string]$Path, [bool]$PointerOk) {

@@ -238,13 +238,19 @@ def linked_default_home(whynot, home) -> bool:
 # else is the editor's and is kept and listed. Names compare exactly (`Bin` is the editor's). The location check does
 # NOT use this list (fix round 2: names can be anyone's): see occupied_entries and is_engine_home.
 # tests/test_installer.py scans engine/reel for every top-level name it writes under its home against this list.
+# T4.10: locks/ (engine/reel/lib/file_lock, gpu_lock) holds lock files only - `gpu`, `gpu-media` on macOS - and a small
+# JSON with each holder's pid / what / since, never the editor's files: uninstall (which stops the engine first) may
+# delete the whole folder.
 ENGINE_LAYOUT = ("bin", "python", "runtimes", "current", "ffmpeg", "cuda", "bridge", "state.json", "logs", "cache",
                  "downloads", "fonts", "marketplace", "marketplace.new", "marketplace.prev", ".delete-after-exit",
                  "venv", "ppro-queue", "ppro-scripts", "ae-queue", "ae-scripts", "ae-probe", "ae-capabilities.json",
-                 "bench", "tmp", "serve", "state")
+                 "bench", "tmp", "serve", "state", "locks")
 ENGINE_LAYOUT_PREFIXES = ("state.json.corrupt-", ".state.json.", ".current.", ".plugin-options.json.",
                           "..delete-after-exit.", ".wnc-write-test")  # set-aside / atomic-write leftovers, the probe
-ENGINE_KEPT = ("models", "library")  # models/ unless --remove-models; library/ (licensed packs) always
+# (locks commit, L-2) tools/ (engine/reel/lib/{hush,kalam,tidy}/store.py: tools/hush, tools/kalam, tools/tidy) holds
+# the editor's own Hush presets, each tool's settings and Kalam's model downloads: kept by every uninstall, as
+# library/ is; recognised by its content (tools_state), never by the name alone
+ENGINE_KEPT = ("models", "library", "tools")  # models/ unless --remove-models; library/ and tools/ always
 ENGINE_MARKS = ("state.json", "current")  # read by is_engine_home: their CONTENT must be WhyNot Cut's
 _RUNTIME_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")  # the engine's runtime id rule (lib/plat.py)
 HOME_ROOTS = ("Desktop", "Documents", "Downloads")  # with the user folder itself: never the engine home directly
@@ -349,6 +355,7 @@ HF_BLOBS, HF_BLOBS_MARKER = "blobs", ".huggingface-shared-blobs"
 # library/ (engine/reel/lib/motion_library.py): licensed packs the editor adds, library/motion/<pack>/pack.json - the
 # pack manifest is its marker. Kept by every uninstall, never deleted by WhyNot Cut.
 LIBRARY, MOTION, PACK_MARK = "library", "motion", "pack.json"
+TOOLS, TOOL_NAMES = "tools", ("hush", "kalam", "tidy")  # <engine home>/tools/<tool> (the tools track's stores)
 
 
 def model_store_names(components) -> frozenset:
@@ -644,12 +651,30 @@ def library_state(lib) -> Optional[str]:
     return "packs" if ok else None
 
 
+def tools_state(tools) -> Optional[str]:
+    """<engine home>/tools (locks commit, L-2): "tools" when it holds only real folders named exactly hush, kalam and
+    tidy (each tool's own store: the tools track writes nowhere else there), at least one; "empty" when it holds
+    nothing; None otherwise (anything else, any link: the editor's, never entered). OS folder-view files are ignored.
+    What is inside each tool's folder is the editor's data and is never looked at."""
+    tools = Path(tools)
+    if not _real_dir(tools):
+        return None
+    try:
+        names = [n for n in os.listdir(tools) if not _view_file(tools / n)]
+    except OSError:
+        return None
+    if not names:
+        return "empty"
+    return "tools" if all(n in TOOL_NAMES and _real_dir(tools / n) for n in names) else None
+
+
 def is_kept_leftover(path, *, pointer_ok: bool = False) -> bool:
     """What `uninstall --remove-engine` keeps of an engine home, still WhyNot Cut's own folder for placement at install
     and uninstall (fix round 5, N1; round 6, R5-2 and library/): its only entries (occupied_entries: the write probe,
     the -Source cache and, with `pointer_ok`, the pointer do not count) are the kept names - models/ that is ours
-    (is_our_models) and/or library/. library/ counts by its own content (pack manifests: library_state "packs"); an
-    empty one only beside our models/, never alone. Never by the names alone, and a link is never ours."""
+    (is_our_models), library/ and/or tools/. library/ counts by its own content (pack manifests: library_state
+    "packs"), tools/ by its own (only hush/, kalam/, tidy/: tools_state "tools", locks commit L-2); an empty one only
+    beside another kept entry that counts, never alone. Never by the names alone, and a link is never ours."""
     # (round 8, R7-2) Finder's / Explorer's own view files do not count HERE only: a leftover of ours still needs one
     # recognised entry besides them; placement counts them (a folder holding only desktop.ini is not empty)
     occupied = occupied_entries(path, pointer_ok=pointer_ok, ignore_view=True)
@@ -659,10 +684,18 @@ def is_kept_leftover(path, *, pointer_ok: bool = False) -> bool:
     models = "models" in occupied and is_our_models(p / "models")
     if "models" in occupied and not models:
         return False
-    if LIBRARY not in occupied:
-        return models
-    lib = library_state(p / LIBRARY)
-    return lib == "packs" or (lib == "empty" and models)
+    counts = models
+    if LIBRARY in occupied:
+        lib = library_state(p / LIBRARY)
+        if lib is None:
+            return False
+        counts = counts or lib == "packs"
+    if TOOLS in occupied:
+        tools = tools_state(p / TOOLS)
+        if tools is None:
+            return False
+        counts = counts or tools == "tools"
+    return counts
 
 
 def is_our_home(path, *, pointer_ok: bool = False) -> bool:

@@ -83,7 +83,8 @@
 # Fix round 6: what an uninstall keeps is recognised by content, never by name (is_kept_leftover): models/ counts only
 # when EVERY entry is a store of ours (components.json models.*.repo, every model the installer offers) or Hugging
 # Face's own bookkeeping (.locks, CACHEDIR.TAG, a marked blobs/ store, OS folder-view files), never with a link inside;
-# library/ counts by its pack manifests (motion/<pack>/pack.json), or empty beside our models/. `..` never climbs above
+# library/ counts by its pack manifests (motion/<pack>/pack.json), tools/ by its own (only hush/, kalam/, tidy/: the
+# tools' data, kept by every uninstall), either one empty only beside another that counts. `..` never climbs above
 # /, a drive (C:/) or //server/share (lex_path, norm_path). --release-stage (install.sh --source): the release staged
 # under the OS temp dir; an install keeps it in <engine>/downloads/release-<sha8> only after every check above has
 # passed (keep_release), an uninstall never writes it.
@@ -449,7 +450,7 @@ delete_deferred() { # after `uninstall --remove-engine`: $ENGINE/.delete-after-e
     # (task F1) an entry that looks like a transient copy of one of WhyNot Cut's own top-level names (<name>.tmp, case
     # ignored: STATE.JSON.tmp from an antivirus or indexer) is waited for, at most 2 s; it is never deleted (the
     # core's base.transient_copy; the same names, tests/test_installer.py)
-    transient_names=".delete-after-exit ae-capabilities.json ae-probe ae-queue ae-scripts bench bin bridge cache cuda current downloads ffmpeg fonts library logs marketplace marketplace.new marketplace.prev models plugin-options.json ppro-queue ppro-scripts python runtimes serve state state.json tmp venv"
+    transient_names=".delete-after-exit ae-capabilities.json ae-probe ae-queue ae-scripts bench bin bridge cache cuda current downloads ffmpeg fonts library locks logs marketplace marketplace.new marketplace.prev models plugin-options.json ppro-queue ppro-scripts python runtimes serve state state.json tmp tools venv"
     i=0
     while [ $i -lt 10 ]; do  # x 0.2 s = 2 s, as the core
       copies=""
@@ -855,17 +856,37 @@ library_state() { # dir -> LIB: <engine home>/library (fix round 6; the core's b
   return 0
 }
 
+tools_state() { # dir -> TOOLS: <engine home>/tools (locks commit, L-2; the core's base.tools_state) - tools (only real
+  # folders named exactly hush, kalam and tidy, at least one), empty (nothing) or "" (anything else, any link). OS
+  # folder-view files are ignored; what is inside each tool's folder is never read
+  local e n found=""
+  TOOLS=""
+  { [ -d "$1" ] && [ ! -L "$1" ]; } || return 0
+  for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    [ -e "$e" ] || [ -L "$e" ] || continue
+    view_file "$e" && continue
+    n="${e##*/}"
+    case "$n" in hush|kalam|tidy) ;; *) return 0 ;; esac
+    { [ -d "$e" ] && [ ! -L "$e" ]; } || return 0
+    found=1
+  done
+  if [ -n "$found" ]; then TOOLS=tools; else TOOLS=empty; fi
+  return 0
+}
+
 is_kept_leftover() { # dir [pointer-ok]: status 0 for what an uninstall keeps of an engine home, still WhyNot Cut's own
   # folder (fix round 5, N1; round 6: the core's base.is_kept_leftover): its only entries (occupied_list) are models/
-  # that is ours (our_models) and/or library/ - recognised by its pack manifests, or empty beside our models/ (never
-  # alone). Never by the names alone; a link is never ours
-  local n has_models="" models="" has_lib=""
+  # that is ours (our_models), library/ and/or tools/ - recognised by their content (pack manifests; only hush/,
+  # kalam/, tidy/), either one empty only beside another kept entry that counts (never alone). Never by the names
+  # alone; a link is never ours
+  local n has_models="" has_lib="" has_tools="" counts=""
   occupied_list "$1" "${2:-}" view  # (round 8, R7-2) view files are ignored HERE only
   [ -n "$OCCUPIED" ] || return 1
   while IFS= read -r n; do
     case "$n" in
       models) has_models=1 ;;
       library) has_lib=1 ;;
+      tools) has_tools=1 ;;
       *) return 1 ;;
     esac
   done <<EOF
@@ -873,11 +894,19 @@ $OCCUPIED
 EOF
   if [ -n "$has_models" ]; then
     our_models "$1/models" || return 1
-    models=1
+    counts=1
   fi
-  if [ -z "$has_lib" ]; then [ -n "$models" ]; return $?; fi
-  library_state "$1/library"
-  [ "$LIB" = packs ] || { [ "$LIB" = empty ] && [ -n "$models" ]; }
+  if [ -n "$has_lib" ]; then
+    library_state "$1/library"
+    [ -n "$LIB" ] || return 1
+    [ "$LIB" = packs ] && counts=1
+  fi
+  if [ -n "$has_tools" ]; then
+    tools_state "$1/tools"
+    [ -n "$TOOLS" ] || return 1
+    [ "$TOOLS" = tools ] && counts=1
+  fi
+  [ -n "$counts" ]
 }
 
 our_home() { # dir [pointer-ok]: WhyNot Cut's own folder - a genuine engine home or the leftover of one (fix rounds 5, 6)

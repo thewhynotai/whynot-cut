@@ -17,12 +17,15 @@ marketplace  ~/.whynot-cut/marketplace (+ .new / .prev); a link (a development c
 engine       only with --remove-engine: ONLY the children of the engine home that WhyNot Cut puts there
              (base.ENGINE_LAYOUT: bin, python, runtimes, current, ffmpeg, cuda, bridge, state.json, logs, cache,
              downloads, fonts, marketplace(.new/.prev), the deferred list, the engine's venv / queues / scripts /
-             probe / bench / tmp / serve (the panel's job journal) / state (the active item), and their set-aside
-             leftovers; fix rounds 1 and 6), in every engine home including ~/.whynot-cut. Anything else is the
+             probe / bench / tmp / serve (the panel's job journal) / state (the active item) / locks (lock files
+             only, T4.10), and their set-aside leftovers; fix rounds 1 and 6), in every engine home including
+             ~/.whynot-cut. Anything else is the
              editor's: kept and listed. models/ is kept unless --remove-models, which deletes only WhyNot Cut's own
              model stores and Hugging Face's bookkeeping in it (never through a link), and models/ itself only when
              nothing of the editor's is left in it (fix round 6, R5-2),
-             library/ (the editor's licensed motion packs, engine motion_library.py) always, plugin-options.json
+             library/ (the editor's licensed motion packs, engine motion_library.py) and tools/ (the tools' data:
+             the editor's Hush presets, each tool's settings, Kalam's model downloads; locks commit L-2) always,
+             never entered; plugin-options.json
              follows the pointer rules (forget_engine_home). Plus
              %LOCALAPPDATA%\\WhyNotCut\\git, then the settings env CLAUDE_CODE_GIT_BASH_PATH that points into it.
              python/ and bin/ (the interpreter running this code: Windows locks it) are listed in
@@ -52,6 +55,7 @@ from .system import PREFS, read_preferences, render_checklist
 DEFER_LIST = ".delete-after-exit"
 DEFERRED = ("python", "bin")  # the interpreter running this core, and uv: removed by the bootstrap after it exits
 KEPT = "library"  # <engine home>/library: licensed motion / illustration packs (engine motion_library.py); never ours
+TOOLS = base.TOOLS  # <engine home>/tools: the tools' data (the editor's Hush presets, settings, Kalam's models): kept
 RETRY_SECTIONS = ("adobe", "fonts")  # what an earlier step may leave recorded for the next uninstall
 
 
@@ -590,8 +594,8 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
     keep_models = not models
     if _dry(ctx):
         return _done("engine", "skipped", [f"dry run: would delete WhyNot Cut's own folders and files in "
-                                           f"{paths.whynot}" + (" except models/ and library/" if keep_models
-                                                                 else " except library/")
+                                           f"{paths.whynot}" + (" except models/, library/ and tools/"
+                                                                 if keep_models else " except library/ and tools/")
                                            + f", and {claude.managed_git_dir(paths)}; anything else stays"])
     # what an earlier step could not remove (a running Adobe host, a font in use) stays recorded in a minimal
     # state.json, so the uninstall the editor is told to run again still knows about it
@@ -614,6 +618,10 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
             continue
         if name == KEPT:
             kept.append("library (your motion and illustration packs: never deleted by the uninstall)")
+            continue
+        if name == TOOLS:  # (locks commit, L-2) never entered, whatever it holds
+            kept.append("tools (your Hush presets, the tools' settings and Kalam's models: never deleted by the "
+                        "uninstall)")
             continue
         if name == "state.json" and retry:
             continue
@@ -711,7 +719,7 @@ def step_engine(ctx: base.Ctx) -> base.StepResult:
         return _done("engine", "amber", notes, _locked_hint(busy, "--remove-engine"))
     notes += forgot
     custom = not base.same_path(paths.whynot, paths.default_whynot)
-    if not retry and custom and any(k.startswith(("models", KEPT)) for k in kept):
+    if not retry and custom and any(k.startswith(("models", KEPT, TOOLS)) for k in kept):
         notes.append(f"{paths.whynot} keeps what is listed above; to use it again, install with -EngineHome "
                      f"\"{paths.whynot}\" (macOS: --engine-home)")
     return _done("engine", "ok", notes)

@@ -6683,10 +6683,65 @@ def make_pack(root: Path, name: str = "pack1") -> Path:
     return touch(root / "library" / "motion" / name / "pack.json", ('{"id": "%s"}' % name).encode())
 
 
+def make_tools(root: Path) -> Path:
+    """The tools' own data (T4.10 / the tools track): <engine home>/tools/ holds only hush/, kalam/ and tidy/ - the
+    editor's Hush presets, each tool's settings, Kalam's model downloads. Returns the presets file."""
+    touch(root / "tools" / "kalam" / "settings.json", b'{"lang": "ar"}')
+    touch(root / "tools" / "kalam" / "models" / "pack" / "model.bin", b"kalam weights")
+    touch(root / "tools" / "tidy" / "sync" / "x.json", b"{}")
+    return touch(root / "tools" / "hush" / "presets.json", b'{"mine": {"depth": 3}}')
+
+
 def make_owner_genuine(root: Path) -> None:
     """Genuine through `current` and its runtime stamp only (no state.json), as the owner's own engine home is."""
     touch(root / "current", b"r-owner\n")
     touch(root / "runtimes" / "r-owner" / "WHYNOT_RUNTIME", b'{"id": "r-owner"}')
+
+
+# (locks commit, L-3) the engine-home scan: every top-level name engine/reel writes as <engine home> / "name". Roots
+# anywhere: engine_home (a call, a parameter or an attribute), Path(home), ENV_DIR. A variable counts as the engine
+# home only inside the function that assigns it the engine home itself (`home = home or engine_home()`,
+# `home = _home(home)`), or file-wide where ENGINE_HOME_FILE_VARS says so, with the reason. Never a bare `home`
+# elsewhere: kalam/platform.py's and kalam/correct.py's `home` is the USER home (.claude, .local, AppData, Library),
+# lib/plat.py's font folders use the user home (.fonts), and a tool store's `self.home` is <engine home>/tools/<tool>
+# (settings.json, presets.json, last-scan.json, hf, sync are inside it, not at the top).
+ENGINE_HOME_FILE_VARS = {"serve/daemon.py": ("home", "every function there takes the engine home it serves "
+                                                     "(_home(home) or the caller's resolved home)")}
+_EH_NAME = r'\s*/\s*"([A-Za-z0-9._-]+)"'
+_EH_ROOT = re.compile(r'(?:engine_home(?:\(\))?|Path\(home\)|\bENV_DIR)' + _EH_NAME)
+_EH_ASSIGN = re.compile(r"(?m)^[ \t]*(\w+)[ \t]*(?::[^=\n]+)?=(?!=)([^\n]*)$")
+_EH_CALL = re.compile(r"\b(?:engine_home|_home)\(")
+
+
+def engine_home_names(rel: str, text: str) -> dict:
+    """{name: how it was found} for the top-level names `text` (engine/reel/<rel>, POSIX) writes under the engine
+    home."""
+    found = {}
+    for m in _EH_ROOT.finditer(text):
+        found.setdefault(m.group(1), f"{rel} (root)")
+    file_var = ENGINE_HOME_FILE_VARS.get(rel, (None, ""))[0]
+    if file_var:
+        for m in re.finditer(r"(?<![\w.])" + re.escape(file_var) + _EH_NAME, text):
+            found.setdefault(m.group(1), f"{rel} ({file_var}, file-wide)")
+    for block in re.split(r"(?m)^(?=[ \t]*(?:async[ \t]+)?def[ \t])", text):
+        aliases = set()
+        for m in _EH_ASSIGN.finditer(block):
+            rhs = m.group(2).split("#")[0]
+            if _EH_CALL.search(rhs) and "/" not in rhs:  # the engine home itself, never a folder below it
+                aliases.add(m.group(1))
+        for v in sorted(aliases):
+            for m in re.finditer(r"(?<![\w.])" + re.escape(v) + _EH_NAME, block):
+                found.setdefault(m.group(1), f"{rel} ({v})")
+    return found
+
+
+def engine_home_names_below(root: Path) -> dict:
+    """engine_home_names for every .py file below `root` (the first place each name is found)."""
+    found = {}
+    for f in sorted(root.rglob("*.py")):
+        for name, how in engine_home_names(f.relative_to(root).as_posix(), f.read_text(encoding="utf-8")).items():
+            found.setdefault(name, how)
+    return found
 
 
 class TestRound6(unittest.TestCase):
@@ -6705,17 +6760,62 @@ class TestRound6(unittest.TestCase):
         self.assertTrue(base.is_engine_entry("serve"))
         self.assertTrue(base.is_engine_entry("state"))
         # static: every top-level name the engine's own code writes under its home is in the layout (deleted by
-        # --remove-engine) or kept on purpose, so the next engine folder cannot drift again
-        rx = re.compile(r'(?:engine_home(?:\(\))?|Path\(home\)|\bhome|ENV_DIR)\s*/\s*"([A-Za-z0-9._-]+)"')
-        found = {}
-        for f in sorted((SK / "engine" / "reel").rglob("*.py")):
-            for m in rx.finditer(f.read_text(encoding="utf-8")):
-                found.setdefault(m.group(1), f.name)
-        found.pop(".fonts", None)  # lib/plat.py: the Linux USER home's own font folder, not the engine home
-        self.assertTrue({"serve", "state", "logs", "bridge", "library"} <= set(found), found)  # the scan sees them
+        # --remove-engine) or kept on purpose, so the next engine folder cannot drift again (the precise scan:
+        # engine_home_names, locks commit L-3)
+        found = engine_home_names_below(SK / "engine" / "reel")
+        # the scan sees them: through a root (serve, state, logs, bridge, library, tools, locks) and through a variable
+        # holding the engine home inside one function (venv: lib/plat.py; bin: cli.py), so it cannot go blind
+        self.assertTrue({"serve", "state", "logs", "bridge", "library", "tools", "locks", "venv", "bin", "cache",
+                         "state.json"} <= set(found), found)
+        # and never the user home's names or what is inside a tool store (<engine home>/tools/<tool>)
+        self.assertFalse({".fonts", ".claude", ".local", "AppData", "Library", "settings.json", "presets.json",
+                          "last-scan.json", "hf", "sync"} & set(found), found)
         for name, where in sorted(found.items()):
             with self.subTest(name):
                 self.assertTrue(base.is_engine_entry(name) or name in base.ENGINE_KEPT, f"{name} ({where})")
+
+    def test_l3_the_engine_home_scan_is_precise_and_cannot_go_blind(self):
+        def names(src, rel="lib/x.py"):
+            return set(engine_home_names(rel, src))
+        cases = [
+            ("a root call", 'LOCKS = engine_home() / "locks"\n', {"locks"}),
+            ("a module's root", 'p = plat.engine_home() / "tools" / "kalam"\n', {"tools"}),
+            ("a parameter / attribute root", '        self.home = self.engine_home / "tools" / "hush"\n', {"tools"}),
+            ("Path(home)", 'd = Path(home) / "serve"\n', {"serve"}),
+            ("ENV_DIR", 'x = ENV_DIR / "venv"\n', {"venv"}),
+            ("a variable assigned the engine home", 'def f(home=None):\n    home = home or engine_home()\n'
+             '    return home / "bin"\n', {"bin"}),
+            ("the daemon's helper", 'def run(home=None):\n    home = _home(home)\n    return home / "bridge"\n',
+             {"bridge"}),
+            ("a typed assignment", 'def f():\n    h: Path = plat.engine_home()\n    return h / "cache"\n', {"cache"}),
+            # the user home, never the engine home
+            ("the user home", 'def c(env, home, windows):\n    return [home / ".local" / "bin", home / ".claude"]\n',
+             set()),
+            ("Path.home()", 'def c(home=None):\n    home = Path.home() if home is None else Path(home)\n'
+             '    return home / "AppData"\n', set()),
+            # a variable assigned the engine home holds it only inside its own function
+            ("another function's home", 'def f(home=None):\n    home = home or engine_home()\n\n\n'
+             'def fonts(home):\n    return home / ".fonts"\n', set()),
+            # a store root below the engine home is not the engine home: what is inside it is not top-level
+            ("a tool store", '        self.home = self.engine_home / "tools" / "tidy"\n'
+             '        self.settings = self.home / "settings.json"\n        sync = self.home / "sync"\n', {"tools"}),
+            ("an alias of a sub-folder", 'def f():\n    home = engine_home() / "tools"\n    return home / "hf"\n',
+             {"tools"}),
+        ]
+        for label, src, want in cases:
+            with self.subTest(label):
+                self.assertEqual(names(src), want)
+        # serve/daemon.py: every function there takes the engine home it serves (ENGINE_HOME_FILE_VARS); elsewhere a
+        # bare parameter is not trusted
+        src = 'async def _serve(home, *, port):\n    return home / "logs"\n'
+        self.assertEqual(names(src, "serve/daemon.py"), {"logs"})
+        self.assertEqual(names(src, "serve/other.py"), set())
+        # every file named in the allowlist still exists and still uses the variable it names
+        for rel, (var, why) in ENGINE_HOME_FILE_VARS.items():
+            with self.subTest(rel):
+                self.assertTrue(why)
+                text = (SK / "engine" / "reel" / rel).read_text(encoding="utf-8")
+                self.assertRegex(text, r"(?<![\w.])" + re.escape(var) + r'\s*/\s*"')
 
     def test_r5_1_an_uninstall_leaves_only_models_of_a_home_the_panel_used(self):
         h = self.home
@@ -7731,6 +7831,165 @@ class TestRound8(unittest.TestCase):
                     self.assertEqual(os.listdir(eng), ["models"], r.detail)
 
 
+class TestEngineLocks(unittest.TestCase):
+    """T4.10: <engine home>/locks/ (lib/file_lock: the `gpu` lock, `gpu-media` on macOS, and a small JSON info file per
+    lock - never the editor's files) is WhyNot Cut's own: --remove-engine deletes it with the layout, and a home that
+    does not have it yet is just as fine at install and at uninstall."""
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.home = Path(self._td.name) / ARABIC_HOME
+        self.home.mkdir()
+
+    def test_locks_is_part_of_the_layout_and_goes_with_remove_engine(self):
+        self.assertTrue(base.is_engine_entry("locks"))
+        self.assertFalse(base.is_engine_entry("Locks"))  # names compare exactly
+        eng = self.home / "Engine"
+        touch(eng / "state.json", GENUINE_STATE)
+        make_model_leftover(eng)
+        touch(eng / "locks" / "gpu.lock", b"")
+        touch(eng / "locks" / "gpu.json", b'{"pid": 1, "what": "transcribe", "since": 0}')
+        touch(eng / "locks" / "gpu-media.lock", b"")
+        ctx = make_ctx(self.home, {"schema": 1}, SK, engine_home=eng, remove_engine=True, remove_models=False)
+        ctx.log.path = None
+        r = uninstall_module().step_engine(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(os.listdir(eng), ["models"], r.detail)
+        self.assertNotIn("locks", r.detail.split("kept (not WhyNot Cut's")[-1] if "kept (not" in r.detail else "")
+
+    def test_a_home_without_locks_is_fine_at_install_and_uninstall(self):
+        eng = self.home / "Engine"
+        touch(eng / "state.json", GENUINE_STATE)
+        make_model_leftover(eng)
+        self.assertEqual(base.choose_engine_home(str(eng), home=self.home, plugin_root=SK), (eng, "", None))
+        self.assertIsNone(base.resolved_home_problem(eng, home=self.home, mode="install"))
+        self.assertIsNone(base.resolved_home_problem(eng, home=self.home, mode="uninstall"))
+        ctx = make_ctx(self.home, {"schema": 1}, SK, engine_home=eng, remove_engine=True, remove_models=False)
+        ctx.log.path = None
+        r = uninstall_module().step_engine(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(os.listdir(eng), ["models"], r.detail)
+        # what --remove-engine keeps is still recognised as WhyNot Cut's old folder, locks/ or not
+        self.assertTrue(base.is_kept_leftover(eng))
+
+
+class TestEngineTools(unittest.TestCase):
+    """Locks commit L-2: <engine home>/tools/ (hush/, kalam/, tidy/: the editor's Hush presets, the tools' settings,
+    Kalam's model downloads) is the engine's but holds the editor's work: KEPT by every uninstall, and what an
+    uninstall keeps of a home is still WhyNot Cut's old folder only when tools/ holds nothing but those three
+    folders (recognised by content; anything else, any link: unsure, so the editor's)."""
+
+    def setUp(self):
+        self._td = TempDir()
+        self.addCleanup(self._td.cleanup)
+        self.home = Path(self._td.name) / ARABIC_HOME
+        self.home.mkdir()
+
+    def test_tools_is_kept_never_part_of_the_layout(self):
+        self.assertIn("tools", base.ENGINE_KEPT)
+        self.assertFalse(base.is_engine_entry("tools"))
+        self.assertEqual(base.foreign_entries(self.home), [])
+        touch(self.home / "tools" / "hush" / "presets.json", b"{}")
+        self.assertEqual(base.foreign_entries(self.home), [])
+
+    def test_a_kept_tools_folder_is_recognised_by_its_content(self):
+        h = self.home
+        alone = h / "tools only"
+        make_tools(alone)
+        both = h / "tools and models"
+        make_tools(both)
+        make_model_leftover(both)
+        one = h / "one tool"
+        touch(one / "tools" / "hush" / "presets.json", b"{}")
+        empty_beside = h / "empty tools beside models"
+        make_model_leftover(empty_beside)
+        (empty_beside / "tools").mkdir()
+        with_packs = h / "tools and packs"
+        make_tools(with_packs)
+        make_pack(with_packs)
+        ours = [alone, both, one, empty_beside, with_packs]
+        empty_alone = h / "empty tools alone"
+        (empty_alone / "tools").mkdir(parents=True)
+        foreign = h / "foreign entry"
+        make_tools(foreign)
+        make_model_leftover(foreign)
+        touch(foreign / "tools" / "notes.txt", b"mine")
+        foreign_dir = h / "foreign folder"
+        make_tools(foreign_dir)
+        touch(foreign_dir / "tools" / "whisperx" / "w.bin", b"mine")
+        case = h / "case"
+        touch(case / "tools" / "Hush" / "presets.json", b"{}")
+        a_file = h / "tool is a file"
+        touch(a_file / "tools" / "kalam", b"mine")
+        extra = h / "extra"
+        make_tools(extra)
+        touch(extra / "thesis.docx", b"mine")
+        theirs = [empty_alone, foreign, foreign_dir, case, a_file, extra]
+        link = h / "tools link"
+        make_model_leftover(link)
+        if make_dir_link(link / "tools", alone / "tools"):
+            self.addCleanup(drop_dir_link, link / "tools")
+            theirs.append(link)
+        sub = h / "tool link"
+        touch(sub / "tools" / "hush" / "presets.json", b"{}")
+        if make_dir_link(sub / "tools" / "kalam", alone / "tools" / "kalam"):
+            self.addCleanup(drop_dir_link, sub / "tools" / "kalam")
+            theirs.append(sub)
+        for p in ours:
+            with self.subTest(p.name):
+                self.assertTrue(base.is_kept_leftover(p))
+                self.assertTrue(base.is_our_home(p))
+                self.assertEqual(base.choose_engine_home(str(p), home=h, plugin_root=SK), (p, "", None))
+        for p in theirs:
+            with self.subTest(p.name):
+                self.assertFalse(base.is_kept_leftover(p))
+                self.assertFalse(base.is_our_home(p))
+
+    def test_remove_engine_keeps_tools_byte_for_byte_and_a_reinstall_reuses_the_home(self):
+        eng = self.home / "Engine"
+        touch(eng / "state.json", GENUINE_STATE)
+        make_model_leftover(eng)
+        make_engine_extras(eng)
+        presets = make_tools(eng)
+        before = snapshot_tree(eng / "tools")
+        for remove_models in (False, True):
+            with self.subTest(remove_models=remove_models):
+                ctx = make_ctx(self.home, {"schema": 1}, SK, engine_home=eng, remove_engine=True,
+                               remove_models=remove_models)
+                ctx.log.path = None
+                r = uninstall_module().step_engine(ctx)
+                self.assertEqual(r.status, "ok", r.detail)
+                self.assertEqual(snapshot_tree(eng / "tools"), before, r.detail)
+                self.assertEqual(presets.read_bytes(), b'{"mine": {"depth": 3}}')
+                self.assertIn("kept tools", r.detail)  # said as kept, in its own words
+                self.assertNotIn("tools", r.detail.split("not WhyNot Cut's")[-1] if "not WhyNot Cut's" in r.detail
+                                 else "")
+                self.assertEqual(sorted(os.listdir(eng)), ["tools"] if remove_models else ["models", "tools"])
+                self.assertTrue(base.is_kept_leftover(eng))
+                for mode in ("install", "uninstall"):
+                    self.assertIsNone(base.resolved_home_problem(eng, home=self.home, mode=mode), mode)
+                self.assertEqual(base.choose_engine_home(str(eng), home=self.home, plugin_root=SK), (eng, "", None))
+                touch(eng / "state.json", GENUINE_STATE)  # installed again for the next round
+
+    def test_a_foreign_entry_in_tools_makes_the_kept_home_the_editors(self):
+        eng = self.home / "Engine"
+        touch(eng / "state.json", GENUINE_STATE)
+        make_model_leftover(eng)
+        make_tools(eng)
+        mine = touch(eng / "tools" / "my-notes.txt", b"mine")
+        ctx = make_ctx(self.home, {"schema": 1}, SK, engine_home=eng, remove_engine=True, remove_models=False)
+        ctx.log.path = None
+        r = uninstall_module().step_engine(ctx)
+        self.assertEqual(r.status, "ok", r.detail)
+        self.assertEqual(mine.read_bytes(), b"mine")  # tools/ is never entered: kept whole
+        self.assertEqual(sorted(os.listdir(eng)), ["models", "tools"])
+        self.assertFalse(base.is_kept_leftover(eng))
+        final, _note, problem = base.choose_engine_home(str(eng), home=self.home, plugin_root=SK)
+        self.assertIsNone(problem)
+        self.assertEqual(norm(final), norm(eng / "WhyNotCut"))  # the editor's folder: its own WhyNotCut subfolder
+
+
 class TestF1(unittest.TestCase):
     """Task F1: an uninstall leftover under load (an entry STATE.JSON.tmp in the engine home after --remove-engine)."""
 
@@ -8456,6 +8715,38 @@ class _CountdownCases:
         self.assertEqual(pack.read_bytes(), b'{"id": "pack1"}')
         self.assertTrue(base.is_link(self.home / ".whynot-cut"))
 
+    def test_locks_l2_a_linked_home_with_the_tools_data_reinstalls_and_keeps_it(self):
+        # tools/ (the editor's Hush presets, the tools' settings, Kalam's downloads; kept by every uninstall) beside our
+        # models/ is still WhyNot Cut's old folder for the bootstraps too (Test-WncKeptLeftover / is_kept_leftover)
+        target = self.owner_target()
+        presets = make_tools(target)
+        r = self.inst(self.home, "yes", "skip")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        r = self.inst(self.home, "uninstall", "remove-engine", "yes")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.wait_gone(target / "bin")
+        self.assertEqual(sorted(os.listdir(target)), ["models", "tools"], out)
+        before = snapshot_tree(target / "tools")
+        r = self.inst(self.home, "yes", "skip")
+        out = r.stdout + r.stderr
+        self.assertEqual(r.returncode, 0, out)
+        self.assertTrue((target / "current").is_file(), out)
+        self.assertEqual(snapshot_tree(target / "tools"), before, out)
+        self.assertEqual(presets.read_bytes(), b'{"mine": {"depth": 3}}')
+        self.assertTrue(base.is_link(self.home / ".whynot-cut"))
+        # a foreign entry in tools/: the bootstraps refuse to treat it as ours, exactly as the core does
+        touch(target / "tools" / "my-notes.txt", b"mine")
+        r = self.inst(self.home, "uninstall", "remove-engine", "yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.wait_gone(target / "bin")
+        self.assertEqual(sorted(os.listdir(target)), ["models", "tools"], r.stdout + r.stderr)
+        self.assertFalse(base.is_kept_leftover(target))
+        r = self.inst(self.home, "yes", "skip")
+        self.assertNotEqual(r.returncode, 0, r.stdout + r.stderr)  # the linked default home is the editor's now
+        self.assertEqual((target / "tools" / "my-notes.txt").read_bytes(), b"mine")
+        self.assertEqual(presets.read_bytes(), b'{"mine": {"depth": 3}}')
+
     def test_round6_an_editors_own_model_beside_ours_is_never_taken(self):
         # R5-2, the reviewer's probe: AI/models holds our store AND the editor's Llama: not a leftover of ours, so the
         # install goes into AI/WhyNotCut; there, -RemoveModels deletes only WhyNot Cut's own models
@@ -8815,7 +9106,7 @@ class TestPowerShellCountdown(_CountdownCases, _ShellCase):
                  "Read-WncJsonObject", "Get-WncMember", "ConvertTo-WncHomePath", "Get-WncLinkedTargetProblem",
                  "Test-WncEngineHomeMark", "Read-WncJsonFile", "Get-WncOccupiedEntry", "Test-WncOurHome",
                  "Test-WncKeptLeftover", "Test-WncOurModels", "Get-WncModelEntryKind", "Get-WncLibraryState",
-                 "Test-WncViewFile", "Get-WncModelStoreList", "Get-WncArabic"]
+                 "Get-WncToolsState", "Test-WncViewFile", "Get-WncModelStoreList", "Get-WncArabic"]
         boot = INSTALLER / "core" / "bootstrap.ps1"
         arabic = re.search(r"(?ms)^    \$WncAr = @\{.*?^    \}\n", boot.read_text(encoding="utf-8")).group(0)
         body = ("$S = @{ Utf8 = (New-Object System.Text.UTF8Encoding $false); CompPath = $null; ModelStores = $null }\n"
@@ -8905,7 +9196,7 @@ class TestBashCountdown(_CountdownCases, _ShellCase):
                  "place_problem", "resolved_home_problem", "client_roots", "home_path", "abs_path", "json_get",
                  "exact_child", "delete_deferred", "linked_target_problem", "is_engine_home",
                  "state_is_ours", "has_occupied", "occupied_list", "is_kept_leftover", "our_home", "model_stores",
-                 "our_models", "model_entry_kind", "library_state", "view_file"]
+                 "our_models", "model_entry_kind", "library_state", "tools_state", "view_file"]
         script = self.tmp / "deferred.sh"
         script.write_text("".join(shell_function(boot, n, False) for n in names)
                           + 'OS_NAME="$(uname -s)"; JSON_PY=""; HOME="$1"; ENGINE="$1/.whynot-cut"; LINK_REAL="$2"\n'
