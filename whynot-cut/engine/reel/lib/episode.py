@@ -263,7 +263,9 @@ def prep(ep: EpisodePaths) -> dict:
     scan, supers_img, head_img = None, None, None
     if v and dur_s and _scan_budget() > 0:         # G65: name supers are 3 s long; scan the whole episode for them
         from . import overlay_scan
-        scan = overlay_scan.scan_video(src, dur_s, budget_s=_scan_budget())
+        from .gpu_lock import site_slot
+        with site_slot("thumbs", log_to=ep) as lane:          # T4.10: the verb takes the slot once; the scan gets the lane
+            scan = overlay_scan.scan_video(src, dur_s, budget_s=_scan_budget(), lane=lane)
         supers_img, head_img = supers_sheets(ep, src, dur_s, scan)
         if scan["events"]:
             warnings.append("possible name supers / lower thirds at " + ", ".join(
@@ -411,12 +413,13 @@ def _energy_db(audio, sr: int = 16000, hop_ms: int = 50) -> list:
 
 
 def whisper_runner(model_size: str, vad: bool, ep: EpisodePaths | None = None, backend: str | None = None,
-                   batch_size: int | None = None):
+                   batch_size: int | None = None, device: str | None = None):
     """run(audio, start_ms, language, prompt) -> {segments, words, language, language_probability} (chunk-relative
     times), from the configured backend (lib/whisper_backends.py: faster-whisper, batched on CUDA; mlx-whisper on
-    Apple Silicon). The model loads once, at the first chunk; a GPU failure at the first inference retries on the CPU."""
+    Apple Silicon). The model loads once, at the first chunk; a GPU failure at the first inference retries on the CPU.
+    `device="cpu"`: the Whisper slot was not had (T4.10, accel.whisper_device)."""
     from . import whisper_backends as WB
-    return WB.make_runner(model_size, vad, ep, backend=backend, batch_size=batch_size)
+    return WB.make_runner(model_size, vad, ep, backend=backend, batch_size=batch_size, device=device)
 
 
 def _decoder_matches(rec: dict, model: str, prompt, backend, decoder: dict | None = None) -> bool:
@@ -534,9 +537,14 @@ def transcribe_episode(ep: EpisodePaths, model_size: str = "large-v3", language:
     plan = chunk_plan(cdir, audio, fp, chunk_ms, language, force)
     vad = bool(cfg.get("episode_vad", True))
     prompt = load_config("transcription.json").get("initial_prompt")
-    runner = run_chunk or whisper_runner(model_size, vad, ep, backend=backend, batch_size=batch_size)
-    done = run_chunks(ep, cdir, audio, plan, runner, model=model_size, prompt=prompt, language=language,
-                      label=f"episode {ep.episode_id}")
+    from . import accel, gpu_lock
+    # T4.10: the longest GPU job of all holds the Whisper slot for the model load and every chunk (waits up to 600 s
+    # for another GPU job or a Premiere / AE export, then the CPU: slower, same words)
+    with gpu_lock.whisper_slot("transcribe", backend=backend, log_to=ep) as lane:
+        runner = run_chunk or whisper_runner(model_size, vad, ep, backend=backend, batch_size=batch_size,
+                                             device=accel.whisper_device(lane))
+        done = run_chunks(ep, cdir, audio, plan, runner, model=model_size, prompt=prompt, language=language,
+                          label=f"episode {ep.episode_id}")
     segs, words = stitch(done["results"])
     st = getattr(runner, "state", {}) or {}
     prob = done["language_probability"]

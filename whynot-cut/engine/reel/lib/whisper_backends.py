@@ -352,15 +352,19 @@ def _oom(e: Exception) -> bool:
 
 
 # --------------------------------------------------------------------------- runners
-def _ct2_runner(model_size: str, vad: bool, log_to, batch_size: int, cfg: dict, compute_type: str = "int8"):
+def _ct2_runner(model_size: str, vad: bool, log_to, batch_size: int, cfg: dict, compute_type: str = "int8",
+                device: str | None = None):
+    """`device`: "cpu" loads on the CPU (the GPU slot was not had, T4.10); None: the GPU when usable (the config)."""
     state: dict = {"backend": LABEL["ct2"], "vad": vad, "redecoded": []}
+    want = device
 
     def effective_batch(device: str) -> int:
         return batch_size if (vad and device == "cuda" and batch_size > 1) else 0
 
     def load(device: str | None = None):
         expected = None if "device" in state else signature()
-        state["model"], state["device"], state["compute_type"] = load_ct2(model_size, compute_type, device=device)
+        state["model"], state["device"], state["compute_type"] = load_ct2(model_size, compute_type,
+                                                                          device=device or want)
         state["cpu_threads"] = cpu_threads(cfg)
         set_batch(effective_batch(state["device"]))
         if expected and expected["device"] != state["device"]:      # the GPU would not even load the model
@@ -381,7 +385,7 @@ def _ct2_runner(model_size: str, vad: bool, log_to, batch_size: int, cfg: dict, 
         loads it is the expected one (no 3 GB load just to compare checkpoints)."""
         if "device" in state:
             return {"device": state["device"], "batch_size": state["batch_size"], "vad": vad}
-        dev = _device_tries(cfg, None, compute_type)[0][0]
+        dev = _device_tries(cfg, want, compute_type)[0][0]
         return {"device": dev, "batch_size": effective_batch(dev), "vad": vad}
 
     def options(language, prompt):
@@ -480,19 +484,24 @@ def _mlx_runner(model_size: str, vad: bool, log_to):
 
 
 def make_runner(model_size: str, vad: bool, log_to=None, backend: str | None = None, batch_size: int | None = None,
-                compute_type: str = "int8"):
+                compute_type: str = "int8", device: str | None = None):
     """run(audio, start_ms, language, prompt) -> the schema above. The backend is chosen now (cheap); the model loads
     at the first call (or `run.load()`). run.state: backend label, device, compute_type, batch_size, cpu_threads,
-    redecoded (batched segments decoded again); run.signature(): the decoder checkpoints record."""
+    redecoded (batched segments decoded again); run.signature(): the decoder checkpoints record.
+    `device="cpu"` (T4.10: the engine GPU slot was not had) loads on the CPU (passed through to load_ct2); MLX runs on
+    the GPU (Metal), so a Mac then uses faster-whisper on the CPU."""
     cfg = load_config("transcription.json")
     name, note = choose_backend(cfg, backend)
+    if name == "mlx" and device == "cpu":
+        name, note = "ct2", ("the graphics card is not free for this job (busy, or WHYNOT_ACCEL=off): faster-whisper "
+                             "on the CPU this time (slower)")
     if note:
         log(log_to, note)
     if name == "mlx":
         run = _mlx_runner(model_size, vad, log_to)
     else:
         bs = cfg.get("batch_size", 4) if batch_size is None else batch_size
-        run = _ct2_runner(model_size, vad, log_to, max(0, int(bs or 0)), cfg, compute_type)
+        run = _ct2_runner(model_size, vad, log_to, max(0, int(bs or 0)), cfg, compute_type, device=device)
     run.state["backend_note"] = note
     return run
 

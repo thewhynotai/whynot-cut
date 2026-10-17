@@ -161,36 +161,56 @@ def split_by_presence(samples: list, a: int, b: int, min_run_ms: int = 1000) -> 
     return out
 
 
-def analyze_window(path: Path, offset_ms: int, duration_ms: int, faces_fn=face_boxes) -> dict:
+def analyze_window(path: Path, offset_ms: int, duration_ms: int, faces_fn=face_boxes, lane: str = "cpu") -> dict:
     """Shots inside the window and the faces in each: hard cuts (scene score), then splits where faces appear or
-    disappear for >= 1 s (dissolves to cards). Faces are sampled at sample_fps in one decode pass of small frames."""
+    disappear for >= 1 s (dissolves to cards). Faces are sampled at sample_fps in one decode pass of small frames.
+    `lane` (T4.10): the sampling decoder's lane, from the GPU slot the calling verb holds ("shots" in SITE_LANES);
+    this helper never takes a slot itself."""
     import subprocess
+    import tempfile
     from PIL import Image
+    from . import accel
     cfg = _cfg()
     cuts = detect_cuts(path, offset_ms, duration_ms, cfg.get("scene_threshold", 0.3))
     hard = shots_from_cuts(cuts, duration_ms, cfg.get("min_shot_ms", 400))
     W, H, fps = 640, 360, float(cfg.get("sample_fps", 2.0))
     from .media import _hist, _similarity
-    from .media_util import ff_popen
-    raw, n, notes = [], 0, set()
+    from . import media_util
+    notes = set()
     real = faces_fn is face_boxes
     detect = (lambda im: face_boxes(im, notes)) if real else faces_fn     # notes: why detection could not run
-    # ff_popen: a watchdog kills a decoder stuck on a corrupt file or a stalled share (T2.15, MI-17)
-    with ff_popen([ffmpeg_exe(), "-loglevel", "error", "-ss", f"{offset_ms / 1000:.3f}", "-t",
-                   f"{duration_ms / 1000:.3f}", "-i", str(path), "-an", "-vf",
-                   f"fps={fps},scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2",
-                   "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as p:
-        try:
-            while True:
-                buf = p.stdout.read(W * H * 3)
-                if len(buf) < W * H * 3:
-                    break
-                im = Image.frombuffer("RGB", (W, H), buf, "raw", "RGB", 0, 1)
-                raw.append((int((n + 0.5) * 1000 / fps), [[round(float(x), 4) for x in f] for f in detect(im)],
-                            _hist(im)))
-                n += 1
-        finally:
-            p.kill()
+
+    def sample(ln):
+        """The sampled frames in lane `ln` and the decoder's error text."""
+        out, n = [], 0
+        # ff_popen: a watchdog kills a decoder stuck on a corrupt file or a stalled share (T2.15, MI-17)
+        with tempfile.TemporaryFile() as err:
+            with media_util.ff_popen([ffmpeg_exe(), "-loglevel", "error", *accel.decode_args(ln), "-ss",
+                                      f"{offset_ms / 1000:.3f}", "-t", f"{duration_ms / 1000:.3f}", "-i", str(path),
+                                      "-an", "-vf", f"fps={fps},scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                                                    f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2",
+                                      "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                                     stdout=subprocess.PIPE, stderr=err) as p:
+                try:
+                    while True:
+                        buf = p.stdout.read(W * H * 3)
+                        if len(buf) < W * H * 3:
+                            break
+                        im = Image.frombuffer("RGB", (W, H), buf, "raw", "RGB", 0, 1)
+                        out.append((int((n + 0.5) * 1000 / fps), [[round(float(x), 4) for x in f] for f in detect(im)],
+                                    _hist(im)))
+                        n += 1
+                finally:
+                    p.kill()
+            err.seek(0)
+            return out, err.read().decode("utf-8", "replace")
+    raw, err = sample(lane)
+    # the GPU decoder failed and frames are missing (ffmpeg itself goes on in software when only the hwaccel set-up
+    # failed, and those frames are fine): this window again on the CPU
+    if lane != "cpu" and accel.is_gpu_failure(err) and len(raw) < max(1, int(duration_ms / 1000 * fps * 0.9)):
+        accel.note_fallback(None, "shot analysis", err)
+        notes.clear()
+        raw, _err = sample("cpu")
     # a frame without a detected face that looks like the frames WITH faces is still the speaker (head turned, hand
     # over the face): colour-histogram intersection, the same rule media.analyze_shots uses for cutaways
     ref = [h for _t, f, h in raw if f]

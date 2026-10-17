@@ -161,31 +161,34 @@ def _ffmpeg() -> str:
 
 
 def grab_frame_file(video: Path, t_s: float, out: Path, *, vf: str | None = None, quality: int | None = None,
-                    ss_digits: int = 3) -> Path | None:
+                    ss_digits: int = 3, lane: str = "cpu") -> Path | None:
     """One frame at t_s seconds written to `out` (format from its extension), or None when nothing was written.
     Input seeking: ffmpeg decodes only from the keyframe before t_s. vf: a filter chain (scale ...); quality: -q:v.
-    A file already at `out` is removed first."""
+    A file already at `out` is removed first. `lane` (T4.10): the decoder's lane (accel.decode_args); the CPU by
+    default (accel.SITE_LANES["grab_frame"])."""
+    from .accel import decode_args
     from .common import run
     out = Path(out)
     out.unlink(missing_ok=True)            # an older file at `out` must never count as this grab's frame
-    cmd = [_ffmpeg(), "-y", "-loglevel", "error", "-ss", f"{max(0.0, float(t_s)):.{ss_digits}f}", "-i", str(video),
-           "-frames:v", "1"]
+    cmd = [_ffmpeg(), "-y", "-loglevel", "error", *decode_args(lane), "-ss", f"{max(0.0, float(t_s)):.{ss_digits}f}",
+           "-i", str(video), "-frames:v", "1"]
     cmd += ["-vf", vf] if vf else []
     cmd += ["-q:v", str(quality)] if quality is not None else []
     run(cmd + [str(out)], check=False)
     return out if out.exists() else None
 
 
-def grab_frame(video: Path, t_s: float, w: int, h: int, *, fit: str = "pad", mode: str = "RGB"):
+def grab_frame(video: Path, t_s: float, w: int, h: int, *, fit: str = "pad", mode: str = "RGB", lane: str = "cpu"):
     """One frame at t_s seconds as a w x h PIL image (no temp file: rawvideo through a pipe), or None past the end.
-    fit "pad": letterboxed inside w x h; "crop": scaled to fill w x h and centre-cropped."""
+    fit "pad": letterboxed inside w x h; "crop": scaled to fill w x h and centre-cropped. `lane`: as grab_frame_file."""
     from PIL import Image
+    from .accel import decode_args
     if fit == "crop":
         vf = f"scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}"
     else:
         vf = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2"
-    cmd = [_ffmpeg(), "-loglevel", "error", "-ss", f"{t_s:.3f}", "-i", str(video), "-an", "-frames:v", "1",
-           "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    cmd = [_ffmpeg(), "-loglevel", "error", *decode_args(lane), "-ss", f"{t_s:.3f}", "-i", str(video), "-an",
+           "-frames:v", "1", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
     r = subprocess.run(cmd, capture_output=True, timeout=ff_timeout(cmd))
     if r.returncode or len(r.stdout) < w * h * 3:
         return None

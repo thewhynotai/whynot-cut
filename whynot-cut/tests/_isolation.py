@@ -19,6 +19,8 @@ What it does, once per process:
     (dirs=, or a patched plat.font_dirs). plat.font_dirs() itself still names the real folders;
   * keeps the pinned ffmpeg of the real engine home findable (NH_FFMPEG, read-only) so media tests behave as before
     (a developer's WHYNOT_FFMPEG / WHYNOT_FFMPEG_TIMEOUT_SCALE are dropped: they would win over it / scale timeouts);
+  * sets WHYNOT_ACCEL=off (T4.10): no test reaches the GPU; every ffmpeg call keeps its CPU argv (tests of the GPU
+    lanes use fake runners, tests/test_gpu_accel.py);
   * puts every temp folder of the run inside the sandbox (tempfile.tempdir, and TMP/TEMP/TMPDIR for child processes)
     and makes TemporaryDirectory clean up robustly: Windows under load answers rmtree with WinError 145 ("directory is
     not empty") or a read-only / briefly locked file, so cleanup retries (chmod + short backoff) and whatever still
@@ -151,6 +153,7 @@ def _sandbox() -> None:
         "CLAUDE_CONFIG_DIR": str(user / ".claude"),
         "TMP": str(tmp), "TEMP": str(tmp), "TMPDIR": str(tmp),
         plat.FONT_DIRS_ENV: str(box / "fonts"),
+        "WHYNOT_ACCEL": "off",          # T4.10: the suite never touches the GPU (tests opt in with fakes)
     })
     if plat.IS_WIN:
         os.environ["APPDATA"] = str(user / "AppData" / "Roaming")

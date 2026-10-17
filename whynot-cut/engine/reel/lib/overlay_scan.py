@@ -70,12 +70,18 @@ def tc(t_s: float) -> str:
 
 
 # --------------------------------------------------------------------------- decoding
-def decode_thumbs(src, start_s: float, length_s: float) -> np.ndarray:
-    """(n, 180, 320, 3) uint8: one frame per second of src from start_s (ffmpeg decodes the video once)."""
-    cmd = [ffmpeg_exe(), "-nostdin", "-v", "error", "-ss", f"{max(0.0, start_s):.3f}", "-i", str(src),
-           "-t", f"{length_s:.3f}", "-an", "-sn", "-vf", f"fps=1,scale={TH_W}:{TH_H}:flags=area,format=rgb24",
-           "-f", "rawvideo", "-"]
-    raw = subprocess.run(cmd, capture_output=True, check=False, timeout=ff_timeout(cmd)).stdout
+def decode_thumbs(src, start_s: float, length_s: float, lane: str = "cpu") -> np.ndarray:
+    """(n, 180, 320, 3) uint8: one frame per second of src from start_s (ffmpeg decodes the video once). `lane`
+    (T4.10): the decoder's lane; a GPU failure decodes once more on the CPU (accel.run_ff)."""
+    from . import accel
+
+    def build(ln):
+        return [ffmpeg_exe(), "-nostdin", "-v", "error", *accel.decode_args(ln), "-ss", f"{max(0.0, start_s):.3f}",
+                "-i", str(src), "-t", f"{length_s:.3f}", "-an", "-sn", "-vf",
+                f"fps=1,scale={TH_W}:{TH_H}:flags=area,format=rgb24", "-f", "rawvideo", "-"]
+    res, _lane = accel.run_ff(build, lane, runner=lambda cmd: subprocess.run(cmd, capture_output=True, check=False,
+                                                                              timeout=ff_timeout(cmd)))
+    raw = res.stdout or b""
     fs = TH_W * TH_H * 3
     n = len(raw) // fs
     return np.frombuffer(raw[:n * fs], dtype=np.uint8).reshape(n, TH_H, TH_W, 3)
@@ -193,10 +199,13 @@ def detect_events(frames: np.ndarray, step_s: float = STEP_S, base_s: float = 0.
 
 # --------------------------------------------------------------------------- whole-file scan
 def scan_video(src, duration_s: float, *, decode=None, clock=time.monotonic, budget_s: float = BUDGET_S,
-               chunk_s: float = CHUNK_S, max_events: int = MAX_EVENTS) -> dict:
+               chunk_s: float = CHUNK_S, max_events: int = MAX_EVENTS, lane: str = "cpu") -> dict:
     """Scan src in chunks (memory stays small; the budget can stop it between chunks). `decode(src, start_s,
-    length_s)` returns the thumbnails and is replaceable for tests."""
-    decode = decode or decode_thumbs
+    length_s)` returns the thumbnails and is replaceable for tests. `lane` (T4.10): the default decoder's lane, from
+    the "thumbs" GPU slot the calling verb holds (episode.prep); this helper never takes a slot itself."""
+    if decode is None:
+        def decode(s, a, b):
+            return decode_thumbs(s, a, b, lane=lane)
     t0 = clock()
     hits, c0, complete = [], 0.0, True
     while c0 < duration_s - 1e-6:

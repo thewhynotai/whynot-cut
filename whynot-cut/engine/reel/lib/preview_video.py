@@ -163,14 +163,17 @@ PREVIEW_WORKERS = min(2, os.cpu_count() or 1)     # chunks rendered at once: eac
                                                    # decoder of the clip it is in), so <= ~6 ffmpeg (T2.14 review I2)
 MIN_CHUNK_FRAMES = 240                             # a chunk is worth its own start-up from about 10 s of timeline
 DLL_INIT_FAILED = (3221225794, -1073741502)        # 0xC0000142: Windows could not start the process (spawn load)
+DETAIL_LINES = 40                                  # stderr lines kept for the GPU-failure check (T4.10)
 
 
 class _FFFailed(Exception):
-    """An ffmpeg process of a chunk failed: `what` (source decoder / B-roll decoder / encoder), exit code, stderr tail."""
+    """An ffmpeg process of a chunk failed: `what` (source decoder / B-roll decoder / encoder), exit code, stderr tail
+    (the last 3 lines: the message) and `detail` (the last DETAIL_LINES lines: what the GPU check reads, T4.10 — ffmpeg
+    7 prints the NVENC reason first and ends on generic task / thread / muxer lines)."""
 
-    def __init__(self, what: str, rc, tail: str = ""):
+    def __init__(self, what: str, rc, tail: str = "", detail: str = ""):
         super().__init__(f"the {what} ffmpeg exited with code {rc}" + (f": {tail}" if tail else ""))
-        self.what, self.rc, self.tail = what, rc, tail
+        self.what, self.rc, self.tail, self.detail = what, rc, tail, detail or tail
 
     @property
     def spawn(self) -> bool:
@@ -179,6 +182,15 @@ class _FFFailed(Exception):
 
 class _Timeout(Exception):
     pass
+
+
+class _GPUFailed(Exception):
+    """A chunk's ffmpeg failed because of the GPU (NVENC / NVDEC / CUDA / VideoToolbox, T4.10): the whole render is
+    redone on the CPU, because the lossless concat needs the same codec parameters in every chunk."""
+
+    def __init__(self, what: str, tail: str):
+        super().__init__(f"{what}: {tail}")
+        self.tail = tail
 
 
 def chunk_timeout_s(dur_s: float) -> float:
@@ -219,13 +231,22 @@ class _Watch:
         return p
 
     @staticmethod
-    def tail(p) -> str:
+    def _lines(p) -> list[str]:
         try:
             p.wnc_err.seek(0)
-            lines = p.wnc_err.read().decode("utf-8", "replace").strip().splitlines()
+            return p.wnc_err.read().decode("utf-8", "replace").strip().splitlines()
         except (OSError, ValueError):
-            return ""
-        return " | ".join(lines[-3:])[-400:]
+            return []
+
+    @classmethod
+    def tail(cls, p) -> str:
+        """The last 3 stderr lines, for the editor's message."""
+        return " | ".join(cls._lines(p)[-3:])[-400:]
+
+    @classmethod
+    def detail(cls, p) -> str:
+        """The last DETAIL_LINES stderr lines, for the GPU-failure check (accel.is_gpu_failure)."""
+        return "\n".join(cls._lines(p)[-DETAIL_LINES:])
 
     def finish(self, p, what: str, read_any: bool):
         """A decoder whose output ended: raise unless it exited 0 having delivered at least one frame."""
@@ -237,9 +258,9 @@ class _Watch:
         if self.fired:
             raise _Timeout()
         if rc != 0:
-            raise _FFFailed(what, rc, self.tail(p))
+            raise _FFFailed(what, rc, self.tail(p), self.detail(p))
         if not read_any:
-            raise _FFFailed(what, rc, self.tail(p) or "no frame decoded")
+            raise _FFFailed(what, rc, self.tail(p) or "no frame decoded", self.detail(p))
 
     def close(self, p):
         """Stop a process and reap it (no zombie ffmpeg, no ResourceWarning)."""
@@ -286,9 +307,13 @@ def chunk_bounds(total: int, workers: int, min_chunk: int = MIN_CHUNK_FRAMES) ->
 
 
 def render(paths: Paths, width: int = 540, label: bool = True, workers: int | None = None,
-           min_chunk_frames: int = MIN_CHUNK_FRAMES) -> dict:
+           min_chunk_frames: int = MIN_CHUNK_FRAMES, lane: str | None = None) -> dict:
     """Render the preview MP4. The timeline is cut into up to `workers` chunks that are rendered at the same time and
-    joined with ffmpeg's concat demuxer (same codec parameters, so the join is lossless); `workers=1` is one pass."""
+    joined with ffmpeg's concat demuxer (same codec parameters, so the join is lossless); `workers=1` is one pass.
+    `lane` (T4.10): "cuda" | "videotoolbox" | "cpu" when the caller holds the GPU slot; None takes the
+    "preview_video" slot for the encoding (waits up to 120 s, then the CPU). A GPU failure in any chunk renders the
+    whole preview again on the CPU (never a concat of NVENC and x264 chunks)."""
+    from . import accel
     from .ppro_build import job_data
     t0 = time.time()
     from .stamps import read_compiled
@@ -361,15 +386,16 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
         return chunk_timeout_s(max((f1 - f0) / fps_n, src_s))
     from .parallel import check as cancel_check
 
-    def render_range(f0, f1, enc, watch):
+    def render_range(f0, f1, enc, watch, lane):
         """Timeline frames f0..f1-1 into the encoder's stdin. A range that does not start at frame 0 has its decoders
         skip the frames before it INSIDE ffmpeg (`trim` after the same `fps` filter, so every frame is the one a single
         pass would have used); the one starting at 0 is the plain sequential pass. A decoder that fails, or delivers no
         frame, raises _FFFailed (never a silent black or speaker-only chunk, T2.14 review I3)."""
         skip = source_frame(f0, segs[seg_index(f0)]) if f0 else 0
         trim = f",trim=start_frame={skip},setpts=PTS-STARTPTS" if skip else ""
+        hw = accel.decode_args(lane)                    # T4.10: NVDEC / VideoToolbox; frames back to system memory
         # `-r` after a trim: without it ffmpeg falls back to the SOURCE's rate for the output and duplicates frames
-        dec = watch.spawn([ff, "-loglevel", "error", *threads, *off, "-i", str(src), "-an", "-vf",
+        dec = watch.spawn([ff, "-loglevel", "error", *threads, *hw, *off, "-i", str(src), "-an", "-vf",
                            f"fps={fps_s}{trim},scale={cw_}:{ch_}", *(["-r", fps_s] if skip else []),
                            "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], stdout=subprocess.PIPE)
         src_idx, cur = skip - 1, Image.new("RGB", (cw_, ch_))
@@ -385,7 +411,7 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
             pp = ev["params"]
             cx, cy = (pp.get("crop_center") or [0.5, 0.5])[:2]
             return watch.spawn(
-                [ff, "-loglevel", "error", *threads, "-ss", str(float(pp.get("in", 0) or 0)), "-i", str(paths.root / pp["video"]), "-an",
+                [ff, "-loglevel", "error", *threads, *hw, "-ss", str(float(pp.get("in", 0) or 0)), "-i", str(paths.root / pp["video"]), "-an",
                  "-vf", f"fps={fps_s}" + (f",trim=start_frame={into},setpts=PTS-STARTPTS" if into else "") +
                         f",scale={W}:{H}:force_original_aspect_ratio=increase,"
                         f"crop={W}:{H}:x='(iw-{W})*{float(cx)}':y='(ih-{H})*{float(cy)}'",
@@ -495,20 +521,20 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
             for p in [dec, *bdec.values()]:     # stop the decoders and reap them (no zombie ffmpeg, no ResourceWarning)
                 watch.close(p)
 
-    def encode_once(f0, f1, dest, audio):
+    def encode_once(f0, f1, dest, audio, lane):
         """Render f0..f1 and encode it to `dest` (with the dialogue when `audio`: the single-pass file). Same codec
         parameters for every chunk, which is what makes the concatenation lossless. Raises _FFFailed / _Timeout."""
         cmd = [ff, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", fps_s, "-i", "-"]
         if audio:
             cmd += ["-i", str(wav)]
-        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", *threads]
+        cmd += [*accel.h264_args(lane, 23), "-pix_fmt", "yuv420p", *threads]
         cmd += ["-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart"] if audio else []
         # T2.15 watchdog: 10 s + 3 x the chunk's work (its source span), then every process of the chunk is killed
         watch = _Watch(chunk_deadline_s(f0, f1))
         try:
             enc = watch.spawn(cmd + [str(dest)], stdin=subprocess.PIPE)
             try:
-                render_range(f0, f1, enc, watch)
+                render_range(f0, f1, enc, watch, lane)
             except OSError:                     # the encoder died under us (broken pipe): its exit code says why
                 if enc.poll() is None and not watch.fired:
                     raise
@@ -521,22 +547,25 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
             if watch.fired:
                 raise _Timeout()
             if enc.returncode != 0:
-                raise _FFFailed("encoder", enc.returncode, watch.tail(enc))
+                raise _FFFailed("encoder", enc.returncode, watch.tail(enc), watch.detail(enc))
         finally:
             watch.stop()
 
-    def encode(f0, f1, dest, audio):
+    def encode(f0, f1, dest, audio, lane):
         """encode_once, retried once when Windows could not start one of its ffmpeg (0xC0000142 under process-creation
-        load); any other failure is a Guidance (ok: false with what failed and what to do)."""
+        load); a GPU failure in a GPU lane is _GPUFailed (the caller re-renders everything on the CPU); any other
+        failure is a Guidance (ok: false with what failed and what to do)."""
         from .errors import Guidance
         what = f"timeline frames {f0}-{f1 - 1}"
         for attempt in (1, 2):
             try:
-                return encode_once(f0, f1, dest, audio)
+                return encode_once(f0, f1, dest, audio, lane)
             except _FFFailed as e:
                 if e.spawn and attempt == 1:
                     log(paths, f"preview video: {e} ({what}); Windows could not start ffmpeg, retrying once")
                     continue
+                if lane != "cpu" and accel.is_gpu_failure(e.detail):
+                    raise _GPUFailed(f"the {e.what} ffmpeg, {what}", e.detail) from e
                 raise Guidance(f"preview-video could not render {what}: {e}",
                                "Check that the footage (and any B-roll clip) opens: `reel preflight`, then run `reel "
                                "preview-video` again. Exit code 3221225794 (0xC0000142) means Windows could not start "
@@ -548,35 +577,58 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
                                "disk or wake the drive, then run `reel preview-video` again.") from None
     chunk_files = [out_dir / f"_preview_chunk_{i}.mp4" for i in range(nch)] if nch > 1 else []
     listing = out_dir / "_preview_chunks.txt"
-    err = None
-    try:
+
+    def render_all(lane) -> str | None:
+        """Every chunk in `lane`, then the join. Returns the join's error, or None."""
         if nch <= 1:
-            encode(0, total, mp4, True)
-        else:
-            from .parallel import parallel_map
-            done = parallel_map(lambda i: encode(bounds[i], bounds[i + 1], chunk_files[i], False), range(nch), nch)
-            for good, v in done:
-                if not good:
-                    raise v
-            # the concat demuxer joins the chunks without re-encoding; the dialogue is encoded once over the whole
-            listing.write_text("".join(f"file '{c.name}'\n" for c in chunk_files), encoding="utf-8")
-            cat = run([ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing.name,
-                       "-i", str(wav), "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest",
-                       "-movflags", "+faststart", str(mp4)], check=False, cwd=out_dir)     # T2.15 timeout
-            if cat.returncode != 0:
-                err = f"joining the chunks failed (ffmpeg exit {cat.returncode}): " + \
-                      " | ".join((cat.stderr or "").strip().splitlines()[-3:])[-400:]
+            encode(0, total, mp4, True, lane)
+            return None
+        from .parallel import parallel_map
+        done = parallel_map(lambda i: encode(bounds[i], bounds[i + 1], chunk_files[i], False, lane), range(nch), nch)
+        bad = [v for good, v in done if not good]
+        gpu = next((v for v in bad if isinstance(v, _GPUFailed)), None)
+        if gpu is not None or bad:
+            raise gpu if gpu is not None else bad[0]
+        # the concat demuxer joins the chunks without re-encoding; the dialogue is encoded once over the whole
+        listing.write_text("".join(f"file '{c.name}'\n" for c in chunk_files), encoding="utf-8")
+        cat = run([ff, "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", listing.name,
+                   "-i", str(wav), "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest",
+                   "-movflags", "+faststart", str(mp4)], check=False, cwd=out_dir)     # T2.15 timeout
+        if cat.returncode != 0:
+            return f"joining the chunks failed (ffmpeg exit {cat.returncode}): " + \
+                   " | ".join((cat.stderr or "").strip().splitlines()[-3:])[-400:]
+        return None
+    err, fallback = None, None
+    from contextlib import ExitStack, nullcontext
+    from .gpu_lock import site_slot
+    try:
+        with ExitStack() as slot:
+            lane = slot.enter_context(nullcontext(lane) if lane else site_slot("preview_video", log_to=paths))
+            try:
+                err = render_all(lane)
+            except _GPUFailed as g:             # any chunk: the whole render again on the CPU, one codec everywhere
+                slot.close()                    # the GPU slot is free for other jobs while the processor works
+                accel.note_fallback(paths, "preview video", g.tail)
+                fallback = str(g)
+                for f in chunk_files:
+                    _unlink(f)
+                lane = "cpu"
+                err = render_all(lane)
     finally:
         for f in (wav, out_dir / "_camera_audio.wav", listing, *chunk_files):
             _unlink(f)
     ok = err is None
     ok = ok and mp4.exists() and mp4.stat().st_size > 1000
     res = {"ok": ok, "video": str(mp4), "size": f"{W}x{H}", "frames": total, "seconds": round(total / seq_fps(), 2),
-           "layers": len(layers), "chunks": nch, "elapsed_s": round(time.time() - t0, 1), "at": now_iso(),
+           "layers": len(layers), "chunks": nch, "lane": lane, "elapsed_s": round(time.time() - t0, 1),
+           "at": now_iso(),
            "dialogue": "cleaned" if paths.p("06_audio/dialogue/dialogue_clean.wav").exists() else "camera (not cleaned yet)",
            "note": "Proxy preview for review only. The deliverable is the Premiere project; the editor renders the final."}
     if err:
         res["error"] = err
+    if fallback:                        # T4.10: the GPU could not do it; the processor did (same result, slower)
+        res["gpu_fallback"] = accel.GPU_FALLBACK_EN
+        res["gpu_fallback_ar"] = accel.GPU_FALLBACK_AR
     if data.get("_stills_redrawn"):     # 3.0 F1: graphics drawn from an older plan were redrawn first
         res["stills_redrawn"] = data["_stills_redrawn"]
     write_json(out_dir / "preview-result.json", res)

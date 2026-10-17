@@ -91,7 +91,7 @@ def status(queue: Path, max_age_s: float = 5.0, app: str = "the Adobe app") -> d
            "host": d.get("host"), "role": d.get("role"), "current": d.get("current"),
            # protocol 4 (bundle 3.0.0); absent from a 3.1.1 heartbeat
            "protocol": d.get("protocol"), "bundle": d.get("bundle"), "build": d.get("build"), "libs": d.get("libs"),
-           "host_version": d.get("hostVersion"),
+           "host_version": d.get("hostVersion"), "host_busy": d.get("host_busy"),
            "detail": "ok" if age < max_age_s else f"heartbeat {age:.0f}s old: {app} busy or quit"}
     orphans = _orphans(queue, d.get("current"))
     if orphans:

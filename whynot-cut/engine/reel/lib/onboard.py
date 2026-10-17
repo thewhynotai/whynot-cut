@@ -237,6 +237,40 @@ def runtime_report(home: Path | None = None) -> dict:
     return st
 
 
+def accelerator(video: dict | None = None, gpu: dict | None = None, *, backend: str | None = None) -> dict:
+    """What the heavy media steps run on (T4.10): {"video": accel.detect(), "transcription": the Whisper device of
+    plat.gpu_info(), "line": one line for the editor}, e.g.
+    "Video: NVIDIA GeForce RTX 4060 Laptop GPU (NVENC/NVDEC) · transcription: CUDA float16",
+    "Video: Apple VideoToolbox · transcription: MLX", or "Video: CPU — <why> · transcription: CPU" (with
+    WHYNOT_ACCEL=off both halves say CPU). The doctor probes afresh (detect(refresh=True)): it is the place to see a
+    driver update or a card that came back. `backend`: the transcription backend (ct2 | mlx); None asks
+    whisper_backends.choose_backend."""
+    from . import accel
+    from .common import load_config
+    video = accel.detect(refresh=True) if video is None else video
+    gpu = plat.gpu_info() if gpu is None else gpu
+    cfg = load_config("transcription.json")
+    if backend is None:
+        try:
+            from .whisper_backends import choose_backend
+            backend = choose_backend(cfg)[0]
+        except Exception:  # noqa: BLE001 — a bad backend setting is the doctor's other checks' business
+            backend = "ct2"
+    dev = gpu.get("whisper_device") or "cpu"
+    if accel.off():
+        tx = "CPU"                                   # WHYNOT_ACCEL=off: transcription stays on the processor too
+    else:
+        tx = "MLX" if backend == "mlx" else f"CUDA {cfg.get('gpu_compute_type', 'float16')}" if dev == "cuda" else "CPU"
+    kind = video.get("kind")
+    if kind == "cuda":
+        v = f"{video.get('name') or 'NVIDIA GPU'} (NVENC/NVDEC)"
+    elif kind == "videotoolbox":
+        v = video.get("name") or "Apple VideoToolbox"
+    else:
+        v = "CPU" + (f" — {video['why']}" if video.get("why") else "")
+    return {"video": video, "transcription": dev, "line": f"Video: {v} · transcription: {tx}"}
+
+
 def doctor() -> dict:
     from . import settings as S
     mods = {}
@@ -269,6 +303,7 @@ def doctor() -> dict:
     gh = guard_heartbeat()
     rep["guard_active"], rep["guard_heartbeat"] = gh["active"], gh
     rep["transcription_speed"] = transcription_speed()
+    rep["accelerator"] = accelerator(gpu=rep["gpu"])      # T4.10: GPU (NVENC/NVDEC, VideoToolbox) or CPU, in one line
     fixes = []
     if not rc["ok"]:      # G66: a session started before the install keeps another plugin's `reel` first on PATH
         fixes.append({"item": "wrong `reel` first on PATH: " + rc["message"], "who": "editor", "fix": rc["fix"]})

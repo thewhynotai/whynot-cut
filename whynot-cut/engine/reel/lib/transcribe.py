@@ -90,24 +90,31 @@ def transcribe(paths: Paths, source_video: Path, model_size: str = "large-v3",
     long_ms = float(cfg.get("long_clip_minutes", 10) or 0) * 60000
     chunked = bool(long_ms) and total_ms > long_ms
     log(paths, f"Loading Whisper model {model_size}")
-    t0 = time.time()
-    run = WB.make_runner(model_size, chunked, paths, backend=backend, batch_size=batch_size, compute_type=compute_type)
+    from . import accel, gpu_lock
     extra = {}
-    if chunked:
-        from .episode import chunk_plan, run_chunks, stitch
-        cdir = out / "chunks"
-        fp = sha1_head(source_video) + ":" + json.dumps(rng or {}, sort_keys=True, default=str)
-        plan = chunk_plan(cdir, audio, fp, int(float(cfg.get("chunk_minutes", 10)) * 60000), language, force)
-        done = run_chunks(paths, cdir, audio, plan, run, model=model_size, prompt=initial_prompt, language=language,
-                          label=f"{paths.video_id} (long clip)")
-        segs, words = stitch(done["results"])
-        lang, prob = done["language"], done["language_probability"]
-        extra = {"chunks": len(plan["chunks"]), "chunks_run": done["ran"]}
-        decoders = {"decoders": done["decoders"], "mixed_decoders": len(done["decoders"]) > 1,
-                    "redecoded_segments": done["redecoded"]}
-    else:
-        r = run(audio, 0, language, initial_prompt)
-        segs, words, lang, prob = r["segments"], r["words"], r["language"], r["language_probability"]
+    # T4.10: one GPU-heavy engine job at a time; waits up to 600 s for another job or a Premiere / AE export, then
+    # transcribes on the CPU (slower, same words). The slot is held for the model load and the whole decode.
+    tw = time.time()
+    with gpu_lock.whisper_slot("transcribe", backend=backend, log_to=paths) as lane:
+        t0 = time.time()                # the transcription's own time starts once the slot is had
+        gpu_wait = round(t0 - tw, 1)
+        run = WB.make_runner(model_size, chunked, paths, backend=backend, batch_size=batch_size,
+                             compute_type=compute_type, device=accel.whisper_device(lane))
+        if chunked:
+            from .episode import chunk_plan, run_chunks, stitch
+            cdir = out / "chunks"
+            fp = sha1_head(source_video) + ":" + json.dumps(rng or {}, sort_keys=True, default=str)
+            plan = chunk_plan(cdir, audio, fp, int(float(cfg.get("chunk_minutes", 10)) * 60000), language, force)
+            done = run_chunks(paths, cdir, audio, plan, run, model=model_size, prompt=initial_prompt,
+                              language=language, label=f"{paths.video_id} (long clip)")
+            segs, words = stitch(done["results"])
+            lang, prob = done["language"], done["language_probability"]
+            extra = {"chunks": len(plan["chunks"]), "chunks_run": done["ran"]}
+            decoders = {"decoders": done["decoders"], "mixed_decoders": len(done["decoders"]) > 1,
+                        "redecoded_segments": done["redecoded"]}
+        else:
+            r = run(audio, 0, language, initial_prompt)
+            segs, words, lang, prob = r["segments"], r["words"], r["language"], r["language_probability"]
     st = getattr(run, "state", {}) or {}
     elapsed = round(time.time() - t0, 1)
     log(paths, f"Transcribed {len(segs)} segments / {len(words)} words in {elapsed}s; lang={lang} p={prob}")
@@ -117,7 +124,8 @@ def transcribe(paths: Paths, source_video: Path, model_size: str = "large-v3",
             "model": model_size, "compute_type": st.get("compute_type"), "device": st.get("device"),
             "batch_size": st.get("batch_size"), "cpu_threads": st.get("cpu_threads"),
             "language": lang, "language_probability": prob if prob is not None else 1.0,
-            "duration_ms": total_ms, "initial_prompt": initial_prompt, "elapsed_s": elapsed, "translated": False}
+            "duration_ms": total_ms, "initial_prompt": initial_prompt, "elapsed_s": elapsed, "gpu_wait_s": gpu_wait,
+            "translated": False}
     if chunked:
         meta.update(chunks=extra["chunks"], vad=st.get("vad", True), **decoders)
     res = finalize(paths, meta, segs, words)

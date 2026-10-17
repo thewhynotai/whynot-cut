@@ -151,6 +151,44 @@ def _label(im: Image.Image, text: str) -> Image.Image:
     return out
 
 
+def _cmd(W: int, H: int, wav, dur: float, mp4, lane: str) -> list:
+    """The animatic encoder in `lane` (T4.10); the CPU lane is the pre-3.0 argv."""
+    from .accel import h264_args
+    return [ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
+            "-r", str(ANIM_FPS), "-i", "-", "-i", str(wav), "-map", "0:v", "-map", "1:a", *h264_args(lane, 26),
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-t", f"{dur:.3f}", "-movflags", "+faststart",
+            str(mp4)]
+
+
+def _encode(build, lane: str, frames, errf: Path, log_to=None, release=None) -> tuple[int, str, str]:
+    """Feed `frames()` (an iterable of rgb24 frames) to the encoder `build(lane)`: (exit code, stderr, lane used). A GPU
+    failure encodes everything once more on the CPU (accel.run_ff's rule, for a piped encoder); `release()` is called
+    first, so the GPU slot is free for other jobs during the CPU encode. The check reads the whole stderr file:
+    ffmpeg 7 ends a GPU failure on generic task / thread / muxer lines.
+    stderr goes to a file, not a pipe: a pipe nobody reads while frames are written can fill and stall ffmpeg, and
+    the old pipe was never closed (MI-9 ResourceWarning). The `with` closes stdin and reaps the process.
+    ff_popen (T2.15, MI-17): a watchdog kills an encoder that stops taking frames after 10 s + 3 x the animatic."""
+    from . import accel
+    while True:
+        p = None
+        try:
+            with open(errf, "wb") as ef, ff_popen(build(lane), stdin=subprocess.PIPE, stderr=ef) as p:
+                for b in frames():
+                    p.stdin.write(b)
+        except OSError:                      # the encoder is gone (BrokenPipeError): its exit code and stderr say why
+            if p is None:
+                raise
+        err = errf.read_bytes().decode("utf-8", "replace")
+        rc = p.returncode if p.returncode is not None else p.wait()
+        if lane != "cpu" and rc and accel.is_gpu_failure(err):
+            if release is not None:
+                release()
+            accel.note_fallback(log_to, "animatic", err)
+            lane = "cpu"
+            continue
+        return rc, err, lane
+
+
 def render(paths, width: int = 540) -> dict:
     from .motion_audio import mix
     from .previews import Brand
@@ -180,33 +218,32 @@ def render(paths, width: int = 540) -> dict:
     wav = mix(plan, paths.root, d / "_animatic_mix.wav")
     mp4 = d / f"{paths.video_id}_animatic.mp4"
     W, H = imgs[0].size
-    cmd = [ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}",
-           "-r", str(ANIM_FPS), "-i", "-", "-i", str(wav), "-map", "0:v", "-map", "1:a", "-c:v", "libx264",
-           "-preset", "veryfast", "-crf", "26", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k",
-           "-t", f"{dur:.3f}", "-movflags", "+faststart", str(mp4)]
     labeled = [_label(im, f"{sc['id']} {sc['type']} · {LABEL}").convert("RGB") for sc, im in zip(plan["scenes"], imgs)]
     n = int(math.ceil(dur * ANIM_FPS)) + 1
     cache = {}
-    # stderr goes to a file, not a pipe: a pipe nobody reads while frames are written can fill and stall ffmpeg, and
-    # the old pipe was never closed (MI-9 ResourceWarning). The `with` closes stdin and reaps the process.
-    # ff_popen (T2.15, MI-17): a watchdog kills an encoder that stops taking frames after 10 s + 3 x the animatic
+
+    def frames():
+        for k in range(n):
+            t = k / ANIM_FPS * fps
+            i = max((j for j, sc in enumerate(plan["scenes"]) if sc["start_frame"] <= t), default=0)
+            a = (t - plan["scenes"][i]["start_frame"]) / 6.0
+            if i > 0 and a < 1:
+                key = (i, round(a, 2))
+                if key not in cache:
+                    cache[key] = Image.blend(labeled[i - 1], labeled[i], max(0.0, a)).tobytes()
+                yield cache[key]
+            else:
+                yield cache.setdefault((i, 1.0), labeled[i].tobytes())
     errf = d / "_animatic_ffmpeg.log"
+    import contextlib
+    from .gpu_lock import site_slot
     try:
-        with open(errf, "wb") as ef, ff_popen(cmd, stdin=subprocess.PIPE, stderr=ef) as p:
-            for k in range(n):
-                t = k / ANIM_FPS * fps
-                i = max((j for j, sc in enumerate(plan["scenes"]) if sc["start_frame"] <= t), default=0)
-                a = (t - plan["scenes"][i]["start_frame"]) / 6.0
-                if i > 0 and a < 1:
-                    key = (i, round(a, 2))
-                    if key not in cache:
-                        cache[key] = Image.blend(labeled[i - 1], labeled[i], max(0.0, a)).tobytes()
-                    p.stdin.write(cache[key])
-                else:
-                    p.stdin.write(cache.setdefault((i, 1.0), labeled[i].tobytes()))
-        err = errf.read_bytes().decode("utf-8", "replace")
+        with contextlib.ExitStack() as slot:      # T4.10: the GPU when free at once, else the CPU (no wait)
+            lane = slot.enter_context(site_slot("animatic", log_to=paths))
+            rc, err, lane = _encode(lambda ln: _cmd(W, H, wav, dur, mp4, ln), lane, frames, errf, paths,
+                                    release=slot.close)
     finally:
         errf.unlink(missing_ok=True)       # also when writing a frame failed (ffmpeg gone: BrokenPipeError)
-    if p.returncode or not mp4.exists():
+    if rc or not mp4.exists():
         raise SystemExit(f"animatic encode failed: {err[-400:]}")
     return {"stills": stills, "sheet": str(sheet_p), "mp4": str(mp4), "duration_s": round(dur, 3)}

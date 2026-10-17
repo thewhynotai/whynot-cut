@@ -252,9 +252,12 @@ def preflight(paths: Paths, main_footage: list[Path]) -> dict:
             if wider and rng.get("kind") == "episode_reel" and Path(f).name == Path(rng["footage"]).name:
                 # podcast reel cut from a finished episode: framing per SHOT inside the window (shots.py); the plan
                 # composes it with the story camera moves. One global crop would cut faces off at every camera change.
+                from .gpu_lock import site_slot
                 from .shots import analyze_window
                 try:
-                    report["shots"] = analyze_window(Path(f), int(rng["in_ms"]), int(rng["out_ms"] - rng["in_ms"]))
+                    with site_slot("shots", log_to=paths) as lane:      # T4.10: the verb takes the slot once, the helper gets the lane
+                        report["shots"] = analyze_window(Path(f), int(rng["in_ms"]), int(rng["out_ms"] - rng["in_ms"]),
+                                                         lane=lane)
                 except Exception as e:  # noqa: BLE001  (analysis is an aid: the plan falls back to a centred crop)
                     report["shots"] = {"shots": [], "error": f"{type(e).__name__}: {e}"}
                     report["issues"].append({"file": str(f), "severity": "warning",

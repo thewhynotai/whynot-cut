@@ -296,9 +296,20 @@ def _label_png(path: Path, lines: list[str], w: int = 540, h: int = 960) -> Path
     return path
 
 
-def audio_card(ep, cand: dict, out: Path) -> Path:
+class _NeedsCPU(Exception):
+    """A candidate's GPU encode failed because of the GPU (T4.10): render_candidates frees the GPU slot, then redoes
+    it on the CPU."""
+
+    def __init__(self, stderr):
+        super().__init__("the GPU could not encode this candidate")
+        self.stderr = stderr
+
+
+def audio_card(ep, cand: dict, out: Path, lane: str = "cpu", fallback: bool = True) -> Path:
     """Preview card for an audio-only episode: a dark 540x960 card with the Latin label and the window's waveform,
-    over the window's audio (H.264 + AAC). Also writes <id>.jpg (the card) for the sheet."""
+    over the window's audio (H.264 + AAC). Also writes <id>.jpg (the card) for the sheet. `lane` (T4.10): the
+    encoder's; a GPU failure encodes once more on the CPU, or with fallback=False raises _NeedsCPU (the caller frees
+    the GPU slot first)."""
     import numpy as np
     from PIL import Image, ImageDraw, ImageFont
     from .common import ffmpeg_exe, run
@@ -330,21 +341,36 @@ def audio_card(ep, cand: dict, out: Path) -> Path:
     d.text((14, h - 30), "audio-only episode - motion candidate", fill=(200, 200, 200), font=f)
     card = out.with_suffix(".jpg")
     im.save(card, quality=88)
-    run([ffmpeg_exe(), "-y", "-loglevel", "error", "-loop", "1", "-framerate", "25", "-i", str(card), "-ss", f"{a:.3f}",
-         "-t", f"{dur:.3f}", "-i", str(src), "-map", "0:v", "-map", "1:a:0", "-t", f"{dur:.3f}", "-c:v", "libx264",
-         "-tune", "stillimage", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k",
-         "-movflags", "+faststart", str(out)], check=False)
+    from . import accel
+
+    def build(ln):      # the CPU lane is the pre-3.0 argv (x264's still-image tune, its default CRF 23)
+        venc = (["-c:v", "libx264", "-tune", "stillimage", "-preset", "veryfast"] if ln == "cpu" else
+                accel.h264_args(ln, 23))
+        return [ffmpeg_exe(), "-y", "-loglevel", "error", "-loop", "1", "-framerate", "25", "-i", str(card), "-ss",
+                f"{a:.3f}", "-t", f"{dur:.3f}", "-i", str(src), "-map", "0:v", "-map", "1:a:0", "-t", f"{dur:.3f}",
+                *venc, "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(out)]
+    if fallback:
+        accel.run_ff(build, lane, log_to=ep, runner=lambda cmd: run(cmd, check=False))
+    else:
+        r = run(build(lane), check=False)
+        if lane != "cpu" and r.returncode and accel.is_gpu_failure(r.stderr):
+            raise _NeedsCPU(r.stderr)
     return out
 
 
-def render_candidates(ep, ids: list[str] | None = None, workers: int | None = None) -> dict:
+def render_candidates(ep, ids: list[str] | None = None, workers: int | None = None, lane: str | None = None) -> dict:
     """A quick 540x960 preview per candidate: the whole 16:9 frame letterboxed (not cropped: the reframe is decided
     per shot later), the episode audio for the range, and a Latin label. Plus a first-frame JPG and a sheet.
     The candidates render in a small thread pool (each one is an ffmpeg process; 3.0 T2.14): the result lists them in
     plan order whatever finishes first, and a candidate that fails is reported in `failed` without stopping the rest.
-    `workers=1` renders one after the other (the same files)."""
+    `workers=1` renders one after the other (the same files). `lane` (T4.10): the encoders' and decoders' lane; None
+    takes the "reel_candidates" GPU slot for the whole batch (waits up to 120 s, then the CPU). Candidates whose GPU
+    encode failed are redone on the CPU after the slot is freed (other jobs get the card meanwhile)."""
+    from contextlib import ExitStack, nullcontext
+    from . import accel
     from .common import ffmpeg_exe, run
     from .episode import episode_file, load_episode
+    from .gpu_lock import site_slot
     from .media_util import contact_sheet, grab_frame_file
     from .parallel import DEFAULT_WORKERS, parallel_map
     res = fresh_validated(ep)
@@ -354,12 +380,14 @@ def render_candidates(ep, ids: list[str] | None = None, workers: int | None = No
     d.mkdir(parents=True, exist_ok=True)
     audio_only = load_episode(ep).get("media") == "audio"
     ff = ffmpeg_exe()
+    nw = DEFAULT_WORKERS if workers is None else workers
 
-    def one(c: dict) -> dict:
-        """One candidate -> its {id, mp4, jpg}; raises (an Exception) when it did not render."""
+    def one(c: dict, ln: str) -> dict:
+        """One candidate in lane `ln` -> its {id, mp4, jpg}; raises (an Exception) when it did not render, _NeedsCPU
+        when the GPU could not encode it."""
         a, dur = c["in_ms"] / 1000, (c["out_ms"] - c["in_ms"]) / 1000
         if audio_only:
-            mp4 = audio_card(ep, c, d / f"{c['id']}.mp4")
+            mp4 = audio_card(ep, c, d / f"{c['id']}.mp4", lane=ln, fallback=False)
             jpg = d / f"{c['id']}.jpg"
             if not mp4.exists():
                 raise RuntimeError("audio card not rendered")
@@ -369,12 +397,15 @@ def render_candidates(ep, ids: list[str] | None = None, workers: int | None = No
                           f"{fmt_ts(c['in_ms'], '.')} -> {fmt_ts(c['out_ms'], '.')}  ({dur:.0f} s)"])
         mp4, jpg = d / f"{c['id']}.mp4", d / f"{c['id']}.jpg"
         try:
-            r = run([ff, "-y", "-loglevel", "error", "-ss", f"{a:.3f}", "-t", f"{dur:.3f}", "-i", str(src),
-                     "-i", str(lab), "-filter_complex",
+            r = run([ff, "-y", "-loglevel", "error", *accel.decode_args(ln), "-ss", f"{a:.3f}", "-t", f"{dur:.3f}",
+                     "-i", str(src), "-i", str(lab), "-filter_complex",
                      "[0:v]scale=540:-2,pad=540:960:0:(oh-ih)/2:color=0x111111[v];[v][1:v]overlay=0:0[o]",
-                     "-map", "[o]", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "28",
-                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(mp4)], check=False)
-            grab_frame_file(src, a + 0.2, jpg, vf="scale=540:-2", quality=3)
+                     "-map", "[o]", "-map", "0:a:0?", *accel.h264_args(ln, 28),
+                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart", str(mp4)],
+                    check=False)
+            if ln != "cpu" and r.returncode and accel.is_gpu_failure(r.stderr):
+                raise _NeedsCPU(r.stderr)
+            grab_frame_file(src, a + 0.2, jpg, vf="scale=540:-2", quality=3, lane=accel.site_lane("grab_frame", ln))
         finally:
             lab.unlink(missing_ok=True)
         if r.returncode or not mp4.exists():
@@ -382,8 +413,18 @@ def render_candidates(ep, ids: list[str] | None = None, workers: int | None = No
             raise RuntimeError(f"ffmpeg exited with code {r.returncode}" + (f": {tail}" if tail else
                                " and printed no error" if r.returncode else " but wrote no file"))
         return {"id": c["id"], "mp4": str(mp4), "jpg": str(jpg) if jpg.exists() else None}
+    with ExitStack() as slot:
+        lane = slot.enter_context(nullcontext(lane) if lane else site_slot("reel_candidates", log_to=ep))
+        done = parallel_map(lambda c: one(c, lane), cands, nw)
+        gpu_bad = [v for ok, v in done if not ok and isinstance(v, _NeedsCPU)]
+        slot.close()                    # the renders are done (or need the CPU): the GPU slot is free for others
+        if gpu_bad:
+            accel.note_fallback(ep, "reel candidates", gpu_bad[0].stderr)
+            again = [c for c, (ok, v) in zip(cands, done) if not ok and isinstance(v, _NeedsCPU)]
+            redo = dict(zip((c["id"] for c in again), parallel_map(lambda c: one(c, "cpu"), again, nw)))
+            done = [redo.get(c["id"], dv) for c, dv in zip(cands, done)]
     outs, failed = [], []
-    for c, (ok, v) in zip(cands, parallel_map(one, cands, DEFAULT_WORKERS if workers is None else workers)):
+    for c, (ok, v) in zip(cands, done):
         if ok:
             outs.append(v)
         else:
