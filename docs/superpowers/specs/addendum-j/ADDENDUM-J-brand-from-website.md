@@ -613,7 +613,7 @@ This addendum and **Addendum L** (the security programme) share some tests. To a
 | Topic | Owner | The other addendum |
 |---|---|---|
 | J's injection fixtures (`injection.html`, J-T8) | J-T8 builds them | L-T6 adds them to the L4.1 corpus |
-| The network block for subagents | J-T8 builds it for `client-researcher` and `intake-inspector` | L-G18 / L-T6 extends it to every Bash-capable subagent |
+| The network block for subagents | J-T8 builds it for `client-researcher` and `intake-inspector` | L-G18 / L-T5 extends it to every Bash-capable subagent |
 | Write confinement and link refusal | One module, `lib/linksafe.py`, built by whichever lands first (J-T5 or L-T8) as the start of L-T8's engine write gate, and used by both | L-T8's junction and collision traps include `brand-adopt` |
 | Panel intents | L-T7 owns the attack tests for J-T9b's intents | — |
 

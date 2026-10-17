@@ -87,3 +87,9 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     `whynot-cut/tests/test_safety*.py`, `whynot-cut/tests/fixtures/safety/**`. `config/defaults/safety.json` (the K1
     switches) is executor-owned; cli.py / plan / reels-plan / qc call sites, skills, agents and hooks arrive as patches;
     K-T3's ppro_build fade goes to the Adobe track; K-T4's Task 27 delta goes as a patch to lane 1's `safe_zones*`.
+  - API-credit lane 3 (2026-10-17, Addendum L Tasks 39, 40, 41, 48 = L-T1 scan kit, L-T2 secrets sweep, L-T3 security
+    CI, L-T10 fuzzing Python part): `tools/security/**`, `.semgrep/**`, `.gitleaks.toml`,
+    `.github/workflows/security.yml`, `docs/security/scan-*.md` + `docs/security/baseline*.json`,
+    `whynot-cut/tests/security/fuzz/**`, `whynot-cut/tests/test_security_scan*.py`, `whynot-cut/tests/test_fuzz*.py`.
+    `adobe/` devDependencies (ESLint security plugins) go to the Adobe track as a patch; `docs/ci.md` minutes table and
+    any fix in another owner's file arrive as patches.
