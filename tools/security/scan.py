@@ -642,18 +642,187 @@ def scan_gitleaks(root, raw_dir, history=False):
     argv = gitleaks_argv(root, out_json, history, cfg if cfg.exists() else None)
     if out_json.exists():
         out_json.unlink()
-    rc, so, se = run(argv, cwd=str(root))
+    try:
+        rc, so, se = run(argv, cwd=str(root))
+    except subprocess.TimeoutExpired:
+        out_json.unlink(missing_ok=True)
+        return result("gitleaks", "FAILED", note="gitleaks timed out", version=pinned_version("gitleaks"))
     if rc != 0 or not out_json.exists():
-        return result("gitleaks", "FAILED", note="gitleaks exit %s: %s" % (rc, (se or so).strip()[-300:]), version=pinned_version("gitleaks"))
-    items = json.loads(out_json.read_text(encoding="utf-8") or "[]")
-    findings = parse_gitleaks(items, root)
-    # raw report on disk: keep only locations and rule ids (the values are already redacted by --redact; message, author
-    # and e-mail are dropped too)
-    write_json(out_json, [{k: it[k] for k in GITLEAKS_RAW_KEEP if k in it} for it in items])
+        out_json.unlink(missing_ok=True)
+        return result("gitleaks", "FAILED", note="gitleaks exit %s (its message is withheld: it can quote a value)" % rc, version=pinned_version("gitleaks"))
+    try:
+        items = json.loads(out_json.read_text(encoding="utf-8") or "[]")
+        findings = parse_gitleaks(items, root)
+        # raw report on disk: keep only locations and rule ids (the values are already redacted by --redact; message,
+        # author and e-mail of a commit are dropped too)
+        write_json(out_json, [{k: it[k] for k in GITLEAKS_RAW_KEEP if k in it} for it in items])
+    except BaseException:
+        out_json.unlink(missing_ok=True)  # an unscrubbed report never outlives a failed run
+        raise
     note = "full git history (diffs of every commit)" if history else "working tree (archives opened to depth 2)"
     return result("gitleaks-history" if history else "gitleaks", "OK", findings, note, pinned_version("gitleaks"))
 
 
+# >>> L-T2 secrets sweep (commit and tag messages, binaries, hand-off lines)
+STDIN_CHUNK = 32 * 1024 * 1024  # text handed to one `gitleaks stdin` run: a big history never sits in memory as 4 copies
+
+
+def _gitleaks_stdin(text, raw_json, root):
+    """Hits (RuleID, StartLine) of a text read from stdin; no value ever leaves this function."""
+    cfg = Path(root) / ".gitleaks.toml"
+    if not cfg.exists():
+        cfg = REPO / ".gitleaks.toml"
+    argv = [str(tool_exe("gitleaks")), "stdin", "--report-format", "json", "--report-path", str(raw_json), "--redact",
+            "--no-banner", "--exit-code", "0", "--log-level", "warn"]
+    if cfg.exists():
+        argv += ["--config", str(cfg)]
+    if Path(raw_json).exists():
+        Path(raw_json).unlink()
+    try:
+        rc, so, se = run(argv, cwd=str(root), input_bytes=text.encode("utf-8", "replace"))
+        if rc != 0 or not Path(raw_json).exists():
+            raise ScanError("gitleaks stdin exit %s (its message is withheld: it can quote a value)" % rc)
+        items = json.loads(Path(raw_json).read_text(encoding="utf-8") or "[]")
+        hits = [(it.get("RuleID", "?"), it.get("StartLine", 0)) for it in items]
+        write_json(raw_json, [{"RuleID": r, "StartLine": n} for r, n in hits])
+        return hits
+    except BaseException:
+        Path(raw_json).unlink(missing_ok=True)  # an unscrubbed report never outlives a failed run
+        raise
+
+
+def _hits_in_chunks(lines, owners, raw_json, root):
+    """Run `gitleaks stdin` over the lines in chunks of about STDIN_CHUNK bytes; returns [(rule, owner label, line)]."""
+    out, start, size = [], 0, 0
+    for i in range(len(lines) + 1):
+        if i < len(lines):
+            size += len(lines[i]) + 1
+        if i == len(lines) or size >= STDIN_CHUNK:
+            if i > start:
+                for rule, ln in _gitleaks_stdin("\n".join(lines[start:i]), raw_json, root):
+                    k = start + ln - 1
+                    out.append((rule, owners[k] if 0 <= k < len(owners) else "?", k + 1))
+            start, size = i, 0
+    return out
+
+
+def scan_commit_messages(root, raw_dir):
+    """gitleaks `git` reads diffs, not commit or tag messages: feed every message of every ref through `gitleaks stdin`."""
+    miss = need("gitleaks")
+    if miss:
+        return miss
+    import secrets_sweep as ss
+    try:
+        text, owners = ss.commit_message_text(root, run)
+        if not text:
+            return result("gitleaks-messages", "OK", note="the repository has no commit messages", version=pinned_version("gitleaks"))
+        hits = _hits_in_chunks(text.split("\n"), owners, Path(raw_dir) / "gitleaks-messages.json", root)
+    except (ss.SweepError, ScanError, subprocess.SubprocessError, OSError, ValueError) as e:
+        return result("gitleaks-messages", "FAILED", note="commit messages NOT read: %s" % type(e).__name__ if isinstance(e, subprocess.TimeoutExpired) else "commit messages NOT read: %s" % e,
+                      version=pinned_version("gitleaks"))
+    out = []
+    for rule, owner, line in hits:
+        is_tag = owner.startswith("tag:")
+        x = finding("gitleaks", rule, "HIGH", "<tag message>" if is_tag else "<commit message>", line,
+                    "secret-like value (redacted) rule %s in a %s message" % (rule, "tag" if is_tag else "commit"), "msg:%s:%s" % (owner, rule))
+        x["commit"] = owner
+        out.append(x)
+    return result("gitleaks-messages", "OK", out, "commit messages of every ref and annotated tag messages", pinned_version("gitleaks"))
+
+
+def load_binary_allow(root):
+    """docs/security/baseline-binaries.json: binary files / blobs reviewed as holding no secret, pinned by their exact
+    bytes (`sha256` of the file, or the git `blob` id), each with a reason, owner task and review date. Returns
+    (set of sha256, set of blob ids). A malformed file is a BaselineError (exit 2)."""
+    p = Path(root) / "docs" / "security" / "baseline-binaries.json"
+    if not p.exists():
+        p = REPO / "docs" / "security" / "baseline-binaries.json"
+    if not p.exists():
+        return frozenset(), frozenset()
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise BaselineError("%s is not valid JSON: %s" % (p, e))
+    if not isinstance(data, dict) or not isinstance(data.get("allowed", []), list):
+        raise BaselineError("%s must be an object with an `allowed` list" % p)
+    sha, blob = set(), set()
+    for i, e in enumerate(data.get("allowed", [])):
+        if not isinstance(e, dict):
+            raise BaselineError("%s entry #%d is not an object" % (p, i))
+        _check_entry(dict(e, rule=e.get("path", "?")), ("path", "reason", "owner_task", "review_date"), "%s entry #%d" % (p.name, i))
+        if isinstance(e.get("sha256"), str) and re.fullmatch(r"[0-9a-f]{64}", e["sha256"]):
+            sha.add(e["sha256"])
+        elif isinstance(e.get("blob"), str) and re.fullmatch(r"[0-9a-f]{40}", e["blob"]):
+            blob.add(e["blob"])
+        else:
+            raise BaselineError("%s entry #%d needs an exact `sha256` (64 hex) or `blob` (40 hex): a path alone never excuses a file" % (p.name, i))
+    return frozenset(sha), frozenset(blob)
+
+
+def scan_binary_secrets(root, raw_dir, history=False):
+    """gitleaks skips binary files. Read the printable runs (ASCII and UTF-16) of every binary file in the working tree (and,
+    with history, of every binary blob ever committed) through `gitleaks stdin`. An archive in the tree is opened by the
+    tree scan itself (--max-archive-depth); compressed content in history is NOT readable this way (stated in the note)."""
+    miss = need("gitleaks")
+    if miss:
+        return miss
+    import secrets_sweep as ss
+    root = Path(root)
+    allow_sha, allow_blob = load_binary_allow(root)
+    try:
+        parts, big, allowed = ss.tree_binary_text(root, allow_sha)
+        kind, unreadable = "tree", 0
+        if history:
+            kind = "tree+history"
+            h, hbig, hallowed, unreadable = ss.history_binary_text(root, run, run_bytes, allow_blob)
+            parts += [("blob:" + sha, txt) for sha, txt in h]
+            big, allowed = big + hbig, allowed + hallowed
+        lines, owner = [], []
+        for lab, txt in parts:
+            for ln in txt.split("\n"):
+                lines.append(ln)
+                owner.append(lab)
+        hits = _hits_in_chunks(lines, owner, Path(raw_dir) / "gitleaks-binaries.json", root) if lines else []
+    except (ss.SweepError, ScanError, subprocess.SubprocessError, OSError, ValueError) as e:
+        return result("gitleaks-binaries", "FAILED", note="binary files NOT read: %s" % type(e).__name__ if isinstance(e, subprocess.TimeoutExpired) else "binary files NOT read: %s" % e,
+                      version=pinned_version("gitleaks"))
+    out, seen = [], set()
+    for rule, lab, _line in hits:
+        where = lab
+        if lab.startswith("blob:"):
+            where = "blob %s (see git log --find-object)" % lab[5:17]
+            if len(seen) < 50:  # each lookup walks the history: cap them, and never let one fail the whole scan
+                try:
+                    where = "blob %s (%s)" % (lab[5:17], ss.where_is_blob(root, lab[5:], run))
+                except Exception:  # noqa: BLE001
+                    pass
+        if (rule, where) in seen:
+            continue
+        seen.add((rule, where))
+        out.append(finding("gitleaks", rule, "HIGH", where, 0, "secret-like value (redacted) rule %s inside a binary file" % rule,
+                           "bin:%s:%s" % (lab, rule)))
+    notes = ["printable runs (ASCII and UTF-16) of binary files (%s)" % kind,
+             "NOT read: compressed content (history blobs, a UTF-16 file inside a zip), a multi-line value split across a 32 MB chunk"]
+    if big:
+        notes.append("%d file(s)/blob(s) over 64 MB NOT read" % big)
+    if allowed:
+        notes.append("%d reviewed binary file(s)/blob(s) skipped (baseline-binaries.json)" % allowed)
+    if unreadable:
+        notes.append("%d blob(s) git could not read" % unreadable)
+    return result("gitleaks-binaries", "OK", out, "; ".join(notes), pinned_version("gitleaks"))
+
+
+def handoff_lines(findings):
+    """Redacted lines for the executor's `## Needs Yunus` (HL5): file, line, rule, commit. Never a value."""
+    out = []
+    for f in findings:
+        if f["tool"] != "gitleaks":
+            continue
+        out.append("%s line %d rule %s%s" % (f["file"], f["line"], f["rule"], " commit %s" % f["commit"] if f.get("commit") else ""))
+    return sorted(set(out))
+
+
+# <<< L-T2 secrets sweep
 
 # -------------------------------------------------------------------------------------------------------------- deps
 
@@ -889,6 +1058,10 @@ def run_scans(modes, root, raw_dir, offline=False, history=False, registry=True)
         results.append(scan_eslint(root, raw_dir))
     if "secrets" in modes:
         results.append(scan_gitleaks(root, raw_dir, history=False))
+        results.append(scan_binary_secrets(root, raw_dir, history=history))  # L-T2
+        if history:  # L-T2
+            results.append(scan_gitleaks(root, raw_dir, history=True))  # L-T2
+            results.append(scan_commit_messages(root, raw_dir))  # L-T2
     if "locks" in modes:
         results.append(check_locks(root))
     if "deps" in modes:
@@ -934,6 +1107,10 @@ def render_report(results, new, accepted, expired, gate, root, today, baseline=N
         if f["severity"] in BLOCKING:
             L.append("- **%s** `%s` %s:%s %s%s" % (f["severity"], f["rule"], f["file"], f["line"], f["message"],
                                                     " (commit %s)" % f["commit"] if f.get("commit") else ""))
+    secrets = handoff_lines([f for f in new if f["tool"] == "gitleaks"])  # L-T2
+    if secrets:  # L-T2
+        L += ["", "## Needs Yunus: secret-like values (HL5, only Yunus rotates keys; values are never printed)", ""]  # L-T2
+        L += ["- " + s for s in secrets]  # L-T2
     L += ["", "## Accepted by the baseline: %d" % len(accepted), ""]
     verdicts = {}
     for f in accepted:

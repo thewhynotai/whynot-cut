@@ -1,0 +1,4 @@
+{
+  "_about": "Binary files (and git blobs) that the secrets sweep reviewed and found to hold no secret, so a high-entropy false positive in e.g. a font table or a bundled model does not block the gate forever. Each entry pins the EXACT bytes: `sha256` of the working-tree file or the 40-hex git `blob` id, plus `path` (for humans), `reason`, `owner_task` and `review_date`. A path alone never excuses a file, and a changed file is scanned again. gitleaks findings in text files are never listed here: a real key is rotated by the owner, a fake one gets an exact allow rule in .gitleaks.toml.",
+  "allowed": []
+}

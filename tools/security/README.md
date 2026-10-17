@@ -10,7 +10,7 @@ python tools/security/scan.py --all [--history] [--gate <name>]
 
 `scan.py --all` = Semgrep (our `.semgrep/` rules + the registry packs p/python p/javascript p/typescript p/secrets,
 `--metrics=off`) + Bandit (4 folders, B404/B603 skipped by rule, `# nosec` needs a reason) + ESLint security plugins
-(Adobe track patch) + gitleaks (tree, and with `--history` the full history) +
+(Adobe track patch) + gitleaks (tree, and with `--history` the full history, commit messages and binary files) +
 pip-audit (every lock, `--require-hashes --disable-pip --no-deps`) + OSV-Scanner (explicit lock types) + `npm audit`
 (prod and full) + the lock-hash check + a CycloneDX SBOM. Summary: `docs/security/scan-<date>-<gate>.md`; raw JSON
 (scrubbed of source text and secret values) under `dist/` (git-ignored).
@@ -24,7 +24,9 @@ altered after install, or failed. Zero locks / zero files scanned is a failure, 
 accepted only through a `known_gaps` entry in the baseline for that exact tool and reason code (offline, registry-skipped, scan-errors,
 skipped-files, skipped-requirements, plugins-missing, parse-errors) with a reason, an owner task and a review date. Secret findings can never be
 baselined: a real one is rotated by the owner (HL5/H35) and handed over without its value; a fake one gets an exact
-allow rule in `.gitleaks.toml` (one file + one exact value + `targetRules`; see that file's header for the gitleaks quirk).
+allow rule in `.gitleaks.toml` (one file + one exact value + `targetRules`; see that file's header for the gitleaks quirk). A false positive
+in a BINARY file (read through `gitleaks stdin`, so it has no path) is excused only in `docs/security/baseline-binaries.json`, pinned by
+the file's exact sha256 or git blob id. History scans fail closed: a git command that fails or answers short is FAILED, never "nothing to scan".
 
 ## What the Semgrep rules cannot see (so nobody trusts them more than they deserve)
 | Rule | Sees | Does not see |

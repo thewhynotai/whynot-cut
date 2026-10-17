@@ -1,0 +1,50 @@
+# WhyNot Cut gitleaks configuration (Addendum L §L3 / L-G30; Phase 4 Task 40 / L-T2).
+# gitleaks is the authoritative, BLOCKING secrets scanner: working tree, the full private history, and every gate/tag.
+#
+# Rules: gitleaks' own default rule set stays fully on (`useDefault`), so no key class is ever switched off here.
+# Allow rules: ONLY the listed fake values below, each pinned to its own file AND its exact value (`condition = "AND"`).
+# No allow rule is a directory, a `tests/` wildcard, a rule id, or a pattern class: a real key of ANY class in the same
+# file, or the same value anywhere else, is still reported. tests/test_security_scan_secrets.py parses this file and
+# fails on a path-only allow, a rule-wide allow, a directory allow, or an allow value shorter than 12 characters.
+# gitleaks 8.30.1 quirk (verified 2026-10-17): an [[allowlists]] block WITHOUT targetRules that has `paths` skips the
+# WHOLE FILE, whatever `regexes` and `condition = "AND"` say (a real key in an allowlisted file was not reported). With
+# `targetRules` the AND works as written. So every block names the one rule that produced the false positive, and a
+# test proves a real key of another rule, and a second generic key, in the same file are still reported.
+# Adding an entry needs: the file, the exact fake value, and a reason in the comment above it.
+title = "WhyNot Cut"
+
+[extend]
+useDefault = true
+
+# The RFC 6455 section 1.3 sample Sec-WebSocket-Key: published in the RFC, used to test the handshake accept value.
+[[allowlists]]
+description = "RFC 6455 sample key in the ws handshake test"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^whynot-cut[\\/]tests[\\/]test_serve_ws\.py$''']
+regexes = ['''^dGhlIHNhbXBsZSBub25jZQ==$''']
+
+# A made-up sentinel the settings-precedence test plants to prove it never reaches a log or a file.
+[[allowlists]]
+description = "fake sentinel secret in the settings precedence test"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^whynot-cut[\\/]tests[\\/]test_settings_precedence\.py$''']
+regexes = ['''^mgf-SECRET-0123456789$''']
+
+# A 16-character counting string repeated four times to make a 64-character fake token for the panel mount test.
+[[allowlists]]
+description = "fake repeated hex token in the panel mount test"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^adobe[\\/]panel-ui[\\/]test[\\/]mount\.test\.ts$''']
+regexes = ['''^0123456789abcdef$''']
+
+# A review note quotes the ZXPSignCmd command line with a `<password>` placeholder; the rule read the certificate FILE
+# NAME that follows it (`whynotcut.p12`, no key material) as a key.
+[[allowlists]]
+description = "certificate file name next to a <password> placeholder in a review note"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^docs[\\/]review[\\/]2026-10-11[\\/]adobe\.md$''']
+regexes = ['''^whynotcut\.p12$''']
