@@ -823,6 +823,11 @@ def final_checks(inp: PlanInputs, events: list):
                 errors.append(f"{e['event_id']}: on-screen text uses '{f['word']}' (word {f['id']}, "
                               f"{fmt_ts(f['start_ms'], '.')}), flagged as uncertain ({f['note']}): confirm it by ear "
                               "first (correct it, or drop the flag, in transcript-corrections.json)")
+    # K-T1 (Addendum K1, Task 61): a dose, number, drug name, negation by a claim or duration the transcription is
+    # unsure of never goes on a graphic until the editor confirmed the transcript by ear; [] while its switch is off
+    # (never raises: a failure inside the check is one plain error)
+    from .safety.risk_words import plan_errors as risk_word_errors
+    errors += risk_word_errors(inp.paths, events, inp.ctx)
     if flagged:
         warnings.append(f"{len(flagged)} uncertain word(s) stay in the captions as heard until the editor confirms "
                         "them: " + ", ".join(f"#{f['id']} {f['word']}" for f in flagged[:8]))

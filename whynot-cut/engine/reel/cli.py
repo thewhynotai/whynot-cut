@@ -292,6 +292,11 @@ def cmd_transcript_correct(a):
 
 def cmd_transcript_verify(a):
     from lib.transcribe import words_fingerprint
+    if a.by is not None and not a.by.strip():          # K-T1: an empty name never stands for the editor
+        from lib.errors import Guidance
+        raise Guidance("--by is empty / اسم اللي راجع فاضي",
+                       "Give who checked the words by ear: `--by editor` (the lead, after the editor confirmed), or "
+                       "`--by claude` / `--by delegated` for a check that is not by ear")
     p = P(a)
     write_json(p.p("02_transcription/verification.json"), {"verified": True, "by": a.by or "editor", "at": now_iso(),
                                                             "note": a.note or "", "words_sha1": words_fingerprint(p)})

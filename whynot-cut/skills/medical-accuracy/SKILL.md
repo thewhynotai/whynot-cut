@@ -17,7 +17,10 @@ every scene's complete words in the `On-screen text (full)` section of `01_analy
 1. **Wording vs. speech**: the text matches the exact transcript words (filler removed only). Any meaning change fails.
 2. **Qualifiers**: a hedge or warning the speaker gave ("ممكن", "under supervision", "not for everyone") appears wherever the claim appears.
 3. **Terminology**: drug, procedure and test names are spelled correctly. Doubtful spellings go to the editor.
-4. **Uncertain transcription**: words flagged in `subtitle-review.md` must not appear on screen.
+4. **Uncertain transcription**: words flagged in `subtitle-review.md` must not appear on screen. With the K-T1
+   switch on, `reel plan` enforces this for the risk-first words too («راجع دول الأول — Check these first»: doses,
+   numbers, drug names, negations next to a claim, durations) until the editor confirms the transcript by ear
+   (`reel transcript-verify`).
 5. **Approval**: any claim, recommendation, timing, dose, diagnostic statement or result-implying image is marked `approval_required: true`.
 
 Return a table: graphic id | on-screen text | transcript evidence | verdict (ok / reword-to-match / needs-doctor-approval / remove) | reason.

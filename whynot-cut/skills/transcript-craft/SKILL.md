@@ -18,6 +18,12 @@ Outputs in `02_transcription/`:
 - `subtitles.srt` and `captions-short.srt`
 - `subtitle-review.md`: low-confidence words, **profile vocabulary not heard verbatim** (e.g. hint `نادال`, heard `نضال`,
   often at high confidence), and glossary hits labelled by the profile's `domain` (medical / religious / general)
+- With the K-T1 switch on (`safety.json`), `subtitle-review.md` opens with «راجع دول الأول — Check these first»: the
+  words to confirm ranked by risk × doubt (doses, numbers, drug names, a negation next to a claim, durations first).
+  Proofread that block first and tell the editor these words first; NEEDS-YOU lists them in the same order. There is
+  no new command: the editor confirms with `reel transcript-verify` as below, and until then `reel plan` refuses any
+  graphic that shows one of these words (the error names the word and its time). A subagent never records the
+  editor's confirmation: it reports, or records `--by claude`, which does not unblock these words.
 
 The vocabulary hint (`initial_prompt`) and the glossary come from the client profile. The hint biases spelling only and never inserts content.
 

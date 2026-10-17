@@ -308,7 +308,8 @@ def finalize(paths: Paths, meta: dict, segs: list, words: list) -> dict:
     except Exception as e:  # noqa: BLE001  (a cross-check aid; never blocks the transcript)
         quotes = [{"error": f"{type(e).__name__}: {e}"}]
     review = subtitle_review(meta, segs, words, quotes)
-    write_text(out / "subtitle-review.md", review)
+    from .safety.risk_words import with_review_block      # K-T1: "check these first" on top (behind its switch)
+    write_text(out / "subtitle-review.md", with_review_block(review, paths))
     return {"meta": meta, "segments": len(segs), "words": len(words), "cues": len(cues),
             "short_cues": len(short)}
 

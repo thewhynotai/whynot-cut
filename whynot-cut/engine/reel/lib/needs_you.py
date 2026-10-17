@@ -340,6 +340,8 @@ def _words(c: _Collector, cfg: _Config, p: Paths, item: str, label: tuple[str, s
                and isinstance(w.get("probability"), (int, float)) and not isinstance(w.get("probability"), bool)
                and w["probability"] < cfg.threshold]
         todo = [w for w in flagged + low if isinstance(w.get("word"), str) and w["word"].strip()]
+        from .safety.risk_words import needs_you_order    # K-T1: risk first (behind its switch)
+        todo = needs_you_order(todo, p)
         if not todo:
             return False
         n, shown = len(todo), todo[:SHOWN_WORDS]
