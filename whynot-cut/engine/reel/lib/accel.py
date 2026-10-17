@@ -38,13 +38,15 @@ CACHE_REL = ("cache", "accel.json")
 VT_Q = {18: 75, 23: 65, 28: 55}
 
 # per call site: "gpu" (use the lane the job's slot gave) or "cpu" (always the CPU), set from the A/B (T4.10 step 8).
-# A single frame pays the CUDA start-up for one picture: grab_frame starts on the CPU.
+# The live A/B on the RTX 4060 laptop (docs/superpowers/evidence/2026-10-17-g-gpu-ab.md): every site was slower on
+# the GPU (the engine's short jobs pay the CUDA start-up; 20 CPU threads are fast), so no site reached the >= 15 %
+# rule and all stay on the CPU. Re-run tools/bench_media.py on another machine class before changing a value.
 SITE_LANES: dict[str, str] = {
-    "preview_video": "gpu",
-    "reel_candidates": "gpu",
-    "animatic": "gpu",
-    "thumbs": "gpu",
-    "shots": "gpu",
+    "preview_video": "cpu",
+    "reel_candidates": "cpu",
+    "animatic": "cpu",
+    "thumbs": "cpu",
+    "shots": "cpu",
     "grab_frame": "cpu",
 }
 

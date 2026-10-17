@@ -317,6 +317,14 @@ class TestArgs(unittest.TestCase):
         self.assertTrue(set(accel.SITE_LANES.values()) <= {"gpu", "cpu"})
         self.assertEqual(accel.SITE_LANES["grab_frame"], "cpu")              # one frame pays the CUDA start-up
         self.assertEqual(accel.site_lane("grab_frame", "cuda"), "cpu")
+        # T4.10 step 8, the live A/B on the RTX 4060 laptop (docs/superpowers/evidence/2026-10-17-g-gpu-ab.md): no site
+        # was >= 15 % faster on the GPU (every one was slower: the short engine jobs pay the CUDA start-up), so every
+        # site stays on the processor; the GPU lane code stays for a machine where the A/B says otherwise
+        self.assertEqual(accel.SITE_LANES, {"preview_video": "cpu", "reel_candidates": "cpu", "animatic": "cpu",
+                                            "thumbs": "cpu", "shots": "cpu", "grab_frame": "cpu"})
+        ev = (SK.parent / "docs" / "superpowers" / "evidence" / "2026-10-17-g-gpu-ab.md").read_text(encoding="utf-8")
+        for site, lane in accel.SITE_LANES.items():
+            self.assertRegex(ev, rf"\| {site} \| cuda \|[^\n]*\| {lane} \|")
         with mock.patch.dict(accel.SITE_LANES, {"thumbs": "gpu"}):
             self.assertEqual(accel.site_lane("thumbs", "cuda"), "cuda")
             self.assertEqual(accel.site_lane("thumbs", "cpu"), "cpu")
@@ -794,7 +802,21 @@ class TestFrameSites(_Home):
         self.assertTrue(rep["shots"])
 
 
-class TestPreflightShots(unittest.TestCase):
+GPU_SITES = {k: "gpu" for k in ("preview_video", "reel_candidates", "animatic", "thumbs", "shots")}
+
+
+class _GpuSites:
+    """These tests exercise the GPU lane code. Since the step 8 A/B every SITE_LANES value is "cpu" on the measuring
+    PC; the lane code stays for a machine class where its own A/B picks the GPU, so they run with the sites on "gpu"."""
+
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.dict(accel.SITE_LANES, GPU_SITES)
+        p.start()
+        self.addCleanup(p.stop)
+
+
+class TestPreflightShots(_GpuSites, unittest.TestCase):
     """media.preflight (the verb) takes the "shots" slot once and passes its lane to shots.analyze_window."""
 
     def test_preflight_shot_analysis_lane(self):
@@ -857,7 +879,7 @@ class TestAudioCard(_Home):
             self.assertIn(str(src), c)
 
 
-class TestReelCandidates(unittest.TestCase):
+class TestReelCandidates(_GpuSites, unittest.TestCase):
     """render_candidates on a client folder with an Arabic name and spaces: real ffmpeg on the CPU, the GPU encoder
     replaced by a fake that fails with an NVENC error."""
 
@@ -995,7 +1017,7 @@ def cpu_twin(cmd):
     return out
 
 
-class TestPreviewVideoLanes(unittest.TestCase):
+class TestPreviewVideoLanes(_GpuSites, unittest.TestCase):
     """preview-video in both lanes on a project in a folder with an Arabic name and spaces (test_perf's fixture)."""
 
     @classmethod
