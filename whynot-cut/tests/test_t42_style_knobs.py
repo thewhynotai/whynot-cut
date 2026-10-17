@@ -818,7 +818,9 @@ class TestArabicCaptionStills(KnobCase):
             self.assertIn(": 2 word(s)", w[0])                                    # two words skipped
             self.assertTrue(w[0].startswith("في 2 كلمة في words.json ناقصة (من غير رقم أو الكلمة أو التوقيت)، "
                                             "ومش هتتحسب في الكابشن ولا في القص"), w[0])  # Arabic first, whole sentence
-            self.assertIn("captions-short.srt can't be checked", w[0])             # the hand-edit check did not run
+            unchecked = [x for x in r["warnings"] if "can't be checked" in x]
+            # only a rebuild (a chosen size) replaces captions-short.srt, so only then is the skipped check worth saying
+            self.assertEqual(len(unchecked), 1 if style else 0, r["warnings"])
 
     def test_r2f_after_effects_one_line_wider_than_the_safe_width_is_a_plan_warning(self):
         self.words("Isotretinoin-hydrochloride-solution works")

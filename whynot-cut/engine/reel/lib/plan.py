@@ -693,6 +693,12 @@ HAND_EDITS_LOST = ("تعديلاتك اليدوية في captions-short.srt مش
                    "`reel transcript-correct`), then run `reel plan` again")
 
 
+HAND_EDITS_UNCHECKED = ("مش هنقدر نشوف إذا كنت عدّلت captions-short.srt بإيدك، لأن في كلمات ناقصة في التفريغ، والكابشن "
+                        "هيتبني من جديد من كلمات التفريغ — hand edits in captions-short.srt can't be checked because "
+                        "some transcript words were skipped, and the captions are rebuilt from the transcript words; "
+                        "fix wording in the transcript")
+
+
 def _hand_edits_lost(inp: PlanInputs) -> list[str]:
     """T4.2: [HAND_EDITS_LOST] when the captions-short.srt a rebuild replaces says other words than the transcript
     words (an editor's hand edits there would silently vanish); [] when they agree or there is no file."""
@@ -700,7 +706,7 @@ def _hand_edits_lost(inp: PlanInputs) -> list[str]:
     if not srt_cues:
         return []
     if getattr(inp, "bad_words", 0):                     # the SRT was built from words read_inputs skipped: no fair compare
-        return []
+        return [HAND_EDITS_UNCHECKED]
     said = _exact_words(" ".join(c["text"].replace("\n", " ") for c in srt_cues))
     return [HAND_EDITS_LOST] if said != _exact_words(" ".join(w["word"] for w in inp.words)) else []
 
@@ -725,10 +731,9 @@ def check_words(inp: PlanInputs):
     """The words.json entries read_inputs skipped (no id, word or times): one warning, never a KeyError."""
     n = getattr(inp, "bad_words", 0) or 0
     return {}, [], ([f"في {n} كلمة في words.json ناقصة (من غير رقم أو الكلمة أو التوقيت)، ومش هتتحسب في الكابشن "
-                     "ولا في القص، ومش هنقدر نشوف إذا كنت عدّلت captions-short.srt بإيدك — "
+                     "ولا في القص — "
                      f"02_transcription/words.json: {n} word(s) without an id, the word or start/end times were "
-                     "skipped (captions and word cuts ignore them), and hand edits in captions-short.srt can't be "
-                     "checked — run `reel transcribe` again or fix the file"]
+                     "skipped (captions and word cuts ignore them) — run `reel transcribe` again or fix the file"]
                     if n else [])
 
 
