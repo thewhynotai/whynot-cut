@@ -43,6 +43,7 @@ reel settings --root "<CLIENT>"        # or `reel settings` outside a client fol
 | `panel_link` | `true` · `false` | start the engine the Premiere panel talks to (`reel serve`) in the background at session start; `false` leaves the panel offline until `reel serve ensure` |
 | `evidence_gate` | `true` · `false` (`on` · `off` mean the same) | `true`: a turn that ran `reel` and says the edit is ready/done without `reel qc`/`reel verify` is sent back once (never with `approval: auto`; default `false`) |
 | `magnific_budget_credits` | number, 0 or more | the most Magnific credits one edit may spend (0 = never use Magnific; default 300) |
+| `background_priority` | `below_normal` · `normal` | "Run background work at lower priority so Premiere stays smooth" («شغل الخلفية بأولوية أقل عشان البريمير يفضل سلس»): `below_normal` (default) runs every `reel` job and its ffmpeg/Whisper children at a lower priority; `normal` gives them full speed even while Premiere is busy. The panel's engine (`reel serve`) always stays normal |
 
 `language`, `approval`, `whisper_model` and `magnific_budget_credits` are also plugin options (layer 3).
 

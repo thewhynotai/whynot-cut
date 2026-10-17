@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib.common import (Paths, load_status, log, read_json, set_status, write_json, now_iso,  # noqa: E402
                         set_context, active_profile, profile_dirs, project_prefix, models_dir, PROFILES_DIR, CLIENT_PROFILE_REL,
                         clients_root, client_folders, resolve_root, valid_prefix, derived_prefix)
+from lib import priority  # noqa: E402  T4.11: imported at load, so WHYNOT_PRIORITY is read as the process starts
 
 # 01_analysis/editing-style.json is the video's copy of the client reference style (`reel ref-style --apply`), not
 # authored per video; the other files are written by the story editor (+ medical reviewer) for each video
@@ -1767,6 +1768,11 @@ def main(argv: list[str] | None = None):
         cmd_py(argparse.Namespace(cmd="py", pyargs=pyargs))
         return
     a = ap.parse_args(argv)
+    if a.cmd != "serve":                # T4.11: background work at BelowNormal (setting); the panel's engine stays Normal
+        try:
+            priority.apply()
+        except Exception:  # noqa: BLE001  a priority that cannot be set never stops the command
+            pass
     try:
         start(a)
     except Exception as e:  # noqa: BLE001 — 3.0 T2.2 (IM-7): guidance JSON and exit 1, never a traceback

@@ -543,8 +543,13 @@ def transcribe_episode(ep: EpisodePaths, model_size: str = "large-v3", language:
     with gpu_lock.whisper_slot("transcribe", backend=backend, log_to=ep) as lane:
         runner = run_chunk or whisper_runner(model_size, vad, ep, backend=backend, batch_size=batch_size,
                                              device=accel.whisper_device(lane))
-        done = run_chunks(ep, cdir, audio, plan, runner, model=model_size, prompt=prompt, language=language,
-                          label=f"episode {ep.episode_id}")
+        try:
+            done = run_chunks(ep, cdir, audio, plan, runner, model=model_size, prompt=prompt, language=language,
+                              label=f"episode {ep.episode_id}")
+        finally:                        # T4.11: Whisper leaves memory before the slot does (success, error, Ctrl+C)
+            rel = getattr(runner, "release", None)
+            if callable(rel):
+                rel()
     segs, words = stitch(done["results"])
     st = getattr(runner, "state", {}) or {}
     prob = done["language_probability"]

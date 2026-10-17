@@ -237,6 +237,16 @@ def runtime_report(home: Path | None = None) -> dict:
     return st
 
 
+def _gpu_type(cfg: dict) -> str:
+    """The GPU precision of the model the editor uses (T4.14: transcription.json gpu_compute_types per model)."""
+    try:
+        from . import settings as S
+        from .whisper_backends import gpu_compute_type_for
+        return gpu_compute_type_for(S.load().get("whisper_model") or "large-v3", cfg)
+    except Exception:  # noqa: BLE001  a damaged preferences file: the old key, as before
+        return str(cfg.get("gpu_compute_type", "float16"))
+
+
 def accelerator(video: dict | None = None, gpu: dict | None = None, *, backend: str | None = None) -> dict:
     """What the heavy media steps run on (T4.10): {"video": accel.detect(), "transcription": the Whisper device of
     plat.gpu_info(), "line": one line for the editor}, e.g.
@@ -260,7 +270,7 @@ def accelerator(video: dict | None = None, gpu: dict | None = None, *, backend: 
     if accel.off():
         tx = "CPU"                                   # WHYNOT_ACCEL=off: transcription stays on the processor too
     else:
-        tx = "MLX" if backend == "mlx" else f"CUDA {cfg.get('gpu_compute_type', 'float16')}" if dev == "cuda" else "CPU"
+        tx = "MLX" if backend == "mlx" else f"CUDA {_gpu_type(cfg)}" if dev == "cuda" else "CPU"
     kind = video.get("kind")
     if kind == "cuda":
         v = f"{video.get('name') or 'NVIDIA GPU'} (NVENC/NVDEC)"
