@@ -80,3 +80,10 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     `tests/test_lean_runtime.py`, `tests/test_transcribe_precision.py`, `tests/test_burned_captions.py`,
     `tests/fixtures/burned_captions/**`; the G13 evidence file. cli.py / plan.py / ppro_build.py / previews.py /
     intake hooks arrive as patches.
+  - Addendum M (2026-10-17, M6): `whynot-cut/engine/reel/lib/bidi_lines.py` and `lib/client_brief.py` executor;
+    `lib/looks_pairing.py` looks & motion track (covered by `looks*.py`); the `typography.pairing` field in
+    `lib/client_db.py` wnc-queue (hunk only).
+  - Safety track = API-credit lane 2 (2026-10-17, Addendum K1, Tasks 61–68): `whynot-cut/engine/reel/lib/safety/**`,
+    `whynot-cut/tests/test_safety*.py`, `whynot-cut/tests/fixtures/safety/**`. `config/defaults/safety.json` (the K1
+    switches) is executor-owned; cli.py / plan / reels-plan / qc call sites, skills, agents and hooks arrive as patches;
+    K-T3's ppro_build fade goes to the Adobe track; K-T4's Task 27 delta goes as a patch to lane 1's `safe_zones*`.
