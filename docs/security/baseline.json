@@ -1280,7 +1280,7 @@
   {
    "tool": "pip-audit",
    "code": "skipped-requirements",
-   "packages": ["torch", "torchaudio"],
+   "packages": ["torch==2.8.0+cu128", "torchaudio==2.8.0+cu128"],
    "reason": "torch and torchaudio 2.8.0+cu128 in runtime-cuda.txt are local-version builds from the PyTorch index: pip-audit looks them up on PyPI and cannot; OSV-Scanner audits the same pins and reports them",
    "owner_task": "executor (T4.12 runtime locks) / L-T9 (SBOM + OSV over the binaries)",
    "review_date": "2026-11-17"

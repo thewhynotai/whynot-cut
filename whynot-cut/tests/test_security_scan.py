@@ -1170,6 +1170,11 @@ class RunScansComposition(unittest.TestCase):
     FUNCS = ("scan_semgrep", "scan_bandit", "scan_eslint", "scan_gitleaks", "scan_binary_secrets", "check_locks",
              "scan_pip_audit", "scan_osv", "scan_npm", "scan_sbom", "scan_commit_messages")
 
+    def test_funcs_is_exactly_what_run_scans_calls(self):
+        """A scanner added to (or dropped from) run_scans without this list is a clean failure here, never a real run."""
+        called = {n for n in scan.run_scans.__code__.co_names if n.startswith(("scan_", "check_"))}
+        self.assertEqual(called, set(self.FUNCS))
+
     def _run(self, modes, **kw):
         calls = []
         self.flags = []
@@ -1214,13 +1219,16 @@ class RunScansComposition(unittest.TestCase):
 class PipAuditGapIsPinnedByName(unittest.TestCase):
     """A pip-audit `skipped-requirements` gap names its packages (torch, torchaudio): a NEW skipped package is not accepted."""
     GAP = {"tool": "pip-audit", "code": "skipped-requirements", "reason": "local +cu128 builds", "owner_task": "executor",
-           "review_date": "2099-01-01", "packages": ["torch", "torchaudio"]}
+           "review_date": "2099-01-01", "packages": ["torch==2.8.0+cu128", "torchaudio==2.8.0+cu128"]}
+    LOCK = ("torch==2.8.0+cu128 \\\n    --hash=sha256:aa\n"
+            "torchaudio==2.8.0+cu128 \\\n    --hash=sha256:bb\n"
+            "Some_Pkg==1.2 \\\n    --hash=sha256:cc\n")
 
-    def _audit(self, names):
+    def _audit(self, names, lock_text=None):
         with tempfile.TemporaryDirectory() as d, mock.patch.object(scan, "need", return_value=None), \
                 mock.patch.object(scan, "run") as run_mock:
             lock = Path(d) / "a.lock"
-            lock.write_text("x\n", encoding="utf-8")
+            lock.write_text(self.LOCK if lock_text is None else lock_text, encoding="utf-8")
 
             def fake(argv, cwd=None, **kw):
                 Path(argv[argv.index("-o") + 1]).write_text(
@@ -1229,17 +1237,27 @@ class PipAuditGapIsPinnedByName(unittest.TestCase):
             run_mock.side_effect = fake
             return scan.scan_pip_audit(Path(d), Path(d), [lock])
 
-    def _accepted(self, names, gap=None):
-        r = [self._audit(names)]
+    def _accepted(self, names, gap=None, lock_text=None):
+        r = [self._audit(names, lock_text)]
         scan.apply_known_gaps(r, {("pip-audit", "skipped-requirements"): gap or self.GAP})
         return scan.exit_code(r, []) == scan.EXIT_OK
 
     def test_the_result_carries_the_skipped_package_names(self):
-        self.assertEqual(sorted(self._audit(["torch", "torchaudio"])["skipped"]), ["torch", "torchaudio"])
+        self.assertEqual(sorted(self._audit(["torch", "torchaudio"])["skipped"]), ["torch==2.8.0+cu128", "torchaudio==2.8.0+cu128"])
+        self.assertEqual(self._audit(["unpinned"])["skipped"], ["unpinned"])  # no pin in the lock: the bare name, never accepted
 
     def test_torch_and_torchaudio_alone_are_accepted(self):
         self.assertTrue(self._accepted(["torch", "torchaudio"]))
         self.assertTrue(self._accepted(["TorchAudio"]))  # package names compare case-insensitively (PEP 503 spelling)
+
+    def test_a_new_version_of_an_accepted_package_is_not_hidden(self):
+        self.assertFalse(self._accepted(["torch"], lock_text="torch==2.9.0+cu128 \\\n"))
+        self.assertFalse(self._accepted(["torch"], lock_text="torch==2.8.0 \\\n"))  # the CPU build is another artifact
+        self.assertTrue(self._accepted(["torch"], lock_text="Torch==2.8.0+cu128\n"))
+
+    def test_two_different_pins_of_one_package_are_never_accepted(self):
+        two = 'torch==2.8.0+cu128 ; sys_platform == "linux"\ntorch==9.9 ; sys_platform == "win32"\n'
+        self.assertFalse(self._accepted(["torch"], lock_text=two))
 
     def test_any_other_skipped_package_is_not_hidden(self):
         self.assertFalse(self._accepted(["torch", "requests"]))
@@ -1252,11 +1270,11 @@ class PipAuditGapIsPinnedByName(unittest.TestCase):
     def test_the_real_baseline_pins_the_packages(self):
         _, gaps = scan.load_baseline_full(ROOT / "docs" / "security" / "baseline.json")
         g = gaps[("pip-audit", "skipped-requirements")]
-        self.assertEqual(sorted(g["packages"]), ["torch", "torchaudio"])
+        self.assertEqual(sorted(g["packages"]), ["torch==2.8.0+cu128", "torchaudio==2.8.0+cu128"])
 
     def test_a_bad_packages_field_is_a_baseline_error(self):
         with tempfile.TemporaryDirectory() as d:
-            for bad in ("torch", [], [""], [1]):
+            for bad in ("torch", [], [""], [1], ["torch"], ["torch=="], ["torch>=2.8"]):
                 p = Path(d) / "b.json"
                 p.write_text(json.dumps({"accepted": [], "known_gaps": [dict(self.GAP, packages=bad)]}), encoding="utf-8")
                 with self.assertRaises(scan.BaselineError, msg=repr(bad)):

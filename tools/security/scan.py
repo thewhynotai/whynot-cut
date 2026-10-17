@@ -272,8 +272,9 @@ def load_baseline_full(path):
         if e["code"] not in GAP_CODES:
             raise BaselineError("known_gaps entry #%d: code %r is not one of %s" % (i, e["code"], ", ".join(GAP_CODES)))
         pk = e.get("packages")
-        if pk is not None and (not isinstance(pk, list) or not pk or not all(isinstance(x, str) and x.strip() for x in pk)):
-            raise BaselineError("known_gaps entry #%d: `packages` must be a non-empty list of package names" % i)
+        if pk is not None and (not isinstance(pk, list) or not pk or not all(
+                isinstance(x, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*==[^\s=]+", x.strip()) for x in pk)):
+            raise BaselineError("known_gaps entry #%d: `packages` must be a non-empty list of `name==exact-version` pins" % i)
         gaps[(e["tool"], e["code"])] = e
     return out, gaps
 
@@ -301,12 +302,33 @@ def _pkg(name):
     return re.sub(r"[-_.]+", "-", str(name)).lower()  # the PEP 503 spelling
 
 
+def _pin(spec):
+    """'Name==1.0+cu128' -> ('name', '1.0+cu128'): the PEP 503 name and the EXACT version (a bare name has version None)."""
+    name, sep, ver = str(spec).partition("==")
+    return _pkg(name.strip()), (ver.strip() if sep else None)
+
+
+def lock_pin(lock, name):
+    """'name==version' of `name` as the lock file pins it, or the bare name when the lock has no such pin. The skipped
+    entries of pip-audit carry no version, so the version the gap accepts is read from the lock that was audited."""
+    try:
+        text = Path(lock).read_text(encoding="utf-8")
+    except OSError:
+        return str(name)
+    pins = {m.group(2) for m in re.finditer(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*==\s*([^\s\\;#]+)", text, re.M)
+            if _pkg(m.group(1)) == _pkg(name)}
+    if len(pins) != 1:  # no pin, or two different pins (markers): which one was skipped is unknown, so nothing is accepted
+        return str(name)
+    return "%s==%s" % (_pkg(name), pins.pop())
+
+
 def _gap_covers(gap, code, r):
     """`skipped-requirements` is accepted per PACKAGE: every package the scanner skipped must be named in the gap's
-    `packages` (so a future skipped package is never hidden by an old entry). Other codes need no package list."""
+    `packages`, each as `name==exact-version` (so a future skipped package, or a new version of an old one, is never hidden
+    by an old entry). Other codes need no package list."""
     if code != "skipped-requirements":
         return True
-    return bool(r.get("skipped")) and {_pkg(n) for n in r["skipped"]} <= {_pkg(n) for n in gap.get("packages", [])}
+    return bool(r.get("skipped")) and {_pin(n) for n in r["skipped"]} <= {_pin(n) for n in gap.get("packages", [])}
 
 
 def apply_known_gaps(results, gaps):
@@ -894,7 +916,7 @@ def scan_pip_audit(root, raw_dir, locks):
         if skipped:
             status = "DEGRADED"
             codes.append("skipped-requirements")
-            skipped_names += [str(d.get("name", "?")) for d in skipped]
+            skipped_names += [lock_pin(lock, d.get("name", "?")) for d in skipped]
             notes.append("%s: %d requirement(s) NOT audited (%s)" % (lock.name, len(skipped), skipped[0]["skip_reason"][:80]))
         findings += parse_pip_audit(data, lock, root)
     return result("pip-audit", status, findings, "; ".join(notes) or "%d lock(s)" % len(locks), pinned_version("pip-audit"), codes, skipped_names)
