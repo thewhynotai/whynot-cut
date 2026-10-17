@@ -65,13 +65,18 @@ class HBFontSpec:
 
 # --------------------------------------------------------------------------- bidi (paragraph = one line)
 def _cls(ch: str) -> str:
+    bd = unicodedata.bidirectional(ch)
+    # digits first: Arabic-Indic digits, the Arabic decimal separator «٫» and percent sign «٪» sit inside the Arabic
+    # block, and a number keeps its left-to-right order in RTL text («٥٠٠ مجم», «٣٫٥», «٧٠٪»), never reversed
+    # (K-T5: «٣٫٥» was drawn «٥٫٣»)
+    if ch.isdigit() or bd in ("EN", "AN") or ch == "٪":
+        return "L"
     if _ARABIC.match(ch):
         return "R"
-    bd = unicodedata.bidirectional(ch)
     if bd in ("R", "AL"):
         return "R"
-    if bd == "L" or ch.isdigit() or bd in ("EN", "AN"):
-        return "L"           # digits keep left-to-right order inside RTL text ("50 ملغ")
+    if bd == "L":
+        return "L"           # Latin keeps left-to-right order inside RTL text ("50 ملغ")
     return "N"               # spaces, punctuation
 
 

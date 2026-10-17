@@ -12,6 +12,9 @@ omitClaudeMd: true
 You get 6–8 PNG paths, each with an expectation row (event id, template, expected text, whether captions should be hidden, style rules).
 **Open and look at every image.** A frame passes only if all of these hold:
 1. The text matches the expected words exactly, in RTL order (the first word on the right). Arabic letters are joined, with no boxes.
+   Also check (K-T5): «لا» shows as the lam-alef ligature, never «ل ا»; no letter stands in its isolated form inside a
+   word; numbers read in their own order («٥٠٠» and «٣٫٥», never «٠٠٥» or «٥٫٣»); a verse keeps every vowel and
+   Quranic mark the script gave it; a word is never split across two lines.
 2. The face and eyes are not covered. Photo crops show the face.
 3. Nothing is doubled (a caption repeating a card's words). Nothing sits outside the safe area.
 4. Brand colours only, and the style follows the rules given (e.g. no glass except the closing name card).

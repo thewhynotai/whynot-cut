@@ -133,6 +133,15 @@ def run(paths) -> dict:
     add("readback", bool(rb_ok), "After Effects read-back matches the plan" if rb_ok else
         ("no read-back (built without the bridge)" if b.get("status") == "BUILT_UNVERIFIED" else
          "read-back failed: " + "; ".join(((b.get("comparison") or {}).get("failures") or [])[:3])))
+    # K-T5: Arabic text animates by word or line, never letter by letter; no word split across lines or units;
+    # no pasted presentation forms, direction overrides, font without Arabic or lost Quranic marks. Behind its K1
+    # switch (off until the Gate 4 tag) and listed only when it finds something.
+    from .safety import switches as _k1
+    if _k1.enabled(_k1.ARABIC_QC_IN_MOTION_QC):
+        from .safety.arabic_integrity import run as arabic_integrity
+        ai = arabic_integrity(paths)
+        if ai["findings"]:
+            add("arabic_integrity", ai["ok"], "; ".join(f["ar"] + " / " + f["en"] for f in ai["findings"][:4]))
     rr = read_json(paths.p(RENDER), {}) or {}
     main = Path(rr["main"]) if rr.get("main") else None
     r_ok = rr.get("status") == "RENDERED" and not rr.get("reasons") and main is not None and main.exists() \
