@@ -96,3 +96,25 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
   - API-credit lane 2 also owns Phase 4 Task 25 R-4.3 cut proposals (2026-10-17, from the looks track; K-T7 builds on
     it): `whynot-cut/engine/reel/lib/cut_proposals*.py`, `whynot-cut/tests/test_cut_proposals*.py`,
     `whynot-cut/tests/fixtures/cut_proposals/**`; plan.py / ppro_build.py hooks arrive as patches.
+  - API-credit lane queues (2026-10-17, owner strategy: lanes do the long heavy implementation until the Console credit
+    is used up; the sessions keep design, ordering, acceptance and gates). Each lane commits only its own files,
+    unpushed; the executor accepts and pushes; other owners' hunks arrive as patches.
+    - Lane 1 adds, after Task 24: T4.10 Step 8 A/B (`SITE_LANES`/`VT_Q` values in `lib/accel.py` + their assertions,
+      the G-GPU evidence file); Task 26 (`lib/media_normalise.py`, `tests/test_media_normalise*.py`,
+      `tests/fixtures/media_normalise/**`); T4.12 (`setup/requirements-torch.in`, `setup/locks/runtime-*.txt`,
+      `setup/requirements.txt` requested lines, `lib/runtime.py`, `setup/setup_env.py`, `lib/plat.py` cuda_lib_dirs,
+      `tests/test_runtime_locks.py`); T4.15 after `lib/linksafe.py` lands (`lib/housekeeping.py`,
+      `tests/test_housekeeping.py`).
+    - Lane 2 adds, after K1: Task 30 (`lib/publish_rules.py`, `tests/test_publish_rules*.py`,
+      `tests/fixtures/publish_rules/**`); T4.3 after T4.2 (`lib/rules_loop.py`, `tests/test_t43_rules*.py`); Task 29
+      after T4.1 (`lib/emphasis.py`, `lib/endings.py`, `tests/test_emphasis*.py`).
+    - Lane 3 adds, after L-T1/2/3/10: L-T16 (`tests/security/files/**`, `tests/test_security_files*.py`); L-T6 v1
+      (`tests/security/injection/**`, `tests/test_security_injection*.py`, `evals/security/**`); L-T4 audit
+      (`tests/test_security_bare_exe.py`, `docs/security/scan-bare-exe.md`); L-T17 read-only record
+      (`docs/security/scan-acl-thispc.md`).
+    - Lane 4 (new) = Addendum M Gate 4 list, Tasks 50–60: `lib/review_domains*.py`, `lib/review_flags.py` (handed over
+      for M1-T2), `lib/bidi_lines.py`, `lib/font_pairing.py`, `lib/client_brief.py`, `lib/brief.py`,
+      `lib/transcript_compact.py`, `config/review-domains/**`, `tests/test_review_domains*.py`, `tests/test_review_flags.py`,
+      `tests/test_bidi_lines*.py`, `tests/test_font_pairing*.py`, `tests/test_brief.py`, `tests/test_client_brief.py`,
+      `tests/test_transcript_compact*.py`, fixtures `tests/fixtures/{review_domains,bidi,brief}/**`,
+      `evals/review-domains/**`, `evals/model-tier/**`, the M2/M5 evidence files.
