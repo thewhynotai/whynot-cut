@@ -15,6 +15,7 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
 <link rel="stylesheet" href="../mockup.css">
 <script src="../icons.js"></script>
 <script src="../strings.js"></script>
+<script src="../strings/client-setup.js"></script>
 <script src="../mockup.js"></script>
 </head>
 <body>
@@ -97,9 +98,12 @@ tab switch | colour, underline border-color | --mk-dur-base | white label + pink
   var STATES = {
     empty: function () {
       return {
-        noclient: true, needs: 0,
-        body: M.empty({ icon: "folder-open", title: t("empty.noclient.title"), text: t("empty.noclient.plain"),
-          btn: M.btn(t("empty.noclient.action"), { kind: "primary", icon: "folder-open", kbd: true }) }) + settings()
+        noclient: true, noclientKey: "cs.noclient", needs: 0,
+        /* J-T9a (designer R1 P1-7): ONE Home empty state, the J12 one (J-01 empty): «مفيش عميل مفتوح» + «إعداد عميل جديد»;
+           an editor with a folder already picks it in the flow's first step */
+        body: M.empty({ icon: "folder-open", title: t("cs.home.none.title"), text: t("cs.home.none.text"),
+          btn: M.btn(t("cs.action.setup"), { kind: "primary", icon: "plus", kbd: true }) }) +
+          '<div class="t-meta tx-muted tx-center mt-3">' + t("cs.home.none.hint") + '</div>' + settings()
       };
     },
     loading: function () {

@@ -1,0 +1,113 @@
+/* WhyNot Cut 3.0 J-T9a: the "Set up a client" group (J-01 to J-05, Addendum J12). Loaded after ../mockup.css and
+   css/premiere-core.css. Same UXP limits as mockup.css: flexbox only, explicit display on every element, physical margins
+   swapped under .m-rtl, no shadows / effects / opacity / flex spacing, state as classes, radius 8 on controls, 16 on cards.
+   Paddings count the border and land on 4 / 8 / 12 / 16 (11 + 1 on a second row). */
+
+/* ---- header action (J12 "a Home card and a header action"): a 32 px ghost control before the language switch;
+   icon only at 300 px (its name is the aria-label) ---- */
+.cs-hdr-act { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; height: 32px; padding: 0 6px; margin-right: 4px; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
+.m-rtl .cs-hdr-act { margin-right: 0; margin-left: 4px; }
+.cs-hdr-act-lbl { display: block; margin-left: 4px; white-space: nowrap; color: var(--twn-text-muted); font: 600 var(--mk-type-meta) var(--twn-font-ui); }
+.m-rtl .cs-hdr-act-lbl { margin-left: 0; margin-right: 4px; font: 600 var(--mk-type-ar-meta) var(--twn-font-ar); }
+.m-w300 .cs-hdr-act { justify-content: center; width: 32px; padding: 0; }
+.cs-hdr-act-focus { border-color: var(--mk-focus-border); }
+.cs-hdr-act-off .cs-hdr-act-lbl { color: var(--mk-text-disabled); }
+
+/* ---- review items: a row (content + the confirm / reject pair), then full-width extras ---- */
+.cs-item { display: flex; flex-direction: column; padding: 12px 0; }
+.cs-item + .cs-item { border-top: 1px solid var(--mk-divider); padding-top: 11px; }
+.cs-item-row { display: flex; flex-direction: row; align-items: flex-start; }
+.cs-dec { display: flex; flex-direction: row; flex: 0 0 auto; margin-left: 8px; }
+.m-rtl .cs-dec { margin-left: 0; margin-right: 8px; }
+.cs-decbtn { display: flex; flex-direction: row; align-items: center; justify-content: center; flex: 0 0 32px; width: 32px; height: 32px; border: 2px solid var(--mk-control); border-radius: 8px; background: var(--mk-control); cursor: pointer; }
+.cs-decbtn + .cs-decbtn { margin-left: 4px; }
+.m-rtl .cs-decbtn + .cs-decbtn { margin-left: 0; margin-right: 4px; }
+/* confirmed: the ok tint with an ok border; rejected: the pressed grey (a rejection is a choice, not a problem) */
+.cs-decbtn-yes { background: var(--mk-ok-tint); border-color: var(--twn-ok); }
+.cs-decbtn-no { background: var(--mk-control-pressed); border-color: var(--twn-text-muted); }
+.cs-decbtn-focus { border-color: var(--mk-focus-border); }
+.cs-decbtn-dis { background: var(--mk-control-disabled); border-color: var(--mk-control-disabled); cursor: default; }
+.cs-line { display: flex; flex-direction: row; align-items: flex-start; margin-top: 4px; }
+.cs-line .m-ico { margin-top: 2px; }
+.m-rtl .cs-line .m-ico { margin-top: 4px; }
+.cs-chiprow { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.cs-chiprow .m-chip { margin-right: 4px; margin-bottom: 4px; }
+.m-rtl .cs-chiprow .m-chip { margin-right: 0; margin-left: 4px; }
+
+/* website text (L-G38): a text node in an auto-direction isolate; a long run breaks anywhere rather than overflow */
+.m-panel .cs-web { unicode-bidi: isolate; overflow-wrap: anywhere; }
+/* a website title shown as a quote, never as an answer: a 2 px rule on the reading-start side */
+.cs-quote { display: flex; flex-direction: column; margin-top: 8px; padding: 2px 0 2px 10px; border-left: 2px solid var(--mk-control-pressed); }
+.m-rtl .cs-quote { padding: 2px 10px 2px 0; border-left: 0; border-right: 2px solid var(--mk-control-pressed); }
+
+/* ---- logo previews (J12: raster previews on light, grey and dark tiles) ---- */
+.cs-tiles { display: flex; flex-direction: row; margin-top: 8px; }
+.cs-tile { display: flex; flex-direction: row; align-items: center; justify-content: center; flex: 1 1 0; min-width: 0; height: 56px; border: 1px solid transparent; border-radius: 8px; }
+.cs-tile + .cs-tile { margin-left: 8px; }
+.m-rtl .cs-tile + .cs-tile { margin-left: 0; margin-right: 8px; }
+.cs-tile-light { background: #F2F2F2; }
+.cs-tile-grey { background: #808080; }
+.cs-tile-dark { background: #0D0D0D; border-color: var(--twn-border); }
+/* the mock raster (an engine PNG preview in the product): a teal mark and a navy word, always LTR like any image */
+.cs-logo { display: flex; flex-direction: row; align-items: center; direction: ltr; }
+.cs-logo-mark { display: block; flex: 0 0 18px; width: 18px; height: 18px; border-radius: 9px; background: #20ACAF; }
+.cs-logo-word { display: block; margin-left: 4px; color: #0B3C5D; font: 700 13px/16px var(--twn-font-ui); white-space: nowrap; }
+.cs-logo-icon { display: flex; flex-direction: row; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; background: #20ACAF; }
+.cs-logo-icon .cs-logo-dot { display: block; width: 10px; height: 10px; border-radius: 5px; background: #FFFFFF; }
+
+/* ---- colour swatch ---- */
+.cs-swatch { display: block; flex: 0 0 32px; width: 32px; height: 32px; border: 1px solid var(--twn-border); border-radius: 8px; }
+.cs-swrow { display: flex; flex-direction: row; align-items: center; flex: 1 1 auto; min-width: 0; }
+
+/* ---- photo preview (a raster preview in the product; here a portrait well with a plain figure) ---- */
+.cs-photo { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; flex: 0 0 64px; width: 64px; height: 80px; overflow: hidden; border-radius: 8px; background: linear-gradient(180deg, #3A3050 0%, #231C30 55%, #120F18 100%); }
+.cs-photo-1 { background: linear-gradient(180deg, #24424A 0%, #162A30 55%, #0E1518 100%); }
+.cs-photo-2 { background: linear-gradient(180deg, #54402C 0%, #30241A 55%, #17110C 100%); }
+.cs-photo-3 { flex-basis: 64px; width: 64px; height: 36px; background: linear-gradient(180deg, #38404E 0%, #22262E 55%, #111317 100%); }
+.cs-photo .pc-head { width: 22px; height: 22px; }
+.cs-photo .pc-body { width: 40px; height: 22px; }
+.cs-photo-desk { display: block; width: 48px; height: 10px; margin-bottom: 6px; border-radius: 2px; background: #5A6272; }
+
+/* ---- people: the two choices (gender, title) ---- */
+.cs-field { display: flex; flex-direction: column; margin-top: 12px; }
+.cs-field .m-segctl, .cs-field .m-select { margin-top: 4px; }
+.cs-list { display: flex; flex-direction: column; margin-top: 4px; padding: 3px; border: 1px solid var(--twn-border); border-radius: 8px; background: var(--mk-card-solid); }
+.cs-opt { display: flex; flex-direction: row; align-items: center; min-height: 32px; padding: 0 10px; border: 2px solid transparent; border-radius: 8px; cursor: pointer; }
+.cs-opt-focus { border-color: var(--mk-focus-border); background: var(--mk-control); }
+.cs-opt-gloss { display: block; margin-left: 8px; }
+.m-rtl .cs-opt-gloss { margin-left: 0; margin-right: 8px; }
+
+/* ---- website link field: an error state (the field's own border, never a second notice) ---- */
+.cs-input-err { border-color: var(--twn-error); }
+.cs-label { display: block; margin-bottom: 4px; }
+
+/* ---- progress card rows and the action bar's counts ---- */
+.cs-meta-row { display: flex; flex-direction: row; align-items: center; min-height: 32px; }
+.cs-acts { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; }
+.cs-acts > .m-row { margin-top: 8px; margin-right: 8px; }
+.m-rtl .cs-acts > .m-row { margin-right: 0; margin-left: 8px; }
+.cs-counts { display: block; margin-top: 8px; }
+
+/* ---- report: a card heading row (icon + label) ---- */
+.cs-cardhead { display: flex; flex-direction: row; align-items: center; }
+.cs-sub-eyebrow { display: block; margin-top: 12px; color: var(--twn-text-muted); }
+
+/* ---- review accordion (J-04): one section open at a time; a closed head says where the section stands ---- */
+.cs-sechead { align-items: flex-start; min-height: 48px; height: auto; padding-top: 6px; padding-bottom: 6px; }
+.cs-sechead > .m-ico { margin-top: 2px; }
+.m-rtl .cs-sechead > .m-ico { margin-top: 4px; }
+.cs-secmeta { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; }
+.cs-secchip { display: flex; flex-direction: row; margin-left: 8px; }
+.m-rtl .cs-secchip { margin-left: 0; margin-right: 8px; }
+.cs-secbody { display: flex; flex-direction: column; border-top: 1px solid var(--mk-divider); }
+
+/* ---- round 1 (designer): no-wrap Latin runs, the LTR link value, the chosen gender's check mark ---- */
+.m-panel .cs-nw { white-space: nowrap; }
+.m-panel .cs-ltrval { direction: ltr; text-align: left; }
+.cs-seglbl { display: flex; flex-direction: row; align-items: center; color: var(--twn-text); }
+.cs-seglbl .m-ico { margin-right: 4px; }
+.m-rtl .cs-seglbl .m-ico { margin-right: 0; margin-left: 4px; }
+.cs-pathchip { display: flex; flex-direction: row; margin-top: 4px; }
+/* R2 pass 2 (editor P2-4): an LTR name under an Arabic label stays on the reading-start side (right in Arabic); a long one
+   still starts at its left and ends in the ellipsis */
+.m-rtl .cs-ltrstart { text-align: right; }

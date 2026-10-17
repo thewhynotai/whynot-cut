@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="loading,normal,complete,handover-sent,no-website,no-claude,error,busy,offline,long">
+<meta name="mock-themes" content="dark,light">
+<meta name="mock-keys" content="Mod+Enter = the one next-step button (Add what's missing, or Finish the client profile with Claude); Tab moves card to card, then to the button; Esc = close the top notice; Alt+1 / Alt+2 / Alt+3 = tabs. No single-key shortcuts.">
+<meta name="mock-motion" content="Cards appear in place, no slide; the loading skeleton shimmers 1200 ms (static fallback: solid bars). After the hand-over the button swaps for the done notice in its reserved slot (background colour 200 ms), no layout shift below it.">
+<title>J-05 Set up a client: report</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<link rel="stylesheet" href="../css/client-setup.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../strings/client-setup.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+<script src="../js/client-setup.js"></script>
+</head>
+<body>
+<script>
+/* J-05 "Set up a client": the report (Addendum J12 screen 5, J5.2; engine: brand.report, client.handover).
+   - The four J5.2 parts as cards: what the website gave (counts per kind, the hosts read, the other sites listed but
+     not opened), what is in assets and data and how it is organised (folder by folder, with a misplaced file), what is
+     missing (each with its fix in words), and where the website and the files differ (the client's files win; nothing
+     was changed).
+   - ONE next-step button, chosen by state (pinned bar): «ضيف الناقص» / "Add what's missing" when something is missing
+     (opens the client folder at the first missing item); otherwise «كمّل ملف العميل مع Claude» / "Finish the client
+     profile with Claude", which writes the hand-over request (the panel never starts Claude, D5; C1.5).
+   - handover-sent: the request is written; the next Claude session finishes the profile; Back to Home.
+   - no-website: the website was skipped: card 1 says so, card 4 has nothing to compare.
+   - no-claude: Claude is signed out on this computer: the hand-over still works (the request waits); the Claude card's
+     sign-in is the secondary, the hand-over stays the one primary.
+   - error: the report could not be put together → Try again (the off next step says so). busy: a Claude session holds the
+     client's writer lock («استنى وجرّب تاني»; the hand-over waits). loading: a neutral off "Next step", nothing chosen
+     before the data exists. complete: the brand font was licensed and the misplaced file moved, so nothing is missing.
+     offline: the WhyNot Cut service is off. long: long names. */
+(function () {
+  var t = M.t, D = M.D, C = CS.D, R = C.report;
+
+  function head(o) {
+    o = o || {};
+    return M.back(t("cs.back")) + CS.flow(4, { done: o.done ? 4 : 3, skipped: o.skipped, kind: o.done ? "ok" : undefined }) +
+      '<div class="mt-4">' + PC.title(t("cs.rep.title"), "") + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("cs.rep.sub", { client: D.client, time: M.html(M.mono(C.repTime)) }) + '</div>';
+  }
+  function slot(n) { return '<div class="mt-4">' + n + '</div>'; }
+  function card(icon, ink, label, inner) {
+    return M.card('<div class="cs-cardhead">' + M.ico(icon, 16, ink) + '<div class="t-label ms-2 m-grow">' + label + '</div></div>' + inner, "mt-3");
+  }
+  /* hosts are text, never links: one mono chip each, so a host never breaks or reorders inside Arabic */
+  function hosts(list) { return '<div class="cs-chiprow">' + list.map(function (h) { return M.monoChip(h); }).join("") + "</div>"; }
+  function found(o) {
+    o = o || {};
+    if (o.skipped) return card("link", "ink-muted", t("cs.rep.found"),
+      '<div class="t-body mt-2">' + t("cs.rep.noweb") + '</div><div class="t-meta tx-muted mt-1">' + t("cs.rep.noweb.sub") + '</div>');
+    /* R2 pass 2 (editor P2-1): the counts sit under the label, so a long count never runs under it at 300 px */
+    var row = function (icon, key, end) { return M.listrow(icon, t(key), end, "", { dense: true }); };
+    return card("link", "ink-muted", t("cs.rep.found"),
+      '<div class="m-col mt-1">' +
+      row("image", "cs.rev.logo", t("cs.rep.fc", { f: 2, c: 1 })) + row("palette", "cs.rev.colours", t("cs.rep.fc", { f: 4, c: 2 })) +
+      row("type", "cs.rev.fonts", o.none ? t("cs.rep.fc", { f: 2, c: 1 }) : t("cs.rep.fcn", { f: 2, c: 1, n: 1 })) + row("user-round", "cs.rev.people", t("cs.rep.fc", { f: 2, c: 2 })) +
+      row("image", "cs.rev.photos", t("cs.rep.fc", { f: 3, c: 2 })) + '</div>' +
+      '<div class="t-meta tx-muted mt-3">' + t("cs.rep.hosts") + '</div>' + hosts(C.hosts) +
+      '<div class="t-meta tx-muted mt-2">' + t("cs.rep.links") + '</div>' + hosts(C.links));
+  }
+  function files(o) {
+    o = o || {};
+    var row = function (path, key) { return M.listrow("folder", M.ltr(path, "mono"), t(key), "", { dense: true }); };
+    return card("folder-tree", "ink-muted", t("cs.rep.files"),
+      '<div class="t-eyebrow cs-sub-eyebrow">' + M.ltr("assets", "lat") + '</div>' +
+      row("assets/Logo", o.skipped ? "cs.rep.t.logo0" : "cs.rep.t.logo") +
+      row("assets/Fonts", o.skipped ? "cs.rep.t.refs" : o.none ? "cs.rep.t.fonts2" : "cs.rep.t.fonts") + row("assets/Photos", o.skipped ? "cs.rep.t.refs" : "cs.rep.t.photos") +
+      row("assets/Brand", o.skipped ? "cs.rep.t.brand0" : "cs.rep.t.brand") +
+      '<div class="t-eyebrow cs-sub-eyebrow">' + M.ltr("data", "lat") + '</div>' +
+      row("data/Raw", "cs.rep.t.raw") + row("data/References", o.none ? "cs.rep.t.refs1" : "cs.rep.t.refs") +
+      '<div class="t-meta tx-muted mt-1">' + t("cs.rep.t.rest") + '</div>' +
+      (o.none ? "" : '<div class="cs-line mt-2">' + M.status("warn", 12) + '<div class="t-meta tx-text ms-1 m-grow">' +
+        t("cs.rep.misplaced", { file: M.html(M.ltr(R.misplaced.file, "mono")), folder: M.html(M.ltr(R.misplaced.folder, "mono")) }) + '</div></div>'));
+  }
+  function missing(o) {
+    o = o || {};
+    if (o.none) return card("list-checks", "ink-ok", t("cs.rep.missing"),
+      '<div class="cs-line mt-2">' + M.status("ok", 12) + '<div class="t-body ms-1 m-grow">' + t("cs.rep.miss.none") + '</div></div>');
+    var item = function (html) { return '<div class="cs-line mt-2">' + M.status("waiting", 12) + '<div class="t-body ms-1 m-grow">' + html + '</div></div>'; };
+    /* R1 (designer P1-8): with the website skipped no font name can be known, so the missing font is said in general */
+    if (o.skipped) return card("list-checks", "ink-muted", t("cs.rep.missing"), item(t("cs.rep.miss.nofont")) + item(t("cs.rep.miss.ref")));
+    return card("list-checks", "ink-muted", t("cs.rep.missing"),
+      item(t("cs.rep.miss.paid", { font: M.html(M.ltr(R.paidFont, "lat")) })) +
+      item(t("cs.rep.miss.install", { font: M.html(M.ltr(R.openFont, "lat")) })) +
+      item(t("cs.rep.miss.ref")));
+  }
+  function conflicts(o) {
+    o = o || {};
+    if (o.skipped) return card("triangle-alert", "ink-muted", t("cs.rep.conflicts"), '<div class="t-body mt-2">' + t("cs.rep.c.noweb") + '</div>');
+    var item = function (html) { return '<div class="cs-line mt-2">' + M.status("warn", 12) + '<div class="t-body ms-1 m-grow">' + html + '</div></div>'; };
+    var p = C.people[0];
+    return card("triangle-alert", "ink-warn", t("cs.rep.conflicts"),
+      item(t("cs.rep.c.logo")) +
+      item(t("cs.rep.c.colour", { a: M.html(M.mono(C.colours[0].hex)), b: M.html(M.mono(C.colours[0].conflict)) })) +
+      item(t("cs.rep.c.name", { a: M.html(CS.web(p.ar)), b: M.html(CS.web(p.spell)) })) +
+      '<div class="mt-3">' + M.trust(t("cs.rep.c.win")) + '</div>');
+  }
+  function cards(o) { return found(o) + files(o) + missing(o) + conflicts(o); }
+  function addBar() {
+    return PC.kbtn(t("cs.next.add"), "enter", { kind: "primary", block: true, icon: "folder-open" }) + '<div class="t-meta tx-muted mt-2">' + t("cs.next.add.sub") + '</div>';
+  }
+  function handBar() {
+    return PC.kbtn(t("cs.next.handover"), "enter", { kind: "primary", block: true, icon: "message-square" }) + '<div class="t-meta tx-muted mt-2">' + t("cs.next.handover.sub") + '</div>';
+  }
+  var DONE = { none: true };
+
+  var STATES = {
+    loading: function () {
+      var sk = function () { return M.card(M.skel(50) + '<div class="mt-2"></div>' + M.skel(85, 16) + M.skel(70, 16) + M.skel(60, 16), "mt-3"); };
+      return { body: M.back(t("cs.back")) + CS.flow(4) + '<div class="mt-4">' + M.skel(40, 28) + M.skel(30, 16) + '</div>' + sk() + sk() + sk() + sk(),
+        /* R1 (designer P2-16): nothing is chosen before the data exists: a neutral off button that says why */
+        bar: M.btn(t("cs.rep.next"), { kind: "secondary", block: true, disabled: true }) + '<div class="t-meta tx-muted mt-2">' + t("cs.rep.loading") + '</div>' };
+    },
+    normal: function () { return { body: head() + cards(), bar: addBar() }; },
+    complete: function () { return { body: head() + cards(DONE), bar: handBar() }; },
+    "handover-sent": function () {
+      /* R2 (editor P2-19): once handed over, the header says "Done · 3 differences" (the amber stays: the differences are open) */
+      return { body: head({ done: true }) + slot(M.notice("ok", t("cs.handover.sent"), { sub: t("cs.handover.sent.sub") })) +
+        '<div data-pill="' + M.esc(M.raw("cs.pill.done_diff")) + '">' + cards(DONE) + '</div>',
+        bar: M.btn(t("cs.handover.home"), { kind: "secondary", block: true, icon: "chevron-" + (M.rtl ? "right" : "left") }) };
+    },
+    "no-website": function () { return { body: head({ skipped: true }) + cards({ skipped: true }), bar: addBar() }; },
+    "no-claude": function () {
+      return { pills: { claude: "signed_out" }, body: head() + slot(M.noClaude("signed_out", { text: t("cs.rep.noclaude"), sub: t("cs.rep.noclaude.sub"), primary: false })) + cards(DONE),
+        bar: handBar() };
+    },
+    error: function () {
+      return { body: head() + slot(M.notice("error", t("cs.rep.err"), { sub: t("cs.rep.err.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true }, support: true })),
+        bar: M.btn(t("cs.rep.next"), { kind: "secondary", block: true, disabled: true }) + '<div class="t-meta tx-muted mt-2">' + t("cs.rep.retry_first") + '</div>' };
+    },
+    busy: function () {
+      return { body: head() + slot(M.notice("warn", t("cs.busy"), { sub: t("cs.busy.sub"), btn: { label: t("cs.busy.btn"), icon: "refresh-cw", primary: true }, dismiss: false })) + cards(DONE),
+        bar: M.btn(t("cs.next.handover"), { kind: "secondary", block: true, icon: "message-square", disabled: true }) + '<div class="t-meta tx-muted mt-2">' + t("cs.busy.reason") + '</div>' };
+    },
+    offline: function () {
+      return { pills: { engine: "off", claude: "unchecked", host: "unlinked" }, body: head() + slot(M.offline()) + cards(),
+        bar: M.btn(t("cs.next.add"), { kind: "primary", block: true, icon: "folder-open", disabled: true }) + '<div class="t-meta tx-muted mt-2">' + t("cs.reason.service") + '</div>' };
+    },
+    long: function () { return { body: head() + cards(), bar: addBar() }; }
+  };
+
+  CS.mount({
+    id: "J-05", name: "Set up a client: report",
+    states: ["loading", "normal", "complete", "handover-sent", "no-website", "no-claude", "error", "busy", "offline", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "home";
+      v.needs = 0;
+      v.ctxClientOnly = true;
+      if (state !== "handover-sent") v.setup = { done: 4, of: 4 };
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

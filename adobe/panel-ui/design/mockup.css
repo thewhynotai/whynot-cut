@@ -61,6 +61,22 @@
 html, body { margin: 0; padding: 0; background: #2B2B2B; }
 body { display: flex; flex-direction: column; align-items: flex-start; direction: ltr; } /* the page stays LTR; the panel carries dir */
 html.m-capture, html.m-capture body { background: #FF00FF; } /* render sentinel: cropped away by _build/render_all.py */
+/* J-T9a host frame (?theme=dark|light, mockup.js host()): Premiere's panel tab strip above the docked panel and the frame
+   gap below it, so a render shows the always-dark panel on Premiere's Dark and Light themes (Addendum B2). Approximate
+   Spectrum chrome colours; mockup context only, never part of the product. */
+.m-host { display: flex; flex-direction: column; flex: 0 0 auto; direction: ltr; }
+.m-host-w300 { width: 300px; } .m-host-w360 { width: 360px; } .m-host-w480 { width: 480px; }
+.m-host-dark { background: #1D1D1D; }
+.m-host-light { background: #D9D9D9; }
+.m-host-tabs { display: flex; flex-direction: row; align-items: center; flex: 0 0 28px; height: 28px; padding: 0 8px; font: 400 12px/16px "Segoe UI", Arial, sans-serif; }
+.m-host-tab { display: block; padding: 4px 0 2px 0; border-bottom: 2px solid #2680EB; white-space: nowrap; }
+.m-host-dark .m-host-tab { color: #E3E3E3; }
+.m-host-light .m-host-tab { color: #1F1F1F; }
+.m-host-menu { display: flex; flex-direction: column; flex: 0 0 auto; }
+.m-host-bar { display: block; width: 12px; height: 2px; margin: 1px 0; border-radius: 1px; }
+.m-host-dark .m-host-bar { background: #8F8F8F; }
+.m-host-light .m-host-bar { background: #6E6E6E; }
+.m-host-foot { display: block; flex: 0 0 8px; height: 8px; }
 
 /* ---- panel root ---- */
 .m-panel, .m-panel * { box-sizing: border-box; }

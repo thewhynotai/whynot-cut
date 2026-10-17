@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="normal,focus,picked,new,new-empty,creating,error-exists,error-inside,busy,offline,long">
+<meta name="mock-themes" content="dark,light">
+<meta name="mock-keys" content="Tab / Shift+Tab move between the two choices; Enter or Space opens one; Mod+Enter = Continue or Make the folder (the one primary); Esc = back to Home from the choices; Alt+1 / Alt+2 / Alt+3 = tabs. No single-key shortcuts.">
+<meta name="mock-motion" content="Controls: background and border colour 150 ms ease; focus = border colour only. Choosing a row replaces the choices with that step in place (no slide). Making the folders: the button shows a spinner in place of its icon, no layout shift. Notices appear in their reserved slot (background colour 200 ms).">
+<title>J-02 Set up a client: folder</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<link rel="stylesheet" href="../css/client-setup.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../strings/client-setup.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+<script src="../js/client-setup.js"></script>
+</head>
+<body>
+<script>
+/* J-02 "Set up a client": the client folder (Addendum J12 screen 2; engine: scaffold / scaffold --fill-missing, client-init).
+   - normal: two choices, tapping one is the action (no violet on this step, as on P-04): «اختار فولدر العميل» (an
+     existing folder) or «اعمل فولدر جديد» (a name and a place, in the clients folder by default). The trust line says
+     nothing that exists is touched.
+   - picked: an existing folder with material: what is in it, the missing folders that will be made (names only), the
+     project-name prefix that will be used, Continue (primary).
+   - new: the name (focus) and the place, what goes inside, the prefix, Make the folder (primary). new-empty: no name yet,
+     so Make the folder is off and says why. creating: the folders are being made (busy button).
+   - error-exists: a folder with that name is already there; the fix is to use it (only missing folders are made).
+   - error-inside: the picked folder is inside another client's folder; the fix is to pick another.
+   - busy: a Claude session holds this client's writer lock (J12 «في جلسة Claude شغالة على العميل ده دلوقتي»), one
+     button «استنى وجرّب تاني»; Continue is off.
+   - offline: the WhyNot Cut service is off; the choices are off and say why. long: a long clients-folder name and prefix. */
+(function () {
+  var t = M.t, D = M.D, C = CS.D;
+
+  function choices(o) {
+    o = o || {};
+    return '<div class="t-label mt-4">' + t("cs.folder.q") + '</div>' +
+      '<div class="m-col mt-2">' +
+      PC.pick({ icon: "folder-open", title: t("cs.folder.pick"), sub: o.disabled ? t("cs.reason.service") : t("cs.folder.pick.sub"), disabled: o.disabled }) +
+      '<div class="mt-2"></div>' +
+      PC.pick({ icon: "plus", title: t("cs.folder.new"), sub: o.disabled ? t("cs.reason.service") : t("cs.folder.new.sub"), disabled: o.disabled, focus: o.focus }) +
+      '</div>' + '<div class="mt-4">' + M.trust(t("cs.folder.untouched")) + '</div>';
+  }
+  function head() { return M.back(t("cs.back.home")) + CS.head(1, t("cs.title")); }
+  function prefix() { return '<div class="mt-3">' + PC.info(t("cs.folder.prefix", { prefix: M.html(M.mono(C.prefix)) })) + '</div>'; }
+  function picked(o) {
+    o = o || {};
+    var miss = C.folder.missing.map(function (f) { return M.monoChip(f); }).join("");
+    return M.card(
+      '<div class="t-meta tx-muted">' + t("cs.folder.picked") + '</div>' +
+      '<div class="m-row-top mt-1">' + M.ico("folder", 16, "ink-muted") + '<div class="m-col m-grow ms-2"><div class="t-label">' + M.txt(D.client) + '</div>' +
+        '<div class="t-meta tx-muted m-trunc cs-ltrval cs-ltrstart" dir="ltr">' + M.esc(C.root) + '</div></div>' +
+        M.btn(t("cs.folder.change"), { kind: "ghost", disabled: o.disabled }) + '</div>' +
+      '<div class="t-meta tx-muted mt-2">' + t("cs.folder.has", { a: C.folder.assets, c: C.folder.clips }) + '</div>' +
+      '<div class="t-meta tx-text mt-3">' + t("cs.folder.make") + '</div>' + '<div class="cs-chiprow">' + miss + '</div>', "mt-4") +
+      prefix() + '<div class="mt-3">' + M.trust(t("cs.folder.untouched")) + '</div>';
+  }
+  function continueBar(o) {
+    o = o || {};
+    return o.disabled ? M.btn(t("cs.folder.continue"), { kind: "primary", block: true, disabled: true })
+      : PC.kbtn(t("cs.folder.continue"), "enter", { kind: "primary", block: true, icon: "chevron-" + (M.rtl ? "left" : "right") });
+  }
+  function nameField(o) {
+    o = o || {};
+    var val = o.empty ? '<span class="m-block tx-muted t-body">' + t("cs.new.name.ph") + '</span>' : '<span class="m-block tx-text t-body">' + M.txt(D.client) + '</span>';
+    return '<div class="t-label cs-label">' + t("cs.new.name") + '</div>' +
+      '<div class="m-input' + (o.focus ? " m-input-focus" : "") + '" role="textbox" tabindex="0" aria-label="' + M.esc(M.raw("cs.new.name")) + '">' + val + '</div>';
+  }
+  function newForm(o) {
+    o = o || {};
+    return M.card(nameField({ focus: !o.creating, empty: o.empty }) +
+      '<div class="t-label mt-4">' + t("cs.new.where") + '</div>' +
+      '<div class="m-row-top mt-1">' + M.ico("folder", 16, "ink-muted") + '<div class="m-col ms-2 m-grow"><div class="t-meta tx-muted">' + t("cs.new.where.in") + '</div>' +
+        '<div class="t-body m-trunc cs-ltrval cs-ltrstart" dir="ltr">' + M.esc(C.root) + '</div></div>' +
+        M.btn(t("cs.new.change"), { kind: "ghost", disabled: o.creating }) + '</div>' +
+      '<div class="t-meta tx-muted mt-3">' + t("cs.new.folders") + '</div>', "mt-4") +
+      (o.empty ? "" : prefix()) + '<div class="mt-3">' + M.trust(t("cs.new.trust")) + '</div>';
+  }
+  function makeBar(o) {
+    o = o || {};
+    if (o.empty) return M.btn(t("cs.new.make"), { kind: "primary", block: true, icon: "plus", disabled: true }) +
+      '<div class="t-meta tx-muted mt-2">' + t("cs.new.need_name") + '</div>';
+    if (o.creating) return M.btn(t("cs.new.making"), { kind: "primary", block: true, icon: "busy", disabled: true });
+    return PC.kbtn(t("cs.new.make"), "enter", { kind: "primary", block: true, icon: "plus" });
+  }
+  var slot = function (n) { return '<div class="mt-4">' + n + '</div>'; };
+
+  var STATES = {
+    normal: function () { return { noclient: true, body: head() + choices() }; },
+    focus: function () { return { noclient: true, body: head() + choices({ focus: true }) }; },
+    picked: function () { return { body: head() + picked(), bar: continueBar() }; },
+    "new": function () { return { noclient: true, body: head() + newForm(), bar: makeBar() }; },
+    "new-empty": function () { return { noclient: true, body: head() + newForm({ empty: true }), bar: makeBar({ empty: true }) }; },
+    creating: function () { return { noclient: true, body: head() + newForm({ creating: true }), bar: makeBar({ creating: true }) }; },
+    "error-exists": function () {
+      return { noclient: true, body: head() + slot(M.notice("warn", t("cs.exists", { name: D.client }), { sub: t("cs.exists.sub"),
+        btn: { label: t("cs.exists.btn"), icon: "folder-open", primary: true }, dismiss: false })) + newForm() };
+    },
+    "error-inside": function () {
+      return { noclient: true, body: head() + slot(M.notice("error", t("cs.inside", { name: C.otherClient }), { sub: t("cs.inside.sub"),
+        btn: { label: t("cs.inside.btn"), icon: "folder-open", primary: true } })) +
+        '<div class="t-label mt-4">' + t("cs.inside.or") + '</div><div class="m-col mt-2">' +
+        PC.pick({ icon: "plus", title: t("cs.folder.new"), sub: t("cs.folder.new.sub") }) + '</div>' };
+    },
+    busy: function () {
+      return { body: head() + slot(M.notice("warn", t("cs.busy"), { sub: t("cs.busy.sub"),
+        btn: { label: t("cs.busy.btn"), icon: "refresh-cw", primary: true }, dismiss: false })) + picked({ disabled: true }), bar: continueBar({ disabled: true }) };
+    },
+    offline: function () {
+      return { noclient: true, pills: { engine: "off", claude: "unchecked", host: "unlinked" }, body: head() + slot(M.offline()) + choices({ disabled: true }) };
+    },
+    long: function () { return { body: head() + picked(), bar: continueBar() }; }
+  };
+
+  CS.mount({
+    id: "J-02", name: "Set up a client: folder",
+    states: ["normal", "focus", "picked", "new", "new-empty", "creating", "error-exists", "error-inside", "busy", "offline", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "home";
+      v.needs = 0;
+      v.ctxClientOnly = true;
+      v.setup = { done: 1, of: 4 }; /* the header says the current step: "Setting up · 1 of 4" */
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

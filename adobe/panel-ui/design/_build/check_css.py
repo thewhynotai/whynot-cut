@@ -9,7 +9,10 @@ inherited-colour keyword, logical inline margins, and @font-face anywhere except
 strings files it also checks the VALUES: no "engine" / "المحرك" (it is "WhyNot Cut service"), never "Claude Code" in
 panel copy, and every link on the allowlist (https thewhynot.ai, dl.thewhynot.ai, claude.ai, support.claude.com,
 code.claude.com; wa.me ONLY for the support chat, MOCK_DATA.support.url in strings.js: D-05 update 2026-10-16,
-eng-data-contract §7.10). Prints one line per hit and a summary line; exit 1 on any hit.
+eng-data-contract §7.10). Every copy file: no command (`reel setup`, `reel brand-fetch`, ... : Addendum C1.4, J-T9c's
+banned `reel `). The copy files in DEV_WORD_FILES (the J12 group, J-T9a) also carry Addendum J5.2's developer-word
+denylist: JSON, CSS, robots, sha256, token, daemon, CLI (the other groups' copy predates it and their sample DATA
+legitimately holds e.g. a plan fingerprint). Prints one line per hit and a summary line; exit 1 on any hit.
 """
 from __future__ import annotations
 
@@ -30,6 +33,11 @@ JS_PATTERNS = {  # the JS group files use words like Array.filter(); match the C
 ALLOWED_HOSTS = {"thewhynot.ai", "www.thewhynot.ai", "dl.thewhynot.ai", "claude.ai", "support.claude.com", "code.claude.com"}
 SUPPORT_ONLY = {"wa.me"}  # the WhatsApp support chat: allowed only as support.url (the `support:` line of MOCK_DATA)
 VALUE = re.compile(r'"((?:[^"\\]|\\.)*)"')
+# a WhyNot Cut command in copy (C1.4): lower-case "reel" + one of its sub-commands, as typed; "a 52 s reel on ..." and
+# "Reel edit:" are nouns, not hits
+COMMAND = re.compile(r"\breel\s+(?:setup|doctor|serve|scaffold|client-init|inbox|next|lock|watch|needs-you|brand-[a-z]+)\b")
+DEV_WORD_FILES = {"strings/client-setup.js"}
+DEV_WORDS = re.compile(r"\b(?:JSON|CSS|robots|sha256|token|daemon|CLI)\b", re.I)
 
 
 def main() -> int:
@@ -83,6 +91,12 @@ def main() -> int:
                 if re.search(r"\bengine\b", v, re.I) or "المحرك" in v or "المحرّك" in v:
                     hits += 1
                     print(f"{rel}:{n}: copy says engine (use 'WhyNot Cut service'): {v[:90]}")
+                if COMMAND.search(v):
+                    hits += 1
+                    print(f"{rel}:{n}: copy names a command (use a fix button): {v[:90]}")
+                if rel in DEV_WORD_FILES and DEV_WORDS.search(v):
+                    hits += 1
+                    print(f"{rel}:{n}: copy has a developer word ({DEV_WORDS.search(v).group(0)}): {v[:90]}")
                 if "claude code" in v.lower():
                     hits += 1
                     print(f"{rel}:{n}: copy says Claude Code: {v[:90]}")

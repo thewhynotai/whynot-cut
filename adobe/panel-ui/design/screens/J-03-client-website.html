@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,normal,focus,skip,error-link,starting,fetching,fetching-late,partial,cancelled,error-network,error-certificate,error-refused,error-js,error-proxy,error-redirect,error-setup,busy,offline,long">
+<meta name="mock-themes" content="dark,light">
+<meta name="mock-keys" content="Tab order: the link field, Fetch branding, Skip. Mod+Enter = Fetch branding (or the notice's fix when there is one); Mod+. = Cancel while reading; Esc = close the top notice; Alt+1 / Alt+2 / Alt+3 = tabs. No single-key shortcuts.">
+<meta name="mock-motion" content="Controls: background and border colour 150 ms ease; focus = border colour only. Starting: the indeterminate band moves along the track (static fallback: the band in the middle). Reading: the bar's width moves 250 ms per step, the n-of-N text always carries the value; each stage row swaps its icon (pending, spinner, check) with no layout shift. Notices appear in their reserved slot (background colour 200 ms).">
+<title>J-03 Set up a client: website</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<link rel="stylesheet" href="../css/client-setup.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../strings/client-setup.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+<script src="../js/client-setup.js"></script>
+</head>
+<body>
+<script>
+/* J-03 "Set up a client": the website, optional (Addendum J12 screen 3; engine: brand-fetch --progress json).
+   - empty: no link yet; Fetch branding is off and says why; Skip is always there (it goes straight to the report).
+   - normal: the link typed; Fetch branding is the primary (pinned bar), Skip a ghost under it with what it does.
+     focus: keyboard focus in the field. skip: focus on Skip. error-link: the text is not a link: the field's own
+     border and one line say how to type it; Fetch stays off until it is.
+   - starting: the first line within 2 s (G2): "Opening sahha-clinic.example…" with the indeterminate band.
+   - fetching: «بنقرا صفحة 3 من 6» with the page being read, the bar, elapsed time, Cancel, what Cancel does, and the
+     steps in plain words. fetching-late: pages, colours and fonts, and logo done; photos 8 of 12.
+   - partial (cap reached): stopped at the time limit; what was found is ready; Review what was found takes the fill.
+   - cancelled: stopped, nothing kept, the client's files as they were; the form is back.
+   - the J2 errors, each with ONE fix button (J12, J-T9b codes): network → Try again; certificate → Try again + Send
+     diagnostics; refused by the site, built with JavaScript, proxy login → Carry on without the website; redirect to
+     another site → asked first (Yes, use it / No); setup needed → Repair the install. No command and no developer word.
+   - busy: a Claude session holds the client's writer lock: «في جلسة Claude شغالة على العميل ده دلوقتي» with ONE button
+     «استنى وجرّب تاني».
+   - offline: the WhyNot Cut service is off. long: a long, path-scoped site link. */
+(function () {
+  var t = M.t, D = M.D, C = CS.D;
+
+  function head() { return M.back(t("cs.back")) + CS.head(2, t("cs.web.title"), t("cs.web.sub")); }
+  function slot(n) { return '<div class="mt-4">' + n + '</div>'; }
+  /* the form. o = {value, focus, error, disabled} */
+  function form(o) {
+    o = o || {};
+    /* R1 (designer P2-12): a typo is field validation, not a problem: the field's red border and ONE line with a neutral
+       icon; the header pill is left alone */
+    var err = o.error ? '<div class="cs-line">' + M.ico("info", 12, "ink-muted") + '<div class="t-meta tx-text ms-1 m-grow">' + t("cs.web.badlink") + '</div></div>' : "";
+    return M.card(CS.linkField({ value: o.value, focus: o.focus, error: o.error }) + err, "mt-4") +
+      '<div class="mt-3">' + M.trust(t("cs.web.privacy")) + '</div>';
+  }
+  /* the pinned bar. o = {fetch: "on"|"off"|"none", skipFocus, reason, disabled} */
+  function bar(o) {
+    o = o || {};
+    var f = o.fetch || "on";
+    var fetch = f === "none" ? "" : f === "off"
+      ? M.btn(t("cs.web.fetch"), { kind: "primary", block: true, icon: "download", disabled: true }) + '<div class="t-meta tx-muted mt-2">' + (o.reason || t("cs.web.need_link")) + '</div>'
+      : PC.kbtn(t("cs.web.fetch"), "enter", { kind: "primary", block: true, icon: "download" });
+    var skip = '<div class="m-row' + (fetch ? " mt-2" : "") + '">' + M.btn(t("cs.web.skip"), { kind: "ghost", icon: "chevron-" + (M.rtl ? "left" : "right"), flush: true, focus: o.skipFocus, disabled: o.disabled }) + '</div>' +
+      '<div class="t-meta tx-muted">' + (o.skipReason || t("cs.web.skip.hint")) + '</div>';
+    return fetch + skip;
+  }
+  /* the progress card. o = {text, url, pct, indet, time, sub} */
+  function progress(o) {
+    var line = o.indet ? '<div class="mt-3">' + PC.indet() + '</div>' : '<div class="mt-3">' + M.progress(o.pct) + '</div>';
+    return M.card('<div class="t-body">' + o.text + '</div>' +
+      (o.url ? '<div class="t-meta tx-muted mt-1 m-trunc">' + M.ltr(M.mid(o.url, 40), "lat cs-web cs-nw") + '</div>' : "") +
+      (o.sub ? '<div class="t-meta tx-muted mt-1">' + o.sub + '</div>' : "") + line +
+      '<div class="cs-meta-row mt-2">' + M.ico("clock", 12, "ink-muted") + '<span class="t-meta tx-muted ms-1 m-grow">' + t("cs.web.elapsed", { t: M.html(M.mono(o.time)) }) + '</span>' +
+        PC.kbtn(t("cs.web.cancel"), "mod+.", { kind: "ghost", icon: "circle-stop" }) + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + t("cs.web.cancel.note") + '</div>', "mt-4");
+  }
+  function stages(rows) { return M.card(M.stages(rows), "m-card-flush mt-3"); }
+  var pend = function (k) { return ["pending", t(k), t("cs.st.next")]; };
+  function fetchingBody(late) {
+    var r = C.reading;
+    if (late) return progress({ text: t("cs.web.saving"), pct: 88, time: "1:24" }) + stages([
+      ["ok", t("cs.st.pages"), t("cs.st.n_of", { n: 6, of: 6 })],
+      ["ok", t("cs.st.colours"), t("cs.st.colours.done")],
+      ["ok", t("cs.st.logo"), t("cs.st.logo.done")],
+      ["busy", t("cs.st.photos"), t("cs.st.n_of", { n: 8, of: 12 })]]);
+    return progress({ text: t("cs.web.reading", { n: r.n, of: r.of }), url: r.url, pct: 38, time: "0:19" }) + stages([
+      ["busy", t("cs.st.pages"), t("cs.st.n_of", { n: r.n, of: r.of })], pend("cs.st.colours"), pend("cs.st.logo"), pend("cs.st.photos")]);
+  }
+  /* an error notice with one fix; o = {kind, sub, btn, icon, extra, narrowKbd} (narrowKbd false: no keycap at 300 px, the long
+     fix label needs the room) */
+  function err(text, o) {
+    return slot(M.notice(o.kind || "error", text, { sub: o.sub, btn: o.btn ? { label: o.btn, icon: o.icon, primary: true, kbd: o.narrowKbd === false && M.w < 360 ? false : undefined } : null, extra: o.extra, dismiss: false }));
+  }
+  var V = function () { return C.site; };
+
+  var STATES = {
+    empty: function () { return { body: head() + form(), bar: bar({ fetch: "off" }) }; },
+    normal: function () { return { body: head() + form({ value: V() }), bar: bar() }; },
+    focus: function () { return { body: head() + form({ value: V(), focus: true }), bar: bar() }; },
+    skip: function () { return { body: head() + form(), bar: bar({ fetch: "off", skipFocus: true }) }; },
+    "error-link": function () { return { body: head() + form({ value: C.badLink, focus: true, error: true }), bar: bar({ fetch: "off", reason: t("cs.web.fix_link") }) }; },
+    starting: function () {
+      return { body: head() + progress({ text: t("cs.web.opening", { site: V() }), sub: t("cs.web.opening.sub"), indet: true, time: "0:01" }) +
+        stages([["busy", t("cs.st.pages"), ""], pend("cs.st.colours"), pend("cs.st.logo"), pend("cs.st.photos")]) };
+    },
+    fetching: function () { return { body: head() + fetchingBody(false) }; },
+    "fetching-late": function () { return { body: head() + fetchingBody(true) }; },
+    partial: function () {
+      return { body: head() + err(t("cs.web.partial"), { kind: "warn", sub: t("cs.web.partial.sub"), btn: t("cs.web.partial.btn"), icon: "list-checks" }) +
+        stages([["paused", t("cs.st.pages"), t("cs.st.n_of", { n: 4, of: 6 })], ["ok", t("cs.st.colours"), t("cs.st.colours.partial")],
+          ["ok", t("cs.st.logo"), t("cs.st.logo.partial")], ["ok", t("cs.st.photos"), "6"]]) };
+    },
+    cancelled: function () {
+      return { body: head() + slot(M.notice("info", t("cs.web.cancelled"))) + form({ value: V() }), bar: bar() };
+    },
+    "error-network": function () {
+      return { body: head() + err(t("cs.err.network"), { sub: t("cs.err.network.sub"), btn: t("action.retry"), icon: "refresh-cw" }) + form({ value: V() }), bar: bar({ fetch: "none" }) };
+    },
+    "error-certificate": function () {
+      return { body: head() + err(t("cs.err.cert"), { sub: t("cs.err.cert.sub"), btn: t("action.retry"), icon: "refresh-cw" }) + form({ value: V() }), bar: bar({ fetch: "none" }), certDiag: true };
+    },
+    "error-refused": function () {
+      return { body: head() + err(t("cs.err.refused"), { sub: t("cs.err.nosite.sub"), btn: t("cs.err.nosite.btn"), icon: "chevron-" + (M.rtl ? "left" : "right"), narrowKbd: false }) + form({ value: V() }) };
+    },
+    "error-js": function () {
+      return { body: head() + err(t("cs.err.js"), { sub: t("cs.err.nosite.sub"), btn: t("cs.err.nosite.btn"), icon: "chevron-" + (M.rtl ? "left" : "right"), narrowKbd: false }) + form({ value: V() }) };
+    },
+    "error-proxy": function () {
+      return { body: head() + err(t("cs.err.proxy"), { sub: t("cs.err.proxy.sub"), btn: t("cs.err.nosite.btn"), icon: "chevron-" + (M.rtl ? "left" : "right"), narrowKbd: false }) + form({ value: V() }) };
+    },
+    "error-redirect": function () {
+      var two = CS.acts([PC.kbtn(t("cs.redirect.yes"), "enter", { kind: "primary", icon: "check" }), M.btn(t("cs.redirect.no"), { kind: "secondary" })], "mt-1");
+      return { body: head() + slot(M.notice("info", t("cs.redirect", { url: CS.host(C.redirect) }), { sub: t("cs.redirect.sub"), extra: two, dismiss: false })) + form({ value: V() }), bar: bar({ fetch: "none" }) };
+    },
+    "error-setup": function () {
+      return { body: head() + err(t("cs.err.setup"), { sub: t("cs.err.setup.sub"), btn: t("cs.err.setup.btn"), icon: "wrench" }) + form({ value: V() }), bar: bar({ fetch: "none" }) };
+    },
+    busy: function () {
+      return { body: head() + err(t("cs.busy"), { kind: "warn", sub: t("cs.busy.sub"), btn: t("cs.busy.btn"), icon: "refresh-cw" }) + form({ value: V() }),
+        bar: bar({ fetch: "none", disabled: true, skipReason: t("cs.busy.reason") }) };
+    },
+    offline: function () {
+      return { pills: { engine: "off", claude: "unchecked", host: "unlinked" }, body: head() + slot(M.offline()) + form({ value: V() }),
+        bar: bar({ fetch: "off", reason: t("cs.reason.service"), disabled: true }) };
+    },
+    long: function () { return { body: head() + form({ value: V() }), bar: bar() }; }
+  };
+
+  var view = null;
+  CS.mount({
+    id: "J-03", name: "Set up a client: website",
+    states: ["empty", "normal", "focus", "skip", "error-link", "starting", "fetching", "fetching-late", "partial", "cancelled", "error-network", "error-certificate",
+      "error-refused", "error-js", "error-proxy", "error-redirect", "error-setup", "busy", "offline", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "home";
+      v.needs = 0;
+      v.ctxClientOnly = true;
+      v.setup = { done: 2, of: 4 }; /* the header says the current step: "Setting up · 2 of 4" */
+      view = v;
+      return v;
+    }
+  });
+  /* the certificate fix has TWO buttons (J12: «جرّب تاني» + «ابعت تشخيص»): Send diagnostics goes beside Try again, with what it does */
+  if (view && view.certDiag) {
+    var row = document.querySelector(".m-notice-error .m-row.m-wrap");
+    if (row) {
+      row.insertAdjacentHTML("beforeend", '<div class="m-row me-2 mt-3">' + CS.diag() + '</div>');
+      row.insertAdjacentHTML("afterend", CS.diagUnder());
+    }
+  }
+})();
+</script>
+</body>
+</html>

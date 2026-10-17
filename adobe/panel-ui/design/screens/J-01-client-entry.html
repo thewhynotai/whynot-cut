@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,normal,focus,offline">
+<meta name="mock-themes" content="dark,light">
+<meta name="mock-keys" content="Mod+Enter = Set up a client (the empty state's one button); Tab reaches the header action right after the logo, before the language switch; Esc = close the top notice; Alt+1 / Alt+2 / Alt+3 = tabs. No single-key shortcuts (Premiere owns them).">
+<meta name="mock-motion" content="Controls: background and border colour 150 ms ease (--mk-ease); focus = border colour only, no layout shift. The Home card is a solid control like the tool cards. Every state is complete with no motion.">
+<title>J-01 Set up a client: entry</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<link rel="stylesheet" href="../css/client-setup.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../strings/client-setup.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+<script src="../js/client-setup.js"></script>
+</head>
+<body>
+<script>
+/* J-01 "Set up a client": the entry (Addendum J12 screen 1; J-T9a).
+   - empty: no client is open. The Home empty state teaches with ONE button (Addendum B4.5): «مفيش عميل مفتوح» /
+     "No client open" + «إعداد عميل جديد» / "Set up a client" (primary). An editor who already has a folder picks it in
+     the first step, so there is no second button here.
+   - The Home empty state here REPLACES P-03 empty (one Home empty state, J-T9c; P-03 empty now draws the same copy).
+   - normal: a client is open. Home exactly as P-03 normal (hero, verbs, week line, Tools), then a "Clients" section
+     between Tools and Settings with the Set up a client card (a solid
+     control, like the tool cards) and the header action (a ghost "+ New client" before the language switch; icon only
+     at 300 px). The Home's own primary stays the next verb, so the card is not violet.
+   - focus: keyboard focus on the header action.
+   - offline: the WhyNot Cut service is off; the empty state's button is off and says why, the notice's Start takes the fill. */
+(function () {
+  var t = M.t, D = M.D;
+
+  function hero() {
+    return '<div class="m-row-top">' + M.poster({}) +
+      '<div class="m-col m-grow ms-3">' +
+        '<div class="t-meta tx-muted">' + t("home.current") + '</div>' +
+        '<div class="t-display">' + M.ltr(D.item, "lat code") + '</div>' +
+        '<div class="t-meta tx-muted">' + t("home.raw", { dur: M.html(M.mono(D.raw)) }) + '</div>' +
+        '<div class="m-row-top mt-1"><div class="m-last-ico">' + M.status("info", 12) + '</div><div class="t-meta tx-muted ms-1 m-grow">' + t("home.step_new") + '</div></div>' +
+      '</div></div>';
+  }
+  function verbs() {
+    return '<div class="m-col mt-4">' +
+      M.verb({ icon: "folder-input", title: t("home.drop"), done: t("home.drop.done") }) + '<div class="mt-2"></div>' +
+      M.verb({ icon: "clapperboard", title: t("home.edit"), sub: t("home.edit.sub"), primary: true, main: true }) + '</div>' +
+      '<div class="m-saved mt-3">' + M.ico("timer", 16, "ink-ok") + '<div class="m-col ms-2 m-grow">' +
+        '<div class="t-meta tx-muted m-trunc">' + t("home.week.scope", { client: D.client }) + '</div>' +
+        '<div class="t-meta tx-muted">' + t("home.week") + '</div>' +
+        '<div class="t-meta tx-muted mt-1">' + t("home.turnaround") + '</div>' +
+        '<div class="m-row mt-1">' + M.linkbtn(t("home.week.how")) + '</div></div></div>';
+  }
+  /* the Tools section, as P-03 normal */
+  function tools() {
+    var one = function (icon, key, brand, textKey, agoKey) {
+      return M.tool({ icon: icon, name: t("home.tool." + key), brand: M.ltr(brand), last: t("home.last", { text: M.raw(textKey), ago: M.raw(agoKey) }), lastKind: "ok" });
+    };
+    return M.eyebrow(t("home.tools"), "mt-5") + '<div class="m-col mt-2">' +
+      one("folder-tree", "tidy", "Tidy", "demo.tidy.last", "demo.tidy.ago") + '<div class="mt-2"></div>' +
+      one("audio-waveform", "hush", "Hush", "demo.hush.last", "demo.hush.ago") + '<div class="mt-2"></div>' +
+      one("captions", "kalam", "Kalam", "demo.kalam.last", "demo.kalam.ago") + '</div>';
+  }
+  function entryCard(o) {
+    o = o || {};
+    var dis = !!o.disabled;
+    return '<div class="m-tool' + (dis ? " m-tool-disabled" : "") + (o.focus ? " m-btn-focus" : "") + '" role="button"' + (dis ? ' aria-disabled="true" tabindex="-1"' : ' tabindex="0"') + '>' +
+      M.ico("plus", 20, dis ? "ink-disabled" : "ink-text") +
+      '<div class="m-col m-grow ms-3"><div class="t-verb m-tool-title">' + t("cs.action.setup") + '</div>' +
+      '<div class="t-meta tx-muted mt-1">' + (dis ? t("cs.reason.service") : t("cs.home.card.sub")) + '</div></div>' +
+      '<div class="m-row ms-2" style="align-self:center">' + M.chev(dis ? "ink-disabled" : "ink-muted") + '</div></div>';
+  }
+  function clients(o) { return M.eyebrow(t("cs.home.clients"), "mt-5") + '<div class="m-col mt-2">' + entryCard(o) + '</div>'; }
+  function settings() { return '<div class="m-col mt-5">' + M.rowbtn("settings", t("home.settings")) + '</div>'; }
+  function emptyState(o) {
+    o = o || {};
+    return M.empty({ icon: "folder-open", title: t("cs.home.none.title"), text: t("cs.home.none.text"),
+      btn: o.disabled ? M.btn(t("cs.action.setup"), { kind: "primary", icon: "plus", disabled: true })
+        : PC.kbtn(t("cs.action.setup"), "enter", { kind: "primary", icon: "plus" }) }) +
+      '<div class="t-meta tx-muted tx-center mt-3">' + (o.disabled ? t("cs.reason.service") : t("cs.home.none.hint")) + '</div>';
+  }
+
+  var STATES = {
+    empty: function () { return { noclient: true, body: emptyState() + settings() }; },
+    normal: function () { return { ctxClientOnly: true, hdrAct: {}, body: hero() + verbs() + tools() + clients() + settings() }; },
+    focus: function () { return { ctxClientOnly: true, hdrAct: { focus: true }, body: hero() + verbs() + tools() + clients() + settings() }; },
+    offline: function () {
+      return { noclient: true, pills: { engine: "off", claude: "unchecked", host: "unlinked" },
+        body: M.slot(M.offline()) + emptyState({ disabled: true }) + settings() };
+    }
+  };
+
+  CS.mount({
+    id: "J-01", name: "Set up a client: entry",
+    states: ["empty", "normal", "focus", "offline"], defaultState: "empty",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "home";
+      v.needs = 0;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

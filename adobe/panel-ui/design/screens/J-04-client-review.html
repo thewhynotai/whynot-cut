@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="loading,normal,colours,fonts,people,focus,honorific,photos,ready,summary,copying,untrusted,error-changed,error-stale,busy,offline,empty,long">
+<meta name="mock-themes" content="dark,light">
+<meta name="mock-keys" content="Tab moves item to item: each item's ✓ then ✕ (Space toggles), then the person's Gender group (the arrow keys move inside it only while it has focus, native) and the Title list (Enter opens it, the arrow keys move, Enter picks, Esc closes). Mod+Enter = Copy confirmed to the client's files, only when it is on; in the summary it lands on Back to the review (the safe button), and Copy needs a click or Enter on it. Alt+1 / Alt+2 / Alt+3 = tabs. No single-key shortcuts.">
+<meta name="mock-motion" content="✓ / ✕: background and border colour 150 ms ease, the 'Will be copied' / 'Left out' line appears in its own reserved row (no shift of the item below). Picking a gender reveals the Title choices in place; the open Title list pushes nothing (it is drawn over the content below in the product; drawn inline here). The summary appears in the reserved slot under the title (background colour 200 ms). Copying: the button's icon becomes a spinner, no layout shift.">
+<title>J-04 Set up a client: review</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<link rel="stylesheet" href="../css/client-setup.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../strings/client-setup.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+<script src="../js/client-setup.js"></script>
+</head>
+<body>
+<script>
+/* J-04 "Set up a client": review (Addendum J12 screen 4; engine: brand.candidates, brand.adopt).
+   - Sections, ONE OPEN AT A TIME (an accordion: the full review is ~3,400 px tall at 300 px, too long for a docked panel).
+     A closed section says where it stands: "4 to decide", "2 confirmed · 1 rejected", "1 differs", "Gender: 2 to answer".
+     The sections: logo (raster previews on light, grey and dark tiles), colours (swatch, HEX, used N times), fonts (name and
+     the licence state «اتنزل — رخصة مفتوحة» / «محتاج تتسطّب / محتاج رخصة»), people (the name in Arabic and English,
+     the title and specialty, then TWO separate choices, NEITHER pre-selected: gender ذكر / أنثى / مش معروف, and the
+     title, offered only for the chosen gender), name and tagline, photos (raster previews).
+   - Each item: its source (page and host), ✓ confirm and ✕ reject, a line that says what the choice means, and the
+     conflict mark when it differs from the client's files (logo "similar", colour "close but not equal", name
+     "spelled differently"). Website text is text only (CS.web: M.esc, an auto-direction isolate); a website title is a
+     quote marked «من الموقع», never an answer.
+   - The one button «انسخ المؤكد لملفات العميل» sits in the pinned bar. It stays OFF until every person who is not
+     rejected has a gender answer («مش معروف» counts), and says how many are left. Anything not decided is left out.
+   - normal = Logo open; colours, fonts, people, photos = that section open; people shows both choices empty;
+     focus = keyboard focus in a gender group; honorific = a gender picked and its title list open (that gender's
+     titles only); ready = every item decided and every person answered, all sections closed, Copy on.
+   - summary: the summary dialog first (what is added, where; nothing existing changes); the keycap is on the safe
+     button. copying: the copy is running.
+   - untrusted: the tagline from the site holds `<img src=x onerror=alert(1)>` and is shown literally (J-T9c).
+   - error-changed (sha_mismatch) → Read the website again; error-stale (run_stale) → Open the newer read; busy
+     (client_busy) → «استنى وجرّب تاني»; offline; empty (the site gave nothing usable) → Go to the report. */
+(function () {
+  var t = M.t, D = M.D, C = CS.D;
+  var IDS = ["logo1", "logo2", "c0", "c1", "c2", "c3", "f0", "f1", "p0", "p1", "name", "tag", "ph0", "ph1", "ph2"];
+  var READY = { logo1: "yes", logo2: "no", c0: "yes", c1: "yes", c2: "no", c3: "no", f0: "yes", f1: "no", p0: "yes", p1: "yes", name: "yes", tag: "no", ph0: "yes", ph1: "yes", ph2: "no" };
+  var dir = M.rtl ? "left" : "right";
+
+  function head() {
+    return M.back(t("cs.back")) + CS.head(3, t("cs.rev.title"), t("cs.rev.sub")) +
+      '<div class="t-meta tx-muted mt-2">' + t("cs.rev.from", { site: CS.host(C.site), time: M.html(M.mono(C.time)), n: C.pages }) + '</div>';
+  }
+  function slot(n) { return '<div class="mt-4">' + n + '</div>'; }
+  var SEC = { logo: ["logo1", "logo2"], colours: ["c0", "c1", "c2", "c3"], fonts: ["f0", "f1"], people: ["p0", "p1"], texts: ["name", "tag"], photos: ["ph0", "ph1", "ph2"] };
+  var DIFFERS = { logo: 1, colours: 1, people: 1 };
+  /* a section of the accordion: the head (a control) says where the section stands; the open one shows its items */
+  function section(key, label, inner, o) {
+    var d = o.dec || {}, ids = SEC[key], y = 0, x = 0;
+    ids.forEach(function (id) { if (d[id] === "yes") y++; else if (d[id] === "no") x++; });
+    var todo = ids.length - y - x, end;
+    if (key === "people" && (o.left || 0) > 0) end = '<span class="t-meta tx-text">' + t("cs.sec.answer", { n: o.left }) + "</span>";
+    else end = '<span class="t-meta tx-muted">' + (todo ? t("cs.sec.todo", { n: todo }) : t("cs.sec.done", { y: y, x: x })) + "</span>";
+    var chip = DIFFERS[key] ? '<span class="cs-secchip">' + M.chip("warn", t("cs.sec.differs", { n: DIFFERS[key] }), "triangle-alert") + "</span>" : "";
+    var open = o.open === key;
+    var headRow = '<div class="m-sechead cs-sechead" role="button" tabindex="0" aria-expanded="' + open + '">' +
+      M.ico(open ? "chevron-up" : "chevron-down", 16, "ink-muted") + '<div class="m-col m-grow ms-2"><div class="t-label">' + label + "</div>" +
+      '<div class="cs-secmeta">' + end + chip + "</div></div></div>";
+    return M.card(headRow + (open ? '<div class="cs-secbody">' + inner + "</div>" : ""), "m-card-flush mt-2");
+  }
+  /* o = {open: section key, dec: {id: "yes"|"no"}, ans: [{g, hon, open, focus}], left, tagline, disabled} */
+  function sections(o) {
+    var d = o.dec || {}, ans = o.ans || [{}, {}], dis = !!o.disabled;
+    var it = function (id, x) { x.dec = d[id] || ""; x.disabled = dis; return CS.item(x); };
+
+    var logo = section("logo", t("cs.rev.logo"),
+      it("logo1", { main: '<div class="t-body">' + t("cs.logo.meta1") + '</div>', extra: CS.tiles("full") + '<div class="t-meta tx-muted mt-1">' + t("cs.logo.tiles") + '</div>',
+        conflict: t("cs.conf.logo"), src: ["home"] }) +
+      it("logo2", { main: '<div class="t-body">' + t("cs.logo.meta2") + '</div>', extra: CS.tiles("icon"), src: ["icon"] }), o);
+
+    var colours = section("colours", t("cs.rev.colours"), C.colours.map(function (c, i) {
+      var main = '<div class="cs-swrow">' + CS.swatch(c.hex) + '<div class="m-col ms-2 m-grow"><div class="t-label">' + M.mono(c.hex) + '</div>' +
+        '<div class="t-meta tx-muted">' + t(c.n >= 3 && c.n <= 10 ? "cs.colour.used_few" : "cs.colour.used", { n: c.n }) + '</div></div></div>' +
+        (c.template ? '<div class="cs-chiprow">' + M.chip("neutral", t("cs.colour.default"), "layers") + '</div>' +
+          '<div class="t-meta tx-muted">' + t("cs.colour.default.sub") + '</div>' : "");
+      return it("c" + i, { main: main, conflict: c.conflict ? t("cs.colour.close", { hex: M.html(M.mono(c.conflict)) }) : "", src: [c.page] });
+    }).join("") + '<div class="cs-item">' + M.sechead(t("cs.colour.neutrals", { n: C.neutrals }), "", false) + '</div>', o);
+
+    var fonts = section("fonts", t("cs.rev.fonts"), C.fonts.map(function (f, i) {
+      var chip = f.open ? M.chip("ok", t("cs.font.open"), "circle-check") : M.chip("info", t("cs.font.license"), "key-round");
+      var main = '<div class="t-label">' + CS.web(f.name) + '</div><div class="cs-chiprow">' + chip + '</div>' +
+        '<div class="t-meta tx-muted">' + t(f.open ? "cs.font.meta.open" : "cs.font.meta.paid") + '</div>';
+      return it("f" + i, { main: main, src: [f.page, f.host] });
+    }).join(""), o);
+
+    var people = section("people", t("cs.rev.people"), '<div class="cs-item">' + PC.info(t("cs.ppl.why")) + '</div>' + C.people.map(function (p, i) {
+      var a = ans[i] || {};
+      var off = dis || d["p" + i] === "no";
+      var main = '<div class="t-label">' + CS.web(p.ar) + '</div><div class="t-meta tx-text">' + CS.web(p.en) + '</div>' +
+        '<div class="t-meta tx-muted">' + CS.web(M.rtl ? p.role_ar : p.role_en) + '</div>';
+      var extra = (p.evidence ? CS.quote(p.evidence) : "") + CS.gender(a.g, { focus: a.focus, disabled: off }) + CS.hon(a.g, a.hon, { open: a.open, disabled: off });
+      return it("p" + i, { main: main, extra: extra, conflict: p.spell ? t("cs.ppl.spell", { a: M.html(CS.web(p.ar)), b: M.html(CS.web(p.spell)) }) : "", src: [p.page] });
+    }).join(""), o);
+
+    var texts = section("texts", t("cs.rev.texts"),
+      it("name", { main: '<div class="t-meta tx-muted">' + t("cs.name.label") + '</div><div class="t-label">' + CS.web(C.clinic.ar) + '</div><div class="t-label">' + CS.web(C.clinic.en) + '</div>', src: ["home"] }) +
+      it("tag", { main: '<div class="t-meta tx-muted">' + t("cs.tag.label") + '</div>' + CS.quote(o.tagline || (M.rtl ? C.tagline.ar : C.tagline.en)), src: ["home"] }), o);
+
+    var photos = section("photos", t("cs.rev.photos"), C.photos.map(function (p, i) {
+      var main = '<div class="m-row-top">' + CS.photo(p) + '<div class="m-col m-grow ms-3"><div class="t-meta tx-text">' + CS.web(p.alt) + '</div>' +
+        '<div class="t-meta tx-muted">' + t(p.face ? "cs.photo.face" : "cs.photo.noface", { w: p.w, h: p.h }) + '</div>' +
+        (p.small ? '<div class="cs-chiprow">' + M.chip("info", t("cs.photo.small"), "info") + '</div>' : "") + '</div></div>';
+      return it("ph" + i, { main: main, src: [p.page] });
+    }).join(""), o);
+
+    return '<div class="m-col mt-2">' + logo + colours + fonts + people + texts + photos + "</div>";
+  }
+  function counts(dec) {
+    var y = 0, x = 0;
+    IDS.forEach(function (id) { if (dec[id] === "yes") y++; else if (dec[id] === "no") x++; });
+    return { y: y, x: x, u: IDS.length - y - x };
+  }
+  /* the pinned bar. o = {dec, left, busy, disabled} */
+  function bar(o) {
+    var c = counts(o.dec || {});
+    var btn;
+    if (o.loading) return M.btn(t("cs.copy"), { kind: "primary", block: true, icon: "copy", disabled: true });
+    if (o.busy) btn = M.btn(t("cs.copying", { n: c.y }), { kind: "primary", block: true, icon: "busy", disabled: true });
+    else if (o.left || o.disabled) btn = M.btn(t("cs.copy"), { kind: "primary", block: true, icon: "copy", disabled: true }) +
+      (o.left ? '<div class="cs-line mt-2">' + M.status("waiting", 12) + '<div class="t-meta tx-text ms-1 m-grow">' + t("cs.copy.need", { n: o.left }) + '</div></div>' : "");
+    else btn = PC.kbtn(t("cs.copy"), "enter", { kind: "primary", block: true, icon: "copy" });
+    return btn + '<div class="t-meta tx-muted cs-counts">' + t("cs.copy.count", c) + '</div>' +
+      (c.u ? '<div class="t-meta tx-muted">' + t("cs.copy.undecided") + '</div>' : "");
+  }
+  var PATH = { logo: "assets/Logo/from-website", brand: "assets/Brand/from-website", fonts: "assets/Fonts/from-website", photos: "assets/Photos/from-website" };
+  function dialog() {
+    /* R1 (designer P1-4): the count is the bullet, the folder a mono chip on its own row (never a path split over lines) */
+    var p = function (key, k) { return t(key) + '<div class="cs-pathchip">' + M.monoChip(PATH[k]) + "</div>"; };
+    return M.dialog({
+      title: t("cs.dlg.title", { n: 9 }), text: t("cs.dlg.text"), changesLabel: t("cs.dlg.label"),
+      changes: [p("cs.dlg.logo", "logo"), p("cs.dlg.colours", "brand"), p("cs.dlg.fonts", "fonts"),
+        t("cs.dlg.people"), p("cs.dlg.texts", "brand"), p("cs.dlg.photos", "photos")],
+      reversible: t("cs.dlg.untouched"),
+      confirm: { label: t("cs.dlg.confirm"), icon: "copy" }, keep: t("cs.dlg.keep")
+    });
+  }
+  var PART = { logo1: "yes", logo2: "no", c0: "yes", c1: "yes", c2: "no", c3: "no" };
+  var PART2 = { logo1: "yes", logo2: "no", c0: "yes", c1: "yes", c2: "no", c3: "no", f0: "yes", f1: "no", p0: "yes", p1: "yes", name: "yes", tag: "no" };
+  var READY_ANS = [{ g: "female", hon: 0 }, { g: "unknown", hon: 0 }];
+
+  var STATES = {
+    loading: function () {
+      /* R1 (designer P1-3): each skeleton is a closed section head of the real height, with two bars */
+      var sec = function () { return M.card('<div class="m-sechead cs-sechead"><div class="m-col m-grow">' + M.skel(35) + M.skel(22, 16) + "</div></div>", "m-card-flush mt-2"); };
+      return { body: M.back(t("cs.back")) + CS.head(3, t("cs.rev.title"), t("cs.rev.sub")) + '<div class="mt-2">' + M.skel(60, 16) + "</div>" +
+        '<div class="m-col mt-2">' + sec() + sec() + sec() + sec() + sec() + sec() + "</div>", bar: bar({ loading: true }) };
+    },
+    normal: function () { return { body: head() + sections({ open: "logo", left: 2 }), bar: bar({ left: 2 }) }; },
+    colours: function () { var d = { logo1: "yes", logo2: "no" }; return { body: head() + sections({ open: "colours", dec: d, left: 2 }), bar: bar({ dec: d, left: 2 }) }; },
+    fonts: function () { return { body: head() + sections({ open: "fonts", dec: PART, left: 2 }), bar: bar({ dec: PART, left: 2 }) }; },
+    people: function () { return { body: head() + sections({ open: "people", dec: PART, left: 2 }), bar: bar({ dec: PART, left: 2 }) }; },
+    focus: function () { return { body: head() + sections({ open: "people", dec: PART, ans: [{ focus: 1 }, {}], left: 2 }), bar: bar({ dec: PART, left: 2 }) }; },
+    honorific: function () {
+      return { body: head() + sections({ open: "people", dec: PART, ans: [{ g: "female", open: true }, {}], left: 1 }), bar: bar({ dec: PART, left: 1 }) };
+    },
+    photos: function () { return { body: head() + sections({ open: "photos", dec: PART2, ans: READY_ANS }), bar: bar({ dec: PART2 }) }; },
+    ready: function () { return { body: head() + sections({ dec: READY, ans: READY_ANS }), bar: bar({ dec: READY }) }; },
+    summary: function () { return { body: head() + slot(dialog()) + sections({ dec: READY, ans: READY_ANS, disabled: true }) }; },
+    copying: function () { return { body: head() + sections({ dec: READY, ans: READY_ANS, disabled: true }), bar: bar({ dec: READY, busy: true }) }; },
+    untrusted: function () { return { body: head() + sections({ open: "texts", tagline: C.injection, dec: PART, left: 2 }), bar: bar({ dec: PART, left: 2 }) }; },
+    "error-changed": function () {
+      return { body: head() + slot(M.notice("error", t("cs.err.changed"), { sub: t("cs.err.changed.sub"), btn: { label: t("cs.err.reread"), icon: "refresh-cw", primary: true } })) +
+        sections({ dec: READY, ans: READY_ANS, disabled: true }), bar: bar({ dec: READY, disabled: true }) };
+    },
+    "error-stale": function () {
+      return { body: head() + slot(M.notice("warn", t("cs.err.stale"), { sub: t("cs.err.stale.sub"), btn: { label: t("cs.err.stale.btn"), icon: "chevron-" + dir, primary: true }, dismiss: false })) +
+        sections({ dec: READY, ans: READY_ANS, disabled: true }), bar: bar({ dec: READY, disabled: true }) };
+    },
+    busy: function () {
+      return { body: head() + slot(M.notice("warn", t("cs.busy"), { sub: t("cs.busy.sub"), btn: { label: t("cs.busy.btn"), icon: "refresh-cw", primary: true }, dismiss: false })) +
+        sections({ dec: READY, ans: READY_ANS }), bar: bar({ dec: READY, disabled: true }) };
+    },
+    offline: function () {
+      return { pills: { engine: "off", claude: "unchecked", host: "unlinked" }, body: head() + slot(M.offline()) + sections({ dec: READY, ans: READY_ANS, disabled: true }),
+        bar: bar({ dec: READY, disabled: true }) };
+    },
+    empty: function () {
+      return { body: M.back(t("cs.back")) + CS.flow(3) + '<div class="mt-4"></div>' +
+        M.empty({ icon: "image-off", title: t("cs.rev.empty.title"), text: t("cs.rev.empty.text"),
+          btn: PC.kbtn(t("cs.rev.empty.btn"), "enter", { kind: "primary", icon: "chevron-" + dir }) }) };
+    },
+    long: function () { return { body: head() + sections({ open: "people", dec: PART, left: 2 }), bar: bar({ dec: PART, left: 2 }) }; }
+  };
+
+  CS.mount({
+    id: "J-04", name: "Set up a client: review",
+    states: ["loading", "normal", "colours", "fonts", "people", "focus", "honorific", "photos", "ready", "summary", "copying", "untrusted", "error-changed", "error-stale",
+      "busy", "offline", "empty", "long"],
+    defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "home";
+      v.needs = 0;
+      v.ctxClientOnly = true;
+      v.setup = { done: 3, of: 4 }; /* the header says the current step: "Setting up · 3 of 4" */
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -5,14 +5,20 @@
 - Screens: adobe/panel-ui/design/screens/*.html; the states come from each file's <meta name="mock-states">. A page may
   declare its own widths with <meta name="mock-widths" content="760,640"> (default 300,360,480): the browser window
   follows the widths, the width check uses them, and its sheets use the page's first width as the reference width
-  (default 360).
+  (default 360). A page may also declare Premiere host themes with <meta name="mock-themes" content="dark,light">
+  (J-T9a, Addendum B2: the panel stays dark on Premiere's Dark and Light themes): each state is then rendered once per
+  theme with &theme=<t> (mockup.js draws Premiere's panel frame round the panel) into <state>-<lang>-<w>-<t>.png, and
+  its sheets get a -<t> suffix; the manifest's path carries the theme. Pages without the meta render as before.
 - Output: design/renders/<screen>/<state>-<lang>-<w>.png at 2x device scale, full height (the page is captured on a
   sentinel background with capture=1 and cropped to the panel's own box), dark colour scheme, throw-away profile.
 - Checks per render: not blank (pixel variance), and the page's own self-check read with --dump-dom
   (<meta name="mock-check">): panel width, direction, AR mirrored (monogram and first tab on the right), no element
   wider than the panel (sideways overflow), brand fonts loaded, no missing string or icon.
 - Writes design/manifest.csv (path, screen, state, lang, width, sha1, ...) and one contact sheet per screen and language
-  into design/renders/_sheets/ with the brand-identity-pipeline skill's contact_sheet.py.
+  into design/renders/_sheets/ with the brand-identity-pipeline skill's contact_sheet.py. A run with --only MERGES its rows
+  into the manifest (the rows of the screens it rendered are replaced; every other row is kept, in its order), so one
+  group can be re-rendered without re-rendering the others. It also drops that group's renders of states that no longer
+  exist (never the -280 renders, which render_280.py owns).
 Only files under design/renders/ and design/manifest.csv are (re)written: they are this job's own output.
 Prints one summary line; exit 1 when any check fails.
 """
@@ -80,6 +86,14 @@ def widths_of(page: pathlib.Path) -> tuple[list[int], int]:
     return ws, ws[0]
 
 
+def themes_of(page: pathlib.Path) -> list[str]:
+    """The page's <meta name="mock-themes"> (e.g. ["dark", "light"]), else [""] (no host frame, as before)."""
+    m = re.search(r'<meta name="mock-themes" content="([^"]+)"', page.read_text(encoding="utf-8"))
+    if not m:
+        return [""]
+    return [x.strip() for x in m.group(1).split(",") if x.strip() in ("dark", "light")] or [""]
+
+
 def chrome(exe: str, work: pathlib.Path, tag: str, extra: list[str], url: str, out_dom: bool = False,
            win_w: int = WINDOW_W) -> str:
     prof = work / f"p-{tag}"
@@ -95,16 +109,18 @@ def chrome(exe: str, work: pathlib.Path, tag: str, extra: list[str], url: str, o
         shutil.rmtree(prof, ignore_errors=True)
 
 
-def job(exe: str, work: pathlib.Path, screen: str, page: pathlib.Path, state: str, lang: str, w: int) -> dict:
-    url = page.resolve().as_uri() + f"?lang={lang}&w={w}&state={state}&capture=1"
-    tag = f"{screen}-{state}-{lang}-{w}"
-    out = RENDERS / screen / f"{state}-{lang}-{w}.png"
+def job(exe: str, work: pathlib.Path, screen: str, page: pathlib.Path, state: str, lang: str, w: int,
+        theme: str = "") -> dict:
+    sfx = f"-{theme}" if theme else ""
+    url = page.resolve().as_uri() + f"?lang={lang}&w={w}&state={state}&capture=1" + (f"&theme={theme}" if theme else "")
+    tag = f"{screen}-{state}-{lang}-{w}{sfx}"
+    out = RENDERS / screen / f"{state}-{lang}-{w}{sfx}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = work / f"{tag}.png"
     win_w = max(WINDOW_W, w + 40)  # wider pages (mock-widths) get a wider window; panels keep 520
     chrome(exe, work, tag + "-s", [f"--force-device-scale-factor={SCALE}", f"--screenshot={tmp}"], url, win_w=win_w)
     dom = chrome(exe, work, tag + "-d", ["--dump-dom"], url, out_dom=True, win_w=win_w)
-    row = {"path": out.relative_to(DESIGN).as_posix(), "screen": screen, "state": state, "lang": lang, "width": w,
+    row = {"path": out.relative_to(DESIGN).as_posix(), "screen": screen, "state": state, "lang": lang, "width": w, "theme": theme,
            "sha1": "", "px_w": 0, "px_h": 0, "std": 0.0, "check": "", "problems": []}
     img = cv2.imdecode(np.fromfile(str(tmp), np.uint8), cv2.IMREAD_COLOR) if tmp.exists() else None
     if img is None:
@@ -164,7 +180,8 @@ def rule_checks(chk: dict) -> list[str]:
     - dangerkbd: a keycap on a danger or destructive button; confirmkbd: a keycap on the confirm button of a confirm card
       (R3 F-21: it goes on the safe button);
     - violet: more than one violet-family fill (R3 F-10: computed colour, #5400FB / #4800D8 / #6A1FFF / #390796);
-    - stalerun: a live restart button while work runs (R3 F-02); spinoff: a spinner while the service is off (R3 F-07)."""
+    - stalerun: a live restart button while work runs (R3 F-02); spinoff: a spinner while the service is off (R3 F-07);
+    - objtext: "[object Object]" in the panel's text (J-T9a: a markup value pasted as a string)."""
     out = []
     if chk.get("statuslie", "0") != "0":
         out.append("header says All set over an open problem or a Needs-you badge")
@@ -176,6 +193,8 @@ def rule_checks(chk: dict) -> list[str]:
         out.append(f"{chk.get('violet')} live violet fills (one per screen)")
     if chk.get("stalerun", "0") != "0":
         out.append("restart notice is live while work runs (say: let it finish or stop it first)")
+    if chk.get("objtext", "0") != "0":
+        out.append(f"{chk.get('objtext')} '[object Object]' text(s) on screen (a markup value pasted as a string)")
     if chk.get("spinoff", "0") != "0":
         out.append(f"{chk.get('spinoff')} spinner(s) while the WhyNot Cut service is off (draw it paused)")
     return out
@@ -200,14 +219,16 @@ def sheets(rows: list[dict], widths: dict) -> list[pathlib.Path]:
     # panels are tall, so a sheet holds one width: every state at the 360 reference width, per language,
     # plus one sheet per screen with the normal state at all three widths in both languages
     for screen in sorted({r["screen"] for r in rows}):
-        mine = [r for r in rows if r["screen"] == screen and r["sha1"]]
         ws, ref = widths.get(screen, (WIDTHS, 360))
-        for lang in LANGS:
-            imgs = [str(DESIGN / r["path"]) for r in mine if r["lang"] == lang and r["width"] == ref]
-            sheet(SHEETS / f"{screen}-states-{lang}-{ref}.png", imgs, min(6, len(imgs)))
-        imgs = [str(DESIGN / r["path"]) for lang in LANGS for w in ws for r in mine
-                if r["state"] == "normal" and r["lang"] == lang and r["width"] == w]
-        sheet(SHEETS / f"{screen}-widths-normal.png", imgs, 6)
+        for theme in sorted({r.get("theme", "") for r in rows if r["screen"] == screen}):
+            mine = [r for r in rows if r["screen"] == screen and r["sha1"] and r.get("theme", "") == theme]
+            sfx = f"-{theme}" if theme else ""
+            for lang in LANGS:
+                imgs = [str(DESIGN / r["path"]) for r in mine if r["lang"] == lang and r["width"] == ref]
+                sheet(SHEETS / f"{screen}-states-{lang}-{ref}{sfx}.png", imgs, min(6, len(imgs)))
+            imgs = [str(DESIGN / r["path"]) for lang in LANGS for w in ws for r in mine
+                    if r["state"] == "normal" and r["lang"] == lang and r["width"] == w]
+            sheet(SHEETS / f"{screen}-widths-normal{sfx}.png", imgs, 6)
     return made
 
 
@@ -229,7 +250,8 @@ def main() -> int:
         for state in states_of(page):
             for lang in LANGS:
                 for w in widths[screen][0]:
-                    tasks.append((screen, page, state, lang, w))
+                    for theme in themes_of(page):
+                        tasks.append((screen, page, state, lang, w, theme))
     rows: list[dict] = []
     try:
         with cf.ThreadPoolExecutor(max_workers=a.jobs) as ex:
@@ -238,20 +260,28 @@ def main() -> int:
                 rows.append(f.result())
     finally:
         shutil.rmtree(work, ignore_errors=True)
-    rows.sort(key=lambda r: (r["screen"], r["state"], r["lang"], r["width"]))
-    if not a.only:
-        # drop this job's own renders of states that no longer exist (renders/ is generated output only)
-        current = {(DESIGN / r["path"]).resolve() for r in rows}
-        for page in pages:
-            for old in (RENDERS / page.stem).glob("*.png"):
-                if old.resolve() not in current:
-                    old.unlink()
-        with open(MANIFEST, "w", newline="", encoding="utf-8") as fh:
-            wr = csv.writer(fh)
-            wr.writerow(["path", "screen", "state", "lang", "width", "sha1", "png_w", "png_h", "pixel_std", "ok", "problems"])
-            for r in rows:
-                wr.writerow([r["path"], r["screen"], r["state"], r["lang"], r["width"], r["sha1"], r["px_w"], r["px_h"],
-                             f"{r['std']:.1f}", "yes" if not r["problems"] else "no", " | ".join(r["problems"])])
+    rows.sort(key=lambda r: (r["screen"], r["state"], r["lang"], r["width"], r.get("theme", "")))
+    # drop this job's own renders of states that no longer exist (renders/ is generated output only); with --only, the
+    # -280 renders of render_280.py are kept
+    current = {(DESIGN / r["path"]).resolve() for r in rows}
+    for page in pages:
+        for old in (RENDERS / page.stem).glob("*.png"):
+            if old.resolve() not in current and not (a.only and old.stem.endswith("-280")):
+                old.unlink()
+    header = ["path", "screen", "state", "lang", "width", "sha1", "png_w", "png_h", "pixel_std", "ok", "problems"]
+    out_rows = [[r["path"], r["screen"], r["state"], r["lang"], str(r["width"]), r["sha1"], str(r["px_w"]), str(r["px_h"]),
+                 f"{r['std']:.1f}", "yes" if not r["problems"] else "no", " | ".join(r["problems"])] for r in rows]
+    if a.only and MANIFEST.exists():
+        # merge: keep every row of the screens this run did not render, in its order; a stable sort by screen places
+        # the new rows where their screen sorts
+        done = {page.stem for page in pages}
+        with open(MANIFEST, newline="", encoding="utf-8") as fh:
+            kept = [row for row in list(csv.reader(fh))[1:] if len(row) > 1 and row[1] not in done]
+        out_rows = sorted(kept + out_rows, key=lambda row: row[1])
+    with open(MANIFEST, "w", newline="", encoding="utf-8") as fh:
+        wr = csv.writer(fh, lineterminator="\n")  # LF, as the repo stores it (.gitattributes eol=lf)
+        wr.writerow(header)
+        wr.writerows(out_rows)
     made = [] if a.no_sheets else sheets(rows, widths)
     bad = [r for r in rows if r["problems"]]
     for r in bad:

@@ -707,7 +707,8 @@
      at its END with an ellipsis, in both languages; the item code never drops (R2 designer P1-4, editor P1-01). */
   function ctxRow(o) {
     var D = M.D;
-    if (o.noclient) return '<span class="m-ctx t-meta tx-muted">' + t("status.novideo") + "</span>";
+    /* J-T9a: view.noclientKey names the line ("cs.noclient" = "No client open" on the Home empty state, J12) */
+    if (o.noclient) return '<span class="m-ctx t-meta tx-muted">' + t(o.noclientKey || "status.novideo") + "</span>";
     var chevd = ico("chevron-down", 12, "ink-muted");
     var inner = o.ctxClientOnly
       ? '<span class="m-ctx-name tx-muted">' + M.ltr(D.client, "lat") + "</span>"
@@ -809,6 +810,23 @@
     for (var i = 0; i < xs.length; i++) xs[i].parentNode.removeChild(xs[i]);
   }
 
+  /* ---- J-T9a: the Premiere host theme around the docked panel (Addendum B2: the panel stays dark on Premiere's Dark
+     AND Light themes; J-T9a and B-T6 review both). ?theme=dark|light draws Premiere's panel frame round the panel: the
+     host's panel tab strip above it ("WhyNot Cut" + the panel menu) and the frame gap below it, in that theme's colours
+     (approximate Spectrum values). It is mockup context only, never part of the product, always LTR, and exactly as wide
+     as the panel, so the render crop and every self-check are unchanged. No theme param = the panel alone, as before. ---- */
+  M.theme = q.get("theme") === "light" ? "light" : q.get("theme") === "dark" ? "dark" : "";
+  function host(panel) {
+    var box = document.createElement("div");
+    box.className = "m-host m-host-" + M.theme + " m-host-w" + W;
+    box.setAttribute("dir", "ltr");
+    box.innerHTML = '<div class="m-host-tabs" aria-hidden="true"><span class="m-host-tab">' + esc(S["product.name"]) + '</span>' +
+      '<span class="m-spacer"></span><span class="m-host-menu"><span class="m-host-bar"></span><span class="m-host-bar"></span><span class="m-host-bar"></span></span></div>';
+    box.appendChild(panel);
+    box.insertAdjacentHTML("beforeend", '<div class="m-host-foot" aria-hidden="true"></div>');
+    return box;
+  }
+
   /* ---- mount: one screen, one state ---- */
   M.mount = function (screen) {
     var r = M.resolve(screen, q.get("state")); /* "<state>-live" = the same screen with the support and data pages live (H24) */
@@ -824,7 +842,7 @@
     root.lang = LANG;
     root.dir = M.rtl ? "rtl" : "ltr";
     if (CAPTURE) root.className += " m-capture";
-    document.title = screen.id + " " + full + " · " + LANG + " · " + W;
+    document.title = screen.id + " " + full + " · " + LANG + " · " + W + (M.theme ? " · " + M.theme : "");
 
     var panel = document.createElement("div");
     panel.className = "m-panel m-w" + W + (M.rtl ? " m-rtl" : "");
@@ -838,7 +856,7 @@
          Settings > Details for support. logRow() stays for a screen that draws it on purpose. */
       (view.log === true ? logRow(M.D.log) : "") + footer();
     document.body.innerHTML = "";
-    document.body.appendChild(panel);
+    document.body.appendChild(M.theme ? host(panel) : panel);
     stalePass(panel);
     dismissPass(panel);
     if (!CAPTURE) document.body.appendChild(nav(screen, full));
@@ -877,6 +895,7 @@
     screen.states.forEach(function (s) { html += link("state", s, s, s === state); });
     html += "</div><div style='margin:8px 0 0 0'>" + link("lang", "en", "EN", LANG === "en") + link("lang", "ar", "AR", LANG === "ar") + "</div><div>";
     WIDTHS.forEach(function (w) { html += link("w", w, w, w === W); });
+    html += "</div><div style='margin:8px 0 0 0'>" + link("theme", "dark", "Dark", M.theme === "dark") + link("theme", "light", "Light", M.theme === "light");
     box.innerHTML = html + "</div>";
     document.body.style.flexDirection = "row";
     return box;
@@ -893,7 +912,8 @@
      - violet: more than one live violet-family fill (#5400FB, #4800D8 pressed, #6A1FFF hover, #390796 deep), outermost
        fills only, read from the computed style (R3 F-10: the P-19 deep tile was not counted);
      - stalerun: a restart notice whose button is live while work is running (R3 F-02: never "restart now" mid-build);
-     - spinoff: a spinner while the header says the WhyNot Cut service is off or not responding (R3 F-07). */
+     - spinoff: a spinner while the header says the WhyNot Cut service is off or not responding (R3 F-07);
+     - objtext: "[object Object]" in the panel's text (J-T9a: a markup value pasted into a string). */
   var VIOLET = { "rgb(84, 0, 251)": 1, "rgb(72, 0, 216)": 1, "rgb(106, 31, 255)": 1, "rgb(57, 7, 150)": 1 };
   M.selfCheckExtras = function (panel) {
     var roots = bodyRoots(panel);
@@ -923,7 +943,10 @@
     });
     var spinoff = 0;
     if (panel.querySelector(".m-hdr .m-pill-stop")) roots.forEach(function (r) { if (r) spinoff += r.querySelectorAll(".m-spin").length; });
-    return ["statuslie=" + lie, "dangerkbd=" + dk, "violet=" + violet, "confirmkbd=" + ck, "stalerun=" + stalerun, "spinoff=" + spinoff];
+    /* J-T9a (editor R2 P1-1): a markup object pasted into a string shows as "[object Object]"; never on screen */
+    var txt = panel.textContent || "";
+    var objtext = (txt.match(/\[object Object\]/g) || []).length;
+    return ["statuslie=" + lie, "dangerkbd=" + dk, "violet=" + violet, "confirmkbd=" + ck, "stalerun=" + stalerun, "spinoff=" + spinoff, "objtext=" + objtext];
   };
   function check(panel, state, valid) {
     var done = function () {
