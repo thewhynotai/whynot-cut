@@ -34,6 +34,50 @@ never redo a task marked done here.
 | 11 Release (Windows-side release prep; public repo + `dl` CNAME move after Phase 12) | | | |
 | 12 Mac finish & test (Addendum G12, agency Mac) | | | gate: mac-test-report.md zero core-job failures AND the Windows suite still passes after the Mac fixes; beta only after this |
 
+## Stage 1 = Gate 4 open list (roadmap 4b22c59; executor, 2026-10-18)
+Phase 4 closes at tag `v3.0.0-p4`. Owner decision 2026-10-18: J (Tasks 34–38 = J-T3…J-T8), the K extras and Magnific
+are deferred to a later version. Addendum L's lane-3 items move to Stage 8, except **L-T8**, which stays on the Gate 4
+security line. Each row is OPEN until it is accepted and pushed.
+
+**Tasks**
+| Item | Owner | State 2026-10-18 01:30 |
+|---|---|---|
+| T4.1 smooth zoom + fades | Adobe (+ executor applies the plan.py/style.json patches) | in progress |
+| T4.2 minors (AE width raw line, hand-edit warning, edge tests) | executor | patch done; re-run on a snapshot queued |
+| T4.3 learning loop | lane 2 | queued (unblocked by T4.2) |
+| T4.5 part B (relative paths, client-move/clone, guard ratchet) | API backlog BL-14 | swaps done (87b2228 + the plan.py ×2 still to apply) |
+| T4.6 music in motion videos | Adobe | in progress (hunks in the tree) |
+| T4.8 early warnings, then T4.15 `reel clean` on linksafe | lane 1 | queued; T4.15 unblocked (7ab97e1) |
+| Task 18 licence files + SPDX headers | BL-02 (files + tool); executor applies headers at the gate | open |
+| Task 22 GPL / trademark notices | BL-03 | open |
+| Task 25 cut proposals + K-T7 (round 2, one negation reader) | lane 2 | committed 62efd2d; lane-5 review pending |
+| Task 26 fix (two cameras' C0001.MP4) | lane 1 | 19049fe review PASS-WITH-MINORS; P3-1/2/3/6 being fixed |
+| Task 29 emphasis + endings | lane 2 | waits for T4.1 |
+| Tasks 50–60 (Addendum M Gate 4 list) | lane 4 | 50/51 accepted with follow-ups (e4d68dc: review P2s open); 52 patch set v2 owed; 53, 55–60 queued; 54 fixes 29d31c5/ad85d58 in review |
+| K-T2 / K-T7 hooks, K-T1 guard test | executor (apply) | wait for the Task 25 round-2 acceptance and the guard |
+| Task 23 / Task 28 hooks, T4.5 plan.py swaps | executor (apply) | after the T4.2 minors commit |
+| BL-01 read-once hook, BL-04 run-state/resume | API backlog | open |
+| **L-T8 engine write gate** (gated steps refused inside the engine; the real fix for the subagent guard hole; guard commits 42a675b + a2dcf71 = review FAIL, improvement, not counted) | executor | design after T4.15 |
+
+**Full-suite failures to clear (last batch suite, 7ab97e1):**
+- test_installer r5_1 ×12: installer track (precise engine-home scan), plus tools (`user_home` in kalam/platform.py). Both tracks are paused, so the executor takes it over if they are not woken before the gate.
+- serve security ×3: fixed by Adobe a64605f.
+- Three test bugs: fixed in 79bfde2.
+
+**Gate 4 exit, as in the phase plan:**
+- [ ] independent review, 0 Critical / 0 Important
+- [ ] full suite on a snapshot, 0 failures, `WNC_REQUIRE_SCANNERS=1`
+- [ ] `validate --strict` ×2
+- [ ] evals, with bulk grading on the Batch API
+- [ ] full macOS CI on the tag
+- [ ] live PODCAST-TEST check
+- [ ] security line
+- [ ] T4.14 budgets
+- [ ] PROGRESS + gate record
+- [ ] tag `v3.0.0-p4`, then the K1 switches turn on
+
+The Premium bar line and the Mac line go into the gate record.
+
 ## Gate record
 
 Machine-read by `tools/release.py handoff` (PREVIEW banner of Mac/START-HERE.md and WHAT-WORKS-NOW-AR.md). One row per
