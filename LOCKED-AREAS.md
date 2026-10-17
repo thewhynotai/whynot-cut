@@ -117,7 +117,7 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
       `lib/transcript_compact.py`, `config/review-domains/**`, `tests/test_review_domains*.py`, `tests/test_review_flags.py`,
       `tests/test_bidi_lines*.py`, `tests/test_font_pairing*.py`, `tests/test_brief.py`, `tests/test_client_brief.py`,
       `tests/test_transcript_compact*.py`, fixtures `tests/fixtures/{review_domains,bidi,brief}/**`,
-      `evals/review-domains/**`, `evals/model-tier/**`, the M2/M5 evidence files.
+      `evals/review-*/**` (2026-10-18; review-domains broke structure_problems), `lib/latin_backmap.py` (T55), `config/defaults/font-pairings.json` (T56), `tools/token_report.py` (T57), `evals/model-tier/**`, the M2/M5 evidence files.
   - Lane queue extension 2 (2026-10-17 15:30): lane 1 adds T4.8 (`lib/intake_warnings.py`, `tests/test_t48_intake_warnings.py`),
     K-T11 (`lib/topic_search.py`, `tests/test_topic_search*.py`), K-T16 (`lib/broll_search.py`, `tests/test_broll_search*.py`),
     K-T15 (`lib/exposure_check.py`, `tests/test_exposure_check*.py`) + their fixtures; lane 2 adds K-T9

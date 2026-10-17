@@ -79,6 +79,45 @@ security line. Each row is OPEN until it is accepted and pushed.
 
 The Premium bar line and the Mac line go into the gate record.
 
+**Gate 4 exit prep (plan-session pre-mortem 2026-10-18, adopted by the executor):**
+- [ ] **Independent review:** it is split into 5–6 areas per LOCKED-AREAS, as at Gate 2: 187 commits and ~116k lines since p3.1, far over the runner's diff cap. It runs as subagents on the subscription session.
+- [ ] **Order at the gate**, so the tested tree is the tagged tree:
+  1. `install_tools.py --check`
+  2. the SPDX headers commit (BL-02 tool; sha-pinned files are skipped)
+  3. the final snapshot full suite with `WNC_REQUIRE_SCANNERS=1`
+  4. the review
+  5. evals
+  6. macOS CI
+  7. tag
+
+  Lane 3's uncommitted `versions.json` and fuzz files are never half-committed.
+- [ ] **Evals:** the plugin suite keeps its current judge (the p3 baseline). Batch is only for Task 53's deterministic engine evals, through review-runner, in November. Add cases for the Phase 4 skills (rules/T4.3, episode sheet, autopilot, music NEEDS-YOU).
+- [ ] **macOS CI:**
+  1. raise the workflow time caps (the suite is now 6300+ tests);
+  2. `minutes.sh`;
+  3. `workflow_dispatch suite=full` on the candidate commit.
+
+  Tag only when it is green. Each run costs ~250–500 of the 2000 monthly minutes.
+- [ ] **Live PODCAST-TEST checklist** (one page, written before the gate):
+  - eased frames and fades;
+  - the AE music build and render;
+  - the look recommender;
+  - cut markers;
+  - `reel clean`;
+  - the M-list business fixture.
+
+  The bridge is re-bundled (`cep_bundle`), and the run is on a fresh /XJ copy.
+- [ ] **T4.14:** re-run CPU 60 s on an idle PC (overnight). The evidence records a FAIL (RTF 0.93 when the PC was loaded). This also needs one editor-verified 60 s reference transcript (asked of Yunus).
+- [ ] **Gate record:** `release.py gate_record` takes 5 cells. The Security and Premium-bar lines go in the phase-table cell.
+- [ ] **K1 switches:** one switches-on dry run before the tag (suite subsets + one live plan). Flip only the switches of accepted tasks; K-T3's cut fades must compose with T4.1's multiplicative fades.
+- [ ] **Installer r5_1:** the failure message names the list to edit (`ENGINE_LAYOUT` / `ENGINE_KEPT`), and the test joins each lane's fast pre-commit set.
+- [ ] **BL-15:** the executor is the fallback owner if the API pauses before a lane claims it. The Write/Edit guard must also cover `run/lead-tokens/`, so a subagent cannot forge a token.
+- [ ] **Owner items** (asked of Yunus by the plan session):
+  - the 60 s verified transcript;
+  - the GPLv3 §7 NVIDIA exception text (BL-02 drafts it; Yunus signs);
+  - the Quran source permissions (K-T8);
+  - a qualified reviewer for the verse text in the T53 fixtures.
+
 ## Gate record
 
 Machine-read by `tools/release.py handoff` (PREVIEW banner of Mac/START-HERE.md and WHAT-WORKS-NOW-AR.md). One row per
