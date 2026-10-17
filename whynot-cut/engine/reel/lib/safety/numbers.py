@@ -11,7 +11,8 @@ forms carry their 2 («حبايتين», «ساعتين»). Words that are also 
 
 The word lists are our own, written for this module from general Arabic and English usage."""
 import re
-import unicodedata
+
+from ..cut_proposals_norm import prepare, strip_marks
 
 _DIAC = re.compile("[ؐ-ًؚ-ٰٟۖ-ۭ]")      # harakat, Quranic marks
 _FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ة": "ه", "ى": "ي", "ـ": "",
@@ -23,17 +24,19 @@ _CLITICS = ("وال", "بال", "فال", "لل", "ال", "و", "ب", "ف", "ل"
 
 
 def _vulgar(s: str) -> str:
-    """«3½» -> "3.5", «½» -> "0.5" (before NFKC, which would turn ½ into "1⁄2")."""
+    """«3½» -> "3.5", «½» -> "0.5" (before NFKC, which would turn ½ into "1⁄2"; after the hidden marks are gone, so
+    «3‏½» is 3.5, not "3" + "0.5" = 30.5)."""
     def rep(m):
         v = (int(m.group(1)) if m.group(1) else 0) + _VULGAR[m.group(2)]
         return f"{v:g}"
-    return re.sub(r"(\d*)([½¼¾⅓⅔])", rep, s.translate(_FOLD))
+    return re.sub(r"(\d*)([½¼¾⅓⅔])", rep, strip_marks(s).translate(_FOLD))
 
 
 def fold(s) -> str:
-    """One spoken token, compared form: NFKC, no diacritics or tatweel, one alef/ta marbuta/ya, Western digits, lower
-    case, edge punctuation dropped (a decimal point inside a number is kept)."""
-    s = _DIAC.sub("", unicodedata.normalize("NFKC", _vulgar(str(s or "")))).translate(_FOLD).lower().strip()
+    """One spoken token, compared form: the shared normaliser (`cut_proposals_norm.prepare`: NFKC, bidi and zero-width
+    marks dropped, ؤ ئ ی ک unified), no diacritics or tatweel, one alef/ta marbuta/ya, Western digits, lower case,
+    edge punctuation dropped (a decimal point inside a number is kept)."""
+    s = _DIAC.sub("", prepare(_vulgar(str(s or "")))).translate(_FOLD).lower().strip()
     s = _EDGE.sub("", s)
     if s in (".", ","):              # a decimal mark Whisper wrote as its own word ("3" "." "5")
         return s
@@ -43,7 +46,7 @@ def fold(s) -> str:
 def tokens(text) -> list:
     """A written text (a graphic, a hook) in folded tokens; "/" and a dash between numbers split («١٢٠/٨٠»)."""
     out = []
-    for t in re.split(r"[\s/]+|(?<=\d)-(?=\d)", str(text or "")):
+    for t in re.split(r"[\s/]+|(?<=\d)-(?=\d)", prepare(_vulgar(str(text or "")))):   # marks out first: «١٢٠‏-‏٨٠»
         f = fold(t)
         if f:
             out.append(f)
@@ -77,7 +80,8 @@ for _n, _forms in ((300, ("تلتميه", "تلاتميه", "ثلاثمائه", 
                    (800, ("تمنميه", "تمانميه", "ثمانمائه", "ثمانمئه", "تمنميت", "تمانميت")),
                    (900, ("تسعميه", "تسعمائه", "تسعمئه", "تسعميت"))):
     AR_UNITS.update(dict.fromkeys(_forms, _n))
-AR_HUNDRED = {"ميه", "مايه", "مائه", "مئه", "ميت"}
+AR_UNITS = {fold(k): v for k, v in AR_UNITS.items()}       # the lists are matched in fold()'s form («مئتين» → «ميتين»)
+AR_HUNDRED = {fold(w) for w in ("ميه", "مايه", "مائه", "مئه", "ميت")}
 AR_THOUSAND = {"الف", "الاف", "تلاف"}
 EN_UNITS = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8,
             "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
@@ -101,6 +105,7 @@ TIME = {"ساعه", "ساعات", "دقيقه", "دقايق", "دقائق", "ي�
         "سنين", "سنوات", "مره", "مرات", "اليوم", "يوميا",
         "hour", "hours", "minute", "minutes", "day", "days", "week", "weeks", "month", "months", "year", "years",
         "time", "times", "daily", "weekly", "monthly", "hourly", "nightly", "night"}
+TIME = {fold(w) for w in TIME}
 # dual forms: the word itself says 2 («حبايتين» = two pills, «ساعتين» = two hours)
 DUALS = {**dict.fromkeys(("حبايتين", "حبتين", "قرصين", "كبسولتين", "نقطتين", "بختين", "معلقتين", "ملعقتين",
                           "حقنتين", "جرعتين"), "dose"),

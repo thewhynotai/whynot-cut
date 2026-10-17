@@ -665,6 +665,223 @@ class TestReviewRound1Ranking(Project):
         line = [ln for ln in RW.review_block(rep).splitlines() if "refused" in ln][0]
         self.assertLess(line.index("مصدر"), line.index("refused"))
 
+# --- acceptance follow-ups (executor review of 58e5cd5) ------------------------------------------------------------
+RLM, ZWNJ, ZWJ, LRI, PDI = "‏", "‌", "‍", "⁦", "⁩"
+
+
+class TestOneNormaliser(unittest.TestCase):
+    """numbers.fold runs the shared normaliser (cut_proposals_norm.prepare) inside: bidi and zero-width marks go, and
+    ؤ ئ ی ک are unified, so a dose typed or decoded with them is still read."""
+
+    def test_fold_drops_bidi_and_zero_width_marks(self):
+        self.assertEqual(fold(f"{RLM}٣٫٥{RLM}"), "3.5")
+        self.assertEqual(fold(f"{LRI}500{PDI}"), "500")
+        self.assertEqual(fold(f"مج{ZWNJ}م"), "مجم")
+        self.assertEqual(fold(f"بيقل{ZWJ}ل"), "بيقلل")
+        self.assertEqual(fold("﻿خد­"), "خد")
+
+    def test_fold_unifies_hamza_seats_and_persian_letters(self):
+        self.assertEqual(fold("مئة"), fold("مية"))
+        self.assertEqual(fold("مسؤول"), "مسوول")
+        self.assertEqual(fold("دوای"), fold("دواي"))
+        self.assertEqual(fold("کبسوله"), "كبسوله")
+
+    def test_fold_keeps_decimals_fractions_and_percent(self):
+        for raw, want in (("3.5", "3.5"), ("٣٫٥", "3.5"), ("3,5", "3,5"), ("3½", "3.5"), ("٪70", "%70"),
+                          (".", ".")):
+            with self.subTest(raw=raw):
+                self.assertEqual(fold(raw), want)
+
+    def test_fold_agrees_with_the_shared_normaliser(self):
+        from lib.cut_proposals_norm import prepare
+        for raw in (f"{RLM}٣٫٥{RLM}", f"مج{ZWNJ}م", "مئة", "ٱلدَّوَاء", "Isotretinoin", "مسؤول", "الـدوا"):
+            with self.subTest(raw=raw):
+                self.assertEqual(fold(raw), fold(prepare(raw)))
+
+    def test_number_words_with_hamza_on_ya_still_count(self):
+        for text, value in (("ثلاثمئة مجم", 300), ("مئتان مجم", 200), ("ثمانمئة وحدة", 800), ("مئة مجم", 100),
+                            ("خمس دقائق", 5)):
+            with self.subTest(text=text):
+                self.assertEqual(values_in(text), {value})
+
+    def test_marks_around_a_number_in_a_graphic(self):
+        self.assertEqual(values_in(f"{RLM}٣٫٥{RLM} مجم"), {3.5})
+        self.assertEqual(values_in(f"١٢٠{RLM}-{RLM}٨٠"), {120, 80})
+
+    def test_dose_heard_with_marks_is_still_a_dose(self):
+        out = rank(words([("خد", 0.95), (f"{RLM}٣٫٥{RLM}", 0.41), (f"مج{ZWNJ}م", 0.62)]))
+        self.assertEqual(out[0]["risk"], "dose")
+        self.assertEqual(out[0]["value"], 3.5)
+
+    def test_every_word_list_is_written_in_folds_form(self):
+        """A list entry fold() can never produce is dead: «مئتان» stopped matching once ئ became ي."""
+        import importlib
+        skip = {("numbers", "_VULGAR"), ("numbers", "LINK"), ("risk_words", "LINK"), ("numbers", "_forms")}
+        for mod in ("numbers", "risk_words", "differences", "takes", "lexicon"):
+            m = importlib.import_module(f"lib.safety.{mod}")
+            for name, v in vars(m).items():
+                if name.startswith("__") or (mod, name) in skip or not isinstance(v, (set, frozenset, list, tuple, dict)):
+                    continue
+                for entry in (v.keys() if isinstance(v, dict) else v):
+                    for w in (entry if isinstance(entry, tuple) else (entry,)):
+                        if isinstance(w, str) and w and " " not in w:
+                            with self.subTest(module=mod, list=name, word=w):
+                                self.assertEqual(fold(w), w)
+
+
+class TestAffirmations(Project):
+    """«ايوه» / «اه» mean "yes": next to a claim they answer it, so they are claim words there, not fillers."""
+
+    def test_yes_next_to_a_claim_is_a_claim_word(self):
+        for yes in ("ايوه", "آه", "اه"):
+            with self.subTest(yes=yes):
+                out = rank(words([("ينفع", 0.95), ("اخده", 0.95), ("مع", 0.95), ("اللبن", 0.95), (yes, 0.30),
+                                  ("يعني", 0.30)]))
+                by_id = {e["word_ids"][0]: e for e in out}
+                self.assertEqual(by_id[5]["risk"], "claim")
+                self.assertEqual(by_id[6]["risk"], "filler")             # «يعني» is no answer
+                self.assertLess(ids_in_order(out).index(5), ids_in_order(out).index(6))
+
+    def test_english_yes_next_to_a_claim(self):
+        out = rank(words([("can", 0.95), ("I", 0.95), ("take", 0.95), ("it", 0.95), ("yeah", 0.3)]))
+        self.assertEqual([e["risk"] for e in out if e["word_ids"] == [5]], ["claim"])
+
+    def test_yes_far_from_any_claim_stays_a_filler(self):
+        out = rank(words([("انا", 0.95), ("كنت", 0.95), ("في", 0.95), ("البيت", 0.95), ("امبارح", 0.95),
+                          ("ايوه", 0.30)]))
+        self.assertEqual([e["risk"] for e in out], ["filler"])
+
+    def test_an_answer_alone_never_blocks_a_graphic(self):
+        self.switch()
+        self.put_words(words([("ينفع", 0.95), ("اخده", 0.95), ("مع", 0.95), ("اللبن", 0.95), ("ايوه", 0.30)]))
+        self.assertEqual(RW.plan_errors(self.p, [event("G1", "ايوه ينفع")]), [])
+
+
+class TestFailClosedVerification(Project):
+    """A verification.json with no words fingerprint is not "current" (it may be for other words): it never
+    unblocks, and the error says why, so the editor does not wait on a block they think is cleared."""
+
+    def write_ver(self, folder, **fields):
+        write_json(folder / "verification.json", {"verified": True, "by": "editor", **fields})
+
+    def test_missing_or_odd_fingerprint_blocks(self):
+        self.switch()
+        self.put_words(words(DOSE_WORDS))
+        tdir = self.p.p("02_transcription")
+        ev = [event("G1", "٣٫٥ مجم")]
+        for sha in ("<missing>", None, "", "  ", 5, ["x"], "0" * 40):
+            with self.subTest(sha=sha):
+                self.write_ver(tdir, **({} if sha == "<missing>" else {"words_sha1": sha}))
+                self.assertFalse(RW.confirmed(self.p))
+                self.assertEqual(len(RW.plan_errors(self.p, ev)), 1)
+        self.verify()
+        self.assertTrue(RW.confirmed(self.p))
+        self.assertEqual(RW.plan_errors(self.p, ev), [])
+
+    def test_a_file_with_no_fingerprint_says_why_it_still_blocks(self):
+        self.switch()
+        self.put_words(words(DOSE_WORDS))
+        ev = [event("G1", "٣٫٥ مجم")]
+        self.write_ver(self.p.p("02_transcription"))
+        err = RW.plan_errors(self.p, ev)[0]
+        self.assertIn("مفيهوش بصمة للكلمات", err)
+        self.assertIn("no words fingerprint", err)
+        self.assertLess(err.index("مفيهوش"), err.index("no words fingerprint"))
+        self.assertIn("--by editor", err)
+        self.verify(sha="0" * 40)                     # a real fingerprint for other words: the old message only
+        self.assertNotIn("بصمة", RW.plan_errors(self.p, ev)[0])
+        self.p.p("02_transcription/verification.json").unlink()
+        self.assertNotIn("بصمة", RW.plan_errors(self.p, ev)[0])
+
+    def test_episode_verification_with_no_fingerprint_does_not_carry_to_a_reel(self):
+        self.switch()
+        ep = self.tmp / "ep" / "02_transcription"
+        ep.mkdir(parents=True)
+        write_json(ep / "words.json", {"words": []})
+        self.put_words(words(DOSE_WORDS), meta={"episode_transcript": str(ep / "transcript.json")})
+        self.verify(by="episode verification")
+        ev = [event("G1", "٣٫٥ مجم")]
+        self.write_ver(ep)
+        self.assertTrue(RW.plan_errors(self.p, ev))
+        self.write_ver(ep, words_sha1=hashlib.sha1((ep / "words.json").read_bytes()).hexdigest())
+        self.assertEqual(RW.plan_errors(self.p, ev), [])
+
+    def test_switch_off_still_adds_nothing(self):
+        self.switch(False)
+        self.put_words(words(DOSE_WORDS))
+        self.write_ver(self.p.p("02_transcription"))
+        self.assertEqual(RW.plan_errors(self.p, [event("G1", "٣٫٥ مجم")]), [])
+
+class TestReviewRoundFix1(Project):
+    """Fresh-eyes review of the follow-ups: a hidden mark between a number and its fraction (I1); the reason a reel's
+    copy or a non-editor legacy file still blocks (M2, M3)."""
+
+    def test_i1_a_mark_between_a_number_and_its_fraction(self):
+        from lib.cut_proposals_norm import strip_marks
+        self.assertEqual(strip_marks(f"3{RLM}½"), "3½")                  # no NFKC: ½ is still one character
+        for raw in (f"3{RLM}½", f"3{ZWNJ}½", f"٣{RLM}½", f"{LRI}3½{PDI}"):
+            with self.subTest(raw=raw):
+                self.assertEqual(fold(raw), "3.5")
+                self.assertEqual(values_in(f"{raw} مجم"), {3.5})
+
+    def test_i1_a_graphic_with_a_hidden_mark_in_the_dose_is_still_blocked(self):
+        self.switch()
+        self.put_words(words([("خد", 0.95), ("3½", 0.40), ("مجم", 0.95)]))
+        for shown in ("3½ مجم", f"3{RLM}½ مجم", f"٣{ZWNJ}½ مجم"):
+            with self.subTest(shown=shown):
+                self.assertEqual(len(RW.plan_errors(self.p, [event("G1", shown)])), 1)
+
+    def test_m3_a_legacy_file_by_someone_else_names_them_too(self):
+        self.switch()
+        self.put_words(words(DOSE_WORDS))
+        write_json(self.p.p("02_transcription/verification.json"), {"verified": True, "by": "claude"})
+        err = RW.plan_errors(self.p, [event("G1", "٣٫٥ مجم")])[0]
+        self.assertIn("اتسجّلت باسم «claude»", err)
+        self.assertIn("مفيهوش بصمة", err)
+        self.assertNotIn("تاني", err)
+        self.assertNotIn(" again", err)
+
+    def episode(self, ep_ver: dict, episode_by: str):
+        ep = self.tmp / "ep" / "02_transcription"
+        ep.mkdir(parents=True, exist_ok=True)
+        write_json(ep / "words.json", {"words": []})
+        write_json(ep / "verification.json", ep_ver)
+        self.put_words(words(DOSE_WORDS), meta={"episode_transcript": str(ep / "transcript.json")})
+        data = self.p.p("02_transcription/words.json").read_bytes()
+        write_json(self.p.p("02_transcription/verification.json"),
+                   {"verified": True, "by": "episode verification", "episode_by": episode_by,
+                    "words_sha1": hashlib.sha1(data).hexdigest()})
+        return hashlib.sha1((ep / "words.json").read_bytes()).hexdigest()
+
+    def test_m2_a_reel_copy_of_a_legacy_episode_file_says_the_real_reason(self):
+        self.switch()
+        self.episode({"verified": True, "by": "editor"}, "editor")
+        err = RW.plan_errors(self.p, [event("G1", "٣٫٥ مجم")])[0]
+        self.assertIn("مفيهوش بصمة", err)
+        self.assertNotIn("episode verification", err)
+
+    def test_n1_damaged_meta_in_a_reel_copy_never_crashes(self):
+        self.switch()
+        for meta in ([1], "x", 7):
+            with self.subTest(meta=meta):
+                write_json(self.p.p("02_transcription/words.json"), {"meta": meta, "words": words(DOSE_WORDS)})
+                data = self.p.p("02_transcription/words.json").read_bytes()
+                write_json(self.p.p("02_transcription/verification.json"),
+                           {"verified": True, "by": "episode verification", "words_sha1": hashlib.sha1(data).hexdigest()})
+                self.assertFalse(RW.confirmed(self.p))
+                err = RW.plan_errors(self.p, [event("G1", "٣٫٥ مجم")])
+                self.assertEqual(len(err), 1)
+                self.assertNotIn("ما اشتغلش", err[0])          # a real finding, not "the check did not run"
+
+    def test_m2_a_reel_copy_names_who_checked_the_episode(self):
+        self.switch()
+        sha = self.episode({"verified": True, "by": "claude"}, "claude")
+        write_json(self.tmp / "ep" / "02_transcription" / "verification.json",
+                   {"verified": True, "by": "claude", "words_sha1": sha})
+        err = RW.plan_errors(self.p, [event("G1", "٣٫٥ مجم")])[0]
+        self.assertIn("اتسجّلت باسم «claude»", err)
+        self.assertNotIn("بصمة", err)
+
 
 if __name__ == "__main__":
     unittest.main()

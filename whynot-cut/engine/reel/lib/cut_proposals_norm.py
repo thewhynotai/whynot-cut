@@ -42,6 +42,12 @@ def prepare(text: str) -> str:
     return _AR_RX.sub(lambda m: _AR_MAP[m.group()], t)
 
 
+def strip_marks(text: str) -> str:
+    """Only the dropping half of prepare(): format characters, Arabic marks and tatweel out, nothing else changed (no
+    NFKC). For a reader that must see neighbouring characters first: a hidden mark between «3» and «½»."""
+    return _DROP.sub("", text)
+
+
 def clean(text: str) -> str:
     return prepare(text).casefold()
 

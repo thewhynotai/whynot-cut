@@ -67,6 +67,8 @@ CLAIM_CUES = {"علاج", "يعالج", "بيعالج", "عالج", "دوا", "�
 _CUE_CORES = sorted((c for c in CLAIM_CUES if len(c) >= 4 and re.search("[؀-ۿ]", c)), key=len, reverse=True)
 FILLERS = {"يعني", "اه", "ايوه", "ام", "امم", "اممم", "اا", "ااه", "طب", "بقي", "كده", "خلاص", "يا", "بص", "اصل",
            "um", "uh", "uhm", "er", "erm", "like", "so", "well", "ok", "okay", "yeah", "mm", "hmm"}
+# "yes" said as a filler: next to a claim it answers it («ينفع اخده مع اللبن؟ … ايوه»), so there it is a claim word
+AFFIRMATIONS = {"اه", "ايوه", "yeah", "ok", "okay"}
 COMMON_LATIN = {"the", "and", "or", "of", "to", "in", "on", "is", "it", "a", "an", "ok", "okay", "yes", "no", "so",
                 "video", "videos", "channel", "like", "really", "very", "good", "nice", "please", "thanks", "thank",
                 "you", "hello", "hi", "bye", "follow", "share", "comment", "subscribe", "online", "doctor", "dr",
@@ -306,9 +308,10 @@ def rank(words, meta=None, *, thr: float = DEFAULT_THRESHOLD, domain: str = "gen
     for i, t in enumerate(toks):
         if kinds[i] or not t:
             continue
-        if t in FILLERS:
+        near_claim = any(abs(i - k) <= CLAIM_SPAN for k in claim_anchor)
+        if t in FILLERS and not (t in AFFIRMATIONS and near_claim):
             kind = "filler"
-        elif any(abs(i - k) <= CLAIM_SPAN for k in claim_anchor):
+        elif near_claim:
             kind = "claim"
         else:
             kind = "other"
@@ -346,9 +349,20 @@ def _read(path):
 
 
 def _current(ver, data) -> bool:
+    """Verified for THESE words. Fails closed: a verification with no words fingerprint (an older file) is not
+    current, since nothing proves it was made for today's words."""
     if not isinstance(ver, dict) or ver.get("verified") is not True or data is None:
         return False
-    return ver.get("words_sha1") in (None, hashlib.sha1(data).hexdigest())
+    sha = ver.get("words_sha1")
+    return isinstance(sha, str) and sha == hashlib.sha1(data).hexdigest()
+
+
+def _unfingerprinted(ver, data) -> bool:
+    """Verified, but in a file with no words fingerprint: the editor may think the block is already cleared."""
+    if not isinstance(ver, dict) or ver.get("verified") is not True or data is None:
+        return False
+    sha = ver.get("words_sha1")
+    return not (isinstance(sha, str) and sha.strip())
 
 
 def _who(ver: dict, key: str = "by") -> str:
@@ -368,13 +382,20 @@ def confirmed(paths) -> bool:
         return True
     if _who(ver) != EPISODE_BY or ("episode_by" in ver and _who(ver, "episode_by") not in BY_EAR):
         return False
-    ep = (wj.get("meta") or {}).get("episode_transcript") if isinstance(wj, dict) else None
+    ep_data, ep_ver = _episode_files(wj)
+    return _current(ep_ver, ep_data) and _who(ep_ver) in BY_EAR
+
+
+def _episode_files(wj):
+    """(words bytes, verification) of the episode a reel was cut from; (None, None) when it names none."""
+    meta = wj.get("meta") if isinstance(wj, dict) else None
+    ep = meta.get("episode_transcript") if isinstance(meta, dict) else None
     if not isinstance(ep, str) or not ep:
-        return False
+        return None, None
     folder = Path(ep).parent
     ep_data, _ = _read(folder / "words.json")
     _, ep_ver = _read(folder / "verification.json")
-    return _current(ep_ver, ep_data) and _who(ep_ver) in BY_EAR
+    return ep_data, ep_ver
 
 
 def context(ctx=None) -> dict:
@@ -406,9 +427,21 @@ def for_project(paths, ctx=None) -> dict | None:
     ok = confirmed(paths)
     data, _ = _read(paths.p("02_transcription/words.json"))
     _, ver = _read(paths.p("02_transcription/verification.json"))
-    verified_by = _who(ver) if not ok and _current(ver, data) else None     # verified, but not as the editor's ear
+    verified_by, unfingerprinted = None, False      # why it still blocks: the real name and the real file
+    if not ok and _current(ver, data) and _who(ver) == EPISODE_BY:
+        # a reel's copy of its episode's verification: name who checked the episode, and look at the episode's file
+        ep_data, ep_ver = _episode_files(wj)
+        name = _who(ver, "episode_by") if "episode_by" in ver else _who(ep_ver if isinstance(ep_ver, dict) else {})
+        verified_by = name if name not in BY_EAR else None
+        unfingerprinted = _unfingerprinted(ep_ver, ep_data)
+    elif not ok and _current(ver, data):
+        verified_by = _who(ver)                                        # verified, but not as the editor's ear
+    elif not ok and _unfingerprinted(ver, data):
+        unfingerprinted = True
+        verified_by = _who(ver) if _who(ver) not in BY_EAR else None
     return {"confirmed": ok, "threshold": c["thr"], "basis": c["basis"], "items": items,
-            "lexicon_refused": c["lexicon_refused"], "domain": c["domain"], "verified_by": verified_by}
+            "lexicon_refused": c["lexicon_refused"], "domain": c["domain"], "verified_by": verified_by,
+            "unfingerprinted": unfingerprinted}
 
 
 def _tc(ms) -> str:
@@ -468,7 +501,8 @@ def _errors(rep: dict, events) -> list:
                         f"({ar_why}): اسمعها وأكّدها قبل ما تظهر على الشاشة — on-screen text uses '{e['text']}' "
                         f"(word {ids}, {_tc(e['start_ms'])}), a {en} the transcription is unsure of ({en_why}): "
                         "confirm it by ear first (correct it in transcript-corrections.json if needed), then "
-                        "`reel transcript-verify`" + _who_hint(rep.get("verified_by")))
+                        "`reel transcript-verify`" + _who_hint(rep.get("verified_by"))
+                        + _fingerprint_hint(rep.get("unfingerprinted")))
     return errs
 
 
@@ -481,6 +515,17 @@ def _who_hint(name) -> str:
     return (f" — المراجعة اتسجّلت باسم «{shown}»، ودي مش موافقة المونتير بالسمع: بعد ما المونتير يسمعها، "
             f"`reel transcript-verify --by editor` / the check was recorded as \"{shown}\", which is not the "
             "editor's ear: once the editor has listened, `reel transcript-verify --by editor`")
+
+
+def _fingerprint_hint(missing) -> str:
+    """The transcript was marked verified in a file with no words fingerprint (an older one): say why it still
+    blocks and how to clear it."""
+    if not missing:
+        return ""
+    return (" — ملف المراجعة قديم ومفيهوش بصمة للكلمات، فمش باين إنه اتعمل للكلام ده: بعد ما المونتير يسمعها، "
+            "`reel transcript-verify --by editor` / the verification file is an older one with no words "
+            "fingerprint, so nothing shows it was made for these words: once the editor has listened, run "
+            "`reel transcript-verify --by editor`")
 
 
 def plan_errors(paths, events, ctx=None) -> list:
