@@ -1,0 +1,232 @@
+{
+ "note": "Made-up transcript for K-T7 tests (no client speech). groups: the sentence numbers said more than once; best: the hand-labelled better take of each group.",
+ "language": "en",
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "Welcome",
+   "start_ms": 0,
+   "end_ms": 300,
+   "probability": 0.97
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "back",
+   "start_ms": 360,
+   "end_ms": 660,
+   "probability": 0.97
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "to",
+   "start_ms": 720,
+   "end_ms": 1020,
+   "probability": 0.97
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "the",
+   "start_ms": 1080,
+   "end_ms": 1380,
+   "probability": 0.97
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "show.",
+   "start_ms": 1440,
+   "end_ms": 1740,
+   "probability": 0.97
+  },
+  {
+   "id": 6,
+   "segment_id": 2,
+   "word": "Sleep",
+   "start_ms": 2340,
+   "end_ms": 2640,
+   "probability": 0.8
+  },
+  {
+   "id": 7,
+   "segment_id": 2,
+   "word": "is",
+   "start_ms": 2700,
+   "end_ms": 3000,
+   "probability": 0.8
+  },
+  {
+   "id": 8,
+   "segment_id": 2,
+   "word": "the",
+   "start_ms": 3060,
+   "end_ms": 3360,
+   "probability": 0.8
+  },
+  {
+   "id": 9,
+   "segment_id": 2,
+   "word": "first",
+   "start_ms": 3420,
+   "end_ms": 3720,
+   "probability": 0.8
+  },
+  {
+   "id": 10,
+   "segment_id": 2,
+   "word": "thing",
+   "start_ms": 3780,
+   "end_ms": 4080,
+   "probability": 0.8
+  },
+  {
+   "id": 11,
+   "segment_id": 3,
+   "word": "Sleep",
+   "start_ms": 4980,
+   "end_ms": 5280,
+   "probability": 0.96
+  },
+  {
+   "id": 12,
+   "segment_id": 3,
+   "word": "is",
+   "start_ms": 5340,
+   "end_ms": 5640,
+   "probability": 0.96
+  },
+  {
+   "id": 13,
+   "segment_id": 3,
+   "word": "the",
+   "start_ms": 5700,
+   "end_ms": 6000,
+   "probability": 0.96
+  },
+  {
+   "id": 14,
+   "segment_id": 3,
+   "word": "first",
+   "start_ms": 6060,
+   "end_ms": 6360,
+   "probability": 0.96
+  },
+  {
+   "id": 15,
+   "segment_id": 3,
+   "word": "thing",
+   "start_ms": 6420,
+   "end_ms": 6720,
+   "probability": 0.96
+  },
+  {
+   "id": 16,
+   "segment_id": 3,
+   "word": "you",
+   "start_ms": 6780,
+   "end_ms": 7080,
+   "probability": 0.96
+  },
+  {
+   "id": 17,
+   "segment_id": 3,
+   "word": "should",
+   "start_ms": 7140,
+   "end_ms": 7440,
+   "probability": 0.96
+  },
+  {
+   "id": 18,
+   "segment_id": 3,
+   "word": "fix.",
+   "start_ms": 7500,
+   "end_ms": 7800,
+   "probability": 0.96
+  },
+  {
+   "id": 19,
+   "segment_id": 4,
+   "word": "Sleep",
+   "start_ms": 8600,
+   "end_ms": 8900,
+   "probability": 0.7
+  },
+  {
+   "id": 20,
+   "segment_id": 4,
+   "word": "is",
+   "start_ms": 8960,
+   "end_ms": 9260,
+   "probability": 0.7
+  },
+  {
+   "id": 21,
+   "segment_id": 4,
+   "word": "the",
+   "start_ms": 9320,
+   "end_ms": 9620,
+   "probability": 0.7
+  },
+  {
+   "id": 22,
+   "segment_id": 4,
+   "word": "first",
+   "start_ms": 9680,
+   "end_ms": 9980,
+   "probability": 0.7
+  },
+  {
+   "id": 23,
+   "segment_id": 4,
+   "word": "thing",
+   "start_ms": 10040,
+   "end_ms": 10340,
+   "probability": 0.7
+  },
+  {
+   "id": 24,
+   "segment_id": 4,
+   "word": "you",
+   "start_ms": 10400,
+   "end_ms": 10700,
+   "probability": 0.7
+  },
+  {
+   "id": 25,
+   "segment_id": 5,
+   "word": "Thanks",
+   "start_ms": 11600,
+   "end_ms": 11900,
+   "probability": 0.97
+  },
+  {
+   "id": 26,
+   "segment_id": 5,
+   "word": "for",
+   "start_ms": 11960,
+   "end_ms": 12260,
+   "probability": 0.97
+  },
+  {
+   "id": 27,
+   "segment_id": 5,
+   "word": "watching.",
+   "start_ms": 12320,
+   "end_ms": 12620,
+   "probability": 0.97
+  }
+ ],
+ "groups": [
+  [
+   2,
+   3,
+   4
+  ]
+ ],
+ "best": [
+  3
+ ]
+}

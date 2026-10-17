@@ -1,0 +1,293 @@
+{
+ "note": "Made-up transcript for K-T7 tests (no client speech). groups: the sentence numbers said more than once; best: the hand-labelled better take of each group.",
+ "language": "ar",
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "أهلا",
+   "start_ms": 0,
+   "end_ms": 300,
+   "probability": 0.95
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "بيكم",
+   "start_ms": 360,
+   "end_ms": 660,
+   "probability": 0.95
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "في",
+   "start_ms": 720,
+   "end_ms": 1020,
+   "probability": 0.95
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "حلقة",
+   "start_ms": 1080,
+   "end_ms": 1380,
+   "probability": 0.95
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "النهارده.",
+   "start_ms": 1440,
+   "end_ms": 1740,
+   "probability": 0.95
+  },
+  {
+   "id": 6,
+   "segment_id": 2,
+   "word": "أول",
+   "start_ms": 2340,
+   "end_ms": 2640,
+   "probability": 0.93
+  },
+  {
+   "id": 7,
+   "segment_id": 2,
+   "word": "حاجة",
+   "start_ms": 2700,
+   "end_ms": 3000,
+   "probability": 0.93
+  },
+  {
+   "id": 8,
+   "segment_id": 2,
+   "word": "لازم",
+   "start_ms": 3060,
+   "end_ms": 3360,
+   "probability": 0.93
+  },
+  {
+   "id": 9,
+   "segment_id": 2,
+   "word": "نعرف",
+   "start_ms": 3420,
+   "end_ms": 3720,
+   "probability": 0.93
+  },
+  {
+   "id": 10,
+   "segment_id": 3,
+   "word": "أول",
+   "start_ms": 4620,
+   "end_ms": 4920,
+   "probability": 0.95
+  },
+  {
+   "id": 11,
+   "segment_id": 3,
+   "word": "حاجة",
+   "start_ms": 4980,
+   "end_ms": 5280,
+   "probability": 0.95
+  },
+  {
+   "id": 12,
+   "segment_id": 3,
+   "word": "لازم",
+   "start_ms": 5340,
+   "end_ms": 5640,
+   "probability": 0.95
+  },
+  {
+   "id": 13,
+   "segment_id": 3,
+   "word": "نعرف",
+   "start_ms": 5700,
+   "end_ms": 6000,
+   "probability": 0.95
+  },
+  {
+   "id": 14,
+   "segment_id": 3,
+   "word": "إن",
+   "start_ms": 6060,
+   "end_ms": 6360,
+   "probability": 0.95
+  },
+  {
+   "id": 15,
+   "segment_id": 3,
+   "word": "الضغط",
+   "start_ms": 6420,
+   "end_ms": 6720,
+   "probability": 0.95
+  },
+  {
+   "id": 16,
+   "segment_id": 3,
+   "word": "مرض",
+   "start_ms": 6780,
+   "end_ms": 7080,
+   "probability": 0.95
+  },
+  {
+   "id": 17,
+   "segment_id": 3,
+   "word": "صامت.",
+   "start_ms": 7140,
+   "end_ms": 7440,
+   "probability": 0.95
+  },
+  {
+   "id": 18,
+   "segment_id": 4,
+   "word": "الأكل",
+   "start_ms": 8140,
+   "end_ms": 8440,
+   "probability": 0.6
+  },
+  {
+   "id": 19,
+   "segment_id": 4,
+   "word": "الصحي",
+   "start_ms": 8500,
+   "end_ms": 8800,
+   "probability": 0.6
+  },
+  {
+   "id": 20,
+   "segment_id": 4,
+   "word": "بيفرق",
+   "start_ms": 8860,
+   "end_ms": 9160,
+   "probability": 0.6
+  },
+  {
+   "id": 21,
+   "segment_id": 4,
+   "word": "جدا",
+   "start_ms": 9220,
+   "end_ms": 9520,
+   "probability": 0.6
+  },
+  {
+   "id": 22,
+   "segment_id": 5,
+   "word": "الأكل",
+   "start_ms": 10420,
+   "end_ms": 10720,
+   "probability": 0.9
+  },
+  {
+   "id": 23,
+   "segment_id": 5,
+   "word": "الصحي",
+   "start_ms": 10780,
+   "end_ms": 11080,
+   "probability": 0.9
+  },
+  {
+   "id": 24,
+   "segment_id": 5,
+   "word": "يعني",
+   "start_ms": 11140,
+   "end_ms": 11440,
+   "probability": 0.9
+  },
+  {
+   "id": 25,
+   "segment_id": 5,
+   "word": "بيفرق",
+   "start_ms": 11500,
+   "end_ms": 11800,
+   "probability": 0.9
+  },
+  {
+   "id": 26,
+   "segment_id": 5,
+   "word": "جدا",
+   "start_ms": 11860,
+   "end_ms": 12160,
+   "probability": 0.9
+  },
+  {
+   "id": 27,
+   "segment_id": 6,
+   "word": "الأكل",
+   "start_ms": 13060,
+   "end_ms": 13360,
+   "probability": 0.96
+  },
+  {
+   "id": 28,
+   "segment_id": 6,
+   "word": "الصحي",
+   "start_ms": 13420,
+   "end_ms": 13720,
+   "probability": 0.96
+  },
+  {
+   "id": 29,
+   "segment_id": 6,
+   "word": "بيفرق",
+   "start_ms": 13780,
+   "end_ms": 14080,
+   "probability": 0.96
+  },
+  {
+   "id": 30,
+   "segment_id": 6,
+   "word": "جدا",
+   "start_ms": 14140,
+   "end_ms": 14440,
+   "probability": 0.96
+  },
+  {
+   "id": 31,
+   "segment_id": 6,
+   "word": "في",
+   "start_ms": 14500,
+   "end_ms": 14800,
+   "probability": 0.96
+  },
+  {
+   "id": 32,
+   "segment_id": 6,
+   "word": "الضغط.",
+   "start_ms": 14860,
+   "end_ms": 15160,
+   "probability": 0.96
+  },
+  {
+   "id": 33,
+   "segment_id": 7,
+   "word": "وإلى",
+   "start_ms": 15860,
+   "end_ms": 16160,
+   "probability": 0.97
+  },
+  {
+   "id": 34,
+   "segment_id": 7,
+   "word": "اللقاء.",
+   "start_ms": 16220,
+   "end_ms": 16520,
+   "probability": 0.97
+  }
+ ],
+ "groups": [
+  [
+   2,
+   3
+  ],
+  [
+   4,
+   5,
+   6
+  ]
+ ],
+ "best": [
+  3,
+  6
+ ]
+}

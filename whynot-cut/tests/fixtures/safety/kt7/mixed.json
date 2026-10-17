@@ -1,0 +1,135 @@
+{
+ "note": "Made-up transcript for K-T7 tests (no client speech). groups: the sentence numbers said more than once; best: the hand-labelled better take of each group.",
+ "language": "ar",
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "خدي",
+   "start_ms": 0,
+   "end_ms": 300,
+   "probability": 0.85
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "الـ",
+   "start_ms": 360,
+   "end_ms": 510,
+   "probability": 0.85
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "vitamin",
+   "start_ms": 570,
+   "end_ms": 870,
+   "probability": 0.85
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "D",
+   "start_ms": 930,
+   "end_ms": 1230,
+   "probability": 0.85
+  },
+  {
+   "id": 5,
+   "segment_id": 2,
+   "word": "خدي",
+   "start_ms": 2130,
+   "end_ms": 2430,
+   "probability": 0.95
+  },
+  {
+   "id": 6,
+   "segment_id": 2,
+   "word": "الـ",
+   "start_ms": 2490,
+   "end_ms": 2640,
+   "probability": 0.95
+  },
+  {
+   "id": 7,
+   "segment_id": 2,
+   "word": "vitamin",
+   "start_ms": 2700,
+   "end_ms": 3000,
+   "probability": 0.95
+  },
+  {
+   "id": 8,
+   "segment_id": 2,
+   "word": "D",
+   "start_ms": 3060,
+   "end_ms": 3360,
+   "probability": 0.95
+  },
+  {
+   "id": 9,
+   "segment_id": 2,
+   "word": "ألف",
+   "start_ms": 3420,
+   "end_ms": 3720,
+   "probability": 0.95
+  },
+  {
+   "id": 10,
+   "segment_id": 2,
+   "word": "وحدة",
+   "start_ms": 3780,
+   "end_ms": 4080,
+   "probability": 0.95
+  },
+  {
+   "id": 11,
+   "segment_id": 2,
+   "word": "كل",
+   "start_ms": 4140,
+   "end_ms": 4440,
+   "probability": 0.95
+  },
+  {
+   "id": 12,
+   "segment_id": 2,
+   "word": "يوم.",
+   "start_ms": 4500,
+   "end_ms": 4800,
+   "probability": 0.95
+  },
+  {
+   "id": 13,
+   "segment_id": 3,
+   "word": "ده",
+   "start_ms": 5500,
+   "end_ms": 5800,
+   "probability": 0.96
+  },
+  {
+   "id": 14,
+   "segment_id": 3,
+   "word": "مهم",
+   "start_ms": 5860,
+   "end_ms": 6160,
+   "probability": 0.96
+  },
+  {
+   "id": 15,
+   "segment_id": 3,
+   "word": "للعضم.",
+   "start_ms": 6220,
+   "end_ms": 6520,
+   "probability": 0.96
+  }
+ ],
+ "groups": [
+  [
+   1,
+   2
+  ]
+ ],
+ "best": [
+  2
+ ]
+}
