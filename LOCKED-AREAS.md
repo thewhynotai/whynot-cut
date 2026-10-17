@@ -118,3 +118,9 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
       `tests/test_bidi_lines*.py`, `tests/test_font_pairing*.py`, `tests/test_brief.py`, `tests/test_client_brief.py`,
       `tests/test_transcript_compact*.py`, fixtures `tests/fixtures/{review_domains,bidi,brief}/**`,
       `evals/review-domains/**`, `evals/model-tier/**`, the M2/M5 evidence files.
+  - Lane queue extension 2 (2026-10-17 15:30): lane 1 adds T4.8 (`lib/intake_warnings.py`, `tests/test_t48_intake_warnings.py`),
+    K-T11 (`lib/topic_search.py`, `tests/test_topic_search*.py`), K-T16 (`lib/broll_search.py`, `tests/test_broll_search*.py`),
+    K-T15 (`lib/exposure_check.py`, `tests/test_exposure_check*.py`) + their fixtures; lane 2 adds K-T9
+    (`lib/safety/decision_log.py`), K-T12 (`lib/safety/cover_check.py`), K-T17 (`lib/resolve_export.py`,
+    `tests/test_resolve_export*.py`), M4-T1 (`lib/asset_manifest.py`, `tests/test_asset_manifest.py`) and M4-T4
+    (`hooks/magnific_guard.py`, `tests/test_magnific_guard*.py`). Call sites, cli, skills and config arrive as patches.
