@@ -54,6 +54,8 @@ CLAIM_SPAN = 6           # words this close to a claim word or a risky item belo
 
 NEGATIONS = {"مش", "موش", "مو", "لا", "ما", "مفيش", "مافيش", "مفش", "مافش", "ممنوع", "بلاش", "لم", "لن", "ليس", "ليست", "بدون", "ولا",
              "اوعي", "اوعا", "اوع", "اياك", "اياكي", "اياكم",
+             # standard Arabic «ليس» said by person («لست بحاجة», «ليسوا بحاجة»), and "without" («دون», «منغير»)
+             "لست", "لستي", "لسنا", "لستم", "لستن", "لستما", "ليسوا", "ليسا", "ليستا", "لسن", "دون", "منغير",
              "no", "not", "never", "dont", "don't", "doesnt", "doesn't", "didnt", "didn't", "cant", "can't", "cannot",
              "shouldnt", "shouldn't", "wont", "won't", "without", "avoid", "nor", "isnt", "isn't", "arent", "aren't",
              "mustnt", "mustn't", "stop", "hardly", "barely", "scarcely", "neither", "none", "nothing", "nobody"}
@@ -72,6 +74,9 @@ NOT_CIRCUMFIX = {"مشمش", "مشمشه", "معاش", "معاشات", "معلش
                  "مزركش", "مناقش", "محشش", "مهروش", "مدردش", "مفشفش", "متحرش", "متوحش", "مندهش", "مكشكش", "مدشدش",
                  "مخرمش", "منكوش", "مطنش", "منقوشه", "مدهشه", "مغشوشه"}
 _GLUED = ("و", "ف")      # a conjunction written onto the negation: «ومش», «فمش», «ومبيقللش»
+# English "n't" with or without its apostrophe ("hasn't", "hasnt", "wasn’t"): the verbs it is written onto
+_EN_NT = re.compile(r"^(?:do|does|did|is|are|was|were|has|have|had|ca|could|would|should|must|might|may|need|wo|sha|"
+                    r"ai|dare|ought)n'?t$")
 CLAIM_CUES = {"علاج", "يعالج", "بيعالج", "عالج", "دوا", "دواء", "ادويه", "خد", "خدي", "خدوا", "تاخد", "ياخد",
               "اخد", "استخدم", "تستخدم", "يستخدم", "ينفع", "بينفع", "مفيد", "مضر", "ضار", "خطر", "خطير", "امن", "يسبب",
               "بيسبب", "يقلل", "بيقلل", "يزود", "بيزود", "يرفع", "بيرفع", "ينزل", "بينزل", "يشفي", "بيشفي", "شفا",
@@ -188,6 +193,8 @@ def _negation(tok: str, nxt: str = "") -> str | None:
     بيقللش»); «وما» / «فما» before anything else is "and what", not a negation. Tokens are folded (numbers.fold)."""
     if not tok:
         return None
+    if _EN_NT.match(tok.replace("’", "'")):
+        return "word"
     for t in (tok, *(tok[1:] for c in _GLUED if tok.startswith(c) and len(tok) >= 3)):
         if t in NEGATIONS and not (t != tok and t == "ما"):
             return "word"

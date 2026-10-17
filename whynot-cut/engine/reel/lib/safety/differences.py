@@ -5,8 +5,13 @@ exception, a different medical word (Task 25 retakes and K-T7 takes read it the 
 
 - numbers, doses, ordinals («الشهر التالت», "first trimester"; not the openers «أول حاجة», «أول ما», "first of
   all") and «تاني» / "again" (one dose more?): K-T1's number reader (`quantities`: «حباية واحدة», «٥٠٠ مجم» == "500 mg", «حبايتين»), a
-  frequency word («مرتين», "daily"), compared by kind and value; an everyday word that is also a number («واحد»
-  someone, «ست» lady) counts only when the other take says a number too («خمسة» → «ست»);
+  frequency word («مرتين», "daily"), compared by kind, value and unit («٥ مجم» / «٥ جم», "5 mg" / "5 mcg", pill /
+  capsule, teaspoon / tablespoon, «لكل كيلو», «خمس أيام» / «خمس أسابيع»); a number that cannot be read for sure or
+  a vague amount («كام حباية») by its words; an everyday word that is also a number («واحد» someone, «ست» lady)
+  counts only when the other take says a number too («خمسة» → «ست»); a frequency word is a count of times
+  ("twice" == "two times" == «مرتين»); a limit on an amount («أكتر من», «أقل من», «أكبر من», «زادت عن», «فوق»,
+  «تحت», "at most", "at least", "up to", "more than", "older than") before a number, a unit or a time word, or
+  «بالكتير» / «على الأقل» / "maximum" anywhere;
 - negation: K-T1's negation reader (a negation word, a negated verb «مبيقللش», "doesn't", "isn't") plus «غير»
   («غير آمن», «من غير أكل»); «ما» after «قبل», «زي», «لحد» … is a connector, and «ولا» is "or" unless it opens the
   take, follows a negation («لا ده ولا ده»), comes before «حاجة», «حد», «مرة» or a verb («ولا تاخدي»). Compared by
@@ -15,10 +20,19 @@ exception, a different medical word (Task 25 retakes and K-T7 takes read it the 
   moves («مش بيقلل الضغط وبيقلل السكر» / «بيقلل الضغط ومش بيقلل السكر») differs;
 - a condition or an exception: «لو», «إلا», «بشرط», «طالما», "if", "unless", "only", "except", and a "but" clause
   («بس», «لكن», "but" after the first word), compared by kind and count («لو سمحت», "please", is none);
+- must, should or may: «لازم», «يجب», «ضروري», "must", "have to", "required" / «المفروض», «يفضل», "should",
+  "recommended" / «ممكن», «مسموح», "may", "can", "optional"; a modal the other take does not say counts, except where
+  the other take stops before it (a take cut short: its words, in order, are this take's words before the modal);
+  a modal said negated is still that modal («مينفعش» =
+  «ينفع», "shouldn't" = "should": the negation counts apart);
 - a different medical word: a medicine (the shipped names, a generic-name ending) said in one take only or swapped,
-  an opposite on one scale («آمن» / «خطر», «بيقلل» / «بيرفع»), an organ for another («الكبد» / «الكلى»);
+  an opposite on one scale («آمن» / «خطر», «بيقلل» / «بيرفع», «بيسبب» / «بيمنع», «سلبي» / «إيجابي», «الشمال» /
+  «اليمين», «فاضية» / «مليانة», «فورا» / «بعدين»), an organ or a measure for
+  another («الكبد» / «الكلى», «السكر» / «الضغط»), a route for another («بالفم» / «حقن», «العضل» / «الوريد»), who
+  takes it for another («للأطفال» / «للكبار», «الحامل»);
 - timing: a time of day («الصبح», «بالليل»), a day («السبت», «النهارده», «بكرة», «بعد بكرة»), how often («كل أسبوع», «يوميا»,
-  "once a week" == "weekly"), and before/after/with a meal or sleep within three words («بعد الفطار», «قبل ما
+  "once a week" == "weekly"), how often in words («دايما» / «أحيانا», "always" / "sometimes" / "rarely"), and
+  before/after/with a meal or sleep within three words («بعد الفطار», «قبل ما
   تنامي», "with a full meal" == "with food"); a clitic does not make another time («بالليل» == «الليل»).
 
 `compare` returns {} when the takes agree, else {kind: {"a": [as said in take a], "b": [as said in take b]}}.
@@ -26,7 +40,8 @@ Nothing here reads a file or raises for odd input (G10)."""
 import re
 from collections import Counter
 
-from .numbers import canon, find_numbers, fold, frequency_value, is_frequency, quantities, stems, timing_phrases
+from .numbers import (canon, find_numbers, fold, frequency_value, is_frequency, is_time, is_unit, quantities, stems,
+                      timing_phrases)
 from .risk_words import _drug_spans, _lexicon_index, _negation, negated_core
 
 TIME_OF_DAY = {"صبح": "morning", "صباح": "morning", "صباحا": "morning", "ضهر": "noon",
@@ -107,7 +122,19 @@ OPPOSITES = {"امن": ("safe", 1), "امان": ("safe", 1), "سليم": ("safe"
              "حلو": ("good", 1), "كويس": ("good", 1), "كويسه": ("good", 1), "good": ("good", 1),
              "وحش": ("good", -1), "وحشه": ("good", -1), "bad": ("good", -1),
              "عالي": ("high", 1), "مرتفع": ("high", 1), "high": ("high", 1), "واطي": ("high", -1),
-             "منخفض": ("high", -1), "low": ("high", -1)}
+             "منخفض": ("high", -1), "low": ("high", -1),
+             "بيسبب": ("cause", 1), "يسبب": ("cause", 1), "تسبب": ("cause", 1), "بتسبب": ("cause", 1),
+             "causes": ("cause", 1), "cause": ("cause", 1), "بيمنع": ("cause", -1), "يمنع": ("cause", -1),
+             "تمنع": ("cause", -1), "بتمنع": ("cause", -1), "بيحمي": ("cause", -1), "يحمي": ("cause", -1),
+             "prevents": ("cause", -1), "prevent": ("cause", -1), "protects": ("cause", -1),
+             "positive": ("result", 1), "ايجابي": ("result", 1), "ايجابيه": ("result", 1), "موجب": ("result", 1),
+             "موجبه": ("result", 1), "negative": ("result", -1), "سلبي": ("result", -1), "سلبيه": ("result", -1),
+             "سالب": ("result", -1), "سالبه": ("result", -1),
+             "يمين": ("side", 1), "right": ("side", 1), "شمال": ("side", -1), "يسار": ("side", -1), "left": ("side", -1),
+             "مليان": ("full", 1), "مليانه": ("full", 1), "full": ("full", 1), "فاضي": ("full", -1),
+             "فاضيه": ("full", -1), "empty": ("full", -1),
+             "فورا": ("when", 1), "حالا": ("when", 1), "immediately": ("when", 1), "urgently": ("when", 1),
+             "بعدين": ("when", -1), "later": ("when", -1)}
 # an organ by name («الكبد» / «الكلى», liver / kidney)
 ORGANS = {"كبد": "liver", "liver": "liver", "كلي": "kidney", "كلاوي": "kidney", "كليه": "kidney", "kidney": "kidney",
           "kidneys": "kidney", "قلب": "heart", "heart": "heart", "ريه": "lung", "ريتين": "lung",
@@ -115,6 +142,55 @@ ORGANS = {"كبد": "liver", "liver": "liver", "كلي": "kidney", "كلاوي":
           "بنكرياس": "pancreas", "pancreas": "pancreas", "thyroid": "thyroid", "درقيه": "thyroid", "رحم": "uterus",
           "uterus": "uterus", "مثانه": "bladder", "bladder": "bladder", "عضم": "bone", "عظم": "bone", "bone": "bone",
           "bones": "bone"}
+ORGANS.update({"سكر": "sugar", "sugar": "sugar", "glucose": "sugar", "ضغط": "pressure", "pressure": "pressure",
+               "كوليسترول": "cholesterol", "كولسترول": "cholesterol", "cholesterol": "cholesterol",
+               "دهون": "fat", "fat": "fat", "triglycerides": "fat", "وزن": "weight", "weight": "weight",
+               "حراره": "fever", "سخونيه": "fever", "fever": "fever", "temperature": "fever"})
+# how it is taken («بالفم» / «حقن», «في العضل» / «في الوريد»)
+ROUTES = {"فم": "mouth", "بالفم": "mouth", "الفم": "mouth", "فموي": "mouth", "oral": "mouth", "orally": "mouth",
+          "mouth": "mouth", "حقن": "injection", "حقنه": "injection", "injection": "injection",
+          "injections": "injection", "injected": "injection", "عضل": "muscle", "عضلي": "muscle", "muscle": "muscle",
+          "intramuscular": "muscle", "وريد": "vein", "وريدي": "vein", "vein": "vein", "intravenous": "vein",
+          "iv": "vein", "subcutaneous": "skin", "موضعي": "topical", "دهان": "topical", "topical": "topical",
+          "topically": "topical", "شرجي": "rectal", "لبوس": "rectal", "rectal": "rectal", "rectally": "rectal",
+          "استنشاق": "inhaled", "بخاخ": "inhaled", "inhaled": "inhaled", "inhaler": "inhaled"}
+# who takes it («للأطفال» / «للكبار», «الحامل»)
+WHO = {"اطفال": "child", "طفل": "child", "عيال": "child", "children": "child", "child": "child", "kids": "child",
+       "kid": "child", "صغار": "child", "رضع": "infant", "رضيع": "infant", "infant": "infant", "infants": "infant", "كبار": "adult",
+       "بالغين": "adult", "adult": "adult", "adults": "adult", "حامل": "pregnant", "حوامل": "pregnant",
+       "pregnant": "pregnant", "pregnancy": "pregnant", "مرضع": "nursing", "مرضعه": "nursing", "رضاعه": "nursing",
+       "breastfeeding": "nursing", "nursing": "nursing", "مسنين": "elderly", "elderly": "elderly"}
+_ABOUT = {"organ": ORGANS, "route": ROUTES, "who": WHO}
+# a limit on an amount: (words) -> which; the ones in _LIMIT_NEAR count only before a number, a dose or a frequency
+LIMIT_PHRASES = {("اكتر", "من"): "more", ("اكثر", "من"): "more", ("اقل", "من"): "less", ("more", "than"): "more",
+                 ("less", "than"): "less", ("fewer", "than"): "less", ("at", "most"): "max", ("at", "least"): "min",
+                 ("up", "to"): "upto", ("علي", "الاقل"): "min", ("حد", "اقصي"): "max", ("كحد", "اقصي"): "max",
+                 ("بحد", "اقصي"): "max", ("no", "more"): "max", ("اكبر", "من"): "more", ("اصغر", "من"): "less",
+                 ("اعلي", "من"): "more", ("ازيد", "من"): "more", ("اكتر", "عن"): "more", ("اقل", "عن"): "less",
+                 ("زياده", "عن"): "more", ("زاد", "عن"): "more", ("زادت", "عن"): "more", ("يزيد", "عن"): "more",
+                 ("تزيد", "عن"): "more", ("قل", "عن"): "less", ("قلت", "عن"): "less", ("يقل", "عن"): "less",
+                 ("تقل", "عن"): "less", ("older", "than"): "more", ("younger", "than"): "less",
+                 ("higher", "than"): "more", ("lower", "than"): "less", ("greater", "than"): "more",
+                 ("bigger", "than"): "more", ("smaller", "than"): "less", ("over", "than"): "more"}
+LIMIT_WORDS = {"بالكتير": "max", "بالكثير": "max", "اقصي": "max", "القصوي": "max", "maximum": "max", "max": "max",
+               "minimum": "min", "فوق": "over", "تحت": "under", "over": "over", "under": "under", "above": "over",
+               "below": "under", "لحد": "upto", "لغايه": "upto"}
+_LIMIT_NEAR = {"more", "less", "upto", "over", "under"}
+_LIMIT_REACH = 3
+# must or may: (words) -> which
+MODALS = {"must": "must", "لازم": "must", "يجب": "must", "ضروري": "must", "لابد": "must", "واجب": "must",
+          "necessary": "must", "required": "must", "mandatory": "must", "essential": "must",
+          "should": "should", "المفروض": "should", "مفروض": "should", "يفضل": "should", "الافضل": "should",
+          "يستحسن": "should", "مستحسن": "should", "recommended": "should", "preferably": "should",
+          "may": "may", "might": "may", "can": "may", "could": "may", "ممكن": "may", "يمكن": "may", "يجوز": "may",
+          "مسموح": "may", "ينفع": "may", "بينفع": "may", "optional": "may", "اختياري": "may"}
+MODAL_PHRASES = {("have", "to"): "must", ("has", "to"): "must", ("need", "to"): "must", ("needs", "to"): "must",
+                 ("ought", "to"): "should"}
+# how often, in words
+OFTEN = {"دايما": "always", "always": "always", "عاده": "usually", "غالبا": "usually",
+         "usually": "usually", "often": "usually", "generally": "usually", "frequently": "usually",
+         "احيانا": "sometimes", "sometimes": "sometimes", "occasionally": "sometimes", "نادرا": "rarely",
+         "rarely": "rarely", "seldom": "rarely"}
 # "un-" + a word the other take says ("safe" / "unsafe"): a negation
 NEG_PREFIXES = ("non", "un", "in", "im", "ir", "il", "dis")
 # a condition or an exception (kind of each); «بس» / «لكن» / "but" open a clause only after the first word
@@ -137,8 +213,8 @@ _SMALL = {"ده", "دي", "دا", "دول", "خالص", "ابدا", "اصلا", 
           "so", "really", "even", "ever", "on", "in"}
 LABEL = {"negation": ("نفي", "negation"), "numbers": ("رقم أو جرعة", "number or dose"),
          "timing": ("توقيت", "timing"), "condition": ("شرط أو استثناء", "a condition or an exception"),
-         "claim": ("كلام طبي مختلف", "a different medical word")}
-_ORDER = ("negation", "numbers", "timing", "condition", "claim")
+         "modal": ("لازم أو ممكن", "must or may"), "claim": ("كلام طبي مختلف", "a different medical word")}
+_ORDER = ("negation", "numbers", "timing", "condition", "modal", "claim")
 _EDGE_PUNCT = re.compile(r"^[\s\"'«»“”(\[]+|[\s.,!?؟…،؛:\"'«»“”)\]]+$")    # shown as said, without the sentence's marks
 
 
@@ -221,21 +297,39 @@ def _negated(toks: list, i: int) -> tuple:
     return tuple(out), end
 
 
+def _modal_core(tok: str, prev: str) -> str:
+    """A modal said negated is still that modal: «مينفعش» / «ما ينفعش» -> «ينفع», "shouldn't" / "shouldnt" ->
+    "should", "can't" / "cannot" -> "can"."""
+    t = tok.replace("’", "'")
+    if t == "cannot":
+        return "can"
+    m = re.fullmatch(r"([a-z]+)n'?t", t)
+    if m and _negation(t) == "word":
+        return {"ca": "can", "wo": "will", "sha": "shall"}.get(m.group(1), m.group(1))
+    return negated_core(tok, prev)
+
+
 def reading(words) -> dict:
-    """{kind: [(key, words as said)]} for one take (a list of spoken words, as written in the transcript)."""
+    """{kind: [(key, words as said)]} for one take (a list of spoken words, as written in the transcript); "read":
+    the indexes of the words whose meaning is compared with the other take whatever it says (numbers, negation,
+    timing, conditions, limits; not an everyday number word, a modal or a medical word, which count only against
+    their own kind)."""
     raw = [_EDGE_PUNCT.sub("", str(w or "").strip()) for w in (words or [])]
     toks = [fold(str(w or "")) for w in (words or [])]     # folded from the word as written: «٣،» keeps its comma
-    out = {"numbers": [], "negation": [], "timing": [], "condition": [], "claim": [], "negated": []}
+    out = {"numbers": [], "negation": [], "timing": [], "condition": [], "modal": [], "claim": [], "negated": [],
+           "modal_at": [], "toks": toks, "last": next((t for t in reversed(toks) if t), "")}
     said = lambda a, b: " ".join(raw[a:b])                      # noqa: E731
-    taken = set()
+    taken, everyday, read = set(), set(), set()
     for q in quantities(toks):
-        out["numbers"].append(((q["kind"], _value(q)), said(q["start"], q["end"])))
+        out["numbers"].append(((q["kind"], _value(q), q.get("unit")), said(q["start"], q["end"])))
         taken.update(range(q["start"], q["end"]))
     for n in find_numbers(toks):                               # a number word with no unit («خمسة», «ست»)
         if not taken & set(range(n["start"], n["end"])):
             kind = "everyday" if n["ambiguous"] else "number"
             out["numbers"].append(((kind, _value(n)), said(n["start"], n["end"])))
             taken.update(range(n["start"], n["end"]))
+            if n["ambiguous"]:
+                everyday.update(range(n["start"], n["end"]))
     pair_days = {}
     for i in range(len(toks) - 1):
         d = next((RELATIVE_DAY_PAIRS[(x, y)] for x in stems(toks[i]) for y in stems(toks[i + 1])
@@ -261,12 +355,38 @@ def reading(words) -> dict:
             taken.add(i)
     for i, t in enumerate(toks):
         if t and i not in taken and is_frequency(t) and frequency_value(t) is not None:     # «مرتين», "twice"
-            out["numbers"].append((("frequency", canon(frequency_value(t))), raw[i]))
+            out["numbers"].append((("duration", canon(frequency_value(t)), "times"), raw[i]))   # "twice" = "two times"
+            read.add(i)
+    counted = taken | {i for i, t in enumerate(toks) if t and (is_frequency(t) or is_unit(t) or is_time(t))}
+    limited = set()
+    for n in (2, 1):                               # a limit on an amount: «أكتر من حباية», "at most twice"
+        for i in range(len(toks) - n + 1):
+            which = next((LIMIT_PHRASES[(s, toks[i + 1])] for s in _stems(toks[i]) if (s, toks[i + 1]) in LIMIT_PHRASES),
+                         None) if n == 2 else _key(LIMIT_WORDS, toks[i])         # «بأكتر من ساعة»
+            if not which or limited & set(range(i, i + n)):
+                continue
+            if which in _LIMIT_NEAR and not counted & set(range(i + n, i + n + _LIMIT_REACH)):
+                continue
+            out["numbers"].append((("limit", which), said(i, i + n)))
+            limited.update(range(i, i + n))
+    moded = set()
+    for i in range(len(toks) - 1):                 # must or may: «لازم» / «ممكن», "have to" / "may"
+        which = MODAL_PHRASES.get((toks[i], toks[i + 1]))
+        if which:
+            out["modal"].append((("modal", which), said(i, i + 2)))
+            out["modal_at"].append(i)
+            moded.update((i, i + 1))
+    for i, t in enumerate(toks):
+        which = _key(MODALS, _modal_core(t, toks[i - 1] if i else "")) if t and i not in moded else None
+        if which:
+            out["modal"].append((("modal", which), raw[i]))
+            out["modal_at"].append(i)
     for i, t in enumerate(toks):
         if t and _negates(raw, toks, i, bool(out["negation"])):
             what, end = _negated(toks, i)
             out["negation"].append((("not",) + what, raw[i]))
             out["negated"].append(said(i, end))
+            read.add(i)
     used = set()
     for n in (3, 2):
         for i in range(len(toks) - n + 1):
@@ -282,6 +402,7 @@ def reading(words) -> dict:
         if t in _BUT and (i == 0 or nxt in _BUT_ENDS):          # «بعد الأكل بس» (only) counts, «بس كده» not
             continue
         out["condition"].append((("cond", cond), raw[i]))
+        read.add(i)
     timed = set(paired)
     for i, d in sorted(pair_days.items()):
         out["timing"].append((("day", d), said(i, i + 2)))
@@ -293,9 +414,11 @@ def reading(words) -> dict:
             if _key(RELATIVE, toks[j]):
                 break
             meal = _key(MEALS, toks[j])
+            if meal == "meal" and j + 1 < len(toks) and _key(MEALS, toks[j + 1]) not in (None, "meal"):
+                j, meal = j + 1, _key(MEALS, toks[j + 1])      # «قبل وجبة العشا»: which meal
             if meal:
                 out["timing"].append(((rel, meal), said(i, j + 1)))
-                timed.update(range(i, j + 1))
+                timed.update((i, j))          # the words between («before the evening meal») are read on their own
                 break
     for a, b in timing_phrases(toks):
         if not timed & set(range(a, b)):
@@ -324,6 +447,11 @@ def reading(words) -> dict:
             b = i + 2 if which else b
         out["timing"].append((("period", per, which), said(a, b)))
         timed.update(range(a, b))
+    for i, t in enumerate(toks):                   # how often, in words: «دايما» / «أحيانا», "always" / "rarely"
+        often = _key(OFTEN, t) if t and i not in timed else None
+        if often:
+            out["timing"].append((("often", often), raw[i]))
+            timed.add(i)
     for i, t in enumerate(toks):                   # a meal or sleep said as an instruction («… وبعدين نامي»)
         meal = _key(EVENTS, t) if t and i not in timed and i not in taken else None
         if meal:
@@ -335,6 +463,7 @@ def reading(words) -> dict:
         rel_day = _key(RELATIVE_DAYS, t)
         if rel_day:
             out["timing"].append((("day", rel_day), raw[i]))
+            read.add(i)
             continue
         tod = _key(TIME_OF_DAY, t)
         day = _key(DAYS, t)
@@ -343,17 +472,47 @@ def reading(words) -> dict:
             day = None
         if tod or day:
             out["timing"].append((("time", tod or day), raw[i]))
+            read.add(i)
     for a, b, g in _drug_spans(toks, [False] * len(toks), _drug_index(), False, False):
         out["claim"].append((("drug", g if g is not None else " ".join(toks[a:b])), said(a, b)))
     for i, t in enumerate(toks):
         core = negated_core(t, toks[i - 1] if i else "")      # «مبيقللش» says «بيقلل»; the negation counts apart
         side = _key(OPPOSITES, core) if t else None
-        organ = _key(ORGANS, core) if t else None
+        about = next(((kind, v) for kind, table in _ABOUT.items() if t and (v := _key(table, core))), None)
         if side:
             out["claim"].append((("says",) + side, raw[i]))
-        elif organ:
-            out["claim"].append((("organ", organ), raw[i]))
+        elif about:
+            out["claim"].append((about, raw[i]))
+    out["read"] = read | (taken - everyday) | timed | used | limited
     return out
+
+
+# hesitation sounds a take may start with («ااه», «امم», "uhh", "erm")
+_HESITATION = re.compile(r"(?:u+h+m*|u+m+|e+r+m*|h+m+|m{2,}|a+h+|ا+ه*|ا+م+|ه+م+|ا+)")
+
+
+def _stopped_before(short: list, toks: list, at: int) -> bool:
+    """Does the take `short` stop before word `at` of `toks` (a take cut short): its words, in order, are words of
+    toks before `at` (a hesitation sound such as "uhh" aside; any other word toks does not say means it is no cut)?
+    A take said in another order is not cut short."""
+    every = [set(_stems(t)) for t in toks if t]
+    words = []
+    for t in short:
+        w = set(_stems(t)) if t else set()
+        if w and any(w & x for x in every):
+            words.append(w)
+        elif t and not _HESITATION.fullmatch(t):
+            return False                    # a word this take does not say («تبطليها» / «بطلي»): not a cut, a change
+    before = [set(_stems(t)) for t in toks[:at] if t]
+    k = 0
+    for w in words:
+        while k < len(before) and not w & before[k]:
+            k += 1
+        if k == len(before):
+            return False
+        k += 1
+    last = words[-1] if words else set()
+    return bool(words) and not any(last & set(_stems(t)) for t in toks[at + 1:])
 
 
 def compare(a_words, b_words) -> dict:
@@ -368,12 +527,15 @@ def compare(a_words, b_words) -> dict:
             r["numbers"] = [x for x in r["numbers"] if x[0][0] != "everyday"]
     for r, other in ((ra, rb), (rb, ra)):
         # an opposite word counts against the other side of its own scale only («آمن» / «خطر», not «كويس» added as
-        # "well"), an organ against another organ («الكبد» / «الكلى»); a medicine always (a name said or not is a
-        # different instruction)
+        # "well"), an organ or a measure against another («الكبد» / «الكلى», «السكر» / «الضغط»), a route against a
+        # route, who against who; a medicine always (a name said or not is a different instruction)
         axes = {k[1] for k, _ in other["claim"] if k[0] == "says"}
-        organs = any(k[0] == "organ" for k, _ in other["claim"])
+        about = {k[0] for k, _ in other["claim"] if k[0] in _ABOUT}
         r["claim"] = [x for x in r["claim"] if x[0][0] == "drug" or (x[0][0] == "says" and x[0][1] in axes)
-                      or (x[0][0] == "organ" and organs)]
+                      or x[0][0] in about]
+        if not other["modal"]:      # a modal the other take stops before (cut short): every word of it is said here
+            r["modal"] = [x for x, at in zip(r["modal"], r["modal_at"])      # before the modal, never after it
+                          if not _stopped_before(other["toks"], r["toks"], at)]
     for kind in _ORDER:
         ca, cb = Counter(k for k, _ in ra[kind]), Counter(k for k, _ in rb[kind])
         if ca == cb:

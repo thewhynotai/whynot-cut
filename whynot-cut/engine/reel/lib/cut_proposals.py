@@ -36,7 +36,7 @@ import unicodedata
 from pathlib import Path
 
 from . import cut_proposals_norm as N
-from .safety.differences import compare as compare_takes, describe as describe_differences
+from .safety.differences import compare as compare_takes, describe as describe_differences, reading
 
 FILE = "01_analysis/cut-proposals.json"
 SCHEMA = 1
@@ -133,10 +133,28 @@ def _says_number(ws: list) -> bool:
 
 
 def _holds_number(*raw: str) -> bool:
-    """Any of these words is or holds a number, an everyday number word included («خمس» before «خمسمية»), or says
-    how often («مرتين», "twice")."""
-    from .safety.numbers import find_numbers, fold, is_frequency
-    return any(find_numbers([fold(w)]) or is_frequency(fold(w)) or re.search(r"\d", norm_word(w)) for w in raw)
+    """Any of these words is or holds a number, an everyday number word included («خمس» before «خمسمية»), says
+    how often («مرتين», "twice"), or is a dose's unit or count noun («حباية حباية» may be two pills, «مجم مجم»)."""
+    from .safety.numbers import find_numbers, fold, is_frequency, is_unit
+    return any(find_numbers([fold(w)]) or is_frequency(fold(w)) or is_unit(fold(w)) or re.search(r"\d", norm_word(w))
+               for w in raw)
+
+
+def _lost_words(ws: list, toks: list, drop: tuple, keep: tuple, fill: dict, read: set) -> list:
+    """The content words of the take to drop that the kept take does not say, as said: a clitic («للضغط» / «الضغط»)
+    or a word the dropped take cut off («تعرفي» in «تعرفيها») is said in both, and a word whose meaning the takes'
+    reader compared and found the same (read: "with food" / "with a full meal") is no loss."""
+    from .safety.numbers import fold, stems
+    kept = [fold(ws[k]["word"]) for k in range(keep[0], keep[0] + keep[1])]
+    said = {s for t in kept for s in stems(t)}
+    out = []
+    for k in range(drop[0], drop[0] + drop[1]):
+        t = fold(ws[k]["word"])
+        if k in read or not _content(toks[k], fill) or not t or set(stems(t)) & said \
+                or any(x.startswith(t) for x in kept):
+            continue
+        out.append(ws[k]["word"].strip().strip(".,!?؟…،"))
+    return out
 
 
 def _never_filler(raw: str) -> bool:
@@ -343,8 +361,9 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
                 lo_ -= 1
             while hi_ < n - 1 and not sentence_end(hi_) and not other[0] <= hi_ + 1 < other[0] + other[1]:
                 hi_ += 1
-            return [ws[k]["word"] for k in range(lo_, hi_ + 1)]
-        differs = compare_takes(sentence_of(drop[0], drop[1], keep), sentence_of(keep[0], keep[1], drop))
+            return lo_, [ws[k]["word"] for k in range(lo_, hi_ + 1)]
+        (lo_d, sent_d), (_, sent_k) = sentence_of(drop[0], drop[1], keep), sentence_of(keep[0], keep[1], drop)
+        differs = compare_takes(sent_d, sent_k)
         kept_text = " ".join(ws[k]["word"].strip() for k in range(keep[0], keep[0] + keep[1]))
         number_ar = "؛ بس فيها رقم أو جرعة، فسايبينها لحد ما تسمعها" if has_number else ""
         number_en = "; it holds a number or a dose, so it is left unticked" if has_number else ""
@@ -368,8 +387,18 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
             number_en += f"; but the two takes differ in meaning ({d_en}), so it is left unticked for you to choose"
             conf = min(conf, V["conf_on_purpose"])
             extra["differs"] = differs
+        # a word the take to drop says and the kept one does not (no word list can know every medical word: «سلبي» /
+        # «إيجابي», «الشمال» / «اليمين»): dropping it would lose what was said, so the editor hears both
+        lost = [] if differs else _lost_words(ws, toks, drop, keep, F, {lo_d + k for k in reading(sent_d)["read"]})
+        if lost:
+            said = "، ".join(f"«{w}»" for w in lost)
+            number_ar += f"؛ بس الإعادة اللي هتتشال فيها كلام مش في التانية ({said})، فسايبينها لحد ما تسمعهم وتختار"
+            number_en += (f"; but the take to drop says words the kept one does not ({', '.join(lost)}), so it is left "
+                          "unticked for you to choose")
+            conf = min(conf, V["conf_on_purpose"])
+            extra["differs"] = {"words": {"a": lost, "b": []}}
         add("retake", drop[0], drop[0] + drop[1] - 1, conf, ar + number_ar, en + number_en,
-            default="keep" if differs or mid or has_number else None, extra=extra)
+            default="keep" if differs or lost or mid or has_number else None, extra=extra)
         used.update(range(a, a + la))
         used.update(range(b, b + lb))
 

@@ -235,9 +235,14 @@ class TestReviewRound1Groups(unittest.TestCase):
     def test_i1_takes_that_differ_in_a_negation_or_a_word_are_flagged(self):
         g = T.groups(words([("الدوا ده بيعالج البرد", 0.95, 900), ("الدوا ده مش بيعالج البرد.", 0.95, 300)]))[0]
         self.assertTrue(g["differ"].get("negation"))
+        g = T.groups(words([("النهاردة هنتكلم عن موضوع مهم", 0.95, 900),
+                            ("النهاردة هنتكلم عن موضوع جديد.", 0.95, 300)]))[0]
+        self.assertIn("words", g["differ"])
+        # review 62efd2d P3: a disease or a measure for another is a different medical word, never a soft warning
         g = T.groups(words([("النهاردة هنتكلم عن مرض السكر", 0.95, 900),
                             ("النهاردة هنتكلم عن مرض الضغط.", 0.95, 300)]))[0]
-        self.assertIn("words", g["differ"])
+        self.assertEqual(g["differ"]["claim"], ["السكر", "الضغط"])
+        self.assertIsNone(g["best"])
 
     def test_r2_tie_line_reads_well_and_harmless_differences_stay_quiet(self):
         g = T.groups(words([("الدوا ده مهم جدا للضغط.", 0.95, 900), ("الدوا ده مهم جدا للضغط.", 0.95, 300)]))[0]
@@ -437,10 +442,14 @@ class TestMeaningDiffers(unittest.TestCase):
                 self.assertEqual(g["best"], 2)
 
     def test_c8_a_content_word_alone_warns_and_keeps_the_proposal(self):
-        g = pair("النهاردة هنتكلم عن مرض السكر", "النهاردة هنتكلم عن مرض الضغط.")
-        self.assertEqual(g["differ"], {"words": ["السكر", "الضغط"]})
+        g = pair("النهاردة هنتكلم عن موضوع مهم", "النهاردة هنتكلم عن موضوع جديد.")
+        self.assertEqual(g["differ"], {"words": ["جديد", "مهم"]})
         self.assertEqual(g["best"], 2)
         self.assertIn("⚠", g["line_ar"])
+        # review 62efd2d P3: «السكر» / «الضغط» is a different medical word (a measure), so no take is proposed
+        g = pair("النهاردة هنتكلم عن مرض السكر", "النهاردة هنتكلم عن مرض الضغط.")
+        self.assertEqual(g["differ"]["claim"], ["السكر", "الضغط"])
+        self.assertIsNone(g["best"])
 
     def test_c13_a_take_that_may_have_stopped_early_still_gets_no_best(self):
         # 7193e9a P2-1 (executor ruling 2026-10-17 20:10): a start that may have stopped early is no exception: a dose
@@ -513,11 +522,11 @@ class TestMeaningDiffers(unittest.TestCase):
         self.assertIn("نفي «مش»", g["line_ar"])
         g = T.groups(words([("النهاردة هنتكلم عن مرض", 0.95, 900), ("النهاردة هنتكلم عن مرض السكر الصبح", 0.95, 900),
                             ("النهاردة هنتكلم عن مرض الضغط الصبح.", 0.95, 300)]))[0]
-        self.assertEqual(g["differ"]["words"], ["السكر", "الضغط"])  # the full takes are compared with each other
+        self.assertEqual(g["differ"]["claim"], ["السكر", "الضغط"])  # the full takes are compared with each other
         g = T.groups(words([("النهاردة هنتكلم عن مرض", 0.95, 900),
                             ("النهاردة هنتكلم عن مرض السكر عند الكبار", 0.95, 900),
                             ("النهاردة هنتكلم عن مرض السكر عند الصغار.", 0.95, 300)]))[0]
-        self.assertEqual(g["differ"]["words"], ["الصغار", "الكبار"])   # never «السكر»: take 1 just did not get there
+        self.assertEqual(g["differ"]["claim"], ["الكبار", "الصغار"])   # never «السكر»: take 1 just did not get there
 
     def test_c12_words_shown_as_said(self):
         g = pair("today we talk about the patient's diet and sleep", "today we talk about the Doctor's diet and sleep.")
