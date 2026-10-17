@@ -2,7 +2,7 @@
 
 Date: 2026-10-18. Owner: Yunus. Author: plan session.
 
-Status: **DRAFT for the owner's review**. The design was approved in conversation on 2026-10-18, with the owner's additions.
+Status: **APPROVED by the owner on 2026-10-18.** Open questions are answered in §8.
 
 Inputs:
 - `Editing Plugin/NEW-PLAN-BRIEF-AR.md` (owner's answers);
@@ -48,7 +48,7 @@ The product is **open source**. Nothing is sold in V1.
 
 **In V1:**
 - **The panel framework:**
-  - Premiere panel (UXP on Premiere 26.5+, with the existing CEP bridge as the fallback for older Premiere);
+  - Premiere panel (UXP on Premiere 26.5+ ONLY in V1; a CEP fallback for older Premiere comes in a later version, per the owner);
   - After Effects panel (CEP).
 - **Inside the panels:**
   - in-panel chat;
@@ -232,7 +232,7 @@ Each feature is a thin panel UI over an engine command. Engine logic lives in `w
 ## 4. Architecture
 
 ```
-Premiere (UXP panel, 26.5+)   AE (CEP panel)   [older Premiere: CEP panel]
+Premiere (UXP panel, 26.5+)   AE (CEP panel)   [older Premiere: later version]
           \___________________|____________________/
                  shared panel-ui kit (adobe/panel-ui)
                               │  localhost, token, contract v4
@@ -301,6 +301,6 @@ At most 4–5 run at once (RAM).
   - real client clips after V1 is assembled (owner: "test it after the first version").
 - **Gate:** independent review, full suite, the macOS CI, the security line, and the installer test on clean accounts.
 
-## 8. Open questions for the owner
-1. **Open source, where?** A public GitHub repo (publishing needs the owner's OK), or source shared only with USB testers for now?
-2. **Minimum Premiere version for testers:** UXP needs 26.5+. The CEP fallback covers older versions, at extra test cost. Keep the fallback?
+## 8. Owner decisions (2026-10-18)
+1. **Distribution:** private, on a USB stick. The repo stays private, nothing is published, and source goes only with the stick.
+2. **Premiere versions:** the NEW UXP panel only (26.5+) in V1. Older Premiere (CEP fallback) comes in a later version.
