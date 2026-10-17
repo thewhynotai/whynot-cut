@@ -177,6 +177,11 @@ def run_qc(paths: Paths) -> dict:
                     out_sa.append(f"{e['event_id']} {e['template']} y {bb[1]}–{bb[3]} x {bb[0]}–{bb[2]}")
             r.add("creative", f"Graphics inside the safe area (top {sa.get('top')}, bottom {sa.get('bottom')} px)",
                   not out_sa, "; ".join(out_sa[:5]))
+        # K-T4 (Addendum K1, Task 64): an element inside a platform's UI zone is a hard failure, behind its switch
+        from .safety.safezone_gate import qc_item as _safezone_item
+        _sz = _safezone_item(paths)
+        if _sz is not None:
+            r.add("technical", "Platform safe zones (no element under the app's buttons)", _sz["ok"], _sz["detail"])
         # probe AE renders
         try:
             from .media import probe
