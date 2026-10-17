@@ -80,6 +80,13 @@ text arrive exactly as written.
 | `--owner TRACK`, `--priority -100..100` | who queued it; higher priority runs first, then oldest first |
 | `--cwd DIR`, `--env NAME=VALUE`, `--id ID` | the default cwd is the current folder; an id can't look like the runner's own files (`.spec`, `.cancel`, `.json`, `.log`, `.dup-` …) |
 | `--file job.json` | a whole job as JSON (the same fields as a queue file) |
+| `--replace ID` | a suite: cancel your queued or running suite `ID` and queue this one instead |
+| `--allow-second` | a second suite while you have one (recorded; `list`/`status` show `[2nd suite]`) |
+
+**One full suite per owner at a time** (machine-load rule, COORDINATION, 2026-10-17): `add --class suite` (or `gate`)
+is refused while the same `--owner` has a suite queued or running; the message names it. Use `--replace <id>` for a
+newer snapshot, `--allow-second` only when both must run. The executor's `gate` suites are exempt (a gate cancels
+nothing).
 
 ### What `done\<id>.json` holds
 

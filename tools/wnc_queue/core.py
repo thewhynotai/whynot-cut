@@ -596,7 +596,26 @@ def queued_jobs(paths: Paths, bad: list | None = None, skip=frozenset()) -> list
     return jobs
 
 
-def add_job(paths: Paths, job: dict, cfg: dict | None = None) -> dict:
+SUITE_CLASSES = ("suite", "gate")
+
+
+def owner_suites(paths: Paths, owner: str) -> list[tuple[str, dict]]:
+    """(state, job) of this owner's queued or running full suites (class suite or gate)."""
+    out = []
+    for state, d in (("running", paths.running), ("queued", paths.queue)):
+        for f in d.glob("*.json"):
+            j = read_json(f)
+            if isinstance(j, dict) and f.stem == j.get("id") and j.get("owner") == owner \
+                    and j.get("heavy") in SUITE_CLASSES:
+                out.append((state, j))
+    return out
+
+
+def add_job(paths: Paths, job: dict, cfg: dict | None = None, replace: str | None = None,
+            allow_second: bool = False) -> dict:
+    """Queue a job. Machine-load rule (COORDINATION, 2026-10-17): one full suite per owner at a time — a second
+    `suite`/`gate` of the same owner is refused unless it `replace`s the first (that one is cancelled) or says
+    `allow_second` (recorded, shown by status). The executor's gate suites are exempt (a gate cancels nothing)."""
     cfg = cfg or load_config(paths)
     j = validate(job, cfg)
     paths.ensure()
@@ -607,6 +626,25 @@ def add_job(paths: Paths, job: dict, cfg: dict | None = None) -> dict:
     exe = resolve_exe(j["argv"][0], Path(j["cwd"]), cfg, j["env"].get("PATH"))   # fail now, not hours later
     check_batch_args(exe, j["argv"][1:])
     check_command_line(exe, j["argv"][1:])
+    if replace is not None and (j["heavy"] not in SUITE_CLASSES):
+        raise JobError("--replace is for full suites (class suite or gate): it cancels your other suite")
+    if j["heavy"] in SUITE_CLASSES and not (j["heavy"] == "gate" and j["owner"] == GATE_OWNER):
+        others = owner_suites(paths, j["owner"])
+        if replace is not None:
+            if replace not in [o["id"] for _s, o in others]:
+                raise JobError(f"--replace {replace}: not a queued or running suite of owner {j['owner']} "
+                               f"(theirs: {', '.join(o['id'] for _s, o in others) or 'none'})")
+            others = [(s, o) for s, o in others if o["id"] != replace]
+        if others and not allow_second:
+            names = ", ".join(f"{o['id']} ({s})" for s, o in others)
+            raise JobError(f"owner {j['owner']} already has a full suite: {names}. One suite per owner at a time "
+                           f"(machine-load rule): `cancel <id>`, or queue this one with `--replace <id>` (cancels "
+                           f"that one), or `--allow-second` if both must run")
+        if allow_second and others:
+            j["allow_second"] = [o["id"] for _s, o in others]
+        if replace is not None:
+            cancel_job(paths, replace)
+            j["replaces"] = replace
     write_json(paths.queue / f"{jid}.json", j)
     return j
 

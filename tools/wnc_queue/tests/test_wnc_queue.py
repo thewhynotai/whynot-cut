@@ -1798,6 +1798,70 @@ class HeavyV2Tests(Base):
                 self.assertLessEqual(refresh * 2, int(m.group(1)), "two refreshes fit in heavy.sh's limit")
 
 
+class SuiteLimitTests(Base):
+    """Machine-load rule (2026-10-17): one full suite per owner at a time; --replace, --allow-second; gates exempt."""
+
+    def suite(self, owner="adobe", **kw):
+        return self.job(["python", "-V"], heavy=kw.pop("heavy", "suite"), owner=owner, **kw)
+
+    def test_a_second_suite_of_the_same_owner_is_refused(self):
+        first = self.suite()
+        with self.assertRaises(JobError) as cm:
+            self.suite()
+        self.assertIn(first["id"], str(cm.exception))
+        self.assertIn("--replace", str(cm.exception))
+        self.suite(owner="installer")                                   # another owner: fine
+        self.job(["python", "-V"], heavy="cpu", owner="adobe")          # a non-suite job: fine
+        self.assertEqual(len(list(self.paths.queue.glob("*.json"))), 3)
+
+    def test_a_running_suite_counts_too(self):
+        j = self.suite(id="running-one")
+        os.replace(self.paths.queue / "running-one.json", self.paths.running / "running-one.json")
+        with self.assertRaises(JobError) as cm:
+            self.suite()
+        self.assertIn("running-one (running)", str(cm.exception))
+        self.assertEqual(j["heavy"], "suite")
+
+    def test_replace_cancels_the_first_and_queues_this_one(self):
+        first = self.suite(id="old-suite")
+        new = core.add_job(self.paths, {"argv": ["python", "-V"], "cwd": str(self.dir), "heavy": "suite",
+                                        "owner": "adobe", "id": "new-suite"}, self.cfg, replace="old-suite")
+        self.assertEqual(new["replaces"], first["id"])
+        self.assertEqual(self.done("old-suite")["status"], "cancelled")
+        self.assertEqual([f.stem for f in self.paths.queue.glob("*.json")], ["new-suite"])
+
+    def test_replace_must_name_your_own_suite(self):
+        self.suite(id="theirs", owner="installer")
+        with self.assertRaises(JobError):
+            core.add_job(self.paths, {"argv": ["python", "-V"], "cwd": str(self.dir), "heavy": "suite",
+                                      "owner": "adobe"}, self.cfg, replace="theirs")
+        with self.assertRaises(JobError):
+            core.add_job(self.paths, {"argv": ["python", "-V"], "cwd": str(self.dir), "heavy": "cpu",
+                                      "owner": "installer"}, self.cfg, replace="theirs")
+        self.assertTrue((self.paths.queue / "theirs.json").exists())
+
+    def test_allow_second_is_recorded_and_shown(self):
+        first = self.suite()
+        second = core.add_job(self.paths, {"argv": ["python", "-V"], "cwd": str(self.dir), "heavy": "suite",
+                                           "owner": "adobe", "title": "both must run"}, self.cfg, allow_second=True)
+        self.assertEqual(second["allow_second"], [first["id"]])
+        from wnc_queue import cli
+        self.assertIn("[2nd suite] both must run", cli._row("queued", core.read_json(
+            self.paths.queue / f"{second['id']}.json")))
+
+    def test_the_executors_gate_is_exempt(self):
+        self.suite(owner="executor")
+        self.suite(owner="executor", heavy="gate")
+        self.suite(owner="executor", heavy="gate")
+        with self.assertRaises(JobError):                               # its plain suites are not
+            self.suite(owner="executor")
+
+    def test_the_cli_takes_both_flags(self):
+        from wnc_queue import cli
+        a = cli.parser().parse_args(["add", "--class", "suite", "--replace", "X", "--allow-second", "--", "python"])
+        self.assertEqual((a.replace, a.allow_second), ("X", True))
+
+
 class EndToEndTests(Base):
     """Through the real CLI, with the runner as its own process (as the scheduled task starts it)."""
 

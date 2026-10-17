@@ -87,7 +87,7 @@ def kick_and_check(paths: Paths, jid: str) -> str:
 
 
 def cmd_add(a, paths):
-    job = core.add_job(paths, build_job(a))
+    job = core.add_job(paths, build_job(a), replace=a.replace, allow_second=a.allow_second)
     print(job["id"])
     if not a.no_kick:
         print(kick_and_check(paths, job["id"]), file=sys.stderr)
@@ -103,7 +103,9 @@ def _row(state, j):
     return (f"{state:<8} {j.get('id', '?'):<44} {str(j.get('priority', (j.get('job') or {}).get('priority', ''))):>4} "
             f"{(j.get('heavy') or (j.get('job') or {}).get('heavy') or ''):<6} {str(j.get('owner') or ''):<14} "
             f"{(s.get('mode') or ((j.get('job') or {}).get('stop') or {}).get('mode') or ''):<13} {prog:<16} "
-            f"{_age(j.get('finished_at') or j.get('queued_at')):>5}  {str(j.get('title') or '')[:50]}")
+            f"{_age(j.get('finished_at') or j.get('queued_at')):>5}  "
+            f"{'[2nd suite] ' if (j.get('allow_second') or (j.get('job') or {}).get('allow_second')) else ''}"
+            f"{str(j.get('title') or '')[:50]}")
 
 
 def cmd_list(a, paths):
@@ -340,6 +342,10 @@ def parser() -> argparse.ArgumentParser:
     s.add_argument("--max-attempts", type=int,
                    help="starts allowed (default 3: it survives 2 runner deaths, then 'stranded')")
     s.add_argument("--no-kick", action="store_true", help="don't start the runner now")
+    s.add_argument("--replace", metavar="ID", help="a suite: cancel your queued/running suite ID and queue this "
+                                                   "one instead (one full suite per owner at a time)")
+    s.add_argument("--allow-second", action="store_true",
+                   help="a suite while you have one already (recorded; status shows it): only when both must run")
     s.add_argument("argv", nargs=argparse.REMAINDER)
     s.set_defaults(fn=cmd_add)
     s = sub.add_parser("list", help="queued, running and recent done jobs")
