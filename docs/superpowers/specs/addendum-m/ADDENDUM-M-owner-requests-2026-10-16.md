@@ -149,10 +149,10 @@ ignores extra keys. The executor implements this in T4.13's code under M1-T2.
 - **`DOMAIN_FLAGS` comes from the registry.** Each registry id flags itself, and the `medical`-always-on rule comes from `always_on`. `_all_flags()` keeps reading it at call time. An unknown key part is refused, never mapped to `general`.
 - **`ok` rows record what they cleared (the additive field).** An `ok` row gains an optional `flags` list: the flags for which the line was reviewed and found fine. Rules (executor ruling, 2026-10-17):
   - `_rows` validates `flags` as a list of distinct registry flags.
-  - A new `ok` row is written with the line's required flags that are not flagged on that line.
+  - A new `ok` row is written with the line's required flags that are not flagged on that line, minus `ai`. An ai review depends on the assets, not the words, so a carried line must ask for `ai` again when an AI asset appears later. `counts()` reports `ai` as "not applicable / no AI asset" on lines that never had an ai review, never as ok (executor ruling, M1-T2 review P2-1).
   - **An `ok` row may name a line that also has flag rows**, as long as its `flags` do not overlap that line's flagged ones. For example, a line flagged `business` can carry an `ok` row for `medical`. Today's refusal "an ok row may not name a flagged line" changes meaning to "an ok row may not name a line **for a flag that line is flagged for**".
   - A carried `ok` row satisfies only the flags it lists. A required flag it lacks (for example, a newly detected `business`) makes the line need review for that flag, naming it, without forcing a full re-review.
-  - An old `ok` row with no `flags` is read as covering `key.split("+")` of its file's key.
+  - An old `ok` row with no `flags` is read as covering `key.split("+")` of its file's key, minus `ai`, so it never counts as an ai review (same reason as above; review P3-3).
   - Per-domain counts in `review-gate` ("بيزنس ١٢/١٢") come from verdict rows plus `ok` rows' `flags`.
 - **Code that changes for this:** `_rows` (validating `flags`, the overlap rule), `write()` (the allowed/required checks, writing `flags`, carrying), and `load()` (accepting any registry flag, reading `ok` rows without `flags`).
 - **Legacy values keep today's checks.** A profile with only the old `domain` maps:
