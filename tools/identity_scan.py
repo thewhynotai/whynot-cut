@@ -16,12 +16,20 @@ Arabic proclitic stripped (`والـ…`), the line with \\uXXXX, HTML entities 
 the next line (unless the line ends in hard punctuation or the next line is blank). File and folder names are scanned
 too; any name part that matches is shown as <name:hash> in every report, so a report never carries a token.
 
-    identity_scan.py scan    [--root DIR] [--hashes FILE] [--key-file FILE] [--require-key] [--json]
+    identity_scan.py scan    [--root DIR] [--hashes FILE] [--key-file FILE] [--require-key] [--json] [--git] [--archives]
     identity_scan.py secrets [--root DIR] [--allowlist FILE] [--key-file FILE] [--require-readable] [--json]
     identity_scan.py make-key --out FILE                                  (outside the repo; never overwrites)
     identity_scan.py make-hashes --plain FILE --key-file FILE [--out FILE] (plain list and key outside the repo)
 
---root must be an existing folder (extract a zip first). Exit: 0 clean (or skipped), 1 findings, 2 usage / key / IO
+--git (the release gate): every git clone under --root (the root itself or any listed folder holding .git) also has its
+history scanned: each commit's author, committer, message and patch (`git log --all --reflog -p --cc`), every ref name,
+every tag's message, and the .git metadata text files (objects and index excepted: the history covers them). A hit
+names the commit (<repo>@git:<sha12>:<path in the patch> or (message)), the ref or the tag, never the token.
+--archives (the release gate): every .zip / .ccx / .zxp under --root has its members' names and texts scanned (nested
+archives too), extracted one by one to a temp folder outside --root; a hit is shown as <archive>!<member>.
+Both write only to that temp folder (removed afterwards). A file that is binary or over 20 MB is scanned by name only
+and counted ("name_only").
+--root must be an existing folder (extract a zip first, or use --archives). Exit: 0 clean (or skipped), 1 findings, 2 usage / key / IO
 error, a root with nothing to scan, or (with --require-key / --require-readable) a file that could not be read.
 Standard library only.
 """
@@ -36,9 +44,14 @@ import json
 import os
 import re
 import secrets as _secrets
+import shutil
 import stat
 import subprocess
 import sys
+import tempfile
+import threading
+import zipfile
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote
@@ -51,6 +64,13 @@ KEY_ENV = "WNC_IDENTITY_KEY_FILE"
 KEY_HEX_ENV = "WNC_IDENTITY_KEY"
 MAX_BYTES = 20_000_000          # bigger files: only their names are scanned
 FORMAT = 2                      # 2: the glued-split spelling of every token is hashed too
+ARCHIVE_SUFFIXES = (".zip", ".ccx", ".zxp")
+ARCHIVE_DEPTH = 4               # archive in archive (the plugin zip holds the .ccx); deeper = unreadable, never skipped
+ARCHIVE_TOTAL = 4_000_000_000   # bytes extracted per scan (a zip bomb stops here: the rest is unreadable)
+HISTORY_CHUNK = 8_000_000       # a commit's text is split into files of about this size (under MAX_BYTES)
+GIT_TIMEOUT = 1500              # seconds for one clone's `git log -p`
+_COMMIT_MARK = b"\x00WNC-COMMIT\x00"
+_TAG_MARK = b"\x00WNC-TAG\x00"
 
 
 def _load_norm():
@@ -454,8 +474,8 @@ def _check_db(db: dict, key: bytes) -> None:
 
 
 def _chunk_worker(args):
-    root, db, key, files = args
-    return _scan_files(Path(root), db, key, files)
+    root, db, key, files, archives = args
+    return _scan_files(Path(root), db, key, files, archives=archives)
 
 
 def _jobs_default() -> int:
@@ -463,10 +483,12 @@ def _jobs_default() -> int:
 
 
 def scan(root: Path, db: dict, key: bytes, files: list[str] | None = None, report: dict | None = None,
-         jobs: int | None = None, min_files_per_job: int = 400) -> list[Hit]:
+         jobs: int | None = None, min_files_per_job: int = 400, git: bool = False, archives: bool = False) -> list[Hit]:
     """Every (path, line) where a listed token appears in a file's text or in a file or folder name. `report`, when
-    given, receives "files" (paths listed) and "unreadable" (shown paths of files and folders that could not be read;
-    files git lists but that no longer exist are skipped, not unreadable). Big trees are split over `jobs` worker
+    given, receives "files" (paths listed), "unreadable" (shown paths of files and folders that could not be read;
+    files git lists but that no longer exist are skipped, not unreadable), "name_only" (files scanned by name only:
+    binary or over MAX_BYTES), "git" and "archives" (counts). `git`: each git clone's history too (see the module
+    doc); `archives`: the members of every .zip / .ccx / .zxp. Big trees are split over `jobs` worker
     processes (default: a quarter of the CPU threads, at most 4); the result is the same, in the same order, and any
     problem starting the workers falls back to one process. Workers start by spawning (Windows, macOS), which re-imports
     the caller's main module: an in-process caller needs an `if __name__ == "__main__":` guard, or should use the CLI."""
@@ -478,7 +500,43 @@ def scan(root: Path, db: dict, key: bytes, files: list[str] | None = None, repor
         raise ScanError(f"nothing to scan under {root}")
     m = _Matcher(db, key)
     memo: dict[str, str] = {}
+    groots = git_roots(root, files) if git else []
+    for g in groots:                        # the clone's .git text files (config, refs, logs, hooks, …)
+        files = files + _git_meta_files(root, g, unlisted)
     unreadable = [_display(r, m, memo) for r in unlisted]
+    hits, more_bad, name_only = _scan_tree(root, db, key, files, m, memo, jobs, min_files_per_job, archives)
+    unreadable += more_bad
+    gstat = {"repos": len(groots), "commits": 0, "refs": 0, "tags": 0}
+    astat = {"archives": 0, "members": 0, "name_only": 0, "bytes": 0, "n": 0}
+    if groots or archives:
+        tmp = Path(tempfile.mkdtemp(prefix="wnc-idscan-"))
+        try:
+            if _inside(tmp, root):
+                raise ScanError("the temp folder is inside the scanned tree: set TMP / TEMP / TMPDIR elsewhere")
+            for i, g in enumerate(groots):
+                h, b = _history_hits(root, g, db, key, m, memo, tmp / f"h{i}", gstat, astat, jobs)
+                hits += h
+                unreadable += b
+            if archives:
+                (tmp / "a").mkdir()
+                for rel in files:
+                    p = os.path.join(root, rel)
+                    if rel.lower().endswith(ARCHIVE_SUFFIXES) and not _is_link(p) and os.path.isfile(_long(p)):
+                        h, b = _archive_hits(_long(p), _display(rel, m, memo), m, tmp / "a", astat, 1)
+                        hits += h
+                        unreadable += b
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)       # our own temp folder: regular files only, no links
+    if report is not None:
+        report["files"] = len(files)
+        report["unreadable"] = unreadable
+        report["name_only"] = name_only + astat["name_only"]
+        report["git"] = gstat
+        report["archives"] = {"archives": astat["archives"], "members": astat["members"]}
+    return hits
+
+
+def _scan_tree(root, db, key, files, m, memo, jobs, min_files_per_job, archives):
     jobs = _jobs_default() if jobs is None else max(1, jobs)
     jobs = min(jobs, len(files) // max(1, min_files_per_job)) or 1
     results = None
@@ -488,31 +546,33 @@ def scan(root: Path, db: dict, key: bytes, files: list[str] | None = None, repor
         try:
             from concurrent.futures import ProcessPoolExecutor
             with ProcessPoolExecutor(max_workers=len(chunks)) as ex:
-                results = list(ex.map(_chunk_worker, [(str(root), db, key, c) for c in chunks]))
+                results = list(ex.map(_chunk_worker, [(str(root), db, key, c, archives) for c in chunks]))
         except Exception:  # noqa: BLE001  G10: workers unavailable here → the same scan in one process
             results = None
     if results is None:
-        results = [_scan_files(root, db, key, files, m, memo)]
-    hits = [h for r in results for h in r[0]]
-    unreadable += [u for r in results for u in r[1]]
-    if report is not None:
-        report["files"] = len(files)
-        report["unreadable"] = unreadable
-    return hits
+        results = [_scan_files(root, db, key, files, m, memo, archives)]
+    return ([h for r in results for h in r[0]], [u for r in results for u in r[1]], sum(r[2] for r in results))
 
 
 def _scan_files(root: Path, db: dict, key: bytes, files: list[str], m: "_Matcher | None" = None,
-                memo: dict | None = None) -> tuple[list[Hit], list[str]]:
+                memo: dict | None = None, archives: bool = False) -> tuple[list[Hit], list[str], int]:
+    """(hits, unreadable, name_only): name_only counts files whose text was not scanned (binary or over MAX_BYTES);
+    with `archives`, an archive is not counted (its members are scanned instead)."""
     m = m or _Matcher(db, key)
     memo = {} if memo is None else memo
-    hits, unreadable = [], []
+    hits, unreadable, name_only = [], [], 0
     for rel in files:
         parent = rel.rsplit("/", 1)[0] if "/" in rel else ""
         h = m.name_hit(rel)
         if h and not (parent and m.name_hit(parent)):        # each name reported once, where it first matches
             hits.append(Hit(_display(rel, m, memo), 0, h[:12]))
+        path = os.path.join(root, rel)
         try:
-            text = _decode(_read_bytes(os.path.join(root, rel)))
+            data = _read_bytes(path)
+            text = _decode(data)
+            if text is None and not (archives and rel.lower().endswith(ARCHIVE_SUFFIXES)) and (
+                    data is not None or _oversized(path)):
+                name_only += 1
         except FileNotFoundError:
             continue                        # listed by git but deleted in the working folder
         except OSError:
@@ -554,7 +614,350 @@ def _scan_files(root: Path, db: dict, key: bytes, files: list[str], m: "_Matcher
             tail = pcs[-1][-(m.n_max - 1):] if pcs and pcs[-1] and m.n_max > 1 else []
             # only words a token can start with are worth carrying (a wrapped token starts on this line)
             carry = tail[next((i for i, w in enumerate(tail) if w in hot or m.is_first(w)), len(tail)):]
-    return hits, unreadable
+    return hits, unreadable, name_only
+
+
+def _oversized(path: str) -> bool:
+    try:
+        st = os.lstat(_long(path))
+    except OSError:
+        return False
+    return stat.S_ISREG(st.st_mode) and st.st_size > MAX_BYTES
+
+
+# ----------------------------------------------------------------------------------------- git history, archives
+def git_roots(root: Path, files: list[str]) -> list[str]:
+    """'' for `root` itself and the relative path of every listed folder that holds a .git (never through a link)."""
+    out = []
+    for rel in [""] + list(files):
+        base = os.path.join(root, rel) if rel else str(root)
+        dot = os.path.join(base, ".git")
+        if os.path.lexists(_long(dot)) and not (rel and _is_link(base)) and not _is_link(dot):
+            out.append(rel)
+    return out
+
+
+def _git_meta_files(root: Path, g: str, errors: list) -> list[str]:
+    """The text side of a clone's .git folder (config, HEAD, refs, logs, hooks, info, …), as paths relative to root;
+    objects/ and the index are left out (the history scan reads every commit, and the index lists tracked files)."""
+    gitdir = Path(root) / g / ".git" if g else Path(root) / ".git"
+    if _is_link(str(gitdir)) or not gitdir.is_dir():
+        return []
+    pre = f"{g}/.git" if g else ".git"
+    errs: list[str] = []
+    found = walk(gitdir, errs)
+    errors += [f"{pre}/{e}" if e != "." else pre for e in errs]
+    return [pre] + [f"{pre}/{r}" for r in found if r != "index" and r != "objects" and not r.startswith("objects/")]
+
+
+def _git(repo: Path, args: list[str]) -> list[str]:
+    return ["git", "-c", "core.quotepath=false", "-c", "i18n.logOutputEncoding=UTF-8", "-c", "log.showSignature=false",
+            "-c", "core.fsmonitor=false", "-C", str(repo), *args]
+
+
+def _git_bytes(repo: Path, args: list[str], timeout: int = 300) -> bytes:
+    """git's stdout; a failure is a ScanError that names the command and the exit code only (git's own message may
+    quote a ref or a path, so it is never echoed)."""
+    try:
+        p = subprocess.run(_git(repo, args), capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise ScanError(f"git {args[0]} timed out after {timeout} s") from None
+    except OSError as e:
+        raise ScanError(f"git is not usable ({type(e).__name__}): the history cannot be scanned") from None
+    if p.returncode != 0:
+        raise ScanError(f"git {args[0]} failed (exit {p.returncode}): the history cannot be scanned")
+    return p.stdout
+
+
+def dump_history(repo: Path, out: Path, timeout: int = GIT_TIMEOUT) -> tuple[dict, dict]:
+    """Write a clone's history as text files under `out` (outside the scanned tree). Returns (index, counts):
+    index {file: ("commit", sha12, [(first line, patch header or None for the commit header + message)])
+           | ("blob", sha12, patch header) | ("refs", [ref names]) | ("tag", ref name)},
+    counts {"commits", "refs", "tags", "blobs"}.
+    Patch text never becomes name-only: a NUL (a file forced to a text diff) is written as a space, and a line longer
+    than HISTORY_CHUNK is split at a space. Every blob git shows as "Binary files … differ" (binary content, or a
+    `binary` / `-diff` attribute: `*.zip binary`) is written out whole as b/<n> so it is scanned as a file, or opened
+    as an archive."""
+    for d in ("c", "t", "b"):
+        (out / d).mkdir(parents=True, exist_ok=True)
+    index: dict = {}
+    counts = {"commits": 0, "refs": 0, "tags": 0, "blobs": 0}
+    binaries: dict[str, tuple[str, str]] = {}          # blob sha -> (commit sha12, patch header), first seen
+    fmt = "--format=%x00WNC-COMMIT%x00%H%nauthor %an <%ae>%ncommitter %cn <%ce>%n%n%B"
+    cmd = _git(repo, ["log", "--all", "--reflog", "-p", "--cc", "--full-index", "--no-color", "--no-ext-diff",
+                      "--no-textconv", fmt])
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError as e:
+        raise ScanError(f"git is not usable ({type(e).__name__}): the history cannot be scanned") from None
+    killed = threading.Event()
+
+    def kill():
+        killed.set()
+        proc.kill()
+    timer = threading.Timer(timeout, kill)
+    timer.start()
+    st = {"f": None, "size": 0, "line": 0, "n": 0, "sha": "", "starts": None, "new": None, "hdr": None}
+
+    def new_chunk(header):
+        if st["f"]:
+            st["f"].close()
+        st["n"] += 1
+        name = f"c/{st['n']:07d}.txt"
+        st["f"], st["size"], st["line"], st["starts"] = open(out / name, "wb"), 0, 0, [(1, header)]
+        index[name] = ("commit", st["sha"][:12], st["starts"])
+
+    try:
+        for raw in proc.stdout:
+            if raw.startswith(_COMMIT_MARK):
+                st["sha"] = raw[len(_COMMIT_MARK):].strip().decode("ascii", "replace")
+                counts["commits"] += 1
+                new_chunk(None)
+                continue
+            if st["f"] is None:
+                continue
+            raw = raw.replace(b"\x00", b" ")
+            if raw.startswith((b"diff --git ", b"diff --cc ", b"diff --combined ")):
+                header = st["hdr"] = raw.rstrip(b"\r\n").decode("utf-8", "replace")
+                st["new"] = None
+                if st["size"] and st["size"] + len(raw) > HISTORY_CHUNK:
+                    new_chunk(header)
+                else:
+                    st["starts"].append((st["line"] + 1, header))
+            elif raw.startswith(b"index ") and st["hdr"]:
+                ids = raw.split()[1] if len(raw.split()) > 1 else b""
+                new = ids.split(b"..")[-1].decode("ascii", "replace")
+                st["new"] = new if new.strip("0") else None   # all zeros: deleted (the old blob was new earlier)
+            elif raw.startswith(b"Binary files ") and st["new"] and st["new"] not in binaries:
+                binaries[st["new"]] = (st["sha"][:12], st["hdr"])
+            for piece in _pieces(raw, HISTORY_CHUNK // 2):
+                if st["size"] and st["size"] + len(piece) > HISTORY_CHUNK:   # a huge patch: on in a new file
+                    new_chunk(st["starts"][-1][1])
+                st["f"].write(piece)
+                st["size"] += len(piece)
+                st["line"] += 1
+        proc.wait()
+    finally:
+        timer.cancel()
+        if st["f"]:
+            st["f"].close()
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    if killed.is_set():
+        raise ScanError(f"git log timed out after {timeout} s: the history cannot be scanned")
+    if proc.returncode != 0:
+        raise ScanError(f"git log failed (exit {proc.returncode}): the history cannot be scanned")
+    refs = [r for r in _git_bytes(repo, ["for-each-ref", "--format=%(refname)"]).decode("utf-8", "replace")
+            .split("\n") if r]
+    (out / "refs.txt").write_bytes(("\n".join(refs) + "\n").encode("utf-8"))
+    index["refs.txt"] = ("refs", refs)
+    counts["refs"] = len(refs)
+    tags = _git_bytes(repo, ["for-each-ref", "refs/tags",
+                             "--format=%00WNC-TAG%00%(refname)%0a%(taggername) %(taggeremail)%0a%0a%(contents)"])
+    for i, part in enumerate(p for p in tags.split(_TAG_MARK) if p.strip()):
+        name = f"t/{i + 1:07d}.txt"
+        (out / name).write_bytes(part)
+        index[name] = ("tag", part.split(b"\n", 1)[0].decode("utf-8", "replace"))
+        counts["tags"] += 1
+    shas = sorted(binaries)
+    for i, ok in enumerate(_fetch_blobs(repo, shas, out / "b", timeout)):
+        name = f"b/{i + 1:07d}"
+        index[name] = ("blob", *binaries[shas[i]]) if ok else ("missing", *binaries[shas[i]])
+        counts["blobs"] += 1
+    return index, counts
+
+
+def _pieces(raw: bytes, limit: int):
+    """`raw` as lines of at most `limit` bytes, cut after a space when there is one (a token stays whole)."""
+    while len(raw) > limit:
+        cut = raw.rfind(b" ", 0, limit)
+        cut = limit if cut <= 0 else cut + 1
+        yield raw[:cut] + b"\n"
+        raw = raw[cut:]
+    yield raw
+
+
+def _fetch_blobs(repo: Path, shas: list[str], out: Path, timeout: int) -> list[bool]:
+    """Each blob in `shas` written whole to out/<n> (n from 1) by one `git cat-file --batch`; False where git has no
+    such blob."""
+    if not shas:
+        return []
+    try:
+        proc = subprocess.Popen(_git(repo, ["cat-file", "--batch"]), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL)
+    except OSError as e:
+        raise ScanError(f"git is not usable ({type(e).__name__}): the history cannot be scanned") from None
+
+    def feed():
+        try:
+            proc.stdin.write("".join(s + "\n" for s in shas).encode("ascii"))
+            proc.stdin.close()
+        except OSError:
+            pass
+    killed = threading.Event()
+
+    def kill():
+        killed.set()
+        proc.kill()
+    threading.Thread(target=feed, daemon=True).start()
+    timer = threading.Timer(timeout, kill)
+    timer.start()
+    got = []
+    try:
+        for i, _sha in enumerate(shas):
+            head = proc.stdout.readline().split()
+            if len(head) == 2 and head[1] == b"missing":
+                got.append(False)
+                continue
+            if len(head) != 3 or head[1] != b"blob":
+                raise ScanError("git cat-file gave an unexpected answer: the history cannot be scanned")
+            left = int(head[2])
+            with open(out / f"{i + 1:07d}", "wb") as f:
+                while left:
+                    chunk = proc.stdout.read(min(1 << 20, left))
+                    if not chunk:
+                        raise ScanError("git cat-file stopped early: the history cannot be scanned")
+                    f.write(chunk)
+                    left -= len(chunk)
+            proc.stdout.read(1)                         # the LF after each blob
+            got.append(True)
+        proc.wait()
+    finally:
+        timer.cancel()
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    if killed.is_set():
+        raise ScanError(f"git cat-file timed out after {timeout} s: the history cannot be scanned")
+    return got
+
+
+def _patch_path(header: str) -> str:
+    """The file a patch header names: `diff --git a/X b/Y` -> Y, `diff --cc X` -> X."""
+    if header.startswith("diff --git "):
+        rest = header[len("diff --git "):]
+        return rest.rsplit(" b/", 1)[1] if " b/" in rest else rest
+    return header.split(" ", 2)[2] if header.count(" ") >= 2 else header
+
+
+def _history_hits(root: Path, g: str, db, key, m, memo, out: Path, gstat: dict, astat: dict, jobs) \
+        -> tuple[list[Hit], list[str]]:
+    """Hits in one clone's history. Its patch text, refs and tags must all be read as text: a file of them that comes
+    back unreadable or name-only is unreadable (never dropped). Its binary blobs are scanned like working-tree files
+    (an archive is opened, other binary content is name-only and counted)."""
+    repo = Path(root) / g if g else Path(root)
+    pre = (_display(g, m, memo) if g else "") + "@git:"
+    index, counts = dump_history(repo, out)
+    for k in ("commits", "refs", "tags"):
+        gstat[k] += counts[k]
+    text = sorted(k for k, v in index.items() if v[0] in ("commit", "refs", "tag"))
+    rep: dict = {}
+    found = scan(out, db, key, files=text, report=rep, jobs=jobs)
+    bad = [f"{pre}{u}" for u in rep.get("unreadable", [])]
+    if rep.get("name_only"):
+        bad.append(f"{pre}{rep['name_only']} history text file(s) that could not be read as text")
+    hits: list[Hit] = []
+    for name in sorted(k for k, v in index.items() if v[0] in ("blob", "missing")):
+        kind, sha12, header = index[name]
+        label = f"{pre}{sha12}:{_display(_patch_path(header), m, memo) if header else '?'}"
+        path = out / name
+        if kind == "missing":
+            bad.append(label)
+            continue
+        with open(path, "rb") as f:
+            magic = f.read(4)
+        if magic == b"PK\x03\x04" or _patch_path(header or "").lower().endswith(ARCHIVE_SUFFIXES):
+            (out / "a").mkdir(exist_ok=True)
+            h, b = _archive_hits(str(path), label, m, out / "a", astat, 1)
+        else:                                       # a text file with a binary / -diff attribute, or real binary
+            r2: dict = {}
+            h = [Hit(label, x.line, x.hash) for x in scan(out, db, key, files=[name], report=r2, jobs=1)]
+            b = [label] if r2.get("unreadable") else []
+            astat["name_only"] += r2.get("name_only", 0)
+        hits += h
+        bad += b
+        path.unlink(missing_ok=True)
+    for h in found:
+        kind, *info = index.get(h.path, ("?",))
+        if kind == "commit":
+            sha12, starts = info
+            first, header = max((s for s in starts if s[0] <= max(h.line, 1)), key=lambda s: s[0])
+            where = f"{_display(_patch_path(header), m, memo)}" if header else "(message)"
+            hits.append(Hit(f"{pre}{sha12}:{where}", h.line - first + 1, h.hash))
+        elif kind == "refs":
+            name = info[0][h.line - 1] if 0 < h.line <= len(info[0]) else "?"
+            hits.append(Hit(f"{pre}ref {_display(name, m, memo)}", 0, h.hash))
+        elif kind == "tag":
+            hits.append(Hit(f"{pre}tag {_display(info[0], m, memo)}", h.line, h.hash))
+    return hits, bad
+
+
+def _archive_hits(path: str, shown: str, m: "_Matcher", tmp: Path, st: dict, depth: int) \
+        -> tuple[list[Hit], list[str]]:
+    """Hits in the member names and texts of one zip-format archive (nested ones too, up to ARCHIVE_DEPTH). Each member
+    is extracted alone to `tmp` (outside the scanned tree), scanned, and deleted; a member that cannot be read, an
+    archive that is not one, or one nested too deep is unreadable (never silently skipped)."""
+    hits: list[Hit] = []
+    bad: list[str] = []
+    try:
+        z = zipfile.ZipFile(path)
+        infos = z.infolist()
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError, ValueError, EOFError, RuntimeError):
+        return hits, [shown]
+    st["archives"] += 1
+    memo: dict[str, str] = {}
+    with z:
+        for info in infos:
+            name = info.filename.replace("\\", "/").rstrip("/")
+            if not name:
+                continue
+            label = f"{shown}!{_display(name, m, memo)}"
+            st["members"] += 1
+            h = m.name_hit(name)
+            if h:
+                hits.append(Hit(label, 0, h[:12]))
+            if info.is_dir():
+                continue
+            nested = name.lower().endswith(ARCHIVE_SUFFIXES)
+            if stat.S_ISLNK(info.external_attr >> 16) or (info.file_size > MAX_BYTES and not nested):
+                st["name_only"] += 1
+                continue
+            if st["bytes"] + info.file_size > ARCHIVE_TOTAL:
+                bad.append(label)
+                continue
+            st["n"] += 1
+            dest = tmp / f"{st['n']:07d}"
+            # a nested archive of any size is streamed out (within ARCHIVE_TOTAL) and opened; other members up to
+            # MAX_BYTES. A member bigger than its header says is unreadable.
+            limit = (ARCHIVE_TOTAL - st["bytes"]) if nested else MAX_BYTES
+            try:
+                size = 0
+                with z.open(info) as src, open(dest, "wb") as dst:
+                    while chunk := src.read(1 << 20):
+                        size += len(chunk)
+                        if size > limit or size > max(info.file_size, 0):
+                            raise ValueError("bigger than its header says")
+                        dst.write(chunk)
+            except (RuntimeError, NotImplementedError, ValueError, OSError, EOFError, zipfile.BadZipFile, zlib.error):
+                bad.append(label)
+                dest.unlink(missing_ok=True)
+                continue
+            st["bytes"] += size
+            if size <= MAX_BYTES:
+                hs, bd, no = _scan_files(tmp, m.db, m.key, [dest.name], m, {}, archives=nested)
+                hits += [Hit(label, x.line, x.hash) for x in hs]
+                bad += [label] if bd else []
+                st["name_only"] += no
+            if nested:
+                if depth >= ARCHIVE_DEPTH:
+                    bad.append(label)
+                else:
+                    sh, sb = _archive_hits(str(dest), label, m, tmp, st, depth + 1)
+                    hits += sh
+                    bad += sb
+            dest.unlink(missing_ok=True)
+    return hits, bad
 
 
 # --------------------------------------------------------------------------------------------------------- secrets
@@ -664,7 +1067,7 @@ def scan_secrets(root: Path, files: list[str] | None = None, allowlist: Path | N
 # ------------------------------------------------------------------------------------------------------------- CLI
 def _emit(as_json: bool, doc: dict, lines: list[str]) -> None:
     if as_json:
-        print(json.dumps(doc, ensure_ascii=False))
+        print(json.dumps(doc, ensure_ascii=True))      # one ASCII line: U+2028 / NEL in a path cannot split it
     else:
         for line in lines:
             print(line)
@@ -681,14 +1084,20 @@ def _cmd_scan(a) -> int:
         return 0
     db = load_db(Path(a.hashes))
     rep: dict = {}
-    hits = scan(Path(a.root), db, key, report=rep)
+    hits = scan(Path(a.root), db, key, report=rep, git=a.git, archives=a.archives)
     bad = rep["unreadable"]
+    g, ar = rep["git"], rep["archives"]
     _emit(a.json, {"hits": [{"path": h.path, "line": h.line, "hash": h.hash} for h in hits], "files": rep["files"],
-                   "unreadable": bad},
+                   "unreadable": bad, "name_only": rep["name_only"], **({"git": g} if a.git else {}),
+                   **({"archives": ar} if a.archives else {})},
           [f"{h.path}:{h.line}: identity token {h.hash}" for h in hits]
           + [f"unreadable (not scanned): {p}" for p in bad]
           + [f"identity scan: {len(hits)} finding(s) in {rep['files']} paths"
-             + (f", {len(bad)} unreadable" if bad else "")])
+             + (f", {len(bad)} unreadable" if bad else "")
+             + (f"; git history: {g['commits']} commit(s), {g['refs']} ref(s), {g['tags']} tag(s) in {g['repos']} "
+                "repo(s)" if a.git else "")
+             + (f"; {ar['members']} archive member(s) in {ar['archives']} archive(s)" if a.archives else "")
+             + f"; {rep['name_only']} name-only (binary or over {MAX_BYTES // 1_000_000} MB)"])
     if hits:
         return 1
     return 2 if (bad and a.require_key) else 0
@@ -725,6 +1134,8 @@ def main(argv=None) -> int:
     s.add_argument("--key-file")
     s.add_argument("--require-key", action="store_true")
     s.add_argument("--json", action="store_true")
+    s.add_argument("--git", action="store_true", help="also every git clone's history, refs, tags and .git text")
+    s.add_argument("--archives", action="store_true", help="also the members of every .zip / .ccx / .zxp")
     s2 = sub.add_parser("secrets")
     s2.add_argument("--root", default=str(REPO))
     s2.add_argument("--allowlist")

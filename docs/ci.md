@@ -117,6 +117,24 @@ gh run view <run-id> --log-failed              # only the failing step's log
 - `tools/ci/fetch_ffmpeg.py`: the pinned ffmpeg/ffprobe into an engine home, size- and sha256-checked.
 - `tools/ci/minutes.sh`: Actions minutes used and left this month (read-only).
 
+## Release identity gate (local, not CI)
+
+`tools/release.py handoff` runs the keyed identity scan (Addendum H R-T6) once, as its last step before the new folder is swapped in. It scans the whole assembled `<out>.new`, so it covers exactly what ships:
+- `Mac/repo`: the working tree, its full git history (every commit's author, committer, message and patch, `--all --reflog`, merges as `--cc`), every ref and tag name, tag messages, and the `.git` text files (objects and the index excepted);
+- every generated file (README-AR.md, checksums.txt, START-HERE.md, the Mac guide, WHAT-WORKS-NOW-AR.md, LABEL.txt, sample-client/);
+- the members (names and texts) of every `.zip` / `.ccx` / `.zxp`, nested ones too. The plugin zip holds the stage's shipped files, so they are covered there.
+
+History text and archive members are written only to a temp folder outside the tree, and that folder is removed afterwards. A hit names the file, the commit (`Mac/repo@git:<sha12>:<path>` or `(message)`), the ref or the archive member (`<archive>!<member>`), never the token.
+
+The scanner that runs is the release commit's own `tools/identity_scan.py`, with its own hash file and normaliser. A real release whose commit has none is refused; the log shows the copy and its sha256.
+
+The scan is hard. A finding, an error, a timeout (30 min), a file it could not read while a key is in use, or a release without the key stops the hand-off. A PREVIEW without a key logs "skipped". The secret scan is report-only.
+
+**Known limits.**
+- **Binary files and files over 20 MB are scanned by name only.** Their count is logged as `name-only`. This covers the guide PDF, images, fonts and the sample client's clips.
+  - The guide PDF is built from sources that are themselves in the scanned clone (working tree and history).
+- **Unreachable objects are not scanned.** These are objects with no ref and no reflog entry. The hand-off's `git clone --no-local` copies only reachable objects, so its clone has none.
+
 ## Security watch
 
 `.github/workflows/security-watch.yml` and its twin `.github/workflows/security-watch-paths.yml` are the cheap tripwire for R-T8. They open an issue assigned to `thewhynotai`, so GitHub emails the owner. Both run the same decision script, `tools/ci/security_watch.py`; the allowlist is `.github/security-allowlist.json` (pushers and commit emails).
@@ -129,7 +147,7 @@ gh run view <run-id> --log-failed              # only the failing step's log
 - A push that changes anything under `.github/` or `tools/ci/security_watch.py`, even from the owner. You get an issue whenever the watch itself changes. That is rare, and it is intended.
 - The repository being made public.
 
-**A push cannot edit its own judge.** The job checks out the script and the allowlist from the commit before the push (`github.event.before`), or from the default branch for a new branch, a new tag or a non-push event. It never uses the pushed commit. Both files list the changed files with the compare API, because the Actions push payload has no added/modified/removed lists. In the main file that list is only defence in depth, for when its job runs anyway. If the list cannot be fetched, or GitHub cuts it at 300 files, the issue says the push could not be fully checked.
+**A push cannot edit its own judge.** The job checks out the script and the allowlist from the commit before the push (`github.event.before`), or from `TRUSTED_BASE` (`release/3.0`, set in both files) for a new branch, a new tag or a non-push event. It never uses the pushed commit. Both files list the changed files with the compare API, because the Actions push payload has no added/modified/removed lists. In the main file that list is only defence in depth, for when its job runs anyway. If the list cannot be fetched, or GitHub cuts it at 300 files, the issue says the push could not be fully checked.
 
 **What it costs in minutes.** It runs on `ubuntu-24.04`, which bills x1 against the free 2,000 a month the macOS jobs also use (x10).
 - **Normal pushes cost nothing.** The main file's job-level `if:` skips a push when all four hold: the pusher is the allowed login, the push is not forced, it is not a deletion, and the head commit's author email is the allowed one. A skipped job bills nothing. That comes from a GitHub staff answer (https://github.com/orgs/community/discussions/26456), not from the billing docs. Confirm it once in Settings → Billing → Usage after the first few pushes.
@@ -140,7 +158,7 @@ gh run view <run-id> --log-failed              # only the failing step's log
 **What it does NOT cover**
 - **A new collaborator.** `member` is not a workflow trigger, so Actions cannot see it.
 - **A deploy key.** There is no workflow trigger for it, and `GITHUB_TOKEN` cannot list deploy keys. GitHub's own email on a new deploy key is documented only for organization owners (https://docs.github.com/en/subscriptions-and-notifications/how-tos/managing-organization-notifications). This repository is under a personal account, so no email is documented. Not covered: use the monthly check below. A push made WITH a deploy key is shown as pushed by the admin who verified the key (the owner), so with the owner's email it is skipped like a normal push: the monthly Deploy keys step is what protects against it.
-- **A push with more than 3,000 changed files.** GitHub's path filter only looks at the first 3,000 files, so an edit to `.github/` further down does not start the twin (an outsider login still starts the main file).
+- **A push with more than 300 changed files.** GitHub's `paths:` filter sees only the first 300 changed files. So an owner push of more than 300 files whose `.github/` (or `tools/ci/security_watch.py`) change comes after the first 300 starts neither workflow: the twin's filter misses it and the main file's `if:` skips an owner push. An outsider login still starts the main file. Step 6 of the monthly check covers it.
 - **More than three tags at once.** Pushing or deleting more than three tags in one push creates no event.
 - **`public` only runs from the default branch's copy of the workflow.** It alerts only once this file is on the default branch. The default branch is `main`, which holds no 3.0 files until release day, so a repo made public before then is NOT alerted (the monthly check covers it). For the same reason a new branch or tag is checked against `release/3.0` (`TRUSTED_BASE` in both files); switch it to the default branch when 3.0 lands on main.
 - **A deleted branch or tag.** It is covered only if GitHub starts a push workflow for a deletion push. GitHub's docs don't say, so treat it as unverified. The `delete` event is not subscribed, so one deletion never opens two issues.
@@ -154,6 +172,7 @@ gh run view <run-id> --log-failed              # only the failing step's log
 3. Account Settings → SSH and GPG keys: only your own machines.
 4. Settings → Developer settings → Personal access tokens: delete any you don't recognise or no longer use.
 5. Settings → Security log: scan the month for logins, key or token events and repository changes you did not make.
+6. In your clone: `git log --since="1 month ago" --stat -- .github tools/ci/security_watch.py` on `release/3.0` (and `main`): every change listed should be one you made.
 
 **How to read an issue.** Open it from the email. The title says the event and ref. The body lists one line per finding (ref, short before..after SHAs, pusher, offending emails or paths, each in a code span) and links the run.
 - If it was you, close the issue.

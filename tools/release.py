@@ -32,9 +32,11 @@ Python stdlib only (no third-party package), so it runs on any Python 3.9+.
           root      WHAT-WORKS-NOW-AR.md (from tools/handoff/what-works.json + PROGRESS.md's passed phases) and
                     LABEL.txt.
         The templates live in tools/handoff/. Every generated text file is scanned for the real-client words of
-        tests/test_plugin.py; a hit refuses the hand-off. The Mac clone and the zip's files also go through
-        tools/identity_scan.py (Addendum H R-T6): an identity finding refuses the hand-off (a release, not a PREVIEW,
-        also needs the key: WNC_IDENTITY_KEY_FILE); its secret scan is report-only for now.
+        tests/test_plugin.py; a hit refuses the hand-off. Last, the whole assembled folder goes through the release
+        commit's own tools/identity_scan.py (Addendum H R-T6) with --git (the clone's history, refs, tags) and
+        --archives (zip / .ccx / .zxp members): an identity finding, an unreadable file while a key is in use, or a
+        timeout refuses the hand-off (a release, not a PREVIEW, also needs the key: WNC_IDENTITY_KEY_FILE). Its secret
+        scan (Mac clone + zip stage) is report-only for now.
 
 Scope. The full release pipeline is T7.6 (master plan) and its steps 1-10 belong to the executor; this stub covers
 the installer's parts only. NOT done here: (1) tests; (2) validate --strict; (3) locks compile
@@ -298,27 +300,106 @@ def zxp_signed(path: Path) -> bool:
         return False
 
 
-IDENTITY_SCAN = [sys.executable, "-I", str(Path(__file__).resolve().parent / "identity_scan.py")]
+LIVE_SCANNER = Path(__file__).resolve().parent / "identity_scan.py"
+IDENTITY_SCAN = [sys.executable, "-I", str(LIVE_SCANNER)]
+SCAN_TIMEOUT = 1800             # seconds, per scan subprocess
 
 
-def identity_gate(root: Path, require_key: bool, log=print, cmd=None, hashes=None) -> str:
-    """Addendum H R-T6 (Task 19): the keyed identity scan over a release tree. A finding (exit 1), an error (2), or no
-    key when `require_key` (a real release) raises HandoffError; its output is already redacted. A PREVIEW without a
-    key is scanned when a key is set, else logged as skipped. A subprocess on purpose: the scan's worker processes
-    need their own __main__. Returns the line it logged."""
-    argv = (list(cmd or IDENTITY_SCAN) + ["scan", "--json", "--root", str(root)]
+def identity_gate(root: Path, require_key: bool, log=print, cmd=None, hashes=None, scanner=None) -> str:
+    """Addendum H R-T6 (Task 19): the keyed identity scan over a release tree, with --git (every clone's history, refs,
+    tags) and --archives (.zip / .ccx / .zxp members). A finding (exit 1), an error (2), no key when `require_key` (a
+    real release), a file it could not read while a key is in use, a timeout, or a report that is not a clean one
+    raises HandoffError; its output is already redacted. A PREVIEW without a key is logged as skipped.
+    `scanner`: the identity_scan.py to run, normally the release commit's own copy (the clone's tools/; then its own
+    hash file and normaliser judge it, and an uncommitted edit in the live tree cannot). When that file is missing, a
+    real release is refused and a PREVIEW falls back to this tool's copy. The copy and its sha256 are logged.
+    A subprocess on purpose: the scan's worker processes need their own __main__. Returns the line it logged."""
+    name = root.name
+    if cmd is None:
+        path = Path(scanner) if scanner else LIVE_SCANNER
+        where = "the release commit's" if scanner else "this tool's"
+        if not path.is_file():
+            if require_key:
+                raise HandoffError(f"identity scan ({name}): the release commit has no tools/identity_scan.py ({path}): "
+                                   "a release is judged by its own scanner")
+            path, where = LIVE_SCANNER, "this tool's (the commit has none; PREVIEW only)"
+        log(f"  identity scan ({name}): {where} {path.name}, sha256 {sha256_file(path)}")
+        log(f"  identity scan ({name}): " + _judge_files(path, hashes))
+        cmd = [sys.executable, "-I", str(path)]
+    argv = (list(cmd) + ["scan", "--json", "--git", "--archives", "--root", str(root)]
             + (["--hashes", str(hashes)] if hashes else []) + (["--require-key"] if require_key else []))
-    r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    # The scan writes history text and archive members to its TEMP. A timeout kills it before its own clean-up, so
+    # the gate owns that folder: a fresh one passed as TMP / TEMP / TMPDIR and removed here whatever happens.
+    import tempfile
+    import time
+    tmp = Path(tempfile.mkdtemp(prefix="wnc-gate-"))
+    env = {**os.environ, "TMP": str(tmp), "TEMP": str(tmp), "TMPDIR": str(tmp)}
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=SCAN_TIMEOUT, env=env)
+    except subprocess.TimeoutExpired:
+        raise HandoffError(f"identity scan ({name}): timed out after {SCAN_TIMEOUT} s") from None
+    except OSError as e:
+        raise HandoffError(f"identity scan ({name}): could not start ({type(e).__name__})") from None
+    finally:
+        for _ in range(20):                         # a killed scan's workers may hold a file for a moment
+            try:
+                _rmtree(tmp)                        # link-safe (rule 15)
+            except HandoffError:
+                pass
+            if not tmp.exists():
+                break
+            time.sleep(0.5)
+        else:
+            log(f"  identity scan ({name}): WARNING: could not remove its temp folder {tmp}; delete it by hand")
     if r.returncode != 0:
-        raise HandoffError(f"identity scan ({root.name}): exit {r.returncode}: " + (r.stdout + r.stderr).strip()[-2000:])
+        raise HandoffError(f"identity scan ({name}): exit {r.returncode}: " + (r.stdout + r.stderr).strip()[-2000:])
     try:
         doc = json.loads(r.stdout.strip().splitlines()[-1])
+        if not isinstance(doc, dict):
+            raise ValueError("not an object")
     except (ValueError, IndexError):
-        raise HandoffError(f"identity scan ({root.name}): unreadable output: " + (r.stdout + r.stderr).strip()[-500:])
-    line = (f"  identity scan ({root.name}): skipped, no key (a PREVIEW only; a release needs it)" if doc.get("skipped")
-            else f"  identity scan ({root.name}): 0 findings in {doc.get('files', 0)} paths")
+        raise HandoffError(f"identity scan ({name}): unreadable output: " + (r.stdout + r.stderr).strip()[-500:])
+    if doc.get("skipped"):
+        if require_key:
+            raise HandoffError(f"identity scan ({name}): skipped on a release (it needs the key)")
+        line = f"  identity scan ({name}): skipped, no key (a PREVIEW only; a release needs it)"
+        log(line)
+        return line
+    hits, bad, g, ar = doc.get("hits"), doc.get("unreadable"), doc.get("git"), doc.get("archives")
+    if not isinstance(hits, list) or not isinstance(bad, list) or not isinstance(g, dict) or not isinstance(ar, dict) \
+            or not isinstance(doc.get("files"), int) or doc["files"] < 1:
+        raise HandoffError(f"identity scan ({name}): exit 0 but not a full report (hits, unreadable, files, git, "
+                           "archives): refused")
+    if hits:
+        raise HandoffError(f"identity scan ({name}): exit 0 but {len(hits)} finding(s): "
+                           + ", ".join(f"{h.get('path')}:{h.get('line')}" for h in hits[:20] if isinstance(h, dict)))
+    if bad:                         # a key is in use: a file it could not read is a file it could not clear
+        raise HandoffError(f"identity scan ({name}): {len(bad)} path(s) could not be read (not scanned): "
+                           + ", ".join(map(str, bad[:20])) + (" …" if len(bad) > 20 else ""))
+    line = (f"  identity scan ({name}): 0 findings in {doc['files']} paths; git history: {g.get('commits', 0)} "
+            f"commit(s), {g.get('refs', 0)} ref(s), {g.get('tags', 0)} tag(s) in {g.get('repos', 0)} repo(s); "
+            f"{ar.get('members', 0)} archive member(s) in {ar.get('archives', 0)} archive(s); "
+            f"{doc.get('name_only', 0)} name-only (binary or over 20 MB: contents not scanned)")
     log(line)
     return line
+
+
+def _judge_files(scanner: Path, hashes=None) -> str:
+    """What else decides the scan: the hash file (sha256, token count) and the normaliser (sha256) the scanner loads
+    (its own tools/identity_hashes.json unless --hashes, and <its repo>/whynot-cut/engine/reel/lib/cut_proposals_norm.py)."""
+    h = Path(hashes) if hashes else scanner.parent / "identity_hashes.json"
+    norm = scanner.resolve().parents[1] / "whynot-cut" / "engine" / "reel" / "lib" / "cut_proposals_norm.py"
+    try:
+        n = len(json.loads(h.read_text(encoding="utf-8"))["tokens"])
+        hs = f"hash file {h.name} sha256 {sha256_file(h)}, {n} tokens"
+    except (OSError, ValueError, KeyError, TypeError):
+        hs = f"hash file {h} unreadable (the scan will refuse)"
+    try:
+        ns = f"normaliser sha256 {sha256_file(norm)}"
+    except OSError:
+        ns = f"normaliser {norm} missing (the scan will refuse)"
+    return f"{hs}; {ns}"
 
 
 def secret_report(root: Path, log=print, cmd=None) -> int:
@@ -326,7 +407,15 @@ def secret_report(root: Path, log=print, cmd=None) -> int:
     home paths owned by several tracks (looks note LOOKS-RELEASE-GATE-DIFF.md); it turns hard once they are fixed or
     allowlisted in tools/secret_allowlist.json. Returns the number of findings (-1 when the scan itself failed)."""
     argv = list(cmd or IDENTITY_SCAN) + ["secrets", "--json", "--root", str(root)]
-    r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           timeout=SCAN_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        log(f"  secret scan ({root.name}): timed out after {SCAN_TIMEOUT} s (report-only)")
+        return -1
+    except OSError as e:
+        log(f"  secret scan ({root.name}): could not run (report-only): {type(e).__name__}")
+        return -1
     try:
         n = len(json.loads(r.stdout.strip().splitlines()[-1])["hits"])
     except (ValueError, IndexError, KeyError, TypeError):
@@ -1016,8 +1105,7 @@ def _build(repo, new, ctx, ship, locked, zip_name, sample_maker, summary, log):
         rc = cmd_fill(argparse.Namespace(plugin=str(stage / "whynot-cut"), components=None))
     if rc != 0:
         raise HandoffError("pinning the Adobe artefacts in components.json failed: " + buf.getvalue().strip())
-    for root in (clone, stage):         # the Mac clone and the plugin zip's files: identity hard, secrets report-only
-        identity_gate(root, require_key=not ctx["preview"], log=log)
+    for root in (clone, stage):         # secrets: report-only (identity: one hard scan of the whole folder, below)
         summary.setdefault("secret_findings", {})[root.name] = secret_report(root, log=log)
     n = build_plugin_zip(stage, win / zip_name)
     log(f"  {zip_name}: {n} files")
@@ -1105,6 +1193,11 @@ def _build(repo, new, ctx, ship, locked, zip_name, sample_maker, summary, log):
     if hits:
         raise HandoffError("a real client name is in the generated files: "
                            + ", ".join(sorted({f"{p} ({t})" for p, t in hits})))
+    # Addendum H R-T6: the keyed identity scan, HARD, once over exactly what ships, as the last step before the swap:
+    # Mac/repo (working tree + its full git history, refs, tags, .git text), every generated file, and every .zip /
+    # .ccx / .zxp member (the plugin zip holds the stage's shipped files, so they are covered there). It runs the
+    # release commit's own scanner.
+    identity_gate(new, require_key=not ctx["preview"], log=log, scanner=clone / "tools" / "identity_scan.py")
     summary["zip_sha"] = zip_sha
 
 
