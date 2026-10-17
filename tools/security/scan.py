@@ -828,7 +828,8 @@ def handoff_lines(findings):
 
 def find_locks(root):
     root = Path(root)
-    py = sorted(root.glob("whynot-cut/setup/locks/*.lock")) + sorted(root.glob("tools/security/*.lock"))
+    # every file of the runtime lock folder: *.lock (per platform) and *.txt (the torch sets, T4.12), never only one spelling
+    py = sorted(root.glob("whynot-cut/setup/locks/*.lock")) + sorted(root.glob("whynot-cut/setup/locks/*.txt")) + sorted(root.glob("tools/security/*.lock"))
     npm = sorted(Path(p) for p in walk_files(root) if os.path.basename(p) == "package-lock.json")  # never through a junction
     return py, npm
 

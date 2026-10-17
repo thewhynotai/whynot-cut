@@ -842,6 +842,11 @@ class LockHashes(unittest.TestCase):
         self.assertTrue(any(p.name == "dev.lock" for p in py))
         self.assertTrue(npm, "adobe/package-lock.json must be found")
 
+    def test_every_file_of_the_runtime_lock_folder_is_scanned_whatever_its_spelling(self):
+        found = {p.name for p in scan.find_locks(ROOT)[0] if p.parent.name == "locks"}
+        on_disk = {p.name for p in (ROOT / "whynot-cut" / "setup" / "locks").iterdir() if p.is_file() and p.name.lower() != "readme.md"}
+        self.assertEqual(on_disk - found, set(), "lock files the scan would silently skip: %s" % sorted(on_disk - found))
+
     def test_planted_unhashed_pip_lock_and_npm_entries_fail(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d) / "مشروع" / "x y"

@@ -5,6 +5,8 @@
 
   python tools/security/install_tools.py            install what is missing (idempotent), then verify everything
   python tools/security/install_tools.py --check    verify only (no network); exit 1 if anything is missing or altered
+  python tools/security/install_tools.py --fuzz     Hypothesis (hash-pinned) for the engine runtime's Python 3.12, used by
+                                                    tests/test_fuzz_*.py; separate from the scanners and the runtime locks
 
 Rules (the owner's house rules for the scanner lane):
   * free, official sources only (GitHub release assets and PyPI), pinned in versions.json;
@@ -64,7 +66,7 @@ def lock_lines_without_hash(text):
     for raw in text.splitlines() + [""]:
         line = raw.rstrip()
         stripped = line.strip()
-        if not logical and (not stripped or stripped.startswith("#")):
+        if not logical and (not stripped or stripped.startswith(("#", "-"))):  # blank, comment, or an option line (--index-url ...)
             continue
         if not logical:
             first = stripped
@@ -298,6 +300,35 @@ def install_venv(home, base_python=None):
     return py
 
 
+FUZZ_PLATFORMS = {"win-x64": ["win_amd64"],
+                  "linux-x64": ["manylinux_2_17_x86_64", "manylinux2014_x86_64", "manylinux_2_28_x86_64", "manylinux_2_34_x86_64"]}
+
+
+def fuzz_dir(home, pyver="3.12"):
+    return Path(home) / ("fuzz-py" + pyver.replace(".", ""))
+
+
+def install_fuzz(home, pyver="3.12", base_python=None):
+    """Hypothesis for the engine runtime's Python version (L-T10): from the hashed fuzz.lock into <home>/fuzz-py312, so
+    the unit suite (which runs under the engine runtime, not under our tools venv) can import it. Never touches the
+    runtime locks or the runtime itself (L-G37)."""
+    v = versions()
+    lock = REPO / v["python_tools"]["fuzz_lock"]
+    if _sha(lock.read_bytes()) != v["python_tools"]["fuzz_lock_sha256"]:
+        raise InstallError("fuzz lock differs from the sha256 in versions.json; refusing to install")
+    missing = lock_lines_without_hash(lock.read_text(encoding="utf-8"))
+    if missing:
+        raise InstallError("fuzz lock has unhashed requirements: %s" % ", ".join(missing[:5]))
+    target = fuzz_dir(home, pyver)
+    py = venv_python(home) or Path(base_python or sys.executable)
+    argv = [str(py), "-m", "pip", "install", "--target", str(target), "--only-binary", ":all:", "--require-hashes",
+            "--no-deps", "--python-version", pyver, "--implementation", "cp", "-r", str(lock)]
+    for plat in FUZZ_PLATFORMS[platform_key()]:
+        argv += ["--platform", plat]
+    subprocess.run(argv, check=True, env=_pip_env(home))
+    return target
+
+
 def check_all(home=None):
     """Problems (list of strings) for every pinned tool; empty list = all installed and unaltered."""
     v = versions()
@@ -329,6 +360,9 @@ def main(argv=None):
         return 1 if probs else 0
     key = platform_key()
     home.mkdir(parents=True, exist_ok=True)
+    if "--fuzz" in argv:
+        print("done hypothesis ->", install_fuzz(home))
+        return 0
     for name, b in v["binaries"].items():
         if verify_installed(name, home) is None and _load_manifest(home)[name]["version"] == b["version"]:
             print("ok   %s %s (already installed)" % (name, b["version"]))

@@ -55,6 +55,11 @@ class VersionsFile(unittest.TestCase):
         bad = it.lock_lines_without_hash((ROOT / VERS["python_tools"]["lock"]).read_text(encoding="utf-8"))
         self.assertEqual(bad, [])
 
+    def test_option_lines_of_a_lock_are_not_requirements(self):
+        text = ("--index-url https://pypi.org/simple\n--extra-index-url https://example.invalid/whl\n\n"
+                "abc==1 \\\n    --hash=sha256:" + "a" * 64 + "\n")
+        self.assertEqual(it.lock_lines_without_hash(text), [])
+
     def test_hash_checker_catches_a_planted_unhashed_line(self):
         text = "good==1.0 \\\n    --hash=sha256:" + "a" * 64 + "\nbad==2.0\n"
         self.assertEqual(it.lock_lines_without_hash(text), ["bad==2.0"])
