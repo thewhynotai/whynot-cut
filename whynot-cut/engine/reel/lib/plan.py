@@ -724,9 +724,11 @@ def _word_ok(w) -> bool:
 def check_words(inp: PlanInputs):
     """The words.json entries read_inputs skipped (no id, word or times): one warning, never a KeyError."""
     n = getattr(inp, "bad_words", 0) or 0
-    return {}, [], ([f"في {n} كلمة في words.json ناقصة (من غير رقم أو الكلمة أو التوقيت) واتسابت من الكابشن والقص — "
+    return {}, [], ([f"في {n} كلمة في words.json ناقصة (من غير رقم أو الكلمة أو التوقيت)، ومش هتتحسب في الكابشن "
+                     "ولا في القص، ومش هنقدر نشوف إذا كنت عدّلت captions-short.srt بإيدك — "
                      f"02_transcription/words.json: {n} word(s) without an id, the word or start/end times were "
-                     "skipped (captions and word cuts ignore them) — run `reel transcribe` again or fix the file"]
+                     "skipped (captions and word cuts ignore them), and hand edits in captions-short.srt can't be "
+                     "checked — run `reel transcribe` again or fix the file"]
                     if n else [])
 
 

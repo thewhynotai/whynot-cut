@@ -816,7 +816,9 @@ class TestArabicCaptionStills(KnobCase):
             w = [x for x in r["warnings"] if "words.json" in x]
             self.assertEqual(len(w), 1, r["warnings"])
             self.assertIn(": 2 word(s)", w[0])                                    # two words skipped
-            self.assertTrue(w[0].startswith("في 2 كلمة"), w[0])                   # Arabic first
+            self.assertTrue(w[0].startswith("في 2 كلمة في words.json ناقصة (من غير رقم أو الكلمة أو التوقيت)، "
+                                            "ومش هتتحسب في الكابشن ولا في القص"), w[0])  # Arabic first, whole sentence
+            self.assertIn("captions-short.srt can't be checked", w[0])             # the hand-edit check did not run
 
     def test_r2f_after_effects_one_line_wider_than_the_safe_width_is_a_plan_warning(self):
         self.words("Isotretinoin-hydrochloride-solution works")
