@@ -442,21 +442,24 @@ class TestMeaningDiffers(unittest.TestCase):
         self.assertEqual(g["best"], 2)
         self.assertIn("⚠", g["line_ar"])
 
-    def test_c13_a_take_cut_short_is_read_only_as_far_as_it_goes(self):
+    def test_c13_a_take_that_may_have_stopped_early_still_gets_no_best(self):
+        # 7193e9a P2-1 (executor ruling 2026-10-17 20:10): a start that may have stopped early is no exception: a dose
+        # more and an abandoned start look the same on paper, so the editor listens and chooses
         res = T.groups(fixture("mixed")["words"])           # «خدي الـ vitamin D» then «… ألف وحدة كل يوم.»
-        self.assertEqual(res[0]["best"], 2)
-        self.assertNotIn("pairs", res[0]["differ"])
-        self.assertEqual(res[0]["differ"]["cut_short"][0]["cut_short"], 1)
-        self.assertIn("الأفضل ٢", res[0]["line_ar"])
-        self.assertIn("⚠ ١ اتقطعت قبل: رقم أو جرعة «ألف وحدة كل يوم»", res[0]["line_ar"])
-        self.assertIn("1 stopped before: number or dose", res[0]["line_en"])
+        self.assertIsNone(res[0]["best"])
+        self.assertEqual(res[0]["differ"]["pairs"][0]["cut_short"], 1)
+        self.assertNotIn("cut_short", res[0]["differ"])
+        self.assertIn("⚠ ١ يمكن تكون وقفت قبل: رقم أو جرعة «ألف وحدة كل يوم»", res[0]["line_ar"])
+        self.assertIn("1 may have stopped before: number or dose", res[0]["line_en"])
+        self.assertIn("اسمعهم واختار انت", res[0]["line_ar"])
         g = pair("خدي حباية واحدة من الدوا ده", "خدي حباية واحدة من الدوا ده الصبح بعد الفطار.")
-        self.assertEqual(g["best"], 2)
-        self.assertNotIn("timing", g["differ"])
-        # a cut-off take that says something else where it overlaps is still a difference
+        self.assertIsNone(g["best"])
+        self.assertCountEqual(g["differ"]["timing"], ["الصبح", "بعد الفطار"])
+        # a cut-off take that says something else where it overlaps is a plain difference
         g = pair("خدي حباية واحدة من الدوا ده بالليل", "خدي حباية واحدة من الدوا ده الصبح بعد الفطار.")
         self.assertIsNone(g["best"])
         self.assertCountEqual(g["differ"]["timing"], ["بالليل", "الصبح", "بعد الفطار"])
+        self.assertNotIn("cut_short", g["differ"]["pairs"][0])
 
     def test_c14_a_closed_take_that_leaves_out_the_timing_differs(self):
         g = pair("خدي حباية واحدة من الدوا ده.", "خدي حباية واحدة من الدوا ده الصبح.")
@@ -490,7 +493,7 @@ class TestMeaningDiffers(unittest.TestCase):
 
     def test_r1_i1_an_abandoned_start_names_what_it_left_out_not_as_words(self):
         g = T.groups(words([("خدي حباية واحدة الصبح", 0.95, 900), ("خدي حباية واحدة الصبح يوميا كمان", 0.95, 300)]))[0]
-        self.assertEqual(g["best"], 2)
+        self.assertIsNone(g["best"])                               # 7193e9a P2-1: no best past a meaning
         self.assertNotIn("words", g["differ"])
         self.assertIn("توقيت «يوميا»", g["line_ar"])
 

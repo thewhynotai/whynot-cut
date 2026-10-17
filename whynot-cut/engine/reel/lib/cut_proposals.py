@@ -133,15 +133,17 @@ def _says_number(ws: list) -> bool:
 
 
 def _holds_number(*raw: str) -> bool:
-    """Any of these words is or holds a number, an everyday number word included («خمس» before «خمسمية»)."""
-    from .safety.numbers import find_numbers, fold
-    return any(find_numbers([fold(w)]) or re.search(r"\d", norm_word(w)) for w in raw)
+    """Any of these words is or holds a number, an everyday number word included («خمس» before «خمسمية»), or says
+    how often («مرتين», "twice")."""
+    from .safety.numbers import find_numbers, fold, is_frequency
+    return any(find_numbers([fold(w)]) or is_frequency(fold(w)) or re.search(r"\d", norm_word(w)) for w in raw)
 
 
 def _never_filler(raw: str) -> bool:
     """A word written with «ة» or as «آي…» is a real word («آية», a verse), never «إيه» or another filler: checked
-    before the shared normaliser folds ة into ه."""
-    bare = re.sub("[\u064b-\u065f\u0670\u0640]", "", unicodedata.normalize("NFC", str(raw or "")))
+    before the shared normaliser folds ة into ه (marks, tatweel and hidden characters such as a joiner out first:
+    «آ‍يه» is «آيه»)."""
+    bare = N.strip_marks(unicodedata.normalize("NFC", str(raw or "")))
     return "ة" in bare or bare.startswith("آي")
 
 
@@ -367,7 +369,7 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
             conf = min(conf, V["conf_on_purpose"])
             extra["differs"] = differs
         add("retake", drop[0], drop[0] + drop[1] - 1, conf, ar + number_ar, en + number_en,
-            default="keep" if differs or mid else None, extra=extra)
+            default="keep" if differs or mid or has_number else None, extra=extra)
         used.update(range(a, a + la))
         used.update(range(b, b + lb))
 
@@ -441,7 +443,8 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
             f"«{ws[i]['word'].strip()}» اتقالت مرتين ورا بعض؛ نشيل واحدة"
             + ("، بس دي رقم فسايبينها لحد ما تسمعها" if number else ""),
             f"\"{ws[i]['word'].strip()}\" said twice in a row; drop one" + ("; it is a number, so left unticked"
-                                                                          if number else ""))
+                                                                          if number else ""),
+            default="keep" if number else None)
         used.add(i)
 
     # pauses ----------------------------------------------------------------------------------------------------------

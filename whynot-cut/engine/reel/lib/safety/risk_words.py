@@ -28,8 +28,8 @@ from pathlib import Path
 
 from . import switches
 from .lexicon import client_terms, inn_like, load_sources, near
-from .numbers import (LINK, canon, fold, frequency_value, is_frequency, is_time, quantities, stems, timing_phrases,
-                      tokens, values_in)
+from .numbers import (LINK, canon, find_numbers, fold, frequency_value, is_frequency, is_time, quantities, stems,
+                      timing_phrases, tokens, values_in)
 
 DEFAULT_THRESHOLD = 0.9
 DEFAULT_BASIS = ("measured 2026-10-17 on 8 corrected transcripts (whynot-test copies; 661 words, 51 corrected by the "
@@ -47,14 +47,31 @@ LABEL = {"dose": ("جرعة", "dose"), "drug": ("اسم دوا أو منتج", "
 BY_EAR = {"editor"}      # the only `transcript-verify --by` that is the editor's own ear (allow-list, as NEEDS-YOU)
 EPISODE_BY = "episode verification"
 NEAR = 4                 # a negation this many words from a claim is part of it
+UNSURE_DOUBT = 1.0       # a number written so it cannot be read for sure: as doubtful as a flagged word
+UNSURE_WHY = ("رقم مكتوب بشكل مش واضح (ممكن يتقري أكتر من رقم): راجعه بالسمع",
+              "check this number: it is written so it cannot be read for sure")
 CLAIM_SPAN = 6           # words this close to a claim word or a risky item belong to the claim
 
-NEGATIONS = {"مش", "مو", "لا", "ما", "مفيش", "مافيش", "ممنوع", "بلاش", "لم", "لن", "ليس", "ليست", "بدون", "ولا",
+NEGATIONS = {"مش", "موش", "مو", "لا", "ما", "مفيش", "مافيش", "مفش", "مافش", "ممنوع", "بلاش", "لم", "لن", "ليس", "ليست", "بدون", "ولا",
              "اوعي", "اوعا", "اوع", "اياك", "اياكي", "اياكم",
              "no", "not", "never", "dont", "don't", "doesnt", "doesn't", "didnt", "didn't", "cant", "can't", "cannot",
              "shouldnt", "shouldn't", "wont", "won't", "without", "avoid", "nor", "isnt", "isn't", "arent", "aren't",
-             "mustnt", "mustn't", "stop"}
-_CIRCUMFIX = re.compile(r"^(ما|م[تيناب])(\w{2,}?)(ه|ها|هم|ك|كي|كو|ني|ي)?ش$")   # «ماتاخدش», «ما تاخدهاش», «مينفعش»
+             "mustnt", "mustn't", "stop", "hardly", "barely", "scarcely", "neither", "none", "nothing", "nobody"}
+# Egyptian negation around a verb, a preposition or a pronoun: «م» (or «ما») + the word + «ش» or «شي» («مخدتش»,
+# «معندوش», «ملوش», «مفيهوش», «مكانش», «محدش», «مبيقللش», «ماتاخدهاش», «مبيقللشي»). A rule, not a list: the word inside
+# may be anything of two letters or more. It over-reads on purpose (a word shaped so that is no negation only leaves a
+# retake unticked or a take unproposed, the safe side; reading a real negation as none would not be), so the everyday
+# words it would catch are listed as a guard, never the negations
+_CIRCUMFIX = re.compile(r"^(?:ما|م)\w{2,}شي?$")
+# everyday words shaped «م…ش» that are no negation: nouns (a fruit, a pension, "never mind", a tablecloth, an
+# inspector) and participles («مغشوش» fake, «مشوش» blurred, «مجروش» crushed, «مدهش» amazing …). Never a form that is
+# also a negation («مخدوش» "he did not take it", «معيش» "I have none"): those stay negations
+NOT_CIRCUMFIX = {"مشمش", "مشمشه", "معاش", "معاشات", "معلش", "معلهش", "مفرش", "مفتش", "ماتش", "مارش", "مناقيش", "مكرش",
+                 "مدهش", "منعش", "مغشوش", "منقوش", "مفروش", "مرشوش", "منفوش", "مدهوش", "مشوش", "مقرمش", "مكرمش",
+                 "مهمش", "مرتعش", "منكمش", "منتعش", "مخربش", "منقش", "مغشش", "مبرقش", "منمش", "منعكش", "مجروش",
+                 "مزركش", "مناقش", "محشش", "مهروش", "مدردش", "مفشفش", "متحرش", "متوحش", "مندهش", "مكشكش", "مدشدش",
+                 "مخرمش", "منكوش", "مطنش", "منقوشه", "مدهشه", "مغشوشه"}
+_GLUED = ("و", "ف")      # a conjunction written onto the negation: «ومش», «فمش», «ومبيقللش»
 CLAIM_CUES = {"علاج", "يعالج", "بيعالج", "عالج", "دوا", "دواء", "ادويه", "خد", "خدي", "خدوا", "تاخد", "ياخد",
               "اخد", "استخدم", "تستخدم", "يستخدم", "ينفع", "بينفع", "مفيد", "مضر", "ضار", "خطر", "خطير", "امن", "يسبب",
               "بيسبب", "يقلل", "بيقلل", "يزود", "بيزود", "يرفع", "بيرفع", "ينزل", "بينزل", "يشفي", "بيشفي", "شفا",
@@ -164,11 +181,34 @@ def _cue_core(tok: str) -> bool:
     return bool(_ARABIC.search(tok)) and any(c in tok for c in _CUE_CORES)
 
 
-def _negation(tok: str) -> str | None:
-    """"word" for a negation word, "verb" for a negated verb («ماتاخدش»), None otherwise."""
-    if tok in NEGATIONS:
-        return "word"
-    return "verb" if _CIRCUMFIX.match(tok) else None
+def _negation(tok: str, nxt: str = "") -> str | None:
+    """The one negation reader (K-T1, Task 25, K-T7): "word" for a negation word («مش», "not"), "verb" for a word
+    negated around it («مخدتش», «معندوش», «ماتاخدش»), None otherwise. A glued «و» / «ف» is read through («ومش»,
+    «فمبيقللش»). nxt, the next word (folded), reads the split form: «ما» / «وما» before a word ending in «ش» («وما
+    بيقللش»); «وما» / «فما» before anything else is "and what", not a negation. Tokens are folded (numbers.fold)."""
+    if not tok:
+        return None
+    for t in (tok, *(tok[1:] for c in _GLUED if tok.startswith(c) and len(tok) >= 3)):
+        if t in NEGATIONS and not (t != tok and t == "ما"):
+            return "word"
+        if t == "ما" and len(nxt) >= 3 and nxt.endswith(("ش", "شي")):
+            return "word"                               # «وما بيقللش», «فما تاخدهاش»
+        if _CIRCUMFIX.match(t) and not any(x in NOT_CIRCUMFIX for x in (t, t[:-1] if t.endswith("ي") else t)) \
+                and not any(x in NOT_CIRCUMFIX for x in stems(t)):
+            return "verb"
+    return None
+
+
+def negated_core(tok: str, prev: str = "") -> str:
+    """The word inside a negated verb («مبيقللش» -> «بيقلل», «وماتاخدش» -> «تاخد», «معندوش» -> «عندو»), or after
+    a split «ما» (prev) («ما بيقللش» -> «بيقلل»); the token itself otherwise. Tokens are folded."""
+    if prev in ("ما", "وما", "فما") and len(tok) >= 4 and tok.endswith(("ش", "شي")) and _negation(prev, tok):
+        return tok[:-2] if tok.endswith("شي") else tok[:-1]
+    if _negation(tok) != "verb":
+        return tok
+    t = tok[1:] if tok.startswith(_GLUED) and not _CIRCUMFIX.match(tok) else tok
+    t = t[:-1] if t.endswith("شي") else t                 # «مبيقللشي» = «مبيقللش»
+    return t[2:-1] if t.startswith("ما") and len(t) >= 5 else t[1:-1]
 
 
 def _lexicon_index(groups) -> tuple:
@@ -271,7 +311,8 @@ def rank(words, meta=None, *, thr: float = DEFAULT_THRESHOLD, domain: str = "gen
         items.append(it)
         return it
     for q in quantities(toks):
-        add(q["start"], q["end"], q["kind"], value=q["value"], **({"alts": q["alts"]} if q.get("alts") else {}))
+        add(q["start"], q["end"], q["kind"], value=q["value"], **({"alts": q["alts"]} if q.get("alts") else {}),
+            **({"unsure": True} if q.get("unsure") else {}))
     for a, b in timing_phrases(toks):
         add(a, b, "duration")
     for i, t in enumerate(toks):
@@ -283,7 +324,7 @@ def rank(words, meta=None, *, thr: float = DEFAULT_THRESHOLD, domain: str = "gen
         add(a, b, "drug", **({"variants": variants[g]} if g is not None else {}))
     anchors = sorted({k for k, x in enumerate(kinds) if x in HIGH} | {k for k, t in enumerate(toks) if t and _cue_core(t)})
     for i, t in enumerate(toks):
-        kind = _negation(t) if t else None
+        kind = _negation(t, toks[i + 1] if i + 1 < len(toks) else "") if t else None
         if not kind:
             continue
         near_ = [k for k in anchors if k != i and abs(k - i) <= NEAR and kinds[k] != "negation"]
@@ -321,9 +362,12 @@ def rank(words, meta=None, *, thr: float = DEFAULT_THRESHOLD, domain: str = "gen
     for it in items:
         rng = range(it["a"], it["b"])
         d = max(doubts[k][0] for k in rng)
+        why = []
+        if it.get("unsure"):              # «3²», «1/2», «٣،٥٠٠»: never read as a guess, the editor checks it
+            d = max(d, UNSURE_DOUBT)
+            why.append(UNSURE_WHY)
         if d <= 0 and not every_item:
             continue
-        why = []
         for k in rng:
             why += [r for r in doubts[k][1] if r not in why]
         group = [ws[k] for k in rng]
@@ -331,7 +375,7 @@ def rank(words, meta=None, *, thr: float = DEFAULT_THRESHOLD, domain: str = "gen
              "start_ms": _num(group[0].get("start_ms")), "end_ms": _num(group[-1].get("end_ms")),
              "risk": it["risk"], "high": it["risk"] in HIGH, "doubt": round(d, 3), "why": why,
              "score": round(WEIGHT[it["risk"]] * d, 4), "flagged": any(bool(w.get("flagged")) for w in group)}
-        for k in ("value", "alts", "variants", "anchors"):
+        for k in ("value", "alts", "variants", "anchors", "unsure"):
             if it.get(k) is not None:
                 e[k] = it[k]
         out.append(e)
@@ -427,13 +471,15 @@ def for_project(paths, ctx=None) -> dict | None:
     ok = confirmed(paths)
     data, _ = _read(paths.p("02_transcription/words.json"))
     _, ver = _read(paths.p("02_transcription/verification.json"))
-    verified_by, unfingerprinted = None, False      # why it still blocks: the real name and the real file
+    verified_by, unfingerprinted, episode = None, False, None   # why it still blocks: the name, the file, the episode
     if not ok and _current(ver, data) and _who(ver) == EPISODE_BY:
         # a reel's copy of its episode's verification: name who checked the episode, and look at the episode's file
         ep_data, ep_ver = _episode_files(wj)
         name = _who(ver, "episode_by") if "episode_by" in ver else _who(ep_ver if isinstance(ep_ver, dict) else {})
         verified_by = name if name not in BY_EAR else None
         unfingerprinted = _unfingerprinted(ep_ver, ep_data)
+        if verified_by is None and not unfingerprinted:
+            episode = _episode_reason(wj, ep_data, ep_ver)
     elif not ok and _current(ver, data):
         verified_by = _who(ver)                                        # verified, but not as the editor's ear
     elif not ok and _unfingerprinted(ver, data):
@@ -441,7 +487,34 @@ def for_project(paths, ctx=None) -> dict | None:
         verified_by = _who(ver) if _who(ver) not in BY_EAR else None
     return {"confirmed": ok, "threshold": c["thr"], "basis": c["basis"], "items": items,
             "lexicon_refused": c["lexicon_refused"], "domain": c["domain"], "verified_by": verified_by,
-            "unfingerprinted": unfingerprinted}
+            "unfingerprinted": unfingerprinted, "episode": episode}
+
+
+EPISODE_REASONS = {
+    "none": ("نسخة الريل بتقول إن الحلقة اتراجعت، بس مش مكتوب فيها ملف الحلقة",
+             "the reel's copy says the episode was verified, but names no episode transcript"),
+    "missing": ("ملف كلام الحلقة أو ملف مراجعتها مش موجود أو مش بيتقري",
+                "the episode's words or its verification file is missing or unreadable"),
+    "not_verified": ("مراجعة الحلقة نفسها مش متسجّلة كمتراجعة", "the episode's own file does not say verified"),
+    "changed": ("كلام الحلقة اتغيّر بعد ما اتراجع (البصمة مش نفسها)",
+                "the episode's words changed after it was verified (the fingerprint does not match)"),
+}
+
+
+def _episode_reason(wj, ep_data, ep_ver):
+    """Why a reel's copy of its episode's verification still does not count (b29d47f P3-2): a reason key of
+    EPISODE_REASONS, or ("by", name) when the episode's own file was recorded by someone other than the editor."""
+    meta = wj.get("meta") if isinstance(wj, dict) else None
+    if not isinstance(meta, dict) or not isinstance(meta.get("episode_transcript"), str) \
+            or not meta["episode_transcript"]:
+        return "none"
+    if ep_data is None or not isinstance(ep_ver, dict):
+        return "missing"
+    if ep_ver.get("verified") is not True:
+        return "not_verified"
+    if not _current(ep_ver, ep_data):
+        return "changed"
+    return ["by", _who(ep_ver)]
 
 
 def _tc(ms) -> str:
@@ -460,6 +533,10 @@ def _shown(entry: dict, text: str) -> bool:
     to (one unsure «مش» does not block every graphic that says «مش»); anything else by all its words."""
     toks = tokens(text)
     shown = {s for t in toks for s in stems(t)}
+    if entry.get("unsure") and entry.get("value") is None:
+        # a number heard that cannot be read at all («٣،٥٠٠», «1/2», «3²»): any number on the graphic may be it, in any
+        # writing («3500», «½», «نص»), so any number shown waits for the editor's ear ("1.500" has its two readings)
+        return bool(values_in(text)) or any(not n["ambiguous"] for n in find_numbers(toks))
     if entry.get("value") is not None:              # "1.500" heard may be 1.5 or 1500: either one on screen
         seen = values_in(text)
         return any(canon(v) in seen for v in [entry["value"], *(entry.get("alts") or [])])
@@ -502,7 +579,7 @@ def _errors(rep: dict, events) -> list:
                         f"(word {ids}, {_tc(e['start_ms'])}), a {en} the transcription is unsure of ({en_why}): "
                         "confirm it by ear first (correct it in transcript-corrections.json if needed), then "
                         "`reel transcript-verify`" + _who_hint(rep.get("verified_by"))
-                        + _fingerprint_hint(rep.get("unfingerprinted")))
+                        + _fingerprint_hint(rep.get("unfingerprinted")) + _episode_hint(rep.get("episode")))
     return errs
 
 
@@ -515,6 +592,20 @@ def _who_hint(name) -> str:
     return (f" — المراجعة اتسجّلت باسم «{shown}»، ودي مش موافقة المونتير بالسمع: بعد ما المونتير يسمعها، "
             f"`reel transcript-verify --by editor` / the check was recorded as \"{shown}\", which is not the "
             "editor's ear: once the editor has listened, `reel transcript-verify --by editor`")
+
+
+def _episode_hint(reason) -> str:
+    """A reel's copy of its episode's verification does not count: say why, so the editor knows what to fix."""
+    if not reason:
+        return ""
+    if isinstance(reason, list) and reason[:1] == ["by"]:
+        shown = reason[1] if len(reason) > 1 and reason[1] else "(بدون اسم / no name)"
+        ar = f"مراجعة الحلقة نفسها اتسجّلت باسم «{shown}»، مش موافقة المونتير بالسمع"
+        en = f"the episode's own verification was recorded as \"{shown}\", not the editor's ear"
+    else:
+        ar, en = EPISODE_REASONS.get(reason, EPISODE_REASONS["missing"])
+    return (f" — {ar}: بعد ما المونتير يسمع الريل، `reel transcript-verify --by editor` / {en}: once the editor has "
+            "listened to the reel, run `reel transcript-verify --by editor`")
 
 
 def _fingerprint_hint(missing) -> str:

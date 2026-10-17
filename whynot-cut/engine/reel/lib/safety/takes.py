@@ -31,7 +31,7 @@ from collections import Counter
 from .. import cut_proposals as CP
 from . import differences as D
 from .numbers import fold
-from .risk_words import _negation
+from .risk_words import _negation, negated_core
 
 FILE = "01_analysis/takes.json"
 HISTORY = "01_analysis/takes-history.json"
@@ -66,6 +66,8 @@ def sentences(words, cfg=None) -> list:
                         "text": " ".join(x["word"].strip() for x in cur), "start_ms": cur[0]["start_ms"],
                         "end_ms": cur[-1]["end_ms"], "toks": [t for x in cur for t in [CP.norm_word(x["word"])] if t],
                         "said": [_said(x["word"]) for x in cur if CP.norm_word(x["word"])],
+                        # every word as written, a comma or a dot on its own too («٣ ، ٥»): what the meaning reader reads
+                        "words": [str(x["word"]) for x in cur],
                         "punct": bool(_PUNCT.search(cur[-1]["word"])), "speaker": cur[0].get("speaker"),
                         "probs": [x.get("probability") for x in cur]})
             cur = []
@@ -102,38 +104,33 @@ def _same(a: dict, b: dict, F: dict, V: dict) -> bool:
 
 
 def _differences(takes: list, F: dict) -> dict:
-    """What the takes do not share. Meaning, always (the shared reader, every pair of takes): "numbers", "negation",
-    "timing" = the words that carry it, as said, and "pairs" = [{"takes": [n, m], kind: {"a": [...], "b": [...]}}].
-    An earlier take cut short (not closed, fewer words) is read only as far as it goes: «خدي الـ vitamin D» then «… ألف
-    وحدة كل يوم.» is not a difference ("cut_short" keeps that pair: the line names what it left out, and it counts
-    if the cut-off take would be the proposal). A later shorter take is always read whole.
-    Content words where the full takes overlap (an abandoned start is left out: it only stopped early), as said
-    ("words"), only when four or fewer differ: a longer list means a
-    reworded take, not a slip. A negation word is not a content word, and a negated verb is compared without its
-    negation («مبيقللش» = «بيقلل» + a negation, which the meaning reader already counts)."""
-    out, pairs, short, cut = {}, [], [], set()
+    """What the takes do not share. Meaning, always (the shared reader, every pair of takes, each read whole):
+    "negation", "numbers", "timing", "claim" = the words that carry it, as said, and "pairs" = [{"takes": [n, m],
+    kind: {"a": [...], "b": [...]}}]. Any of them means no take is proposed. An earlier take that may have stopped
+    early (not closed, fewer words, the start of the later one) is no exception: it still differs in meaning, and the
+    pair carries "cut_short": n only so the line can say what the later take adds («… وحباية بالليل» may be a dose
+    more, not the end of an abandoned start: only the editor's ear tells).
+    Content words where the full takes overlap (a start that may have stopped early is left out), as said ("words"),
+    only when four or fewer differ: a longer list means a reworded take, not a slip. A negation is not a content
+    word, and a negated word is compared without its negation («مبيقللش» = «ما بيقللش» = «بيقلل», "doesn't" =
+    "does not" = "does"): the meaning reader already counts it."""
+    out, pairs, cut = {}, [], set()
     for i in range(len(takes)):
         for j in range(i + 1, len(takes)):
             a, b = takes[i], takes[j]
-            d = D.compare(a["said"], b["said"])
-            # an abandoned start: the rest is unsaid, not said otherwise (read only as far as it goes)
-            stopped = _cut_short(a, b) is not None and not D.compare(a["said"], b["said"][:len(a["said"])])
+            d = D.compare(a["words"], b["words"])
+            # may have stopped early: where it goes, it says what the later take says
+            stopped = _cut_short(a, b) is not None and not D.compare(a["words"], b["words"][:len(a["words"])])
             if stopped:
                 cut.add(a["n"])
-            if not d:
-                continue
-            if stopped:
-                short.append({"takes": [a["n"], b["n"]], "cut_short": a["n"], **d})
-                continue
-            pairs.append({"takes": [a["n"], b["n"]], **d})
+            if d:
+                pairs.append({"takes": [a["n"], b["n"]], **({"cut_short": a["n"]} if stopped else {}), **d})
     for kind in D._ORDER:
         said = [w for p in pairs if kind in p for side in ("a", "b") for w in p[kind][side]]
         if said:
             out[kind] = list(dict.fromkeys(said))
-    meaning = {w for kind in D._ORDER for phrase in out.get(kind, []) + [x for p in short if kind in p
-                                                                           for side in ("a", "b") for x in p[kind][side]]
-               for w in phrase.split()}
-    full = [t for t in takes if t["n"] not in cut]       # an abandoned start's words are a start of the others'
+    meaning = {w for kind in D._ORDER for phrase in out.get(kind, []) for w in phrase.split()}
+    full = [t for t in takes if t["n"] not in cut]       # a start that stopped early: its words start the others'
     n = min((len(t["toks"]) for t in full), default=0)
     shown = {}                                       # compared without a clitic, shown as said («للسكر»)
     words = []
@@ -141,12 +138,12 @@ def _differences(takes: list, F: dict) -> dict:
         s = set()
         frag = _fragments(t["toks"])
         for k, (w, said) in enumerate(zip(t["toks"][:n + 1], t["said"][:n + 1])):
-            neg = _negation(fold(w))
-            if k in frag or neg == "word" or said.lower().replace("’", "'").endswith("n't"):
+            nxt = fold(t["toks"][k + 1]) if k + 1 < len(t["toks"]) else ""
+            neg = _negation(fold(w), nxt)
+            if k in frag or neg == "word":
                 continue
-            if neg == "verb":                            # «مبيقللش» -> «بيقلل», «ماتاخدش» -> «تاخد»
-                w = w[2:-1] if w.startswith("ما") else w[1:-1]
-            if CP._content(w, F) and not _is_number(w):
+            w = _without_negation(w, said, t["toks"][k - 1] if k else "")
+            if w and CP._content(w, F) and not _is_number(w):
                 shown.setdefault(_bare(w), said)
                 s.add(_bare(w))
         words.append(s)
@@ -157,9 +154,22 @@ def _differences(takes: list, F: dict) -> dict:
         out["words"] = differ
     if pairs:
         out["pairs"] = pairs
-    if short:
-        out["cut_short"] = short
     return out
+
+
+_NT = {"won't": "will", "can't": "can", "shan't": "shall", "ain't": "", "cannot": "can"}
+
+
+def _without_negation(w: str, said: str, prev: str) -> str:
+    """A word with its negation taken off, so «مبيقللش», «ما بيقللش» and «بيقلل» compare as one word, and "doesn't",
+    "does not" and "does" too ("" when nothing is left: "ain't")."""
+    low = said.lower().replace("’", "'")
+    if low in _NT:
+        return _NT[low]
+    if low.endswith("n't"):
+        return low[:-3]
+    core = negated_core(fold(w), fold(prev))            # «مبيقللش», «ما بيقللش» -> «بيقلل»
+    return core if core != fold(w) else w
 
 
 def _cut_short(t: dict, other: dict):
@@ -236,9 +246,36 @@ def _why(f: dict, tie: bool) -> tuple:
     return text_ar, ", ".join(en)
 
 
+def _added(p: dict) -> dict:
+    """{kind: [words]} the later take says that a take which may have stopped early did not get to (negation lists
+    every word on both sides: only the new ones, by count: «not … and not with milk», the second is new)."""
+    mine, other = ("a", "b") if p["takes"][0] == p["cut_short"] else ("b", "a")
+    out = {}
+    for kind in D._ORDER:
+        if kind in p:
+            said = Counter(p[kind][mine])
+            new = []
+            for w in p[kind][other]:
+                if said[w]:
+                    said[w] -= 1
+                else:
+                    new.append(w)
+            if new:
+                out[kind] = list(dict.fromkeys(new))
+    return out
+
+
 def _named(p: dict, takes: int, lang: str) -> str:
     """What one pair of takes differs in («نفي: (مفيش) مقابل «مبيقللش»»), with the take numbers when there are more
-    than two takes."""
+    than two takes. A take that may have stopped early: what the other one adds, said as a possibility («١ يمكن
+    تكون وقفت قبل: توقيت «بالليل»»), since a dose more and an abandoned start sound the same on paper."""
+    if p.get("cut_short") and _added(p):
+        n, add = p["cut_short"], _added(p)
+        if lang == "ar":
+            return f"{_ar(n)} يمكن تكون وقفت قبل: " + "؛ ".join(
+                f"{D.LABEL[k][0]} " + "، ".join(f"«{w}»" for w in add[k]) for k in D._ORDER if k in add)
+        return f"{n} may have stopped before: " + "; ".join(
+            f"{D.LABEL[k][1]} " + ", ".join(f"\"{w}\"" for w in add[k]) for k in D._ORDER if k in add)
     d_ar, d_en = D.describe({x: p[x] for x in D._ORDER if x in p})
     if takes == 2:
         return d_ar if lang == "ar" else d_en
@@ -283,12 +320,6 @@ def groups(words, cfg=None, samples=None, sr=0, lang: str = "ar") -> list:
         words_ar = "الكلام (" + "، ".join(differ["words"]) + ")" if differ.get("words") else ""
         words_en = "words (" + ", ".join(differ["words"]) + ")" if differ.get("words") else ""
         best = max(range(len(takes)), key=lambda k: keys[k])
-        for p in differ.get("cut_short", []):           # the proposal would be the cut-off take: never past a meaning
-            if p["cut_short"] == nums[best]:
-                differ.setdefault("pairs", []).append({x: v for x, v in p.items() if x != "cut_short"})
-                for kind in D._ORDER:
-                    if kind in p:
-                        differ[kind] = list(dict.fromkeys(differ.get(kind, []) + p[kind]["a"] + p[kind]["b"]))
         if differ.get("pairs"):                          # the meaning differs: the editor listens and chooses
             what_ar = " | ".join(_named(p, len(nums), "ar") for p in differ["pairs"]) + ("؛ " + words_ar if words_ar else "")
             what_en = " | ".join(_named(p, len(nums), "en") for p in differ["pairs"]) + ("; " + words_en if words_en else "")
@@ -302,26 +333,6 @@ def groups(words, cfg=None, samples=None, sr=0, lang: str = "ar") -> list:
         why_ar, why_en = _why(takes[best]["features"], tie)
         warn_ar = f" — ⚠ النسخ مختلفة في: {words_ar}، اسمعهم قبل ما تختار" if words_ar else ""
         warn_en = f" — ⚠ the takes differ in: {words_en}; listen before choosing" if words_en else ""
-        left = {}                                        # what each abandoned start did not get to say
-        for p in differ.get("cut_short", []):
-            mine, other = ("a", "b") if p["takes"][0] == p["cut_short"] else ("b", "a")
-            for kind in D._ORDER:
-                if kind in p:                            # negation lists every word on both sides: only the new ones,
-                    said = Counter(p[kind][mine])         # by count («not … and not with milk»: the second is new)
-                    new = []
-                    for w in p[kind][other]:
-                        if said[w]:
-                            said[w] -= 1
-                        else:
-                            new.append(w)
-                    left.setdefault(p["cut_short"], {}).setdefault(kind, []).extend(new)
-        for n, kinds in left.items():
-            said = {k: list(dict.fromkeys(v)) for k, v in kinds.items() if v}
-            if said:
-                warn_ar += f" — ⚠ {_ar(n)} اتقطعت قبل: " + "؛ ".join(
-                    f"{D.LABEL[k][0]} " + "، ".join(f"«{w}»" for w in said[k]) for k in D._ORDER if k in said)
-                warn_en += f" — ⚠ {n} stopped before: " + "; ".join(
-                    f"{D.LABEL[k][1]} " + ", ".join(f"\"{w}\"" for w in said[k]) for k in D._ORDER if k in said)
         out.append({"takes": takes, "best": nums[best], "differ": differ,
                     "line_ar": f"{listed}: الأفضل {_ar(nums[best])} — {why_ar}" + warn_ar,
                     "line_en": f"{listed_en}: best {nums[best]} — {why_en}" + warn_en})

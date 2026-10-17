@@ -1,5 +1,5 @@
 {
- "note": "Made-up transcript for K-T7 tests (no client speech). groups: the sentence numbers said more than once; best: the hand-labelled better take of each group.",
+ "note": "Made-up transcript for K-T7 tests (no client speech). groups: the sentence numbers said more than once; best: the hand-labelled better take of each group (null: no take is proposed, the later take adds a dose the earlier one never said).",
  "language": "ar",
  "words": [
   {
@@ -130,6 +130,6 @@
   ]
  ],
  "best": [
-  2
+  null
  ]
 }
