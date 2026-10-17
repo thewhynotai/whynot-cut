@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import stat
 import tempfile
 from datetime import datetime, timezone
@@ -150,6 +151,26 @@ class Store:
             except OSError:
                 pass
             return False
+
+    # ----- the per-run settings file (the API key travels in it; the engine deletes it after reading)
+    def ensure_run_dir(self) -> Path:
+        """<engine home>/tools/kalam/run/, created user-only (the parents too)"""
+        sec = _security()
+        sec.private_dir(self.home)
+        return sec.private_dir(self.run_dir)
+
+    def new_run_settings(self, settings: dict) -> Path:
+        """Write `settings` (UTF-8, LF) to a new kalam-run-<random>.json in the run folder, user-only from its first byte,
+        and return its path: what a caller hands to `python -m lib.kalam.engine run --settings`. The engine deletes the file
+        after reading it; if the engine refuses it, the caller deletes it."""
+        sec = _security()
+        folder = self.ensure_run_dir()
+        data = (json.dumps(settings, ensure_ascii=False) + "\n").encode("utf-8")
+        path = folder / ("kalam-run-%s.json" % secrets.token_hex(8))
+        fd = sec.open_private(path, os.O_WRONLY | os.O_EXCL)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        return path
 
     # ----- log
     def log(self, msg) -> bool:

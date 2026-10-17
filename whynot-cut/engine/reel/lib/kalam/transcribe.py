@@ -12,6 +12,7 @@ import numpy as np
 
 from . import device as _device
 from . import platform as _platform
+from . import revisions as _revisions
 from .store import default_models_dir
 
 ARABIC_DIR = "whisper-turbo-ar-dialectal"
@@ -27,6 +28,17 @@ _onnx = None
 last_device = "apple-gpu"
 
 
+def _snapshot(repo: str) -> str:
+    """the local folder of the PINNED revision of a Hugging Face repo (downloaded at that commit when it is missing, never
+    the moving head; a pinned download leaves no "main" reference, so a lookup by repo name alone finds nothing)"""
+    return _revisions.snapshot(repo)
+
+
+def _load_parakeet():
+    from parakeet_mlx import from_pretrained
+    return from_pretrained(_snapshot(ENGLISH_REPO))
+
+
 def _whisper(a: np.ndarray, model: str, language) -> list:
     import mlx_whisper
     r = mlx_whisper.transcribe(a, path_or_hf_repo=model, language=language, word_timestamps=True,
@@ -38,11 +50,10 @@ def _whisper(a: np.ndarray, model: str, language) -> list:
 def _parakeet_words(a: np.ndarray, chunk: float = 120.0, overlap: float = 15.0) -> list:
     global _parakeet
     import mlx.core as mx
-    from parakeet_mlx import from_pretrained
     from parakeet_mlx.alignment import merge_longest_common_subsequence, merge_longest_contiguous
     from parakeet_mlx.audio import get_logmel
     if _parakeet is None:
-        _parakeet = from_pretrained(ENGLISH_REPO)
+        _parakeet = _load_parakeet()
     cfg = _parakeet.preprocessor_config
     data = mx.array(a.astype(np.float32))   # get_logmel needs float32 (it views the STFT by input dtype)
     tokens, step = [], int((chunk - overlap) * cfg.sample_rate)
@@ -182,4 +193,4 @@ def transcribe(a: np.ndarray, mode: str, models_dir=None) -> list:
         return _whisper(a, str(md / ARABIC_DIR), "ar")
     if mode == "en":
         return _parakeet_words(a)
-    return _whisper(a, OTHER_REPO, None)
+    return _whisper(a, _snapshot(OTHER_REPO), None)

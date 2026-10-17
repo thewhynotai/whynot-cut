@@ -14,7 +14,11 @@
 usage: python -m lib.kalam.engine run --wav W --mode ar|en|other --out DIR --settings SETTINGS.json [--models DIR]
        python -m lib.kalam.engine doctor [--models DIR] [--quick]     (one JSON line: is everything in place?)
 stdout: one JSON object per line, {"stage": loading|transcribing|aligning|correcting|captions|done|error, ...}
-The API key is read from the settings file only (never from argv); the file is deleted as soon as it has been read."""
+The API key is read from the settings file only (never from argv); the file is deleted as soon as it has been read.
+
+The callers' contract for --settings: write the per-run settings file (it may hold the API key) into <engine home>/tools/kalam/run/
+(Store.new_run_settings does it, user-only) or into the temp folder, never settings.json; the engine reads it once and deletes it.
+A file anywhere else, a link, or settings.json is refused and left untouched: the caller deletes its own file then."""
 import argparse
 import json
 import os
@@ -33,12 +37,19 @@ from .audio import envelope_db, load_16k
 from .clean import clean_garbled, drop_hallucinations, drop_loops, drop_nonspeech_tags, drop_unspoken
 from .correct import correct, correction_line, find_claude_code, make_client, notice_how, rules_for
 from .phrases import phrases
+from . import revisions
 from .rules import enforce
 from .store import Store, default_models_dir, take_settings
 from .transcribe import transcribe
 from .units import apply_units, join_continuations
 
 _SECRETS = []           # literals that must never reach stdout / logs / reports (the API key of this run)
+
+RUN_SETTINGS_CONTRACT = (
+    "The per-run settings file (it may hold the API key) must be written by the caller into <engine home>/tools/kalam/run/ "
+    "(Store.new_run_settings does it, user-only) or into the temp folder, never settings.json. The engine reads it once and "
+    "deletes it. If the engine refuses the file (it is elsewhere, a link, or settings.json) it leaves it untouched: the caller "
+    "must delete its own file.")
 
 
 def prepare_env() -> None:
@@ -56,9 +67,9 @@ def _align_module():
 
 
 def aligner_present() -> bool:
+    """is the PINNED aligner in the model cache? (a pinned download leaves no "main" reference: ask for its revision)"""
     try:
-        from huggingface_hub import snapshot_download
-        snapshot_download(_align_module().REPO, local_files_only=True)
+        revisions.snapshot(_align_module().REPO, local_only=True)
         return True
     except Exception:
         return False
@@ -72,7 +83,7 @@ def _nvidia_smi():
         return found
     if _platform.is_windows():
         root = os.environ.get("SystemRoot") or os.environ.get("SYSTEMROOT")
-        if root:
+        if root and os.path.isabs(root) and Path(root).is_absolute():       # a relative root would follow the cwd
             candidate = Path(root) / "System32" / "nvidia-smi.exe"
             if candidate.is_file():
                 return str(candidate)
@@ -227,19 +238,24 @@ def run(wav: str, mode: str, out: str, settings: dict, models: str, log=None) ->
     return done
 
 
-def main(argv=None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="python -m lib.kalam.engine")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run")
+    r = sub.add_parser("run", epilog=RUN_SETTINGS_CONTRACT)
     r.add_argument("--wav", required=True)
     r.add_argument("--mode", choices=["ar", "en", "other"], default="ar")
     r.add_argument("--out", required=True)
-    r.add_argument("--settings", required=True)
+    r.add_argument("--settings", required=True, help="per-run settings file: in <engine home>/tools/kalam/run/ or the temp "
+                   "folder; read once, then deleted by the engine (the caller deletes it if the engine refuses it)")
     r.add_argument("--models", default=str(default_models_dir()))
     d = sub.add_parser("doctor")
     d.add_argument("--models", default=str(default_models_dir()))
     d.add_argument("--quick", action="store_true")
-    args = ap.parse_args(argv)
+    return ap
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
     prepare_env()
     store = Store()
     if args.cmd == "doctor":

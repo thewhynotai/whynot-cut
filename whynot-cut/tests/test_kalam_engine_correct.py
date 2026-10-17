@@ -569,22 +569,29 @@ class TestTempFolderAndCancel(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             pidfile, state = Path(d) / "grandchild.pid", {"n": 0}
 
-            def communicate(self, *a, **k):
+            def communicate(proc, *a, **k):
                 state["n"] += 1
                 if state["n"] == 1:                       # the user cancels once the CLI has started its own child
-                    procs.append(self)
-                    deadline = time.time() + 60
-                    while not pidfile.exists() and time.time() < deadline:
+                    procs.append(proc)
+                    deadline = time.time() + 120          # a deadline, not a fixed sleep: a loaded machine starts slowly
+                    while time.time() < deadline:
+                        try:
+                            pid = int(pidfile.read_text(encoding="utf-8"))      # written, complete and a real number
+                        except (OSError, ValueError):
+                            pid = 0
+                        if pid and self._alive(pid):      # and that process really is running before we cancel
+                            break
                         time.sleep(0.1)
-                    time.sleep(0.2)
+                    state["pid"] = pid
                     raise KeyboardInterrupt
-                return realc(self, *a, **k)
+                return realc(proc, *a, **k)
 
             with mock.patch.object(subprocess.Popen, "communicate", communicate):
                 with self.assertRaises(KeyboardInterrupt):
                     _run_cli(self._sleeper(pidfile), "", d)
             self.assertIsNotNone(procs[0].poll())
-            grandchild = int(pidfile.read_text(encoding="utf-8"))
+            grandchild = state["pid"]
+            self.assertTrue(grandchild, "the CLI never started its child")
             # Windows: kill_tree walks the tree with taskkill /T; POSIX: the CLI's process group is killed (_kill_cli)
             deadline = time.time() + 30
             while self._alive(grandchild) and time.time() < deadline:

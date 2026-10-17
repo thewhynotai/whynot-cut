@@ -11,41 +11,17 @@ import os
 import sys
 from pathlib import Path
 
-from .. import align_w2v as _align_w2v
 from . import platform as _platform
+from . import revisions as _revisions
 from .store import Store
 
 ARABIC_SRC = "oddadmix/whisper-large-v3-turbo-arabic-dialectal"
 OTHERS = ["mlx-community/whisper-large-v3-turbo", "mlx-community/parakeet-tdt-0.6b-v2",
           "MahmoudAshraf/mms-300m-1130-forced-aligner"]
-ALIGNER_REPO, ALIGNER_REV = _align_w2v.MMS_REPO, _align_w2v.MMS_REV     # one place for the aligner (owner decision G8: MMS stays in
-#                                                                      the 3.0 trial edition; the commercial edition replaces it)
-# Every download is pinned to the revision recorded in docs/legal/third-party-licences.md (the 8-hex prefixes of its table,
-# resolved to the full commit through the Hugging Face API): rows M4, M5, M7, M8 and M9. A repo without a pinned revision is
-# refused, never fetched from its moving head.
-REVISIONS = {
-    "oddadmix/whisper-large-v3-turbo-arabic-dialectal": "cb15abb9792c4812f63de322eeb4e9ca00b79c49",    # M7
-    "openai/whisper-large-v3-turbo": "41f01f3fe87f28c78e2fbf8b568835947dd65ed9",                       # M5
-    "istupakov/parakeet-tdt-0.6b-v2-onnx": "0bbb45a3365852604aef28b538a8f066f4ccaa85",                 # M9
-    ALIGNER_REPO: ALIGNER_REV,                                                                         # M8
-    "mlx-community/whisper-large-v3-turbo": "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb",                # M4
-    "mlx-community/parakeet-tdt-0.6b-v2": "8ae155301e23d820d82aa60d24817c900e69e487",                  # M9
-}
-LICENCES = {
-    "oddadmix/whisper-large-v3-turbo-arabic-dialectal": "Apache-2.0",
-    "openai/whisper-large-v3-turbo": "MIT",
-    "istupakov/parakeet-tdt-0.6b-v2-onnx": "CC-BY-4.0 (attribution required)",
-    ALIGNER_REPO: "CC-BY-NC-4.0 (non-commercial: 3.0 trial edition only)",
-    "mlx-community/whisper-large-v3-turbo": "MIT (inherited)",
-    "mlx-community/parakeet-tdt-0.6b-v2": "CC-BY-4.0 (inherited)",
-}
-
-
-def _rev(repo: str) -> str:
-    try:
-        return REVISIONS[repo]
-    except KeyError:
-        raise ValueError("no pinned revision for %s: add it to setup_models.REVISIONS (and the licence table) first" % repo) from None
+# The revisions, licences and the aligner pair live in revisions.py (ONE table, shared with the runtime lookups: a download
+# pinned to a commit leaves no "main" reference in the cache, so the runtime must ask for the same revision).
+REVISIONS, LICENCES, ALIGNER_REPO, ALIGNER_REV = _revisions.REVISIONS, _revisions.LICENCES, _revisions.ALIGNER_REPO, _revisions.ALIGNER_REV
+_rev = _revisions.pinned
 
 
 def _notice(repo: str) -> None:

@@ -29,6 +29,7 @@ _sys.dont_write_bytecode = True
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import contextlib
 import hashlib
+import http.server
 import importlib
 import importlib.util
 import io
@@ -968,13 +969,14 @@ class TestTranscribeRouting(unittest.TestCase):
         T = self.T
         seen = []
         with mock.patch.object(T._platform, "backend", lambda: "mlx"), \
+                mock.patch.object(T, "_snapshot", lambda repo: "/snap/" + repo), \
                 mock.patch.object(T, "_whisper", lambda a, m, lang: seen.append(("whisper", m, lang)) or ["w"]), \
                 mock.patch.object(T, "_parakeet_words", lambda a: seen.append(("parakeet",)) or ["p"]):
             self.assertEqual(T.transcribe(self.a, "ar", "/pack"), ["w"])
             self.assertEqual(T.transcribe(self.a, "en", "/pack"), ["p"])
             self.assertEqual(T.transcribe(self.a, "other", "/pack"), ["w"])
         self.assertEqual(seen, [("whisper", str(Path("/pack") / T.ARABIC_DIR), "ar"), ("parakeet",),
-                                ("whisper", T.OTHER_REPO, None)])
+                                ("whisper", "/snap/" + T.OTHER_REPO, None)])
 
     def test_the_mlx_whisper_call_and_word_shape(self):
         T = self.T
@@ -1770,13 +1772,14 @@ def sha256_of(path) -> str:
     return h.hexdigest()
 
 
-def slow_skip_reason(wav: str) -> str:
+def slow_skip_reason(wav: str, mode: str = "ar") -> str:
     """why the any-clip real-model tests do not run here ('' = they run). They load the Kalam pack and align on the GPU or
     the CPU: run them through the machine queue (heavy.sh gpu|job) with WHYNOT_KALAM_SLOW=1. ANY clip will do."""
     if os.environ.get("WHYNOT_KALAM_SLOW") != "1":
         return "heavy: set WHYNOT_KALAM_SLOW=1 and run through heavy.sh (real models)"
-    if not (REAL_PACK / "ct2-whisper-turbo-ar-dialectal" / "model.bin").is_file():
-        return "the Kalam model pack is not installed (%s)" % REAL_PACK
+    needed = {"ar": ("ct2-whisper-turbo-ar-dialectal", "model.bin"), "en": ("parakeet-tdt-0.6b-v2-onnx", "encoder-model.onnx")}[mode]
+    if not (REAL_PACK / needed[0] / needed[1]).is_file():
+        return "the Kalam model pack is not installed (%s needs %s/%s)" % (REAL_PACK, needed[0], needed[1])
     if not wav or not Path(wav).is_file():
         return "no test clip: set WHYNOT_KALAM_TEST_WAV (any H13 clip under whynot-test/; never client media)"
     try:
@@ -1789,7 +1792,7 @@ def slow_skip_reason(wav: str) -> str:
 def reference_skip_reason(wav: str, which: str) -> str:
     """why a reference check of the OWNER'S clip does not run ('' = it runs): it needs the slow gate, the reference flag
     and a clip whose sha256 equals the digest named in WHYNOT_KALAM_REF_SHA256_<AR|EN>"""
-    reason = slow_skip_reason(wav)
+    reason = slow_skip_reason(wav, "en" if which == "EN" else "ar")
     if reason:
         return reason
     if os.environ.get("WHYNOT_KALAM_REFERENCE") != "1":
@@ -1815,7 +1818,10 @@ def srt_blocks(text):
     return out
 
 
-def check_words(tc, words, duration, tol=0.1):
+WORD_OVERLAP_TOLERANCE_S = 0.1      # untuned until the first real run (aligners overlap by a few ms; measure it, then tighten)
+
+
+def check_words(tc, words, duration, tol=WORD_OVERLAP_TOLERANCE_S):
     """any clip: words exist, each lies inside the clip, starts never go backwards and a word ends before the next starts
     (within `tol` seconds: aligners overlap by a few ms)"""
     tc.assertTrue(words, "no words")
@@ -1876,6 +1882,8 @@ class TestSlowGates(unittest.TestCase):
                 pack = Path(d) / "pack"
                 (pack / "ct2-whisper-turbo-ar-dialectal").mkdir(parents=True)
                 (pack / "ct2-whisper-turbo-ar-dialectal" / "model.bin").write_bytes(b"x")
+                (pack / "parakeet-tdt-0.6b-v2-onnx").mkdir()
+                (pack / "parakeet-tdt-0.6b-v2-onnx" / "encoder-model.onnx").write_bytes(b"x")
                 fake_align = _types.ModuleType("lib.kalam.align")
                 with mock.patch.object(sys.modules[__name__], "REAL_PACK", pack), \
                         mock.patch.dict(sys.modules, {"lib.kalam.align": fake_align}):
@@ -1926,12 +1934,11 @@ class TestCli(unittest.TestCase):
         if reason:
             self.skipTest(reason)
 
-    def run_engine(self, tmp_path, settings, wav=None):
+    def run_engine(self, tmp_path, settings, wav=None, mode="ar"):
         sp = Path(tmp_path) / "settings.json"
         sp.write_text(json.dumps(settings), encoding="utf-8")
         home = Path(tmp_path) / "engine-home"                                    # a temp engine home, never the real one
-        p = subprocess.run([sys.executable, "-s", "-B", "-m", "lib.kalam.engine", "run", "--wav", wav or WAV_AR, "--mode", "ar",
-                            "--out", str(Path(tmp_path) / "out"), "--settings", str(sp), "--models", str(REAL_PACK)],
+        p = subprocess.run(engine_argv(wav or WAV_AR, mode, Path(tmp_path) / "out", sp),
                            capture_output=True, env=slow_env(home), cwd=str(ENGINE), timeout=3600)
         events = [json.loads(l) for l in p.stdout.decode("utf-8").splitlines() if l.startswith("{")]
         return p, events
@@ -1961,64 +1968,6 @@ class TestCli(unittest.TestCase):
             self.assertTrue(p.returncode == 0 and ev[-1]["stage"] == "done")
             self.assertTrue(ev[-1]["corrected"] is False and ev[-1]["notice"] == "no_api_key")
             self.assertTrue((Path(tmp_path) / "out" / "captions.srt").exists())
-
-
-class TestRealModelsAnyClip(unittest.TestCase):
-    """invariants of the real pipeline that hold for ANY clip (the clip is only 'a clip from whynot-test/')"""
-
-    def setUp(self):
-        reason = slow_skip_reason(WAV_AR)
-        if reason:
-            self.skipTest(reason)
-        self.A = mod("audio")
-        a2d, rate = self.A.read_wav(WAV_AR)
-        self.duration = a2d.shape[0] / rate                                      # the file's OWN length
-
-    def run_once(self, tmp_path, name):
-        runner = TestCli("test_missing_key_still_makes_captions_with_notice")
-        sub = Path(tmp_path) / name
-        sub.mkdir()
-        p, ev = runner.run_engine(sub, {"correct": False})
-        self.assertEqual(p.returncode, 0, p.stderr[-2000:])
-        return sub / "out", ev, p
-
-    def test_durations_equal_the_files_own_length(self):
-        a = self.A.load_16k(WAV_AR)
-        self.assertLessEqual(abs(len(a) / 16000 - self.duration), 2 / 16000)
-        self.assertEqual(self.A.envelope_db(a).shape[0], int(len(a) / 160))
-        if WAV_EN and Path(WAV_EN).is_file():
-            a2d, rate = self.A.read_wav(WAV_EN)
-            self.assertLessEqual(abs(len(self.A.load_16k(WAV_EN)) / 16000 - a2d.shape[0] / rate), 2 / 16000)
-
-    def test_a_run_obeys_the_pipeline_invariants(self):
-        with tempfile.TemporaryDirectory() as tmp_path:
-            out, ev, _p = self.run_once(tmp_path, "one")
-            stages = [e["stage"] for e in ev]
-            self.assertEqual(stages[0], "loading")
-            self.assertEqual(stages[-1], "done")
-            self.assertTrue(all(s_ in ("loading", "transcribing", "aligning", "correcting", "captions", "done") for s_ in stages))
-            self.assertLessEqual(abs(ev[1]["seconds"] - round(self.duration, 2)), 0.02)
-            for name in ("captions.srt", "captions.json", "words.json", "corrected.json"):
-                check_utf8_lf(self, (out / name).read_bytes(), name)
-            words = json.loads((out / "words.json").read_text(encoding="utf-8"))
-            check_words(self, words, self.duration)
-            blocks = check_srt(self, (out / "captions.srt").read_text(encoding="utf-8"), self.duration)
-            caps = json.loads((out / "captions.json").read_text(encoding="utf-8"))
-            self.assertEqual([c["n"] for c in caps], [b[0] for b in blocks])
-
-    def test_transcribe_and_align_give_ordered_scored_words(self):
-        a = self.A.load_16k(WAV_AR)
-        align = importlib.import_module("lib.kalam.align").align
-        ws = align(a, mod("transcribe").transcribe(a, "ar", str(REAL_PACK)))
-        check_words(self, ws, len(a) / 16000)
-        self.assertTrue(all("score" in w for w in ws))
-
-    def test_a_rerun_is_deterministic(self):
-        with tempfile.TemporaryDirectory() as tmp_path:
-            out1, _e1, _ = self.run_once(tmp_path, "one")
-            out2, _e2, _ = self.run_once(tmp_path, "two")
-            for name in ("captions.srt", "captions.json", "words.json"):
-                self.assertEqual((out1 / name).read_bytes(), (out2 / name).read_bytes(), name)
 
 
 class TestPipelineSlow(unittest.TestCase):
@@ -2061,6 +2010,446 @@ class TestPipelineSlow(unittest.TestCase):
         hello = [w for w in ws if w["w"].lower().strip(",.") == "hello"]
         self.assertTrue(hello and abs(hello[0]["s"] - 1.21) < 0.1)
 
+
+
+# ============================================================ N1: a REAL huggingface_hub cache, installed with the pinned revision
+class _HubHandler(http.server.BaseHTTPRequestHandler):
+    """a minimal local Hugging Face endpoint (HF_ENDPOINT): the revision, tree and resolve calls the real client makes"""
+    repos = {}                                                    # repo -> (commit sha, {file name: bytes})
+
+    def log_message(self, *a):
+        pass
+
+    def _send(self, body, code=200, headers=None, head=False):
+        self.send_response(code)
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        if not head:
+            self.wfile.write(body)
+
+    def _handle(self, head):
+        path = self.path.split("?")[0]
+        for repo, (sha, files) in self.repos.items():
+            if path == "/api/models/%s/revision/%s" % (repo, sha):
+                body = json.dumps({"id": repo, "sha": sha, "siblings": [{"rfilename": f} for f in files]}).encode()
+                return self._send(body, headers={"Content-Type": "application/json"}, head=head)
+            if path == "/api/models/%s/tree/%s" % (repo, sha):
+                body = json.dumps([{"type": "file", "path": f, "size": len(d), "oid": hashlib.sha1(d).hexdigest()}
+                                   for f, d in files.items()]).encode()
+                return self._send(body, headers={"Content-Type": "application/json"}, head=head)
+            prefix = "/%s/resolve/%s/" % (repo, sha)
+            if path.startswith(prefix) and path[len(prefix):] in files:
+                data = files[path[len(prefix):]]
+                return self._send(data, headers={"ETag": '"%s"' % hashlib.sha1(data).hexdigest(), "X-Repo-Commit": sha,
+                                                 "Content-Type": "application/octet-stream", "Accept-Ranges": "bytes"}, head=head)
+        self._send(b"{}", 404, head=head)
+
+    def do_GET(self):
+        self._handle(False)
+
+    def do_HEAD(self):
+        self._handle(True)
+
+
+@contextlib.contextmanager
+def fake_hub(repos):
+    import threading
+    handler = type("Handler", (_HubHandler,), {"repos": repos})
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield "http://127.0.0.1:%d" % server.server_address[1]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=10)
+
+
+# what the installer does on a Mac (pins and downloads the three MLX / aligner repos through the REAL client) ...
+INSTALL_SCRIPT = """
+import sys, types
+from lib.kalam import setup_models as S
+S.sys = types.SimpleNamespace(platform="darwin")
+S.convert_hf_whisper = lambda repo, dest: None
+S.main(sys.argv[1])
+"""
+# ... and what the runtime does afterwards, offline, with the same repo names
+LOOKUP_SCRIPT = """
+import json, sys, types
+import numpy as np
+from lib.kalam import engine as E, setup_models as S, transcribe as T
+out = {}
+E._align_module = lambda: types.SimpleNamespace(REPO=S.ALIGNER_REPO)
+out["aligner_present"] = E.aligner_present()
+out["whisper_path"] = T._snapshot(T.OTHER_REPO)
+out["parakeet_path"] = T._snapshot(T.ENGLISH_REPO)
+seen = {}
+fake = types.ModuleType("mlx_whisper")
+fake.transcribe = lambda a, **kw: seen.update(kw) or {"segments": []}
+sys.modules["mlx_whisper"] = fake
+T._platform.backend = lambda: "mlx"
+T.transcribe(np.zeros(16000, dtype=np.float32), "other", "/pack")
+out["mlx_whisper_arg"] = seen.get("path_or_hf_repo")
+pk = types.ModuleType("parakeet_mlx")
+pk.from_pretrained = lambda arg, **kw: out.update(parakeet_arg=arg) or "model"
+sys.modules["parakeet_mlx"] = pk
+out["parakeet_model"] = T._load_parakeet()
+from huggingface_hub import snapshot_download
+try:
+    snapshot_download(S.ALIGNER_REPO, local_files_only=True)
+    out["unpinned"] = "found"
+except Exception as e:
+    out["unpinned"] = type(e).__name__
+print(json.dumps(out))
+"""
+
+
+ABSENT_SCRIPT = """
+import json, types
+from lib.kalam import engine as E, setup_models as S
+E._align_module = lambda: types.SimpleNamespace(REPO=S.ALIGNER_REPO)
+print(json.dumps({"aligner_present": E.aligner_present()}))
+"""
+
+
+class TestPinnedCacheLayout(unittest.TestCase):
+    """Task 11 re-review N1: a download pinned to a commit leaves no refs/main in the Hugging Face cache, so a lookup by repo
+    name alone finds nothing. Every runtime lookup passes the same pinned revision (lib/kalam/revisions.py, shared with
+    setup_models). Tested against the REAL huggingface_hub client and a real cache layout in a temp HF_HOME."""
+
+    def _env(self, hf, endpoint, offline=False):
+        env = dict(os.environ, PYTHONPATH=str(ENGINE), HF_HOME=hf, HF_ENDPOINT=endpoint, HF_HUB_DISABLE_XET="1",
+                   HF_HUB_DISABLE_PROGRESS_BARS="1", HF_HUB_DISABLE_TELEMETRY="1", NO_PROXY="*", HTTP_PROXY="", HTTPS_PROXY="")
+        env.pop("HF_HUB_OFFLINE", None)
+        if offline:
+            env["HF_HUB_OFFLINE"] = "1"
+            env["HF_ENDPOINT"] = "http://127.0.0.1:9"                      # nothing listens: a network try would fail loudly
+        return env
+
+    def _run(self, script, env, *args):
+        p = subprocess.run([sys.executable, "-s", "-B", "-c", script, *args], env=env, cwd=str(ENGINE),
+                           capture_output=True, text=True, encoding="utf-8", timeout=300)
+        self.assertEqual(p.returncode, 0, p.stderr[-1500:])
+        return p.stdout
+
+    def test_a_pinned_install_is_found_offline_by_every_runtime_lookup(self):
+        S = mod("setup_models")
+        repos = {r: (S.REVISIONS[r], {"config.json": b'{"n": 1}', "weights.bin": b"w" * 64}) for r in S.OTHERS}
+        with fake_hub(repos) as endpoint, tempfile.TemporaryDirectory() as hf, tempfile.TemporaryDirectory() as models:
+            installed = self._run(INSTALL_SCRIPT, self._env(hf, endpoint), models)
+            self.assertIn("model:", installed)                    # the notices were printed
+            hub = Path(hf) / "hub"
+            for repo, (sha, _files) in repos.items():
+                cache = hub / ("models--" + repo.replace("/", "--"))
+                self.assertTrue((cache / "snapshots" / sha / "config.json").is_file(), repo)   # a real hub cache layout
+                self.assertFalse((cache / "refs" / "main").exists(), repo)                    # and no refs/main, ever
+            found = json.loads(self._run(LOOKUP_SCRIPT, self._env(hf, endpoint, offline=True)).strip().splitlines()[-1])
+            snap = lambda repo: str(hub / ("models--" + repo.replace("/", "--")) / "snapshots" / repos[repo][0])  # noqa: E731
+            self.assertNotEqual(found["unpinned"], "found")                  # by name alone it is NOT found
+            self.assertTrue(found["aligner_present"], "aligner_present() cannot see the pinned install")
+            self.assertEqual(os.path.normcase(found["whisper_path"]), os.path.normcase(snap("mlx-community/whisper-large-v3-turbo")))
+            self.assertEqual(os.path.normcase(found["parakeet_path"]), os.path.normcase(snap("mlx-community/parakeet-tdt-0.6b-v2")))
+            self.assertEqual(os.path.normcase(found["mlx_whisper_arg"]), os.path.normcase(found["whisper_path"]))
+            self.assertEqual(os.path.normcase(found["parakeet_arg"]), os.path.normcase(found["parakeet_path"]))
+
+    def test_an_aligner_that_was_never_installed_is_not_present(self):
+        S = mod("setup_models")
+        with fake_hub({}) as endpoint, tempfile.TemporaryDirectory() as hf:
+            found = json.loads(self._run(ABSENT_SCRIPT, self._env(hf, endpoint, offline=True)).strip().splitlines()[-1])
+        self.assertFalse(found["aligner_present"])
+
+    def test_the_revision_table_is_one_module_shared_by_setup_and_the_runtime(self):
+        R, S, T, E = mod("revisions"), mod("setup_models"), mod("transcribe"), mod("engine")
+        self.assertIs(S.REVISIONS, R.REVISIONS)
+        self.assertEqual((S.ALIGNER_REPO, S.ALIGNER_REV), (R.ALIGNER_REPO, R.ALIGNER_REV))
+        self.assertEqual(R.pinned(R.ALIGNER_REPO), R.ALIGNER_REV)
+        with self.assertRaises(ValueError):
+            R.pinned("some/unpinned-repo")
+        self.assertIn(T.OTHER_REPO, R.REVISIONS)
+        self.assertIn(T.ENGLISH_REPO, R.REVISIONS)
+
+    def test_refs_main_is_never_written_by_our_code(self):
+        for name in ("revisions", "setup_models", "transcribe", "engine"):
+            src = Path(mod(name).__file__).read_text(encoding="utf-8")
+            self.assertNotIn("refs/main", src, name)
+            self.assertNotIn('"refs"', src, name)
+
+    def test_the_snapshot_helper_passes_the_pinned_revision_and_the_offline_flag(self):
+        R = mod("revisions")
+        calls = []
+        hub = types_module("huggingface_hub")
+        hub.snapshot_download = lambda repo, **kw: calls.append((repo, kw)) or "/x"
+        with mock.patch.dict(sys.modules, {"huggingface_hub": hub}):
+            R.snapshot(R.ALIGNER_REPO, local_only=True)
+            R.snapshot("mlx-community/whisper-large-v3-turbo")
+        self.assertEqual(calls, [(R.ALIGNER_REPO, {"revision": R.ALIGNER_REV, "local_files_only": True}),
+                                 ("mlx-community/whisper-large-v3-turbo",
+                                  {"revision": R.REVISIONS["mlx-community/whisper-large-v3-turbo"], "local_files_only": False})])
+
+
+class TestGpuLookupRoot(unittest.TestCase):
+    """Task 11 re-review N2: the System32 fallback takes SystemRoot only when it is an absolute path"""
+
+    def setUp(self):
+        self.E = mod("engine")
+
+    def test_a_relative_systemroot_is_never_used(self):
+        E = self.E
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            touch(d / "System32" / "nvidia-smi.exe")
+            old = os.getcwd()
+            os.chdir(d)
+            try:
+                for root in (".", "", "System32", "..\\x", "./"):
+                    with mock.patch.dict(os.environ, {"PATH": "", "SystemRoot": root}), \
+                            mock.patch.object(E._platform, "is_windows", lambda: True), \
+                            mock.patch.object(E.subprocess, "run", side_effect=AssertionError("must not start a program")):
+                        self.assertIsNone(E._nvidia_smi(), repr(root))
+                        self.assertEqual(E._gpu(), "", repr(root))
+            finally:
+                os.chdir(old)
+
+    def test_a_rooted_path_without_a_drive_is_not_absolute_either(self):
+        E = self.E
+        with mock.patch.dict(os.environ, {"PATH": "", "SystemRoot": "\\Windows"}), mock.patch.object(E._platform, "is_windows", lambda: True):
+            self.assertIsNone(E._nvidia_smi())
+
+
+class TestRunSettingsContract(unittest.TestCase):
+    """Task 11 re-review N3: the per-run settings file goes in the store's run folder (created user-only by the store) or the
+    temp folder; the contract is in the engine's usage text and header; a refusal leaves the file for its caller to delete"""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.S = mod("store").Store(Path(self._tmp.name) / "engine-home")
+
+    def test_the_store_creates_its_run_folder_user_only(self):
+        d = self.S.ensure_run_dir()
+        self.assertEqual(d, self.S.home / "run")
+        self.assertTrue(d.is_dir())
+        if os.name == "nt":
+            from serve import security
+            self.assertTrue(security.user_only(d, directory=True))
+            self.assertTrue(security.user_only(self.S.home, directory=True))
+        else:
+            self.assertEqual(d.stat().st_mode & 0o777, 0o700)
+
+    def test_new_run_settings_writes_a_private_utf8_lf_file_that_take_settings_accepts_and_deletes(self):
+        settings = {"api_key": "sk-test-key-0000", "rules": "اختبار", "max_line": 28}
+        f = self.S.new_run_settings(settings)
+        g = self.S.new_run_settings(settings)
+        self.assertEqual(f.parent, self.S.run_dir)
+        self.assertRegex(f.name, r"^kalam-run-[0-9a-f]{16,}\.json$")
+        self.assertNotEqual(f, g)
+        raw = f.read_bytes()
+        self.assertTrue(raw.endswith(b"\n") and b"\r" not in raw)
+        self.assertEqual(json.loads(raw.decode("utf-8")), settings)
+        if os.name != "nt":
+            self.assertEqual(f.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(mod("store").take_settings(f, store=self.S), settings)
+        self.assertFalse(f.exists())
+        self.assertTrue(g.exists())                                    # only the file it was given
+
+    def test_new_run_settings_never_touches_the_persistent_settings(self):
+        self.S.save_settings({"max_line": 30})
+        before = self.S.settings_file.read_bytes()
+        self.S.new_run_settings({"api_key": "k"})
+        self.assertEqual(self.S.settings_file.read_bytes(), before)
+
+    def test_the_contract_is_in_the_engine_header_and_usage(self):
+        E = self.E = mod("engine")
+        contract = E.RUN_SETTINGS_CONTRACT
+        for needle in ("tools/kalam/run", "temp", "delete", "new_run_settings", "settings.json"):
+            self.assertIn(needle, contract)
+            self.assertIn(needle, E.__doc__, needle)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as cm:
+            E.main(["run", "--help"])
+        self.assertEqual(cm.exception.code, 0)
+        text = " ".join(out.getvalue().split())
+        self.assertIn("tools/kalam/run", text)
+        self.assertIn("delete", text)
+
+    def test_a_refused_settings_file_is_reported_and_left_for_the_caller_to_delete(self):
+        E = mod("engine")
+        elsewhere = Path.home() / "caller-dir" / "settings.json"
+        elsewhere.parent.mkdir(parents=True)
+        elsewhere.write_text(json.dumps({"api_key": "sk-test-key-0000"}), encoding="utf-8")
+        code, stdout, _ = capture_main(["run", "--wav", "x.wav", "--out", str(Path(self._tmp.name) / "o"), "--settings", str(elsewhere)])
+        self.assertEqual(code, 1)
+        self.assertTrue(elsewhere.is_file())                           # the engine did not delete it ...
+        last = json_lines(stdout)[-1]
+        self.assertEqual(last["stage"], "error")                       # ... and says why, so the caller can
+        self.assertIn("settings", last["error"])
+        self.assertNotIn(b"sk-test-key-0000", stdout)
+
+
+# ============================================================ N5: the comparison of two runs; N4: the mode of a real run
+def compare_runs(tc, out1, out2, cuda: bool):
+    """a re-run of the same clip: the words are the same and the output files are byte-identical on the CPU; on CUDA
+    (kernels may differ in the last bit) the word text and the block texts are identical and every time is within 1 ms"""
+    names = ("captions.srt", "captions.json", "words.json")
+    if not cuda:
+        for name in names:
+            tc.assertEqual((out1 / name).read_bytes(), (out2 / name).read_bytes(), name)
+        return
+    w1, w2 = (json.loads((o / "words.json").read_text(encoding="utf-8")) for o in (out1, out2))
+    tc.assertEqual([w["w"] for w in w1], [w["w"] for w in w2])
+    for a, b in zip(w1, w2):
+        tc.assertLessEqual(abs(a["s"] - b["s"]), 1e-3, (a, b))
+        tc.assertLessEqual(abs(a["e"] - b["e"]), 1e-3, (a, b))
+    b1, b2 = (srt_blocks((o / "captions.srt").read_text(encoding="utf-8")) for o in (out1, out2))
+    tc.assertEqual(len(b1), len(b2))
+    for x, y in zip(b1, b2):
+        tc.assertEqual((x[0], x[3]), (y[0], y[3]))
+        tc.assertLessEqual(abs(x[1] - y[1]), 1)
+        tc.assertLessEqual(abs(x[2] - y[2]), 1)
+
+
+def engine_argv(wav, mode, out, settings_file, models=None):
+    return [sys.executable, "-s", "-B", "-m", "lib.kalam.engine", "run", "--wav", str(wav), "--mode", mode,
+            "--out", str(out), "--settings", str(settings_file), "--models", str(models or REAL_PACK)]
+
+
+class TestRunComparison(unittest.TestCase):
+    """Task 11 re-review N4 / N5: the any-clip helpers (mode of a real run, tolerance, determinism check) tested with fakes"""
+
+    def _run(self, d, name, words, srt):
+        out = Path(d) / name
+        out.mkdir()
+        (out / "words.json").write_text(json.dumps(words), encoding="utf-8")
+        (out / "captions.json").write_text("[]", encoding="utf-8")
+        (out / "captions.srt").write_text(srt, encoding="utf-8")
+        return out
+
+    def test_the_overlap_tolerance_is_a_named_untuned_constant(self):
+        self.assertEqual(WORD_OVERLAP_TOLERANCE_S, 0.1)
+        src = Path(__file__).read_text(encoding="utf-8")
+        self.assertRegex(src, r"(?m)^WORD_OVERLAP_TOLERANCE_S = 0\.1 +# untuned until the first real run")
+        self.assertIs(check_words.__defaults__[0], WORD_OVERLAP_TOLERANCE_S)           # the checks use the constant
+
+    def test_cpu_runs_must_be_byte_identical_and_cuda_runs_within_a_millisecond(self):
+        srt = "1\n00:00:00,400 --> 00:00:01,000\nhello\n"
+        srt2 = "1\n00:00:00,401 --> 00:00:01,000\nhello\n"
+        words = [{"w": "hello", "s": 0.4, "e": 1.0}]
+        close = [{"w": "hello", "s": 0.4004, "e": 1.0}]
+        with tempfile.TemporaryDirectory() as d:
+            a, same = self._run(d, "a", words, srt), self._run(d, "same", words, srt)
+            near = self._run(d, "near", close, srt2)
+            compare_runs(self, a, same, cuda=False)
+            compare_runs(self, a, same, cuda=True)
+            compare_runs(self, a, near, cuda=True)
+            with self.assertRaises(AssertionError):
+                compare_runs(self, a, near, cuda=False)                # not byte-identical on the CPU
+
+    def test_a_different_word_or_a_time_beyond_a_millisecond_fails_on_cuda_too(self):
+        srt = "1\n00:00:00,400 --> 00:00:01,000\nhello\n"
+        with tempfile.TemporaryDirectory() as d:
+            a = self._run(d, "a", [{"w": "hello", "s": 0.4, "e": 1.0}], srt)
+            other_word = self._run(d, "w", [{"w": "hullo", "s": 0.4, "e": 1.0}], srt)
+            late = self._run(d, "t", [{"w": "hello", "s": 0.4, "e": 1.003}], srt)
+            late_block = self._run(d, "b", [{"w": "hello", "s": 0.4, "e": 1.0}], "1\n00:00:00,400 --> 00:00:01,003\nhello\n")
+            other_text = self._run(d, "x", [{"w": "hello", "s": 0.4, "e": 1.0}], "1\n00:00:00,400 --> 00:00:01,000\nhullo\n")
+            for other in (other_word, late, late_block, other_text):
+                with self.assertRaises(AssertionError, msg=other.name):
+                    compare_runs(self, a, other, cuda=True)
+
+    def test_engine_argv_carries_the_mode_and_never_a_key(self):
+        argv = engine_argv("clip.wav", "en", "/o", "/s.json", "/models")
+        self.assertEqual(argv[argv.index("--mode") + 1], "en")
+        self.assertEqual(engine_argv("c.wav", "ar", "/o", "/s.json")[argv.index("--mode") + 1], "ar")
+        self.assertNotIn("api_key", " ".join(argv))
+
+    def test_the_slow_gate_checks_the_pack_of_the_mode(self):
+        with tempfile.TemporaryDirectory() as d:
+            clip = Path(d) / "clip.wav"
+            clip.write_bytes(_wav_bytes(_tone(0.2, 16000), 16000, "pcm16"))
+            pack = Path(d) / "pack"
+            (pack / "ct2-whisper-turbo-ar-dialectal").mkdir(parents=True)
+            (pack / "ct2-whisper-turbo-ar-dialectal" / "model.bin").write_bytes(b"x")
+            fake_align = _types.ModuleType("lib.kalam.align")
+            with mock.patch.dict(os.environ, {"WHYNOT_KALAM_SLOW": "1"}), \
+                    mock.patch.object(sys.modules[__name__], "REAL_PACK", pack), \
+                    mock.patch.dict(sys.modules, {"lib.kalam.align": fake_align}):
+                self.assertEqual(slow_skip_reason(str(clip), "ar"), "")
+                self.assertIn("pack is not installed", slow_skip_reason(str(clip), "en"))      # no Parakeet in this pack
+                (pack / "parakeet-tdt-0.6b-v2-onnx").mkdir()
+                (pack / "parakeet-tdt-0.6b-v2-onnx" / "encoder-model.onnx").write_bytes(b"x")
+                self.assertEqual(slow_skip_reason(str(clip), "en"), "")
+
+
+class TestRealModelsAnyClip(unittest.TestCase):
+    """invariants of the real pipeline that hold for ANY clip (the clip is only 'a clip from whynot-test/'): Arabic mode on
+    WHYNOT_KALAM_TEST_WAV, English (Parakeet) mode on WHYNOT_KALAM_TEST_WAV_EN, both without any reference gate"""
+
+    def setUp(self):
+        self.A = mod("audio")
+
+    def _need(self, wav, mode):
+        reason = slow_skip_reason(wav, mode)
+        if reason:
+            self.skipTest(reason)
+        a2d, rate = self.A.read_wav(wav)
+        return a2d.shape[0] / rate                                               # the file's OWN length
+
+    def run_once(self, tmp_path, name, wav, mode):
+        runner = TestCli("test_missing_key_still_makes_captions_with_notice")
+        sub = Path(tmp_path) / name
+        sub.mkdir()
+        p, ev = runner.run_engine(sub, {"correct": False}, wav, mode)
+        self.assertEqual(p.returncode, 0, p.stderr[-2000:])
+        return sub / "out", ev
+
+    def check_run(self, out, ev, duration, mode):
+        stages = [e["stage"] for e in ev]
+        self.assertEqual(stages[0], "loading")
+        self.assertEqual(stages[-1], "done")
+        self.assertTrue(all(s_ in ("loading", "transcribing", "aligning", "correcting", "captions", "done") for s_ in stages))
+        self.assertEqual(ev[1]["mode"], mode)
+        self.assertLessEqual(abs(ev[1]["seconds"] - round(duration, 2)), 0.02)
+        for name in ("captions.srt", "captions.json", "words.json", "corrected.json"):
+            check_utf8_lf(self, (out / name).read_bytes(), name)
+        check_words(self, json.loads((out / "words.json").read_text(encoding="utf-8")), duration)
+        blocks = check_srt(self, (out / "captions.srt").read_text(encoding="utf-8"), duration)
+        caps = json.loads((out / "captions.json").read_text(encoding="utf-8"))
+        self.assertEqual([c["n"] for c in caps], [b[0] for b in blocks])
+
+    def _two_runs(self, wav, mode):
+        duration = self._need(wav, mode)
+        with tempfile.TemporaryDirectory() as tmp_path:
+            out1, ev1 = self.run_once(tmp_path, "one", wav, mode)
+            self.check_run(out1, ev1, duration, mode)
+            out2, ev2 = self.run_once(tmp_path, "two", wav, mode)
+            cuda = "cuda" in (ev1[2].get("device"), ev2[2].get("device"))
+            compare_runs(self, out1, out2, cuda)
+
+    def test_durations_equal_the_files_own_length(self):
+        duration = self._need(WAV_AR, "ar")
+        a = self.A.load_16k(WAV_AR)
+        self.assertLessEqual(abs(len(a) / 16000 - duration), 2 / 16000)
+        self.assertEqual(self.A.envelope_db(a).shape[0], int(len(a) / 160))
+        if WAV_EN and Path(WAV_EN).is_file():
+            a2d, rate = self.A.read_wav(WAV_EN)
+            self.assertLessEqual(abs(len(self.A.load_16k(WAV_EN)) / 16000 - a2d.shape[0] / rate), 2 / 16000)
+
+    def test_an_arabic_run_obeys_the_pipeline_invariants_and_a_rerun_agrees(self):
+        self._two_runs(WAV_AR, "ar")
+
+    def test_an_english_parakeet_run_obeys_the_same_invariants_and_a_rerun_agrees(self):
+        self._two_runs(WAV_EN, "en")
+
+    def test_transcribe_and_align_give_ordered_scored_words(self):
+        self._need(WAV_AR, "ar")
+        a = self.A.load_16k(WAV_AR)
+        align = importlib.import_module("lib.kalam.align").align
+        ws = align(a, mod("transcribe").transcribe(a, "ar", str(REAL_PACK)))
+        check_words(self, ws, len(a) / 16000)
+        self.assertTrue(all("score" in w for w in ws))
 
 
 if __name__ == "__main__":
