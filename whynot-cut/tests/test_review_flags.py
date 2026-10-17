@@ -36,6 +36,7 @@ FLAGS = "review-flags.json"
 SPEC_G2_TEXT = "Take 500 mg daily / after food"
 AR_G1 = "الملح الكتير بيرفع الضغط"                 # logical order, as the speaker said it
 AR_REASON = "الجرعة لازم الدكتورة توافق عليها — ٥٠٠ ملجم"
+RELIGIOUS_OK = ["medical", "religious"]   # M1-T2: what a religious client's ok row clears (the always-on ai is implied)
 
 
 def env():
@@ -190,11 +191,12 @@ class TestWrite(Base):
 
     def test_ok_lines_are_stored_with_the_plans_words(self):
         RF.write(self.p, full(("G2", "medical", "remove", "r")))
-        self.assertEqual(read_json(self.file)["ok"], [{"event_id": "G1", "text": AR_G1}])
+        self.assertEqual(read_json(self.file)["ok"], [{"event_id": "G1", "text": AR_G1, "flags": RELIGIOUS_OK}])
         RF.write(self.p, full(("G1", "medical", "ok", "")))
         doc = read_json(self.file)
-        self.assertEqual((doc["items"], doc["ok"]), ([], [{"event_id": "G1", "text": AR_G1},
-                                                           {"event_id": "G2", "text": SPEC_G2_TEXT}]))
+        self.assertEqual((doc["items"], doc["ok"]), ([], [{"event_id": "G1", "text": AR_G1, "flags": RELIGIOUS_OK},
+                                                           {"event_id": "G2", "text": SPEC_G2_TEXT,
+                                                            "flags": RELIGIOUS_OK}]))
 
     def test_checked_is_computed_and_an_input_checked_is_ignored(self):
         for given in (0, 1, 99, -3, "x", None, True):
@@ -384,7 +386,7 @@ class TestCarry(Base):
 
     def test_an_ok_line_is_carried_as_ok(self):
         r = RF.write(self.p, table(("G2", "medical", "remove", "now remove")))                  # G1 not listed: ok before
-        self.assertEqual((r["checked"], r["ok"]), (2, [{"event_id": "G1", "text": AR_G1}]))
+        self.assertEqual((r["checked"], r["ok"]), (2, [{"event_id": "G1", "text": AR_G1, "flags": RELIGIOUS_OK}]))
         self.assertEqual(r["dropped"], [])
 
     def test_carried_even_when_the_old_file_is_stale(self):
@@ -809,37 +811,46 @@ class TestDomain(Base):
         super().setUp()
         put_timeline(self.p)
 
-    def test_each_domain_allows_its_own_flags(self):
-        self.assertEqual(RF.DOMAIN_FLAGS, {"medical": ("medical",), "religious": ("religious", "medical"),
-                                           "general": ("medical",)})
-        for d, bad in (("medical", "religious"), ("general", "religious")):
+    def test_each_domain_flags_itself_and_any_registry_flag_is_allowed(self):
+        """M1-T2 (was: each domain allows its own flags): DOMAIN_FLAGS comes from the registry, and any registry flag is
+        accepted on any line, so a religious row for a medical client is no longer refused."""
+        from lib import review_domains as RD
+        reg = RD.registry()
+        on = {d for d, e in reg.items() if e["always_on"]}
+        self.assertEqual(dict(RF.DOMAIN_FLAGS), {d: tuple(sorted({d} | on)) for d in reg})
+        for d in ("medical", "general"):
             with self.subTest(d):
                 self.domain(d)
-                with self.assertRaises(Guidance) as cm:                      # the review the skills do not run
-                    RF.write(self.p, table(("G1", bad, "ok", ""), ("G2", bad, "ok", "")))
-                self.assertIn(f"`flag` '{bad}' is not checked for a {d} client", cm.exception.error)
-                self.assertIn("medical", cm.exception.how)
-                self.assertFalse(self.file.exists())
+                r = RF.write(self.p, table(("G1", "religious", "ok", ""), ("G1", "medical", "ok", ""),
+                                           ("G2", "medical", "ok", "")))
+                self.assertEqual((r["domain"], r["checked"]), ("ai+medical", 2))
         self.domain("religious")
         r = RF.write(self.p, table(("G1", "religious", "ok", ""), ("G2", "medical", "remove", "r")))
         self.assertEqual(r["checked"], 2)
 
-    def test_a_new_domain_is_one_new_entry(self):
+    def test_a_new_domain_is_one_registry_entry(self):
+        """M1-T2 (was: one new DOMAIN_FLAGS entry): a fifth registry domain is a flag with no code change."""
         from unittest import mock
-        with mock.patch.dict(RF.DOMAIN_FLAGS, {"business": ("medical", "business")}), \
-                mock.patch.object(RF, "_domain", return_value="business"):
-            r = RF.write(self.p, table(("G1", "business", "remove", "claim"), ("G2", "medical", "ok", "")))
-            self.assertEqual([(i["event_id"], i["flag"]) for i in r["items"]], [("G1", "business")])
+        from lib import review_domains as RD
+        f = SK / "tests" / "fixtures" / "review_domains" / "fifth"
+        write_json(self.root / common.CLIENT_PROFILE_REL / "profile.json", {"review_domains": ["legal"]})
+        with mock.patch.multiple(RD, REGISTRY_DIR=f / "registry", REFERENCES_DIR=f / "references",
+                                 EVALS_DIR=f / "evals"):
+            self.assertEqual(RF.DOMAIN_FLAGS["legal"], ("ai", "legal", "medical"))
+            r = RF.write(self.p, table(("G1", "legal", "remove", "claim"), ("G1", "medical", "ok", ""),
+                                       ("G2", "medical", "ok", ""), ("G2", "legal", "ok", "")))
+            self.assertEqual([(i["event_id"], i["flag"]) for i in r["items"]], [("G1", "legal")])
+            self.assertEqual(r["domain"], "ai+legal+medical")
             with self.assertRaises(Guidance) as cm:
-                RF.write(self.p, table(("G1", "religious", "ok", "")))
-            self.assertIn("medical, business", cm.exception.how)
+                RF.write(self.p, table(("G1", "business", "remove", "x"), ("G2", "medical", "ok", "")))
+            self.assertIn("business", cm.exception.error)            # not a domain of this registry
 
     def test_the_file_stores_the_domain_it_was_reviewed_for(self):
         RF.write(self.p, full(("G2", "medical", "remove", "r")))
-        self.assertEqual(read_json(self.file)["domain"], "general")             # no profile domain: general
+        self.assertEqual(read_json(self.file)["domain"], "ai+medical")          # M1-T2: no profile domain: ai+medical
         self.domain("medical")
         RF.write(self.p, full(("G2", "medical", "remove", "r")))
-        self.assertEqual(read_json(self.file)["domain"], "medical")
+        self.assertEqual(read_json(self.file)["domain"], "ai+medical")          # legacy medical: the same key
 
     def test_a_domain_change_needs_a_full_review_and_is_not_current(self):
         self.domain("medical")
@@ -855,7 +866,7 @@ class TestDomain(Base):
         self.assertIn("religious", cm.exception.error)
         self.assertEqual(self.file.read_bytes(), before)
         r = RF.write(self.p, table(("G1", "religious", "ok", ""), ("G2", "religious", "ok", "")))
-        self.assertEqual((r["items"], r["checked"], r["domain"]), ([], 2, "religious"))
+        self.assertEqual((r["items"], r["checked"], r["domain"]), ([], 2, "ai+medical+religious"))
 
     def test_a_file_without_a_domain_carries_nothing(self):
         RF.write(self.p, full(("G2", "medical", "needs-doctor-approval", "dose")))
@@ -883,7 +894,7 @@ class TestMotion(Base):
         (it,) = doc["items"]
         self.assertEqual((it["event_id"], it["text"]), ("S2", "Dose / 500 mg"))
         self.assertEqual((it["start_s"], it["end_s"]), (0.417, 4.167))          # frames 10 and 100 at 24 fps
-        self.assertEqual(doc["ok"], [{"event_id": "S1", "text": AR_G1}])
+        self.assertEqual(doc["ok"], [{"event_id": "S1", "text": AR_G1, "flags": RELIGIOUS_OK}])
 
     def test_a_scene_the_plan_does_not_have_is_refused(self):
         with self.assertRaises(Guidance) as cm:
@@ -998,11 +1009,13 @@ class TestCli(Base):
                                                                  "flag": "medical", "verdict": "needs-doctor-approval",
                                                                  "text": SPEC_G2_TEXT}]))
 
-    def test_a_flag_the_clients_domain_does_not_check_exits_1(self):
+    def test_a_verdict_its_flag_does_not_have_exits_1(self):
+        """M1-T2 (was: a flag the client's domain does not check exits 1): any registry flag is allowed now; a verdict
+        outside its own flag's list is what is refused."""
         self.domain("medical")
-        code, out, err = self.send(table(("G1", "religious", "ok", ""), ("G2", "religious", "ok", "")))
+        code, out, err = self.send(table(("G1", "religious", "needs-doctor-approval", "x"), ("G2", "medical", "ok", "")))
         self.assertEqual(code, 1, out + err)
-        self.assertIn("not checked for a medical client", one_json_document(out)["error"])
+        self.assertIn("not a verdict of the religious check", one_json_document(out)["error"])
         self.assertFalse(self.file.exists())
 
     def test_other_flag_reviews_of_a_split_merged_or_extended_flag_exit_1_and_write_nothing(self):
@@ -1077,6 +1090,368 @@ class TestCli(Base):
         self.assertEqual(code, 0, out + err)
         self.assertEqual(one_json_document(out)["plan_kind"], "motion")
         self.assertEqual(read_json(self.file)["items"][0]["event_id"], "S2")
+
+
+# ---------------------------------------------------------------------------------------------- M1-T2 (Task 51)
+BIZ = "الكشف بس بـ ٥٠٠ جنيه"                     # a price: the business lexicon detects it
+MED = ["medical"]                                # what a general client's ok row clears (the always-on ai is implied)
+
+
+def biz_spec(text: str = BIZ, **params) -> dict:
+    """The default plan plus G4, a line with a price on it."""
+    spec = timeline_spec()
+    spec["events"].append(event("G4", 7400, 8600, text=text, **params))
+    return spec
+
+
+def registry() -> dict:
+    from lib import review_domains as RD
+    return RD.registry()
+
+
+class TestM1Domains(Base):
+    """Addendum M1-T2: the review key is the client set (`ai+business+medical`), any registry flag is allowed on any
+    line, every line is covered for the key and for the domains its words trigger (review_detect: review), a medical or
+    religious row covers only the T4.13 checks and the always-on ai (never business, never a triggered ai), ok rows
+    record the flags they cleared, and every verdict belongs to its own flag's registry list."""
+
+    DOMAIN = None
+
+    def setUp(self):
+        super().setUp()
+        put_timeline(self.p)
+
+    def prof(self, **kw):
+        write_json(self.root / common.CLIENT_PROFILE_REL / "profile.json", kw)
+
+    def refused(self, findings):
+        before = self.file.read_bytes() if self.file.exists() else None
+        with self.assertRaises(Guidance) as cm:
+            RF.write(self.p, findings)
+        self.assertEqual(self.file.read_bytes() if self.file.exists() else None, before, "a refusal writes nothing")
+        return cm.exception
+
+    def ok_flags(self) -> dict:
+        return {o["event_id"]: o.get("flags") for o in read_json(self.file)["ok"]}
+
+    def test_every_registry_flag_is_accepted_on_any_line_whatever_review_detect(self):
+        for mode in ("review", "suggest", "off"):
+            for doms, key in (([], "ai+medical"), (["religious"], "ai+medical+religious"),
+                              (["business"], "ai+business+medical")):
+                own = ["medical"] + (["business"] if "business" in doms else [])     # rows each line needs
+                for flag, entry in registry().items():
+                    verdict = [v for v in entry["verdicts"] if v != "ok"][0]
+                    with self.subTest(mode=mode, key=key, flag=flag):
+                        self.file.unlink(missing_ok=True)
+                        self.prof(review_domains=doms, review_detect=mode)
+                        rows = [("G1", flag, verdict, "r")] + [("G1", k, "ok", "") for k in own if k != flag]
+                        r = RF.write(self.p, table(*rows, *[("G2", k, "ok", "") for k in own]))
+                        self.assertEqual((r["domain"], [(i["event_id"], i["flag"]) for i in r["items"]]),
+                                         (key, [("G1", flag)]))
+                        self.assertNotIn(flag, self.ok_flags().get("G1") or [])
+                        self.assertEqual(RF.load(self.p), filed(r))
+
+    def test_a_line_flagged_business_with_an_ok_row_for_medical(self):
+        r = RF.write(self.p, table(("G1", "medical", "ok", ""), ("G2", "business", "needs-evidence", "price"),
+                                   ("G2", "medical", "ok", "")))
+        self.assertEqual([(i["event_id"], i["flag"]) for i in r["items"]], [("G2", "business")])
+        self.assertEqual(self.ok_flags(), {"G1": MED, "G2": MED})
+        self.assertEqual(RF.load(self.p), filed(r))
+        c = RF.counts(RF.load(self.p))
+        self.assertEqual((c["business"], c["medical"], c["ai"]),
+                         ({"reviewed": 1, "ok": 0, "flagged": 1}, {"reviewed": 2, "ok": 2, "flagged": 0},
+                          {"reviewed": 2, "ok": 2, "flagged": 0}))
+
+    def test_an_ok_row_whose_flags_overlap_its_lines_flag_is_damaged(self):
+        good = filed(RF.write(self.p, table(("G1", "medical", "ok", ""), ("G2", "business", "needs-evidence", "p"),
+                                            ("G2", "medical", "ok", ""))))
+        ok = {o["event_id"]: o for o in good["ok"]}
+        write_json(self.file, dict(good, ok=[ok["G1"], dict(ok["G2"], flags=["business", "medical"])]))
+        self.assertIsNone(RF.load(self.p))
+        e = self.refused(table(("G1", "medical", "ok", "")))
+        self.assertIn("can't be read", e.error)
+        self.file.unlink()
+        good2 = filed(RF.write(self.p, table(("G1", "medical", "ok", ""), ("G2", "medical", "remove", "dose"))))
+        old_style = dict(good2, ok=good2["ok"] + [{"event_id": "G2", "text": SPEC_G2_TEXT}])     # no flags = the key
+        write_json(self.file, old_style)
+        self.assertIsNone(RF.load(self.p))
+
+    def test_ok_flags_must_be_distinct_registry_flags(self):
+        good = filed(RF.write(self.p, full()))
+        g1 = good["ok"][0]
+        for bad in (["medical", "medical"], ["legal"], [], "medical", [1], ["Medical"], None, ["ai", None]):
+            with self.subTest(bad=bad):
+                write_json(self.file, dict(good, ok=[dict(g1, flags=bad)] + good["ok"][1:]))
+                self.assertIsNone(RF.load(self.p))
+                e = self.refused(table(("G1", "medical", "ok", "")))
+                self.assertIn("can't be read", e.error)
+
+    def test_trimmed_ok_flags_are_not_served(self):
+        good = filed(RF.write(self.p, full()))
+        write_json(self.file, dict(good, ok=[dict(o, flags=["ai"]) for o in good["ok"]]))   # medical gone from ok
+        self.assertIsNone(RF.load(self.p))
+
+    def test_wiped_items_are_never_served_as_an_all_clear(self):
+        """A flag under a key flag next to a passed business check, and a business flag on a line its words trigger,
+        next to a medical ok: wiping `items` must leave the file unserved (review round 1, findings 2 and 3)."""
+        put_timeline(self.p, biz_spec())
+        for name, rows in (("medical flag + business ok", (("G4", "medical", "needs-doctor-approval", "dose"),
+                                                           ("G4", "business", "ok", ""))),
+                           ("business flag + medical ok", (("G4", "business", "needs-evidence", "price"),
+                                                           ("G4", "medical", "ok", "")))):
+            with self.subTest(name):
+                self.file.unlink(missing_ok=True)
+                good = filed(RF.write(self.p, table(("G1", "medical", "ok", ""), ("G2", "medical", "ok", ""), *rows)))
+                self.assertEqual(RF.load(self.p), good)
+                write_json(self.file, dict(good, items=[]))
+                self.assertIsNone(RF.load(self.p))
+
+    def test_an_ai_row_never_stands_in_for_the_medical_check(self):
+        """Review round 1, finding 1: ai is in every key, but only a medical (or a religious client's religious) row
+        covers medical."""
+        for rows in ((("G2", "ai", "ok", ""),), (("G2", "ai", "needs-disclosure", "x"),),
+                     (("G2", "religious", "ok", ""),), (("G2", "business", "ok", ""),)):
+            with self.subTest(rows=rows):
+                e = self.refused(table(("G1", "medical", "ok", ""), *rows))
+                self.assertIn("G2 has not been reviewed for", e.error)
+                self.assertIn("medical", e.error)
+                self.assertFalse(self.file.exists())
+        r = RF.write(self.p, table(("G1", "medical", "ok", ""), ("G2", "ai", "needs-disclosure", "x"),
+                                   ("G2", "medical", "ok", "")))
+        self.assertEqual(self.ok_flags(), {"G1": MED, "G2": MED})
+        self.assertEqual(RF.counts(filed(r))["medical"], {"reviewed": 2, "ok": 2, "flagged": 0})
+
+    def test_a_business_client_needs_a_business_row_on_every_line(self):
+        self.prof(review_domains=["business"])
+        e = self.refused(full())
+        self.assertIn("G1 has not been reviewed for business", e.error)
+        self.assertIn("G2 has not been reviewed for business", e.error)
+        e = self.refused(table(("G1", "business", "ok", ""), ("G2", "business", "ok", "")))
+        self.assertIn("medical", e.error)                       # and a business row never covers medical either
+        RF.write(self.p, table(("G1", "business", "ok", ""), ("G2", "business", "ok", ""), ("G1", "medical", "ok", ""),
+                               ("G2", "medical", "ok", "")))
+        self.assertEqual(self.ok_flags(), {"G1": ["business", "medical"], "G2": ["business", "medical"]})
+
+    def test_an_ai_asset_added_to_a_carried_line_asks_for_its_own_ai_row(self):
+        put_timeline(self.p, biz_spec(text="صورة توضيحية"))
+        RF.write(self.p, table(("G1", "medical", "ok", ""), ("G2", "medical", "ok", ""), ("G4", "medical", "ok", "")))
+        self.assertEqual(self.ok_flags()["G4"], MED)
+        write_json(self.p.client_db / "asset-manifest.json", {"assets": [{"rel": "data/Broll/gen.png",
+                                                                          "ai_generated": True}]})
+        put_timeline(self.p, biz_spec(text="صورة توضيحية", image="data/Broll/gen.png"))    # same words, AI image
+        self.assertIsNone(RF.load(self.p))
+        e = self.refused(table())
+        self.assertIn("G4 has not been reviewed for ai (its words trigger it: data/Broll/gen.png)", e.error)
+        self.assertNotIn("G1", e.error)
+        RF.write(self.p, table(("G4", "ai", "needs-disclosure", "label it")))
+        self.assertEqual([(i["event_id"], i["flag"]) for i in read_json(self.file)["items"]], [("G4", "ai")])
+        self.assertEqual(self.ok_flags()["G4"], MED)
+        self.assertIsNotNone(RF.load(self.p))
+
+    def test_a_damaged_manifest_refuses_cleanly(self):
+        """Review round 1, finding 5: a detection crash is a Guidance naming the cause, and nothing is written."""
+        RF.write(self.p, full())
+        write_json(self.p.client_db / "asset-manifest.json", ["not", "an", "object"])
+        e = self.refused(full())
+        self.assertIn("review-domain detection could not run", e.error)
+        self.assertIsNone(RF.load(self.p))
+
+    def test_a_carried_ok_row_does_not_cover_a_newly_detected_business_line(self):
+        put_timeline(self.p, biz_spec())
+        self.prof(review_detect="off")
+        RF.write(self.p, table(("G1", "medical", "ok", ""), ("G2", "medical", "ok", ""), ("G4", "medical", "ok", "")))
+        self.assertEqual(self.ok_flags()["G4"], MED)
+        self.prof(review_detect="review")                      # detection now finds the price on G4
+        self.assertIsNone(RF.load(self.p))                     # not a complete review for what the line needs now
+        e = self.refused(table())
+        self.assertIn("G4 has not been reviewed for business", e.error)
+        self.assertNotIn("G1", e.error)                        # no full re-review: only that line, for that flag
+        self.assertNotIn("G2", e.error)
+        e = self.refused(table(("G4", "medical", "ok", "")))   # a medical row does not stand in for a detected flag
+        self.assertIn("G4", e.error)
+        r = RF.write(self.p, table(("G4", "business", "ok", "")))
+        self.assertEqual(self.ok_flags(), {"G1": MED, "G2": MED, "G4": ["business", "medical"]})
+        self.assertEqual(r["checked"], 3)
+        RF.write(self.p, table())                              # carried with its business flag: covered now
+        self.assertEqual(self.ok_flags()["G4"], ["business", "medical"])
+
+    def test_detected_flags_are_required_only_under_review(self):
+        put_timeline(self.p, biz_spec())
+        three = (("G1", "medical", "ok", ""), ("G2", "medical", "ok", ""), ("G4", "medical", "ok", ""))
+        for mode in ("suggest", "off"):
+            with self.subTest(mode):
+                self.file.unlink(missing_ok=True)
+                self.prof(review_detect=mode)
+                RF.write(self.p, table(*three))
+                self.assertEqual(self.ok_flags()["G4"], MED)
+                self.assertIsNotNone(RF.load(self.p))
+        self.file.unlink()
+        self.prof()                                            # review is the default
+        e = self.refused(table(*three))
+        self.assertIn("G4 has not been reviewed for business (its words trigger it: ", e.error)
+        self.assertFalse(self.file.exists())
+        RF.write(self.p, table(*three, ("G4", "business", "needs-approval", "price as spoken?")))
+        self.assertEqual(self.ok_flags()["G4"], MED)
+        self.assertEqual([(i["event_id"], i["flag"]) for i in read_json(self.file)["items"]], [("G4", "business")])
+
+    def test_an_old_file_whose_ok_rows_have_no_flags_loads_as_the_key(self):
+        r = filed(RF.write(self.p, full(("G2", "medical", "needs-doctor-approval", "dose"))))
+        old = dict(r, ok=[{"event_id": o["event_id"], "text": o["text"]} for o in r["ok"]])
+        write_json(self.file, old)
+        self.assertEqual(RF.load(self.p), old)
+        c = RF.counts(old)
+        self.assertEqual((c["ai"], c["medical"]), ({"reviewed": 2, "ok": 2, "flagged": 0},       # G2's medical row:
+                                                   {"reviewed": 2, "ok": 1, "flagged": 1}))      # the key reviewed
+        RF.write(self.p, table())                              # G1's old ok row is carried as the key's flags
+        self.assertEqual(self.ok_flags(), {"G1": MED})          # its key-implied ai stays implied, never written
+        write_json(self.p.client_db / "asset-manifest.json", {"assets": [{"rel": "data/Broll/gen.png",
+                                                                          "ai_generated": True}]})
+        write_json(self.file, old)                             # again the older file, now with an AI image on G1
+        spec = timeline_spec()
+        spec["events"][0]["params"]["image"] = "data/Broll/gen.png"
+        put_timeline(self.p, spec)
+        e = self.refused(table(("G2", "medical", "remove", "r")))
+        self.assertIn("G1 has not been reviewed for ai", e.error)   # review round 2, finding 3
+        self.file.unlink()                                     # load() reads a flagless row the same way (round 3)
+        self.prof(review_detect="off")
+        r = filed(RF.write(self.p, full()))
+        write_json(self.file, dict(r, ok=[{"event_id": o["event_id"], "text": o["text"]} for o in r["ok"]]))
+        self.prof(review_detect="review")
+        self.assertIsNone(RF.load(self.p))
+
+    def test_a_lexicon_update_that_drops_a_detection_never_invalidates_a_stored_row(self):
+        from unittest import mock
+        from lib import review_domains as RD
+        put_timeline(self.p, biz_spec())
+        r = filed(RF.write(self.p, table(("G1", "medical", "ok", ""), ("G2", "medical", "ok", ""),
+                                         ("G4", "medical", "ok", ""), ("G4", "business", "needs-evidence", "p"))))
+        real = RD.matchers
+        with mock.patch.object(RD, "matchers", lambda: [m for m in real() if m[0] != "business"]):
+            self.assertEqual(RF.load(self.p), r)                # the shipped lexicon no longer detects G4
+            w = RF.write(self.p, table())
+            self.assertEqual([(i["event_id"], i["flag"], i.get("carried")) for i in w["items"]],
+                             [("G4", "business", True)])
+
+    def test_a_composite_key_accepts_business_and_ai_rows(self):
+        self.prof(review_domains=[" Business", "business", "MEDICAL"])
+        r = RF.write(self.p, table(("G1", "business", "needs-approval", "a"), ("G1", "ai", "needs-disclosure", "b"),
+                                   ("G1", "medical", "ok", ""), ("G2", "medical", "ok", ""), ("G2", "business", "ok", "")))
+        self.assertEqual(r["domain"], "ai+business+medical")
+        self.assertEqual(self.ok_flags(), {"G1": ["medical"], "G2": ["business", "medical"]})
+        self.assertEqual(RF.load(self.p), filed(r))
+
+    def test_an_unknown_key_part_is_refused_never_mapped_to_general(self):
+        RF.write(self.p, full())
+        self.prof(review_domains=["legal"])
+        e = self.refused(full())
+        self.assertIn("legal", e.error)
+        self.assertIsNone(RF.load(self.p))
+        for key, named in (("ai+legal+medical", "legal"), ("general", "general"), ("legal", "legal")):
+            with self.subTest(key), self.assertRaises(Guidance) as cm:
+                RF._allowed(key)
+            self.assertIn(named, cm.exception.error)
+
+    def test_a_general_clients_dose_line_still_needs_a_medical_row(self):
+        e = self.refused(table(("G1", "medical", "ok", ""), ("G2", "business", "needs-evidence", "p")))
+        self.assertIn("G2 has not been reviewed for ai; medical (its words trigger it: 500 mg)", e.error)
+        self.assertFalse(self.file.exists())
+        RF.write(self.p, table(("G1", "medical", "ok", ""), ("G2", "business", "needs-evidence", "p"),
+                               ("G2", "medical", "needs-doctor-approval", "dose")))
+        self.assertEqual(sorted((i["event_id"], i["flag"]) for i in read_json(self.file)["items"]),
+                         [("G2", "business"), ("G2", "medical")])
+        self.assertEqual(self.ok_flags(), {"G1": MED})          # G2's medical row says the key was reviewed
+        c = RF.counts(RF.load(self.p))
+        self.assertEqual((c["ai"], c["medical"], c["business"]),
+                         ({"reviewed": 2, "ok": 2, "flagged": 0}, {"reviewed": 2, "ok": 1, "flagged": 1},
+                          {"reviewed": 1, "ok": 0, "flagged": 1}))
+        write_json(self.file, dict(read_json(self.file), items=[]))
+        self.assertIsNone(RF.load(self.p))                     # wiped flags: G2 is in neither list
+
+    def test_adding_business_to_the_profile_needs_a_full_review(self):
+        RF.write(self.p, full(("G2", "medical", "remove", "r")))
+        self.prof(review_domains=["business"])
+        self.assertIsNone(RF.load(self.p))
+        e = self.refused(table(("G1", "medical", "ok", ""), ("G1", "business", "ok", "")))
+        self.assertIn("G2 has not been reviewed", e.error)
+        self.assertIn("ai+medical", e.error)
+        self.assertIn("ai+business+medical", e.error)
+        r = RF.write(self.p, table(("G1", "medical", "ok", ""), ("G1", "business", "ok", ""), ("G2", "medical", "ok", ""),
+                                   ("G2", "business", "ok", "")))
+        self.assertEqual((r["domain"], r["items"]), ("ai+business+medical", []))
+
+    def test_a_legacy_file_needs_one_full_review(self):
+        for legacy, key in (("general", "ai+medical"), ("medical", "ai+medical"), ("religious", "ai+medical+religious")):
+            with self.subTest(legacy):
+                self.prof(domain=legacy)
+                r = filed(RF.write(self.p, full(("G2", "medical", "remove", "r"))))
+                self.assertEqual(r["domain"], key)
+                write_json(self.file, dict(r, domain=legacy, ok=[{"event_id": o["event_id"], "text": o["text"]}
+                                                                 for o in r["ok"]]))   # as the T4.13 engine wrote it
+                self.assertIsNone(RF.load(self.p))
+                e = self.refused(table(("G1", "medical", "ok", "")))
+                self.assertIn("G2 has not been reviewed", e.error)
+                self.assertIn(f"before review domains (it says {legacy})", e.error)
+                self.assertIn(key, e.error)
+                self.assertEqual(RF.write(self.p, full())["domain"], key)
+
+    def test_a_verdict_outside_its_flags_list_is_refused(self):
+        self.prof(domain="religious")
+        for flag, verdict in (("religious", "needs-doctor-approval"), ("medical", "needs-evidence"),
+                              ("business", "needs-doctor-approval"), ("ai", "needs-evidence"),
+                              ("medical", "needs-disclosure")):
+            with self.subTest(flag=flag, verdict=verdict):
+                e = self.refused(full(("G1", flag, verdict, "r")))
+                self.assertIn(f"{verdict!r} is not a verdict of the {flag} check", e.error)
+                self.assertIn(", ".join(registry()[flag]["verdicts"]), e.how)
+        for flag, entry in registry().items():
+            for verdict in entry["verdicts"]:
+                with self.subTest(ok=(flag, verdict)):
+                    rows = [("G1", flag, verdict, "r")] + ([("G1", "medical", "ok", "")] if flag != "medical" else [])
+                    RF.write(self.p, table(*rows, ("G2", "medical", "ok", "")))
+
+    def test_old_verdicts_still_read(self):
+        """VERDICTS stays the union for reading: a T4.13 religious row with needs-doctor-approval loads."""
+        self.prof(domain="religious")
+        r = filed(RF.write(self.p, full(("G2", "religious", "remove", "r"))))
+        write_json(self.file, dict(r, items=[dict(r["items"][0], verdict="needs-doctor-approval")]))
+        self.assertIsNotNone(RF.load(self.p))
+        self.assertTrue(set(RF.VERDICTS) >= {v for e in registry().values() for v in e["verdicts"]})
+
+    def test_the_carry_rules_hold_for_every_registry_flag(self):
+        """Coverage, carrying, the uncarried-flag re-review and the reworded-flag refusal keep their meaning for every
+        registry domain's flag (M1-T2: parameterised over the registry)."""
+        for flag, entry in registry().items():
+            verdict = [v for v in entry["verdicts"] if v != "ok"][0]
+            med = lambda i: [] if flag == "medical" else [(i, "medical", "ok", "")]    # noqa: E731
+            with self.subTest(flag):
+                self.file.unlink(missing_ok=True)
+                put_timeline(self.p)
+                RF.write(self.p, table(("G1", "medical", "ok", ""), ("G2", flag, verdict, "x"), *med("G2")))
+                r = RF.write(self.p, table())                                        # nothing changed: carried
+                self.assertEqual([(i["event_id"], i["flag"], i.get("carried")) for i in r["items"]],
+                                 [("G2", flag, True)])
+                spec = timeline_spec()
+                spec["events"][1]["params"]["headline"] = "Take 1000 mg daily"
+                put_timeline(self.p, spec)
+                e = self.refused(table(("G1", "medical", "ok", "")))
+                self.assertIn(f"G2 ({flag}) was flagged in the earlier review and its on-screen wording changed", e.error)
+                spec = timeline_spec()
+                spec["events"][1]["event_id"] = "G7"
+                put_timeline(self.p, spec)
+                e = self.refused(table(*(med("G7") or [("G7", "ai", "ok", "")])))
+                self.assertIn(f"review G7 for {flag}", e.error)
+                r = RF.write(self.p, table(("G7", flag, "ok", ""), *med("G7")))
+                self.assertEqual([(c["event_id"], c["from_event_id"], c["flag"]) for c in r["cleared"]],
+                                 [("G7", "G2", flag)])
+
+    def test_the_same_table_twice_writes_the_same_file(self):
+        put_timeline(self.p, biz_spec())
+        t = table(("G1", "medical", "ok", ""), ("G2", "medical", "ok", ""), ("G4", "business", "remove", "x"),
+                  ("G4", "medical", "ok", ""))
+        a = filed(RF.write(self.p, t))
+        b = filed(RF.write(self.p, t))
+        a.pop("written_at"), b.pop("written_at")
+        self.assertEqual(a, b)
 
 
 if __name__ == "__main__":

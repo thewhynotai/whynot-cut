@@ -1,28 +1,44 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # © 2026 The Why Not AI (thewhynot.ai)
-"""Review flags (3.0 Phase 4 T4.13, `reel review-flags`): the medical/religious review as data the panel can show.
+"""Review flags (3.0 Phase 4 T4.13, `reel review-flags`; Addendum M1-T2): the content review as data the panel can show.
 
 The medical-reviewer is read-only and reports to the lead in chat; the lead puts its table through
 `reel review-flags --from <file|->`, and the engine writes `<item>/review-flags.json`
 (docs/adobe/eng-data-contract.md §7.6). Each line is keyed by the plan's event id (a clip: `event_id` in
 01_analysis/timeline-spec.json; a motion video: the scene id in 01_analysis/motion-plan.json).
 
-    {"schema": 1, "plan_kind": "timeline" | "motion", "plan_fingerprint", "domain": "medical" | "religious" | "general",
+    {"schema": 1, "plan_kind": "timeline" | "motion", "plan_fingerprint", "domain": "<review key, e.g. ai+medical>",
      "written_at", "by", "checked", "lines_total",
-     "items": [{"event_id", "flag": "medical" | "religious",
-                "verdict": "needs-doctor-approval" | "reword-to-match" | "remove",
+     "items": [{"event_id", "flag": "<a registry domain: medical | religious | business | ai>",
+                "verdict": "<one of that flag's registry verdicts, never ok>",
                 "text", "start_s", "end_s", "reason", "carried"?}],
-     "ok": [{"event_id", "text"}]}
+     "ok": [{"event_id", "text", "flags"?: ["<the domains the line was reviewed for and found fine>"]}]}
 
 `text`, `start_s` and `end_s` come from the compiled plan, never from the reviewer: the panel shows the words and the span
 the plan really has. The file stores EVERY reviewed line: `items` are the flagged ones, `ok` the lines reviewed and found
-fine (one row per line, a line with a flag is not repeated there). `lines_total` is the number of plan lines with
-on-screen text (the M of "N of M checked"); `checked` is COMPUTED = the covered lines, so it equals `lines_total` on every
-successful write (a `checked` in the table is ignored). `domain` is the client's profile domain the review was done for.
-The file is replaced whole with an atomic write.
+fine. `lines_total` is the number of plan lines with on-screen text (the M of "N of M checked"); `checked` is COMPUTED =
+the covered lines, so it equals `lines_total` on every successful write (a `checked` in the table is ignored). The file is
+replaced whole with an atomic write.
 
-Rows: a row's flag must be one the client's domain checks (DOMAIN_FLAGS: medical and general clients `medical`, a
-religious client `religious` and `medical`), and its id a plan line WITH on-screen text; anything else is refused.
+Review key (M1-T2): `domain` holds the client set (config/review-domains registry: the profile's `review_domains` ∪ the
+legacy `domain` ∪ the always-on medical and ai) in canonical form, `review_domains.review_domain_key()`: `ai+medical`,
+`ai+medical+religious`, `ai+business+medical`. It changes only when the profile does; detected domains never enter it. A
+T4.13 file (`medical`, `religious`, `general`) never equals a key, so the first review after the upgrade lists every line
+once. DOMAIN_FLAGS is generated from the registry (each domain flags itself plus the always-on ones); an unknown key part
+is refused, never mapped to another domain.
+
+Rows: a row's flag may be ANY registry domain on any line, whatever review_detect says (a claim the lexicon missed can
+still be flagged), its verdict one of that flag's registry verdicts (VERDICTS, the union, is only for reading older
+files), and its id a plan line WITH on-screen text; anything else is refused. Every line must be covered for the key
+and for every domain its words or AI-generated files trigger (review_domains.line_requirements, review_detect `review`,
+the default; that line only). A row covers its own flag. A medical or religious row whose flag is in the key also
+covers the key's medical, religious and ai (IMPLIED: T4.13's one row per line, the reviewer runs every check of the
+client on it), except ai where the line triggers an AI hint (a disclosure is never implied). business, ai and any later
+domain never cover anything but themselves: an ai or business row never stands in for the medical check, and a business
+client's every line needs its own business row. An ok row's `flags` lists what the line was cleared for, minus what its
+items already cover (never a flag the line has an item for; an implied ai is not written); an ok row without `flags`
+(older) counts as its file's key. `counts()` gives the per-domain numbers from verdict rows plus ok flags, with the same
+implied coverage.
 
 Coverage: a write is refused (nothing written) unless EVERY plan line with on-screen text is covered. A line is covered
 when the new table lists it (ok or a flag), or the previous usable file, even a stale one, has it with the SAME id and the
@@ -42,47 +58,90 @@ result and the CLI output (not the file) report `dropped` (earlier flagged rows 
 not re-reviewed for that flag anywhere: harmless, every current line is covered) and `cleared` (`from_event_id` added:
 earlier flagged rows the table now marks `ok` for the same flag on the same words, under the same id or a new id the
 words moved to, so the editor is told; a flag whose words were re-flagged elsewhere is in neither). A previous file that
-exists but cannot be used (bad JSON, another schema or plan kind, any damaged row, or a review done for another profile
-domain or none) carries nothing, so the table must list every line. Carrying matches id + words only, not the span or
+exists but cannot be used (bad JSON, another schema or plan kind, any damaged row, or a review done for another review key
+or none) carries nothing, so the table must list every line. Carrying matches id + words only, not the span or
 the speaker's evidence: accepted, low risk (the reviewer checks each line against the full transcript.json).
 
 `load()` returns None for a missing or unreadable file, for a file whose fingerprint is not the current plan's (a re-plan
-means the old flags are never served as current), for one done for another domain, and for one inconsistent with the
-plan (a damaged row, a row for an id without words or with other words than the plan's, `checked`/`lines_total` not the
-plan's count, a plan line in neither `items` nor `ok`). That catches a wiped or careless edit, not a deliberate one: a
-flag moved into `ok` by hand cannot be detected without a signature. Nothing here reads the reviewer's own text for
+means the old flags are never served as current), for one done for another review key, and for one inconsistent with
+the plan (a damaged row, a row for an id without words or with other words than the plan's, `checked`/`lines_total` not the
+plan's count, a plan line not covered for the key and the domains its words trigger now, as write() requires). A
+lexicon update that stops detecting a line never makes a stored row invalid; one that starts detecting a domain on a
+line makes the file not current until that line is reviewed for it. That catches a wiped or careless edit, not a
+deliberate one: a flag moved into `ok` by hand cannot be detected without a signature, and neither can a wiped flag
+under a domain nothing requires on that line (a business flag the reviewer added on a line the lexicon does not detect,
+whose ok row covers the key). Nothing here reads the reviewer's own text for
 anything but the reason. Stdlib plus the engine's own helpers.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
+from collections.abc import Mapping
+
 from .common import Paths, now_iso, read_json, write_json
 from .errors import Guidance
 
 SCHEMA = 1
 FILE = "review-flags.json"
-# The flags a review may use, per client profile domain (common.content_domain), as the skills run it: health claims are
-# checked for every client (medical-accuracy: `general` runs the wording/qualifier/uncertain-word checks; the
-# medical-reviewer runs on every clip and motion video, whatever the domain), the religious checks only for a `religious`
-# client. A new domain (Addendum M: business, AI) is one new entry here; a new flag needs nothing else either.
-DOMAIN_FLAGS = {
-    "medical": ("medical",),
-    "religious": ("religious", "medical"),
-    "general": ("medical",),
-}
+
+
+class _DomainFlags(Mapping):
+    """Registry domain -> the flags a review for it checks: the domain itself plus every always-on domain (medical, ai:
+    health claims are checked for every client, whatever its domains). Generated from the review-domain registry at each
+    use (M1-T2), so a new domain is one registry entry and no code change."""
+
+    def _now(self) -> dict:
+        from .review_domains import registry
+        reg = registry()
+        on = {d for d, e in reg.items() if e["always_on"]}
+        return {d: tuple(sorted({d} | on)) for d in reg}
+
+    def __getitem__(self, domain):
+        return self._now()[domain]
+
+    def __iter__(self):
+        return iter(self._now())
+
+    def __len__(self):
+        return len(self._now())
+
+
+DOMAIN_FLAGS = _DomainFlags()
 
 
 def _all_flags() -> tuple:
-    """Every flag some domain uses (read at call time, so a new DOMAIN_FLAGS entry is all a new flag needs)."""
-    return tuple(dict.fromkeys(f for fl in DOMAIN_FLAGS.values() for f in fl))
+    """Every registry domain: a row may use any of them, on any line (read at call time)."""
+    return tuple(DOMAIN_FLAGS)
 
 
-def _allowed(domain: str) -> tuple:
-    return DOMAIN_FLAGS.get(domain, DOMAIN_FLAGS["general"])
+def _allowed(key: str) -> tuple:
+    """The flags a review key checks (`ai+business+medical` -> ai, business, medical): the union of DOMAIN_FLAGS over its
+    parts. A part the registry does not have is refused, naming it, never mapped to another domain."""
+    parts = key.split("+") if isinstance(key, str) and key else []
+    flags = dict(DOMAIN_FLAGS)
+    unknown = [p for p in parts if p not in flags]
+    if unknown or not parts:
+        raise Guidance(f"the review key {key!r} names {', '.join(map(repr, unknown)) or 'no domain'}, which is not a "
+                       "review domain", f"Use only: {', '.join(sorted(flags))} (set profile.json `review_domains`; a new "
+                       "domain is added to config/review-domains/registry.json first)")
+    return tuple(sorted({f for p in parts for f in flags[p]}))
 
 
-VERDICTS = ("ok", "needs-doctor-approval", "reword-to-match", "remove")
+def _verdicts(flag: str) -> list:
+    """The verdicts of one flag's check, from the registry (medical keeps needs-doctor-approval)."""
+    from .review_domains import registry
+    return registry()[flag]["verdicts"]
+
+
+# Every verdict, for READING a file: T4.13's plus Addendum M's. A new row is checked against its own flag's list.
+VERDICTS = ("ok", "needs-doctor-approval", "reword-to-match", "remove", "needs-approval", "needs-evidence",
+            "needs-disclosure")
+
+
+def _all_verdicts() -> tuple:
+    from .review_domains import registry
+    return tuple(dict.fromkeys(VERDICTS + tuple(v for e in registry().values() for v in e["verdicts"])))
 TIMELINE_SPEC = "01_analysis/timeline-spec.json"
 MOTION_PLAN = "01_analysis/motion-plan.json"
 SHOWN_IDS = 12                       # ids named in the refusal's `how`
@@ -207,14 +266,16 @@ def _current(paths: Paths):
     return kind, index, fp
 
 
-def _clean(findings, ids: dict, domain: str) -> list:
-    """The reviewer's rows, validated; every problem named, nothing half-accepted. A row's flag must be one the client's
-    domain checks (DOMAIN_FLAGS), and its id a plan line WITH on-screen text. A `checked` in the table is accepted and
-    ignored: the engine computes it from what is covered."""
-    allowed = _allowed(domain)
-    how = (f'Send `{{"items": [{{"event_id": "<plan id>", "flag": one of {", ".join(allowed)} (this client\'s domain: '
-           f'{domain}), "verdict": "ok", "needs-doctor-approval", "reword-to-match" or "remove", "reason": "<why>"}}]}}`, '
-           'one row for every line with on-screen text the reviewer checked (the ok ones too)')
+def _clean(findings, ids: dict, key: str) -> list:
+    """The reviewer's rows, validated; every problem named, nothing half-accepted. A row's flag may be any registry
+    domain (whatever the client's key or review_detect: a claim the lexicon missed can still be flagged), its verdict one
+    of THAT flag's registry verdicts, and its id a plan line WITH on-screen text. A `checked` in the table is accepted
+    and ignored: the engine computes it from what is covered."""
+    allowed = _all_flags()
+    per_flag = "; ".join(f"{f}: {', '.join(_verdicts(f))}" for f in allowed)
+    how = (f'Send `{{"items": [{{"event_id": "<plan id>", "flag": one of {", ".join(allowed)} (this client\'s checks: '
+           f'{key}), "verdict": one of that flag\'s verdicts ({per_flag}), "reason": "<why>"}}]}}`, one row for every '
+           'line with on-screen text the reviewer checked (the ok ones too)')
     if not isinstance(findings, dict) or not isinstance(findings.get("items"), list):
         raise Guidance("the review table is not a JSON object with an `items` list", how)
     problems: list[str] = []
@@ -228,12 +289,12 @@ def _clean(findings, ids: dict, domain: str) -> list:
         bad = []
         if not isinstance(eid, str) or not eid.strip():
             bad.append("`event_id` is missing")
-        if flag not in _all_flags():
+        if flag not in allowed:
             bad.append(f"`flag` {flag!r} is not one of {', '.join(allowed)}")
-        elif flag not in allowed:
-            bad.append(f"`flag` {flag!r} is not checked for a {domain} client (use {', '.join(allowed)})")
-        if verdict not in VERDICTS:
-            bad.append(f"`verdict` {verdict!r} is not one of {', '.join(VERDICTS)}")
+            if verdict not in _all_verdicts():
+                bad.append(f"`verdict` {verdict!r} is not one of {', '.join(_all_verdicts())}")
+        elif verdict not in _verdicts(flag):
+            bad.append(f"`verdict` {verdict!r} is not a verdict of the {flag} check (use {', '.join(_verdicts(flag))})")
         if reason is None:
             reason = ""
         if not isinstance(reason, str):
@@ -268,9 +329,63 @@ def _clean(findings, ids: dict, domain: str) -> list:
 
 
 def _domain() -> str:
-    """The client's profile domain (medical | religious | general) the review is done for."""
-    from .common import content_domain
-    return content_domain()
+    """The review key the review is done for: the client set (profile `review_domains` ∪ legacy `domain` ∪ the always-on
+    medical and ai) in canonical form, `ai+business+medical` (review_domains.review_domain_key). An unknown id in the
+    profile is refused, naming it. Detected domains are never part of it."""
+    from .review_domains import client_set, review_domain_key
+    return review_domain_key(client_set())
+
+
+# T4.13's flags. A row under one of them that is in the key covers its line for every IMPLIED flag of the key, as T4.13
+# did (one row per line: the reviewer runs every check of the client on it): medical, religious, and the always-on ai
+# unless the line's own words or assets trigger an AI hint (then ai needs its own row: a disclosure is never implied).
+# business and any later domain are never implied: every line needs its own row for them, and a row under them, or
+# under ai, covers that flag only (it never stands in for the medical check).
+LEGACY = ("medical", "religious")
+IMPLIED = ("ai", "medical", "religious")
+
+
+def _cover(named, key_flags, triggered=()) -> set:
+    """The flags a line is covered for, from the flags named on it (table rows, items, ok rows' `flags`)."""
+    out = set(named)
+    if out & set(LEGACY) & set(key_flags):
+        out |= (set(IMPLIED) & set(key_flags)) - (set(triggered) - set(LEGACY))
+    return out
+
+
+def _ok_flags(row: dict, key) -> tuple:
+    """The flags an ok row cleared: its `flags`, or (an older row without them) its file's key split on `+`."""
+    if "flags" in row:
+        return tuple(row["flags"])
+    return tuple(key.split("+")) if isinstance(key, str) and key else ()
+
+
+def _named_ok(row: dict, key) -> set:
+    """What an ok row names for coverage: its `flags`; an older row without them, its key minus ai (the always-on ai
+    was implied there, so an AI hint that appears later on the line still asks for its own ai row)."""
+    return set(_ok_flags(row, key)) - ({"ai"} if "flags" not in row else set())
+
+
+def counts(doc: dict) -> dict:
+    """flag -> {reviewed, ok, flagged}: per review domain, the plan lines reviewed for it, from the verdict rows plus the
+    ok rows' `flags` (an older ok row without them counts as its file's key), with the same implied coverage write()
+    applies (a medical or religious row covers the key's medical, religious and ai: write() stored an explicit ai row
+    wherever the line triggered an AI hint). review-gate's «بيزنس ١٢/١٢» (M1-T4)."""
+    key = doc.get("domain")
+    key_flags = tuple(key.split("+")) if isinstance(key, str) and key else ()
+    named: dict = {}
+    flagged: dict = {}
+    for it in doc.get("items") or []:
+        named.setdefault(it["event_id"], set()).add(it["flag"])
+        flagged.setdefault(it["flag"], set()).add(it["event_id"])
+    for o in doc.get("ok") or []:
+        named.setdefault(o["event_id"], set()).update(_ok_flags(o, key))
+    reviewed: dict = {}
+    for i, fl in named.items():
+        for f in _cover(fl, key_flags):
+            reviewed.setdefault(f, set()).add(i)
+    return {f: {"reviewed": len(reviewed[f]), "ok": len(reviewed[f] - flagged.get(f, set())),
+                "flagged": len(flagged.get(f, set()))} for f in sorted(reviewed)}
 
 
 UNREADABLE = ("the earlier review file (review-flags.json) can't be read, so nothing could be carried forward: list "
@@ -279,37 +394,50 @@ UNREADABLE = ("the earlier review file (review-flags.json) can't be read, so not
 
 def _rows(doc: dict, *, need_ok: bool = False):
     """(flagged rows, ok rows) of a review document, or None when ANY row is damaged: an item that is not an object, has
-    no text id, a bad flag or verdict (an item never has verdict `ok`), no text, a reason that is not text, or repeats an
-    (id, flag); an ok row that is not an object with text id and text, repeats an id, or names a line that has a flag.
-    `need_ok`: the `ok` list must be there (a file the engine wrote now); an older file without it is accepted."""
+    no text id, a flag that is not a registry domain, a bad verdict (any verdict some check has, so older files still
+    read; an item never has verdict `ok`), no text, a reason that is not text, or repeats an (id, flag); an ok row that is
+    not an object with text id and text, repeats an id, has a `flags` that is not a non-empty list of distinct registry
+    domains, or names a line FOR a flag that line is flagged for (an ok row without `flags`, from an older file, may not
+    name a flagged line at all). `need_ok`: the `ok` list must be there (a file the engine wrote now); an older file
+    without it is accepted."""
     if not isinstance(doc.get("items"), list) or not isinstance(doc.get("ok", None if need_ok else []), list):
         return None
     def bad_id(v) -> bool:                # the engine writes the plan's ids as they are: never empty, never padded
         return not isinstance(v, str) or not v or v != v.strip()
 
+    flags, verdicts = _all_flags(), _all_verdicts()
     flagged, ok, seen = [], [], set()
     for it in doc["items"]:
-        if (not isinstance(it, dict) or bad_id(it.get("event_id")) or it.get("flag") not in _all_flags()
-                or it.get("verdict") not in VERDICTS or it.get("verdict") == "ok" or not isinstance(it.get("text"), str)
+        if (not isinstance(it, dict) or bad_id(it.get("event_id")) or it.get("flag") not in flags
+                or it.get("verdict") not in verdicts or it.get("verdict") == "ok" or not isinstance(it.get("text"), str)
                 or not isinstance(it.get("reason", ""), str) or (it["event_id"], it["flag"]) in seen):
             return None
         seen.add((it["event_id"], it["flag"]))
         flagged.append(it)
-    flagged_ids, ok_ids = {i for i, _ in seen}, set()
+    flagged_on, ok_ids = {}, set()
+    for i, f in seen:
+        flagged_on.setdefault(i, set()).add(f)
     for it in doc.get("ok", []):
         if (not isinstance(it, dict) or bad_id(it.get("event_id")) or not isinstance(it.get("text"), str)
-                or it["event_id"] in ok_ids or it["event_id"] in flagged_ids):
+                or it["event_id"] in ok_ids):
+            return None
+        if "flags" in it:
+            fl = it["flags"]
+            if (not isinstance(fl, list) or not fl or any(f not in flags for f in fl) or len(set(fl)) != len(fl)
+                    or set(fl) & flagged_on.get(it["event_id"], set())):
+                return None
+        elif it["event_id"] in flagged_on:
             return None
         ok_ids.add(it["event_id"])
         ok.append(it)
     return flagged, ok
 
 
-def _previous(paths: Paths, kind: str, domain: str):
+def _previous(paths: Paths, kind: str, key: str):
     """(why it can't be used or None, flagged rows, ok rows) of the previous review file, stale or not. A missing file is
     usable and empty. A file that exists but cannot be used (bad JSON, another schema or plan kind, ANY damaged row, or a
-    review done for another profile domain, or for none it names) carries nothing: it may have held flags, or its ok
-    lines were never checked for this domain, so the new table must list every line."""
+    review done for another review key, a T4.13 profile domain such as `medical`, or none) carries nothing: it may have
+    held flags, or its ok lines were never checked for this key, so the new table must list every line."""
     f = path(paths)
     if not f.exists():
         return None, [], []
@@ -324,29 +452,57 @@ def _previous(paths: Paths, kind: str, domain: str):
     if rows is None:
         return UNREADABLE, [], []
     flagged, ok = rows
-    if old.get("domain") != domain:
-        was = old.get("domain")
-        was = f"the {was} domain" if isinstance(was, str) and was else "no named domain"
-        return (f"the earlier review (review-flags.json) was done for {was} and this client's profile domain is now "
-                f"{domain}, so nothing could be carried forward: list every line once"), [], []
+    was = old.get("domain")
+    if was != key:
+        if isinstance(was, str) and was and "+" not in was:       # T4.13 wrote the profile domain; a key always has +
+            return (f"the earlier review (review-flags.json) was made before review domains (it says {was}) and this "
+                    f"client's review set is now {key}, so nothing could be carried forward: list every line once "
+                    "(only this once)"), [], []
+        was = f"the {was} review set" if isinstance(was, str) and was else "no named review set"
+        return (f"the earlier review (review-flags.json) was done for {was} and this client's review set is now "
+                f"{key}, so nothing could be carried forward: list every line once"), [], []
     return None, flagged, ok
+
+
+def _detected(paths: Paths, kind: str, index: dict, key_flags: tuple) -> dict:
+    """event id -> {domain: matched words} for every domain a line's words (or the AI-generated files it shows) trigger,
+    under review_detect `review` (the default; `suggest` and `off` require nothing). A triggered domain is required on
+    that line; outside the key, or ai, it needs its own row (never implied). A pointer, never a filter."""
+    from .review_domains import detect_mode, line_requirements
+    mode = detect_mode()
+    if mode != "review":
+        return {}
+    try:
+        lines, _assets = line_requirements(paths, kind, index, key_flags, mode)
+    except Guidance:
+        raise
+    except Exception as e:  # noqa: BLE001 — a damaged manifest or plan event must refuse cleanly, never crash
+        raise Guidance(f"the review-domain detection could not run ({type(e).__name__}: {e})",
+                       "Fix the item's asset manifest or compiled plan (or set profile.json `review_detect` to suggest "
+                       "for now), then send the review again") from None
+    return {x["event_id"]: {d: list(dict.fromkeys(str(h.get("match")) for h in hits))
+                            for d, hits in x["detected"].items()} for x in lines if x["detected"]}
 
 
 def write(paths: Paths, findings: dict, *, by: str = "lead") -> dict:
     """Validate the reviewer's table against the compiled plan and write `<item>/review-flags.json`, replacing the
     whole file. Coverage model: every plan line with on-screen text must be COVERED, or nothing is written. A line is
     covered when the table lists it (ok or a flag), or the previous usable file has it, with the SAME id and SAME text,
-    flagged (carried: `carried: true`) or ok. `checked` is computed (= the covered lines = `lines_total`); a `checked` in
-    the table is ignored. Returns the document written plus `dropped` and `cleared` (see the module docstring). A
-    Guidance (nothing written) for a malformed table, a flag the client's domain does not check, an id the plan does not
-    have or that has no on-screen text, no compiled plan, any line left uncovered, or a new or changed line the table did
-    not review FOR an earlier flag that left its line ("G6 is new or changed since G2's medical flag: review G6 for
-    medical") or that holds an exact copy of a flag still on its line."""
+    flagged (carried: `carried: true`) or ok, for the review key's flags and for every domain its words trigger
+    (review_detect `review`; see the module docstring for what a row covers). `checked` is computed (= the covered
+    lines = `lines_total`); a `checked` in the table is ignored. Returns the document written plus `dropped` and `cleared` (see the module docstring). A Guidance
+    (nothing written) for a malformed table, a flag that is not a registry domain or a verdict its flag does not have, an
+    unknown review domain in the profile, an id the plan does not have or that has no on-screen text, no compiled plan,
+    any line left uncovered (for the key, or for a domain its words trigger: "G4 has not been reviewed for business"), or
+    a new or changed line the table did not review FOR an earlier flag that left its line ("G6 is new or changed since
+    G2's medical flag: review G6 for medical") or that holds an exact copy of a flag still on its line."""
     kind, index, fp = _current(paths)
-    domain = _domain()
-    rows = _clean(findings, index, domain)
+    key = _domain()
+    key_flags = _allowed(key)
+    rows = _clean(findings, index, key)
     lines = [i for i, v in index.items() if v["text"]]
-    unusable, old_flagged, old_ok = _previous(paths, kind, domain)
+    detected = _detected(paths, kind, index, key_flags)
+    unusable, old_flagged, old_ok = _previous(paths, kind, key)
 
     def current(eid):                     # a plan line with words; an id whose words were all removed counts as gone
         v = index.get(eid)
@@ -369,10 +525,19 @@ def write(paths: Paths, findings: dict, *, by: str = "lead") -> dict:
                             "start_s": now["start_s"], "end_s": now["end_s"], "reason": it.get("reason", "")[:MAX_REASON],
                             "carried": True})
             carried_keys.add((it["event_id"], it["flag"]))
-    ok_carried = {o["event_id"] for o in old_ok if index.get(o["event_id"]) is not None
-                  and index[o["event_id"]]["text"] == o["text"]}
-    covered = {r["event_id"] for r in rows} | {c["event_id"] for c in carried} | ok_carried
-    uncovered = [i for i in lines if i not in covered]
+    ok_carried = [o for o in old_ok if index.get(o["event_id"]) is not None and index[o["event_id"]]["text"] == o["text"]]
+    # The flags named on each line (table rows, carried items, carried ok rows' `flags`; an older ok row without them:
+    # the key), and what they cover (_cover: a medical or religious row of the key covers the key's IMPLIED flags). A
+    # line must be covered for the key and for every domain its words trigger (review_detect `review`).
+    named: dict = {}
+    for r in rows + carried:
+        named.setdefault(r["event_id"], set()).add(r["flag"])
+    for o in ok_carried:
+        named.setdefault(o["event_id"], set()).update(_named_ok(o, key))
+    trig = {i: set(detected.get(i, {})) for i in lines}
+    cov = {i: _cover(named.get(i, ()), key_flags, trig[i]) for i in lines}
+    uncovered = [i for i in lines if not named.get(i)]
+    short = [(i, sorted((set(key_flags) | trig[i]) - cov[i])) for i in lines if named.get(i)]
     # New or changed lines: no earlier row (flagged or ok) has the same id AND the same words. Where an earlier flag's
     # words went is never guessed (a split, merge, extension or an invisible character all look new): while a flag is
     # not carried, EVERY new or changed line must be reviewed for that flag.
@@ -412,13 +577,29 @@ def write(paths: Paths, findings: dict, *, by: str = "lead") -> dict:
                         f"{'it' if len(uncovered) == 1 else 'them'} (ok or a flag)")
         if unusable:
             problems.append(unusable)
+    for i, missing in short:
+        if missing:
+            why = [f"{f} (its words trigger it: {', '.join(detected[i][f][:3])})" if detected.get(i, {}).get(f) else f
+                   for f in missing]
+            problems.append(f"{i} has not been reviewed for {'; '.join(why)} (this client's checks: {key}): list {i} "
+                            f"for {', '.join(missing)}")
     if problems:
         raise Guidance("; ".join(problems),
-                       "Add those lines to the table (an `ok` row once the wording is fine, or a flag with its verdict), "
-                       "then send it again. Nothing was written")
-    flagged_ids = {i["event_id"] for i in items} | {c["event_id"] for c in carried}
-    ok = [{"event_id": i, "text": index[i]["text"]} for i in lines if i not in flagged_ids]
-    doc = {"schema": SCHEMA, "plan_kind": kind, "plan_fingerprint": fp, "domain": domain, "written_at": now_iso(),
+                       "Add those lines to the table (an `ok` row once the wording is fine, or a flag with its verdict, "
+                       "under the check named), then send it again. Nothing was written")
+    flagged_on: dict = {}
+    for it in items + carried:
+        flagged_on.setdefault(it["event_id"], set()).add(it["flag"])
+    # An ok row records the flags its line was reviewed for and found fine, minus what the line's items already cover
+    # (never a flag the line is flagged for; a line covered by its items alone has no ok row, so a wiped `items` list
+    # leaves it unlisted). The always-on ai is written only where it was named (a medical row's implied ai is not), so
+    # an AI hint that appears later on a carried line still asks for its own ai row.
+    def fine(i) -> list:
+        no_ai = trig[i] | {"ai"}
+        return sorted(_cover(named[i], key_flags, no_ai) - _cover(flagged_on.get(i, ()), key_flags, no_ai))
+
+    ok = [{"event_id": i, "text": index[i]["text"], "flags": fine(i)} for i in lines if fine(i)]
+    doc = {"schema": SCHEMA, "plan_kind": kind, "plan_fingerprint": fp, "domain": key, "written_at": now_iso(),
            "by": str(by or "lead"), "checked": len(lines), "lines_total": len(lines), "items": items + carried, "ok": ok}
     write_json(path(paths), doc)
     return dict(doc, dropped=dropped, cleared=cleared)
@@ -427,35 +608,48 @@ def write(paths: Paths, findings: dict, *, by: str = "lead") -> dict:
 def load(paths: Paths) -> dict | None:
     """The review file when it is readable, whole and belongs to the current plan; None when it is missing, unreadable,
     from another schema, its fingerprint is not the current plan's (the plan changed after the review: stale), it was
-    done for another profile domain than the client's current one, or it is not consistent with the plan: any damaged
-    row (the checks `write` applies to an earlier file), a flag the domain does not check, a row whose id is not a plan
+    done for another review key than the client's current one, or it is not consistent with the plan: any damaged
+    row (the checks `write` applies to an earlier file: any registry flag is fine), a row whose id is not a plan
     line with words or whose text is not that line's current words, no `ok` list, `checked` or `lines_total` not the
-    plan's number of lines with text (an integer), or a plan line with text in neither `items` nor `ok`. These catch a
-    wiped or carelessly edited file, not a deliberate one: a flag moved into `ok` by hand, with the right words, cannot
-    be told from a real `ok` without a signature."""
+    plan's number of lines with text (an integer), or a plan line with text not covered for the key and the domains its
+    words trigger now (the write() rule). These catch a wiped or carelessly edited file, not a deliberate one: a flag
+    moved into `ok` by hand, with the right words, cannot be told from a real `ok` without a signature."""
     try:
         doc = read_json(path(paths))
     except (OSError, ValueError):
         return None
     if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
         return None
-    rows = _rows(doc, need_ok=True)
-    if rows is None:
-        return None
     try:
-        kind, index, fp = _current(paths)
-        domain = _domain()
-        if doc.get("plan_kind") != kind or doc.get("plan_fingerprint") != fp or doc.get("domain") != domain:
+        rows = _rows(doc, need_ok=True)
+        if rows is None:
             return None
-    except Exception:  # noqa: BLE001 — no plan, an unreadable plan or a changed script all mean: not current
+        kind, index, fp = _current(paths)
+        key = _domain()
+        if doc.get("plan_kind") != kind or doc.get("plan_fingerprint") != fp or doc.get("domain") != key:
+            return None
+    except Exception:  # noqa: BLE001 — no plan, an unreadable plan or registry, a changed script or profile: not current
         return None
     lines = [i for i, v in index.items() if v["text"]]
     every = rows[0] + rows[1]
     listed = {r["event_id"] for r in every}
-    counts = [doc.get("checked"), doc.get("lines_total")]
-    if (any(type(n) is not int or n != len(lines) for n in counts) or any(i not in listed for i in lines)
+    numbers = [doc.get("checked"), doc.get("lines_total")]
+    if (any(type(n) is not int or n != len(lines) for n in numbers) or any(i not in listed for i in lines)
             or any(not index.get(r["event_id"], {}).get("text") or r["text"] != index[r["event_id"]]["text"]
-                   for r in every)
-            or any(r["flag"] not in _allowed(domain) for r in rows[0])):
+                   for r in every)):
         return None
+    try:                                 # every line covered for the key and the domains its words trigger, as write()
+        key_flags = _allowed(key)
+        detected = _detected(paths, kind, index, key_flags)
+    except Exception:  # noqa: BLE001
+        return None
+    named: dict = {}
+    for it in rows[0]:
+        named.setdefault(it["event_id"], set()).add(it["flag"])
+    for o in rows[1]:
+        named.setdefault(o["event_id"], set()).update(_named_ok(o, key))
+    for i in lines:
+        trig = set(detected.get(i, {}))
+        if not (set(key_flags) | trig) <= _cover(named.get(i, ()), key_flags, trig):
+            return None
     return doc
