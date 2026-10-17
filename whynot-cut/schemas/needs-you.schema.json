@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:whynot-cut:schema:needs-you:1",
+  "title": "output/needs-you.json: what only the editor can do for this client (the twin of output/NEEDS-YOU.md)",
+  "description": "Written by `reel needs-you --write` (3.0 T4.7) from the client's state, never authored by hand; the panel (Phase 6) shows the same list. Producers put `needs_you: [{kind, text, text_ar?, why, ref}]` in their own state file; this file aggregates them with the items derived from today's state, deduplicated on (source, kind, ref). An empty `items` list means nothing needs the editor. Check with `reel validate output/needs-you.json`.",
+  "type": "object",
+  "required": ["schema_version", "client", "items", "counts", "total", "unread", "skipped"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": 1, "description": "the version of this schema the file follows"},
+    "client": {"type": "string", "description": "the client folder's name"},
+    "items": {"type": "array", "items": {"$ref": "#/$defs/item"}},
+    "counts": {
+      "type": "object",
+      "description": "items per kind (only the kinds present)",
+      "additionalProperties": {"type": "integer", "minimum": 1}
+    },
+    "total": {"type": "integer", "minimum": 0},
+    "unread": {
+      "type": "array",
+      "description": "state files that exist but could not be read: the list may be missing items",
+      "items": {
+        "type": "object",
+        "required": ["source", "item"],
+        "additionalProperties": false,
+        "properties": {
+          "source": {"type": "string", "minLength": 1},
+          "item": {"type": ["string", "null"]},
+          "why": {"type": "string"}
+        }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "description": "producer items that could not be shown (wrong shape, unknown kind, a ref outside the client folder)",
+      "items": {
+        "type": "object",
+        "required": ["source", "item", "why"],
+        "additionalProperties": false,
+        "properties": {
+          "source": {"type": "string", "minLength": 1},
+          "item": {"type": ["string", "null"]},
+          "why": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "item": {
+      "type": "object",
+      "required": ["id", "kind", "text", "why", "ref", "item", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {"type": "string", "pattern": "^[0-9a-f]{12}$", "description": "stable: from (source, kind, ref)"},
+        "kind": {"enum": ["pick", "words","medical", "religious", "music", "fonts", "logo", "website", "final"]},
+        "text": {"type": "string", "minLength": 1, "maxLength": 600, "description": "English, one sentence"},
+        "text_ar": {"type": "string", "minLength": 1, "maxLength": 600},
+        "why": {"type": "string", "maxLength": 1200},
+        "why_ar": {"type": "string", "maxLength": 1200},
+        "ref": {"type": "string", "minLength": 1, "maxLength": 400,
+                "description": "a client-root-relative path (forward slashes) or a plan id (graphic or scene id)"},
+        "ref_exists": {"type": "boolean", "description": "path refs only: the path exists now"},
+        "item": {"type": ["string", "null"], "description": "the video, reel or episode id; null = the whole client"},
+        "source": {"type": "string", "minLength": 1, "description": "the client-root-relative state file it came from"}
+      }
+    }
+  }
+}

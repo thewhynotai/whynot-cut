@@ -10,9 +10,9 @@ Rules enforced in code (prose rules get forgotten in long sessions):
      left alone (engine/reel/lib/client_marker.py).
   2. Whole project folders are not deleted by the agent (rm -r on output/ or output/projects/<ID>).
   3. After Effects / Photoshop builds are opt-in extras: `reel ae-*|ps-*|mogrt-build` need --extras.
-  4. Roles: subagents never approve the plan, record a verification verdict or verify a transcript as the editor
-     (the lead does, after looking); WhyNot Cut's reviewer agents (matched on the full `whynot-cut:<name>`) are
-     read-only; setup-doctor diagnoses and never installs.
+  4. Roles: subagents never approve the plan (`approve-plan`, `auto-approve`), record a verification verdict or
+     verify a transcript as the editor (the lead does, after looking); WhyNot Cut's reviewer agents (matched on the
+     full `whynot-cut:<name>`) are read-only (also no `needs-you --write`); setup-doctor diagnoses and never installs.
   5. Adobe preferences (PlayerDebugMode, After Effects prefs) are the editor's to change.
 
 Covers the Write/Edit tools, Bash (macOS/Linux shells and Git Bash on Windows, incl. /d/... paths) and PowerShell
@@ -62,6 +62,9 @@ QC_FORBIDDEN = {"ppro-build", "approve-plan", "plan", "previews", "audio-clean",
                 "transcript-correct", "client-init", "client-db", "sfx", "premiere", "handoff",
                 "reels-select", "reels-plan", "episode-transcribe", "publish-check",
                 "motion-plan", "motion-animatic", "motion-build", "motion-render", "ref-analyze"}
+# `transcript-verify --by` values a subagent may record (plus its own role name); anything else, or no --by (the CLI
+# records a missing --by as "editor"), is the lead's (T4.7 review)
+SUBAGENT_VERIFY_BY = frozenset({"agent", "claude"})
 SETUP_DOCTOR_FORBIDDEN = {"setup", "model-download", "gpu-enable", "ppro-install"}
 GLOBAL_VALUE_OPTS = ("--root", "--video-id", "--profile", "--episode")
 MUTATE_ALL = {"rm", "mv", "touch", "chmod", "chown", "truncate", "unlink", "rmdir", "shred", "dot_clean",
@@ -1413,6 +1416,12 @@ def check_reel(exe: str, argv: list[str], agent: str | None, cwd: Path | None = 
         if agent:                       # gate rules: every subagent, whatever plugin it comes from
             if sub == "approve-plan":
                 block("only the lead editor (main conversation) records plan approval, after the editor approves.")
+            if sub == "auto-approve":                                      # 3.0 T4.7
+                block("only the lead editor (main conversation) records the approval a standing `approval: auto` "
+                      "gives. Report that the plan is ready instead.")
+            if role in READ_ONLY_AGENTS and sub == "needs-you" and has_opt(argv, "--write"):
+                block(f"{role} is a read-only reviewer: it may read the checklist (`reel needs-you`) but not write "
+                      f"output/NEEDS-YOU.md. Report what you found instead.")
             if sub == "lock" and has_opt(argv, "--release"):
                 block("only the lead editor releases the client's writer lock (`reel lock --release`), when the editor "
                       "says the other session is finished. Report the lock instead.")
@@ -1426,9 +1435,13 @@ def check_reel(exe: str, argv: list[str], agent: str | None, cwd: Path | None = 
                       "video went to the client.")
             if sub == "verify" and has_opt(argv, "--record"):
                 block("subagents report a verdict; the lead editor records it after viewing the evidence itself.")
-            if sub == "transcript-verify" and any(v.strip("'\"").lower() == "editor" for v in opt_values(argv, "--by")):
-                block("only the lead editor records `transcript-verify --by editor`, after the editor confirmed the "
-                      "words. Report the corrections instead.")
+            if sub == "transcript-verify":                 # T4.7 review: an allow-list (a missing --by IS the editor)
+                bys = [v.strip("'\"").strip().lower() for v in opt_values(argv, "--by")]
+                mine = SUBAGENT_VERIFY_BY | ({role} if role else set())
+                if not bys or any(v not in mine for v in bys):
+                    block("only the lead editor records `transcript-verify --by editor` (or without --by, which the "
+                          "engine records as the editor), after the editor confirmed the words. A subagent may only "
+                          "name itself (--by " + ", ".join(sorted(mine)) + "). Report the corrections instead.")
             if role == "qc-reviewer" and sub == "ref-style" and (has_opt(argv, "--record") or has_opt(argv, "--apply")):
                 block("qc-reviewer is independent and read-only: it may not record or apply the client reference style.")
             if sub == "ae-probe" and has_opt(argv, "--record"):

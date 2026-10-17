@@ -143,7 +143,7 @@ and the preview contact sheet.
   (`/whynot-cut:preferences`): ask "this clip only, or from now on?" and stop until they answer; never write
   `approval=auto` in the same turn as the request.
 - Preferences `approval: auto`: show the summary anyway, then
-  `reel approve-plan --by delegated --note "standing preference approval: auto from <_where.approval>"` and continue.
+  `reel auto-approve` (recorded as `by: "auto"`, apart from the editor's own approvals) and continue.
   Name `_where.approval` (a file, or "plugin option") in the summary so the editor sees where the standing approval comes from. Medical approvals are never
   automatic: those graphics stay under "Needs you".
 - Approval comes only from the editor's own messages in this conversation or from `approval` in
@@ -180,6 +180,8 @@ then re-check the original symptom.
   - graphics awaiting medical approval
   - music
   - final mix and render
+
+  `reel needs-you` lists them from the client's state; `--write` keeps them in `output/NEEDS-YOU.md` for the editor.
 
 Never say "done", "ready" or "final" unless `qc` passed in this message **and** nothing in "Needs you" blocks that claim.
 There is no rendered final video unless the editor made one.

@@ -8,6 +8,8 @@ whynot-cut/schemas/<name>.schema.json (draft 2020-12), one per authored file:
     publish-reel            publish/reels/<REEL>.json                  ($defs/reel of publish.schema.json)
     transcript-corrections  02_transcription/transcript-corrections.json (`reel transcript-correct`)
     asset-needs             the optional `asset_needs` array of edit-decisions / motion-script (Phase 5)
+plus one file the engine writes for the panel to read (never authored by hand):
+    needs-you               output/needs-you.json                      (`reel needs-you --write`, T4.7)
 Each schema carries its version twice: `$id` ends in ":<n>" and the optional `schema_version` property of a file is
 `{"const": n}`. The schemas describe structure (types, required fields, the enums the engine enforces); the compilers
 keep checking meaning (evidence in the transcript, times inside the media, templates of the profile).
@@ -37,6 +39,7 @@ KINDS: dict[str, tuple[str, str]] = {
     "publish-reel": ("publish", "/$defs/reel"),
     "transcript-corrections": ("transcript-corrections", ""),
     "asset-needs": ("asset-needs", ""),
+    "needs-you": ("needs-you", ""),
 }
 _FILE_REF = re.compile(r"([a-z0-9-]+)\.schema\.json")
 _DEFS = "/$defs/"

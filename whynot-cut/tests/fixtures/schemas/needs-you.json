@@ -1,0 +1,53 @@
+{
+ "note": "3.0 T4.7: output/needs-you.json as `reel needs-you --write` writes it; valid = shapes the engine's tests write, invalid = must fail at path",
+ "valid": [
+  {"schema_version": 1, "client": "Dr Test د. تجربة", "items": [], "counts": {}, "total": 0, "unread": [], "skipped": []},
+  {
+   "schema_version": 1,
+   "client": "Dr Test د. تجربة",
+   "items": [
+    {"id": "fedcba987654", "kind": "pick", "text": "Episode EP01: pick the reels you want from the reels plan",
+     "text_ar": "حلقة EP01: اختار الريلز اللي عايزها من خطة الريلز", "why": "Picking the reels is your editorial choice.",
+     "ref": "output/episodes/EP01/01_analysis/reels-plan.md", "ref_exists": true, "item": "EP01",
+     "source": "output/episodes/EP01/01_analysis/reels-plan-validated.json"},
+    {"id": "0123456789ab", "kind": "words", "text": "C0001: listen to 1 word and tell Claude if it is right: «الكلى» at 0:01",
+     "text_ar": "C0001: اسمع كلمة واحدة وقول لـ Claude لو مكتوبة صح: «الكلى» عند 0:01",
+     "why": "The transcription was not sure of these words.", "why_ar": "التفريغ مكانش متأكد من الكلمات دي.",
+     "ref": "output/projects/C0001/02_transcription/subtitle-review.md", "ref_exists": true, "item": "C0001",
+     "source": "output/projects/C0001/02_transcription/words.json"},
+    {"id": "abcdefabcdef", "kind": "music", "text": "Add licensed music", "text_ar": "ضيف مزيكا مرخّصة",
+     "why": "no licence", "ref": "data/Music", "ref_exists": false, "item": "M0001",
+     "source": "output/projects/M0001/01_analysis/motion-plan.json"},
+    {"id": "1234567890ab", "kind": "medical", "text": "C0001: get the doctor's approval for graphic G2", "why": "",
+     "ref": "G2", "item": "C0001", "source": "output/projects/C0001/review-flags.json"}
+   ],
+   "counts": {"pick": 1, "words": 1, "music": 1, "medical": 1},
+   "total": 4,
+   "unread": [{"source": "output/client_database/branding/typography.json", "item": null, "why": "ValueError"}],
+   "skipped": [{"source": "output/projects/M0001/01_analysis/motion-plan.json", "item": "M0001",
+                "why": "unknown kind 'approve'"}]
+  }
+ ],
+ "invalid": [
+  {"why": "unknown kind", "path": "/items/0/kind",
+   "doc": {"schema_version": 1, "client": "x", "total": 1, "counts": {}, "unread": [], "skipped": [],
+           "items": [{"id": "0123456789ab", "kind": "approve", "text": "t", "why": "", "ref": "G1", "item": null,
+                      "source": "s"}]}},
+  {"why": "empty text", "path": "/items/0/text",
+   "doc": {"schema_version": 1, "client": "x", "total": 1, "counts": {}, "unread": [], "skipped": [],
+           "items": [{"id": "0123456789ab", "kind": "music", "text": "", "why": "", "ref": "data/Music", "item": null,
+                      "source": "s"}]}},
+  {"why": "an id that is not the 12-hex stable id", "path": "/items/0/id",
+   "doc": {"schema_version": 1, "client": "x", "total": 1, "counts": {}, "unread": [], "skipped": [],
+           "items": [{"id": "G1", "kind": "music", "text": "t", "why": "", "ref": "data/Music", "item": null,
+                      "source": "s"}]}},
+  {"why": "items missing", "path": "",
+   "doc": {"schema_version": 1, "client": "x", "total": 0, "counts": {}, "unread": [], "skipped": []}},
+  {"why": "another schema version", "path": "/schema_version",
+   "doc": {"schema_version": 2, "client": "x", "items": [], "total": 0, "counts": {}, "unread": [], "skipped": []}},
+  {"why": "a field nobody reads", "path": "/items/0/action",
+   "doc": {"schema_version": 1, "client": "x", "total": 1, "counts": {}, "unread": [], "skipped": [],
+           "items": [{"id": "0123456789ab", "kind": "music", "text": "t", "why": "", "ref": "data/Music", "item": null,
+                      "source": "s", "action": "open"}]}}
+ ]
+}

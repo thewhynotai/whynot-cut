@@ -963,6 +963,13 @@ def writes(a) -> bool:
     return a.cmd in CORE_WRITES or a.cmd in podcast_cli.WRITES or a.cmd in motion_cli.WRITES
 
 
+# T4.7 no-questions autopilot: `needs-you` reads the client's state and writes output/NEEDS-YOU.md + needs-you.json only
+# with --write (one list per client, never per video); `auto-approve` records a plan approval by "auto"
+WRITES_IF["needs-you"] = lambda a: bool(getattr(a, "write", False))
+CORE_WRITES = CORE_WRITES | {"auto-approve"}
+NO_ID = NO_ID | {"needs-you"}
+
+
 def mark_legacy_client(root: Path):
     """A 2.x client folder (assets/ + data/ + output/ with a WhyNot Cut sign, no `.whynot-client`) gets its marker on
     the first writing command, so the guard protects it from then on (gate G5). Idempotent; logged in
@@ -1053,6 +1060,23 @@ def cmd_lock(a):
     when the editor says the other session is finished or stuck)."""
     from lib import writer_lock
     out(writer_lock.release(a.root) if a.release else writer_lock.status(a.root))
+
+
+def cmd_needs_you(a):
+    """T4.7: the client's one checklist of what only the editor can do, read from its state (lib/needs_you.py);
+    --write puts output/NEEDS-YOU.md (Arabic first) and its twin output/needs-you.json in output/ only."""
+    from lib import needs_you
+    if a.write:
+        out(needs_you.write(a.root, a.profile))
+        return
+    out(dict(needs_you.collect(a.root, a.profile), ok=True, written=False))
+
+
+def cmd_auto_approve(a):
+    """T4.7: the plan approval a standing `approval: auto` delegates, recorded as by "auto" (lib/autopilot.py);
+    refused unless this client's preferences say approval: auto. Medical and religious lines are never covered."""
+    from lib import autopilot
+    out(autopilot.approve(P(a), a.note))
 
 
 def run_setup_env(force=False, check=False) -> dict:
@@ -1468,6 +1492,10 @@ CORE_COMMANDS: dict[str, str] = {
     "review-flags": "write the medical/religious review (--from <file|->) as review-flags.json, keyed by the plan's "
                     "event ids (the lead runs it with the medical-reviewer's table)",
     "approve-plan": "record the approval of the compiled plan (editor or delegated)",
+    "auto-approve": "record the approval a standing `approval: auto` gives (by auto; refused unless this client's "
+                    "merged preferences say auto); medical and religious lines are never covered",
+    "needs-you": "one checklist of what only the editor can do for this client (words by ear, medical/religious "
+                 "approvals, music, fonts, logo, final mix); --write puts output/NEEDS-YOU.md and needs-you.json",
     "previews": "render PNG previews of the graphics and captions, with QC composites",
     "sfx": "prepare the sound effects the plan needs: the client's mapped library files (06_audio/sfx-map.json) "
            "converted to wav, built-in synthesized sounds for the rest",
@@ -1611,6 +1639,13 @@ def main(argv: list[str] | None = None):
                                  'only the changed lines); `-` reads it from standard input (UTF-8). Each line is keyed by the '
                                  'event id of the plan '
                                  '(a motion video: the scene id); its text and times come from that plan')
+        if name == "auto-approve":
+            sp.add_argument("--note", "--notes", dest="note",
+                            help="default: standing preference approval: auto from <where the preference is set>")
+        if name == "needs-you":
+            sp.add_argument("--write", action="store_true",
+                            help="write output/NEEDS-YOU.md and output/needs-you.json (atomic; unchanged files are "
+                                 "left alone); without it the list is only printed")
         if name == "verify":
             sp.add_argument("--record", action="store_true")
             sp.add_argument("--verdict", choices=["pass", "fail"], help="with --record")

@@ -658,8 +658,9 @@ def prefs_line(st: dict) -> str:
     lang = " Talk to the editor in Arabic." if st.get("language") == "ar" else ""
     src = (st.get("_where") or {}).get("approval")
     src = src if src and src != "default" else (st.get("_file") or "plugin option")
-    appr = (" Approval: auto (show the plan and preview, then record `approve-plan --by delegated --note "
-            "\"standing preference in " + src + "\"` without waiting)." if st.get("approval") == "auto"
+    appr = (" Approval: auto (standing preference in " + src + ": show the plan and preview, then record "
+            "`reel auto-approve` without waiting; medical and religious approvals are never automatic: "
+            "they stay on `output/NEEDS-YOU.md` (`reel needs-you --write`))." if st.get("approval") == "auto"
             else " Approval: ask (stop for the editor's OK on every plan).")
     return (f"Preferences: {st['_file'] or 'the WhyNot Cut plugin options'}.{who}{lang}{appr}{CONSENT_RULE} "
             f"Whisper: {st.get('whisper_model')}.")
