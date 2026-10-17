@@ -215,7 +215,8 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
                        "The story editor authors it (story-craft references/edit-decision-engine.md), then run "
                        "`reel plan` again", where=str(paths.p("01_analysis/edit-decisions.json")))
     tpl = load_config("graphics-templates.json", ctx)["templates"]
-    manifest = read_json(paths.client_db / "asset-manifest.json", {"assets": []})
+    from . import client_db
+    manifest = client_db.load(paths, "asset-manifest.json", {"assets": []})
     ttext, dur_ms = _transcript_text(paths)
     base = ed.get("global", {})
     rp = base.get("remove_pauses")
@@ -243,7 +244,7 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
     # brand tokens are read only for a highlight colour, the frame width only for a caption size
     from . import style_knobs
     seq_cfg, style = load_config("sequence-settings.json", ctx), load_config("style.json", ctx)
-    tokens = read_json(paths.client_db / "branding/brand-tokens.json", {}) \
+    tokens = client_db.load(paths, "branding/brand-tokens.json", {}) \
         if style_knobs.needs_tokens(style, base) else {}
     knobs = style_knobs.resolve(style, base, tpl, tokens, lambda: frame_size_of(seq_cfg)[0],
                                 layers_=style_knobs.layers(ctx),
