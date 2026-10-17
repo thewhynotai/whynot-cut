@@ -97,6 +97,17 @@ with `**passed**` or `**Gate <N> passed on Windows, Mac Not verified**` (else th
 | Task 26 intake normalisation | **REJECTED 2026-10-17** (P1: same-name sources overwrite) | 8bd6b60 | 43 | fix in lane 1; not counted |
 | Task 25 cut proposals v2 | **REJECTED 2026-10-17** (P1: negation/dose/timing retakes pre-ticked) | 5abdc20 | 48 | fix in lane 2; not counted |
 | Task 30 publish-check | **accepted 2026-10-17** (lane 2; runner + executor) | c481198 | 51 | minors in lane (﴿﴾ verse check, filler-tag warnings) |
+| T4.9 adopt old per-video styles | **committed 2026-10-17** (wnc-queue; acceptance pending its batch full suite) | 11ff0e3 (+ guard e05a71b) | t49 35, t44 42, ref_style 19 | full suite runs once after T4.5-A (covers c0a7c30 + 11ff0e3 + 4d16827) |
+| Task 23 R-4.1 caption looks | **committed 2026-10-17** (looks; acceptance pending) | c3ba883 | looks 198 | full suite 5020: 11 F + 8 E; seen: test_installer r5_1 (installer track); rest unlisted → named by the T28 suite log |
+| Task 28 R-4.6 look recommender | **committed 2026-10-17** (looks; 3 review rounds; acceptance pending its full suite) | 35f77b1 | 47 + looks 198 | swap re-dates its reel (spec kept); hooks in LOOKS-T28-HOOKS.md (executor) |
+| Task 26 fix (two cameras' C0001.MP4) | **committed 2026-10-17** (lane 1; lane-5 review pending) | 19049fe | — | fixes the 8bd6b60 P1; not counted until accepted |
+| Task 25 fix (meaning-different retakes) | **committed 2026-10-17** (lane 2; lane-5 review pending) | d73c3e3 | — | fixes the 5abdc20 P1; not counted until accepted |
+| M1-T1, M1-T2 (Tasks 50, 51) | **accepted with follow-ups 2026-10-17** (lane 4; lane-5 PASS-WITH-MINORS + executor) | 79c5bf7, 08657b1; spec c814844 | — | M1-T1 recall P2s and M1-T2 P2-2 fixed before the live stage-7 check; ok rows never count as an ai review |
+| M2-T1 bidi_lines (Task 54) | **committed 2026-10-17** (lane 4; lane-5 review pending) | 530e2e7 | — | — |
+| K-T7 follow-ups | **FAIL 2026-10-17** (lane-5 P2: 'abandoned take' proposed a best take across a meaning difference) | 7193e9a | — | ruling: fix, best = null for any meaning difference; not counted |
+| Lane hook patches applied | **done 2026-10-17** (executor agent; tests per group on snapshots) | ee71a27, 774975e, 5dd6b2a, f17c58a, a23f9fe, ac2168a | 369 / 426 / 639 / 202 / 767 / 342 | K-T2 + K-T7 hooks wait for Task 25; guard hunks wait for the guard round |
+| Guard: engine script started by path | **FAIL 2026-10-17** (opus runner: 1 Critical, 5 Important) | 42a675b (local) | ps_direct 20 | round 2 = a deny-by-default text backstop for subagents (L-G13; L-T8 is the second wall) |
+| CEP queue H6 | **done 2026-10-17** (Adobe hunks) | 3797965 | cep 124 | AE self-close not reproduced (12 cold relaunches); Safe-Mode modal = live-run risk |
 | K-T1, K-T2, K-T4, K-T5, K-T7 (Tasks 61, 62, 64, 65, 67) | **accepted 2026-10-17** (lane 2) | 58e5cd5, 66f835e, f0a9cd3, a43cf97, 51600cb | 57, 20, 18, 27, 30 | K1 switches off until the Gate 4 tag; P2 follow-ups in lane (Quran skeleton compare, K-T4 exit codes, takes negation) |
 | L-T1, L-T2, L-T3 (Tasks 39–41) | **accepted 2026-10-17** (lane 3) | 29566d5, 44191c6, 4ab2aab, 5fb1b1c, f138894 | security_scan 139, workflow 12 | 48 real High in runtime-cuda.txt baselined to 2026-11-17 (T4.12 follow-up); watch can't see deletions (769143d) |
 | Release identity gate | **done 2026-10-17** | d513d4e, cc22359 | identity_gate 47, handoff 50 | history + generated files + archive members, fails closed |
