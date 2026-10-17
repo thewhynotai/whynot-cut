@@ -108,7 +108,7 @@
 
 After the tag, the K1 safety switches turn on.
 
-**Deliverable to Yunus:** the Stage R release cut that follows the tag (or the October cut, whichever comes first).
+**Deliverable to Yunus:** the Gate 4 tag report; the release cut after it is made in the attended sessions, one at a time (owner 2026-10-18).
 
 ## Stage R: Release cut (recurring; first one at the October budget limit)
 **Trigger:** the budget guard flips (the month's API cap is near), or a stage's exit gate passes.
@@ -130,10 +130,7 @@ After the tag, the K1 safety switches turn on.
 
 **Exit:** `Releases/<version>/Windows` and `Releases/<version>/Mac` exist, are built from a clean clone, and are reported.
 
-**First cut (October):**
-- version `3.0.0-preview-oct`;
-- content = the chat-based plugin plus the Phase 4 work accepted by then;
-- an **internal** test build, not V1.
+**First cut (October): CANCELLED by the owner (2026-10-18).** The whole remaining October API limit goes to closing Gate 4. Phase 4 has no deadline; quality first. At the budget switch (now about 100 USD left) the lanes finish and get reviewed their current task, lane 5 writes the pause handoff, and no release is built. Release cuts are made later, one at a time, in the attended sessions.
 
 ## Stage 2: Plan the V1 build (start of November, once the new monthly cap is available)
 **Owner:** executor (Opus). **Entry:** Stage 1 tag, or the 1st of the month.
