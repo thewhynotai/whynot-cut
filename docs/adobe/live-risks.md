@@ -74,3 +74,20 @@ file.
   If it clamps, the read-back reports a mismatch.
 - **Gate 4 check.** Do one live motion build with a licensed track. Read the MUSIC layer's keys back on both channels,
   then listen to the render at a dip.
+
+## R-L6. Premiere smooth zoom and fades (open, T4.1)
+
+- **What.** The smooth zoom is on by default (250 ms on story punch-ins), so every build with punch-ins relies on four
+  behaviours that have not been verified live:
+  1. key times are given in seconds as numbers;
+  2. `setInterpolationTypeAtKey` exists;
+  3. `getValue` is read before any key is set;
+  4. Position is normalised. This is the biggest unknown, together with the unit of the FCP7 `<center>` value.
+- **Impact.** If any of these fails, every build with punch-ins ends as `PRPROJ_BUILT_WITH_ISSUES` until it is fixed.
+  The interpolation cannot be read back through CEP, so the only proof is the exported frames.
+- **Gate 4 checks.**
+  - Export the mid-ease frames that `ppro-build` lists in `qc_frames`. Each must show a scale between the start and
+    end values.
+  - A punch-in that starts on a shot or speaker change stays hard: there is no whip-pan.
+  - On a 4:5 reel with B-roll, a 50% fade shows no ghosting. The fade comes from one black matte on the top track.
+  - A cue under the fade-out is kept up to the 0.5 point, and the build warns about it.
