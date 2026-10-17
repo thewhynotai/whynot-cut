@@ -1,0 +1,23 @@
+{
+  "_about": "Fixture site for Addendum J tests: Example Clinic / عيادة مثال. Invented content, fictional people (D12). The fixture transport maps each URL to a file; a URL with no route answers 404, a host with no dns entry does not resolve. Never fetched from the internet.",
+  "dns": {
+    "example-clinic.test": ["93.184.216.34"],
+    "www.example-clinic.test": ["93.184.216.34"],
+    "cdn.example-clinic.test": ["151.101.1.1"],
+    "fonts.googleapis.test": ["142.250.1.1"],
+    "fonts.gstatic.test": ["142.250.1.2"]
+  },
+  "routes": {
+    "https://example-clinic.test/robots.txt": {"file": "robots.txt", "headers": {"content-type": "text/plain"}},
+    "https://example-clinic.test/": {"file": "index.html", "headers": {"content-type": "text/html; charset=utf-8"}},
+    "https://www.example-clinic.test/": {"status": 301, "headers": {"location": "https://example-clinic.test/"}},
+    "https://example-clinic.test/ar/": {"file": "ar/index.html", "headers": {"content-type": "text/html; charset=utf-8"}},
+    "https://example-clinic.test/about": {"file": "about.html", "headers": {"content-type": "text/html; charset=utf-8"}},
+    "https://example-clinic.test/ar/about": {"file": "ar-about.html", "headers": {"content-type": "text/html; charset=utf-8"}},
+    "https://example-clinic.test/contact": {"file": "contact.html", "headers": {"content-type": "text/html; charset=utf-8"}},
+    "https://example-clinic.test/team": {"file": "team.html", "headers": {"content-type": "text/html; charset=utf-8"}},
+    "https://example-clinic.test/ar/team": {"file": "ar-team.html", "headers": {"content-type": "text/html; charset=utf-8"}},
+    "https://example-clinic.test/doctors/dr-sara": {"file": "dr-sara.html", "headers": {"content-type": "text/html; charset=utf-8"}},
+    "https://example-clinic.test/private/about": {"file": "private-about.html", "headers": {"content-type": "text/html"}}
+  }
+}

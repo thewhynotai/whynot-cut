@@ -1,0 +1,10 @@
+/* unclosed comment at the end is tested separately */
+a { color: #123456; background: url( "img/a.png" ) }
+b { color: "unterminated string
+; }
+@media (min-width: 10px) { c { color: rgb(1,2,3) } 
+@font-face { font-family: "Broken Sans"; src: url(/f.woff2) format("woff2")
+d { color: #ABCDEF !important; --brand-main: #0A6E8A }
+@import "x.css" screen;
+e { background: url(data:image/png;base64,AAAA) }
+}}}} f { color: red }

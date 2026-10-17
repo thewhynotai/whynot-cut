@@ -1,0 +1,8 @@
+{
+  "_about": "A site built with JavaScript: the static HTML has almost no text and an empty mount point (Addendum J3, js_site).",
+  "dns": {"spa-clinic.test": ["93.184.216.35"]},
+  "routes": {
+    "https://spa-clinic.test/": {"file": "index.html", "headers": {"content-type": "text/html; charset=utf-8"}},
+    "https://spa-clinic.test/about": {"file": "index.html", "headers": {"content-type": "text/html; charset=utf-8"}}
+  }
+}
