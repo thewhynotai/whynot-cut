@@ -1,0 +1,243 @@
+# WhyNot Cut security rules, Python (Addendum L §L3; L-T1). Ours, GPL-3.0-or-later; registry packs are NOT vendored.
+# Each rule carries metadata.wnc_severity (CRITICAL|HIGH|MEDIUM|LOW) and metadata.wnc_gap (the L-G item it enforces).
+# These are literal/syntax rules, not a proof: each rule's message and tools/security/README notes say what it cannot see.
+# The real protection for client paths is the engine write gate (L-T8), for executables the L-T4 audit.
+rules:
+  - id: wnc-tls-disabled
+    languages: [python]
+    severity: ERROR
+    message: >-
+      TLS verification turned off (verify=False/0, ssl=False, cert_reqs CERT_NONE, CERT_NONE, check_hostname=False,
+      an unverified context, inject_into_ssl, PYTHONHTTPSVERIFY, curl --insecure). Pass a truststore.SSLContext to the
+      one library that needs it (L-G33).
+    metadata:
+      wnc_severity: HIGH
+      wnc_gap: L-G33
+    pattern-either:
+      - pattern: $F(..., verify=False, ...)
+      - pattern: $F(..., verify=0, ...)
+      - pattern: $F(..., ssl=False, ...)
+      - pattern: $F(..., cert_reqs="CERT_NONE", ...)
+      - pattern: $S.verify = False
+      - pattern: $S.verify = 0
+      - pattern: ssl.CERT_NONE
+      - pattern: CERT_NONE
+      - pattern: $CTX.check_hostname = False
+      - pattern: ssl._create_unverified_context(...)
+      - pattern: ssl._create_default_https_context = ...
+      - pattern: truststore.inject_into_ssl(...)
+      - pattern: inject_into_ssl(...)
+      - pattern: os.environ["PYTHONHTTPSVERIFY"] = ...
+      - pattern: os.environ.setdefault("PYTHONHTTPSVERIFY", ...)
+      - pattern: |
+          os.environ.update({..., "PYTHONHTTPSVERIFY": ..., ...})
+      - pattern: os.putenv("PYTHONHTTPSVERIFY", ...)
+      - pattern: from ssl import CERT_NONE
+      - pattern-regex: '(?m)^(?![ \t]*#)[^#\r\n]*(?:"|'')[^"''\r\n]*--insecure'
+
+  - id: wnc-shell-true
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A command run through a shell (shell=<anything but False>, os.system, os.popen, subprocess.getoutput,
+      getstatusoutput, create_subprocess_shell). Our subprocess calls are list-form with no shell, always (spec L3;
+      L-G11/L-G12).
+    metadata:
+      wnc_severity: HIGH
+      wnc_gap: L-G11
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.$F(..., shell=$V, ...)
+          - pattern: os.system(...)
+          - pattern: os.popen(...)
+          - pattern: os.startfile(...)
+          - pattern: subprocess.getoutput(...)
+          - pattern: subprocess.getstatusoutput(...)
+          - pattern: asyncio.create_subprocess_shell(...)
+      - pattern-not: subprocess.$F(..., shell=False, ...)
+      - pattern-not: subprocess.$F(..., shell=0, ...)
+
+  - id: wnc-remove-item-recurse
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A PowerShell `Remove-Item -Recurse` (or its -r / -rec abbreviations) in code. It follows junctions and deleted
+      real files on 2026-10-14 (incident). Use the link-safe delete helper (L-G12). Text-level rule: a docstring that
+      quotes the command fires too (baseline it with a reason); a literal split over two string pieces is not seen.
+    metadata:
+      wnc_severity: HIGH
+      wnc_gap: L-G12
+    pattern-regex: '(?im)^(?![ \t]*#)[^#\r\n]*\bRemove-Item\b[^#\r\n]*\s-r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?(?![A-Za-z])'
+
+  - id: wnc-recursive-delete-string
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A recursive delete spelled for a shell in a string (`rd /s`, `rmdir /s`, `del /s`, `rm -r`, `rm -rf`). Same
+      hazard as Remove-Item -Recurse: it follows junctions (L-G12). Use the link-safe delete helper.
+    metadata:
+      wnc_severity: HIGH
+      wnc_gap: L-G12
+    pattern-regex: '(?im)^(?![ \t]*#)[^#\r\n]*(?:\b(?:rd|rmdir|del)\s+(?:/[a-z]\s+)*/s\b|(?<!git )\brm\s+(?:-[a-z]+\s+)*(?:-[a-z]*r[a-z]*|--recursive)\b)'
+
+  - id: wnc-client-path-write
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A file opened for writing (or with a mode held in a variable) whose path text names a client folder
+      (`WhyNot Clients`). Client `assets/` and `data/` are read-only; the engine writes to `output/` only. Literal-path
+      check: a path held in a variable is the write gate's job (L-T8). Deletes, moves, copies and Path writes are
+      wnc-client-path-write-nomode.
+    metadata:
+      wnc_severity: HIGH
+      wnc_gap: L-G13
+    patterns:
+      - pattern-either:
+          - pattern: open($P, $M, ...)
+          - pattern: open($P, mode=$M, ...)
+          - pattern: open(file=$P, mode=$M, ...)
+          - pattern: io.open($P, $M, ...)
+          - pattern: $P.open($M, ...)
+          - pattern: $P.open(mode=$M, ...)
+      - metavariable-regex:
+          metavariable: $P
+          regex: '(?is).*whynot[ _-]?clients.*'
+      - metavariable-regex:
+          metavariable: $M
+          regex: '^(?:[rbuRBU]{0,2}[''"][^''"]*[wax+][^''"]*[''"]|[A-Za-z_][\w.]*)$'
+
+  - id: wnc-client-path-write-nomode
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A write, delete, move or copy whose path text names a client folder (`WhyNot Clients`), including
+      `(Path("...") / "x").write_text(...)`. See wnc-client-path-write.
+    metadata:
+      wnc_severity: HIGH
+      wnc_gap: L-G13
+    patterns:
+      - pattern-either:
+          - pattern: $X.write_text(...)
+          - pattern: $X.write_bytes(...)
+          - pattern: $X.unlink(...)
+          - pattern: $X.rename(...)
+          - pattern: $Y.rename($X)
+          - pattern: $X.replace($Y)
+          - pattern: $Y.replace($X)
+          - pattern: $X.mkdir(...)
+          - pattern: $X.touch(...)
+          - pattern: $X.rmdir(...)
+          - pattern: shutil.rmtree($X, ...)
+          - pattern: shutil.copy($Y, $X, ...)
+          - pattern: shutil.copy2($Y, $X, ...)
+          - pattern: shutil.copyfile($Y, $X, ...)
+          - pattern: shutil.copytree($Y, $X, ...)
+          - pattern: shutil.move($Y, $X, ...)
+          - pattern: shutil.move($X, $Y, ...)
+          - pattern: os.remove($X)
+          - pattern: os.unlink($X)
+          - pattern: os.rename($X, $Y)
+          - pattern: os.rename($Y, $X)
+          - pattern: os.replace($X, $Y)
+          - pattern: os.replace($Y, $X)
+          - pattern: os.makedirs($X, ...)
+          - pattern: os.mkdir($X, ...)
+          - pattern: os.rmdir($X)
+      - metavariable-regex:
+          metavariable: $X
+          regex: '(?is).*whynot[ _-]?clients.*'
+
+  - id: wnc-bare-executable
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A program started by bare name (`["icacls", ...]`, `("whoami",)`, `"icacls /x"`). On Windows the current folder is
+      searched first, so a planted file of that name runs instead (L-G11, installer SEC-1). Resolve it to an absolute
+      path first (find_on_path / System32 path) and pass that. Mac-only programs (mdfind, sysctl, defaults) are
+      reported too: baseline them with that reason.
+    metadata:
+      wnc_severity: MEDIUM
+      wnc_gap: L-G11
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.$F([$EXE, ...], ...)
+          - pattern: subprocess.$F(($EXE, ...), ...)
+          - pattern: subprocess.$F(args=[$EXE, ...], ...)
+          - pattern: subprocess.$F([$EXE, ...] + $R, ...)
+          - pattern: Popen([$EXE, ...], ...)
+          - pattern: Popen([$EXE, ...] + $R, ...)
+          - pattern: check_output([$EXE, ...], ...)
+          - pattern: check_call([$EXE, ...], ...)
+          - pattern: call([$EXE, ...], ...)
+          - pattern: asyncio.create_subprocess_exec($EXE, ...)
+          - pattern: os.execvp($EXE, ...)
+          - pattern: os.execlp($EXE, ...)
+          - pattern: os.spawnlp($M, $EXE, ...)
+          - pattern: os.spawnvp($M, $EXE, ...)
+      - metavariable-regex:
+          metavariable: $EXE
+          regex: '^[rbuRBU]{0,2}[''"][A-Za-z0-9_.+-]+[''"]$'
+
+  - id: wnc-bare-executable-string
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A command given to subprocess as one string whose program has no path (`subprocess.run("icacls x")`): bare name
+      (searched in the current folder first on Windows) and, with a shell, a shell command line. See wnc-bare-executable.
+    metadata:
+      wnc_severity: MEDIUM
+      wnc_gap: L-G11
+    patterns:
+      - pattern: subprocess.$F($S, ...)
+      - metavariable-regex:
+          metavariable: $S
+          regex: '^[rbuf]{0,2}[''"][A-Za-z][A-Za-z0-9_.+-]*(?:\s[^''"]*)?[''"]$'
+      - metavariable-regex:
+          metavariable: $F
+          regex: '^(run|Popen|call|check_call|check_output)$'
+
+  - id: wnc-bare-executable-var
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A command list that starts with a bare program name is built first and passed to subprocess later
+      (`cmd = ["ffprobe", p]; subprocess.run(cmd)`): the same current-folder hazard as wnc-bare-executable (L-G11).
+    metadata:
+      wnc_severity: MEDIUM
+      wnc_gap: L-G11
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              $CMD = [$EXE, ...]
+              ...
+          - pattern-inside: |
+              $CMD = ($EXE, ...)
+              ...
+          - pattern-inside: |
+              $CMD = [$EXE, ...] + $R
+              ...
+      - pattern: $F($CMD, ...)
+      - metavariable-regex:
+          metavariable: $EXE
+          regex: '^[rbuRBU]{0,2}[''"][A-Za-z0-9_.+-]+[''"]$'
+      - metavariable-regex:
+          metavariable: $F
+          regex: '^(?:subprocess\.)?(?:run|Popen|call|check_call|check_output)$'
+
+  - id: wnc-which-system-tool
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A Windows system tool resolved through PATH (`shutil.which("icacls")`). which() searches the current folder first
+      on older Pythons and every user-writable PATH folder, so a planted icacls.exe / whoami.exe runs instead (L-G11,
+      found in serve/security.py). Build the absolute path: os.path.join(os.environ["SystemRoot"], "System32", "<tool>.exe").
+    metadata:
+      wnc_severity: MEDIUM
+      wnc_gap: L-G11
+    patterns:
+      - pattern-either:
+          - pattern: shutil.which($X, ...)
+          - pattern: which($X, ...)
+      - metavariable-regex:
+          metavariable: $X
+          regex: '^[rbuRBU]{0,2}[''"](?i:icacls|whoami|taskkill|tasklist|reg|schtasks|powershell|pwsh|cmd|curl|tar|wmic|certutil|bitsadmin|attrib|net|sc|wevtutil|ping|ipconfig|netsh|where|takeown|robocopy|xcopy|cscript|wscript|mshta|rundll32|regsvr32|fsutil|findstr)(?:\.exe)?[''"]$'

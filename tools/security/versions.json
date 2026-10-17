@@ -1,0 +1,80 @@
+{
+ "schema": 1,
+ "pinned_on": "2026-10-17",
+ "rule": "newest stable release at least 14 days old on pinned_on; sha256 from the project's own checksums file (or PyPI hashes in dev.lock)",
+ "tools_home_default": "D:/ClaudeData/tools/security",
+ "binaries": {
+  "gitleaks": {
+   "version": "8.30.1",
+   "licence": "MIT",
+   "released": "2026-03-21",
+   "checksums_url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt",
+   "platforms": {
+    "win-x64": {
+     "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_windows_x64.zip",
+     "sha256": "d29144deff3a68aa93ced33dddf84b7fdc26070add4aa0f4513094c8332afc4e",
+     "archive": "zip",
+     "member": "gitleaks.exe",
+     "exe": "gitleaks.exe",
+     "exe_sha256": "17157e2ee8b76fc8b1d8bee607a250e34b8a8023c8bc81822d4b5ee4d78fcb7c"
+    },
+    "linux-x64": {
+     "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
+     "sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
+     "archive": "tar.gz",
+     "member": "gitleaks",
+     "exe": "gitleaks",
+     "exe_sha256": "88f91962aa2f93ac6ab281d553b9e125f5197bbbce38f9f2437f7299c32e5509"
+    }
+   }
+  },
+  "osv-scanner": {
+   "version": "2.6.0",
+   "licence": "Apache-2.0",
+   "released": "2026-09-14",
+   "checksums_url": "https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_SHA256SUMS",
+   "platforms": {
+    "win-x64": {
+     "url": "https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_windows_amd64.exe",
+     "sha256": "e0ed7644118b717b028c249ee9d3515024e55e8510747ca08906eb96765354d6",
+     "archive": "raw",
+     "exe": "osv-scanner.exe",
+     "exe_sha256": "e0ed7644118b717b028c249ee9d3515024e55e8510747ca08906eb96765354d6"
+    },
+    "linux-x64": {
+     "url": "https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_linux_amd64",
+     "sha256": "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108",
+     "archive": "raw",
+     "exe": "osv-scanner",
+     "exe_sha256": "ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108"
+    }
+   }
+  }
+ },
+ "python_tools": {
+  "lock": "tools/security/dev.lock",
+  "lock_sha256": "3c8296ad383f0dcedda9801ac109b8013d5861743d094a82baf3cdf868ab9889",
+  "packages": {
+   "semgrep": {
+    "version": "1.179.0",
+    "licence": "LGPL-2.1"
+   },
+   "bandit": {
+    "version": "1.9.4",
+    "licence": "Apache-2.0"
+   },
+   "pip-audit": {
+    "version": "2.10.1",
+    "licence": "Apache-2.0"
+   },
+   "hypothesis": {
+    "version": "6.168.3",
+    "licence": "MPL-2.0"
+   }
+  },
+  "override": "tools/security/dev.override"
+ },
+ "npm_tools": {
+  "note": "ESLint + eslint-plugin-security + eslint-plugin-no-unsanitized are Adobe-track devDependencies (patch in lane3/hooks/L-T1/)."
+ }
+}

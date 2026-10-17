@@ -1,0 +1,122 @@
+# WhyNot Cut security rules, JavaScript / TypeScript (Addendum L §L3; L-T1). Ours, GPL-3.0-or-later.
+# The panel's kit builds markup through the branded `Html` type (adobe/panel-ui/src/kit/html.ts). Semgrep cannot see
+# types, so the rule accepts only an assignment whose WHOLE right-hand side is a literal, an empty string, or ONE call
+# to a named kit function (esc, trusted, render, renderError, renderLoading, prose, auto, ltr, join, fmtHtml,
+# withCommands, cmdRow, Html.*). A concatenation, `esc(a) + b`, a method call (`parts.join("")`, `kit.trusted(x)`) or a
+# new kit function name is flagged: add the name here after review (L-G38).
+rules:
+  - id: wnc-raw-innerhtml
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      innerHTML / outerHTML / insertAdjacentHTML / document.write / srcdoc / setHTMLUnsafe / createContextualFragment
+      fed from a variable, a concatenation or an interpolated template. Build markup with the kit (Html type) or use
+      textContent (L-G38).
+    metadata:
+      wnc_severity: HIGH
+      wnc_gap: L-G38
+    patterns:
+      - pattern-either:
+          - pattern: $EL.innerHTML = $V
+          - pattern: $EL.outerHTML = $V
+          - pattern: $EL.innerHTML += $V
+          - pattern: $EL.outerHTML += $V
+          - pattern: $EL.setAttribute("srcdoc", $V)
+          - pattern: $EL["innerHTML"] = $V
+          - pattern: $EL["outerHTML"] = $V
+          - pattern: $EL.srcdoc = $V
+          - pattern: $EL.insertAdjacentHTML($POS, $V)
+          - pattern: $EL.setHTMLUnsafe($V)
+          - pattern: $EL.createContextualFragment($V)
+          - pattern: |
+              Object.assign($EL, {..., innerHTML: $V, ...})
+          - pattern: |
+              Object.assign($EL, {..., outerHTML: $V, ...})
+          - pattern: |
+              Object.assign($EL, {..., srcdoc: $V, ...})
+          - pattern: document.write($V)
+          - pattern: document.writeln($V)
+      - pattern-not: $EL.innerHTML = "..."
+      - pattern-not: $EL.innerHTML = '...'
+      - pattern-not: $EL.outerHTML = "..."
+      - pattern-not: $EL.innerHTML += "..."
+      - pattern-not: $EL.insertAdjacentHTML($POS, "...")
+      - pattern-not: document.write("...")
+      - metavariable-pattern:
+          metavariable: $V
+          patterns:
+            - pattern-not: trusted(...)
+            - pattern-not: Html.$F(...)
+            - pattern-not: esc(...)
+            - pattern-not: render(...)
+            - pattern-not: renderError(...)
+            - pattern-not: renderLoading(...)
+            - pattern-not: prose(...)
+            - pattern-not: auto(...)
+            - pattern-not: ltr(...)
+            - pattern-not: join(...)
+            - pattern-not: fmtHtml(...)
+            - pattern-not: withCommands(...)
+            - pattern-not: cmdRow(...)
+
+  - id: wnc-js-tls-disabled
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: TLS verification turned off in JS (rejectUnauthorized false, NODE_TLS_REJECT_UNAUTHORIZED=0) (L-G33).
+    metadata:
+      wnc_severity: HIGH
+      wnc_gap: L-G33
+    pattern-either:
+      - pattern: "{..., rejectUnauthorized: false, ...}"
+      - pattern: $O.rejectUnauthorized = false
+      - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+      - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0
+      - pattern: process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
+      - pattern: process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = 0
+      - pattern: |
+          {..., NODE_TLS_REJECT_UNAUTHORIZED: "0", ...}
+      - pattern: |
+          {..., NODE_TLS_REJECT_UNAUTHORIZED: 0, ...}
+
+  - id: wnc-js-shell-exec
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      A command run through a shell: child_process exec / execSync (called on require("child_process") or as a plain
+      execSync), or spawn / spawnSync / execFile with `shell: true`. Use execFile / spawn with an argument array and no
+      shell (L-G11). `RegExp.exec` is not this: only child_process receivers match (see the two rules below).
+    metadata:
+      wnc_severity: HIGH
+      wnc_gap: L-G11
+    pattern-either:
+      - pattern: require("child_process").exec(...)
+      - pattern: require("child_process").execSync(...)
+      - pattern: require("node:child_process").exec(...)
+      - pattern: require("node:child_process").execSync(...)
+      - pattern: $R("child_process").exec(...)
+      - pattern: $R("child_process").execSync(...)
+      - pattern: execSync(...)
+      - pattern: |
+          $CP.spawn(..., {..., shell: true, ...})
+      - pattern: |
+          $CP.spawnSync(..., {..., shell: true, ...})
+      - pattern: |
+          $CP.execFile(..., {..., shell: true, ...})
+
+  - id: wnc-js-shell-exec-receiver
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      `<child_process alias>.exec(...)` / `.execSync(...)` runs a command through a shell (L-G11). Receivers whose last name is cp, child_process,
+      childProcess, proc, child, cproc, sh or shell match (this.cp, deps.childProcess too) (Semgrep also resolves `import { exec } from "child_process"` to that module),
+      so `regex.exec(text)` is left alone; a receiver under another alias name is missed (add it here).
+    metadata:
+      wnc_severity: HIGH
+      wnc_gap: L-G11
+    patterns:
+      - pattern-either:
+          - pattern: $CP.exec(...)
+          - pattern: $CP.execSync(...)
+      - metavariable-regex:
+          metavariable: $CP
+          regex: '^(?:.*\.)?(?:cp|child_process|childProcess|proc|child|cproc|sh|shell)$'

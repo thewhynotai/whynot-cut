@@ -1,0 +1,7 @@
+# Dev and test tools only (L-G37): never part of the runtime locks (whynot-cut/setup/locks/runtime-*.lock).
+# Direct pins: each is the newest stable release that was at least 14 days old on 2026-10-17 (spec L3).
+semgrep==1.179.0
+bandit==1.9.4
+pip-audit==2.10.1
+hypothesis==6.168.3
+# Compile: uv pip compile dev.in --universal --generate-hashes --only-binary :all: --python-version 3.12 --exclude-newer 2026-10-03T00:00:00Z --override dev.override -o dev.lock

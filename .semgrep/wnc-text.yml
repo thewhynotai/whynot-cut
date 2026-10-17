@@ -1,0 +1,42 @@
+# WhyNot Cut security rules, PowerShell and shell scripts (Addendum L §L3; L-T1). Ours, GPL-3.0-or-later.
+# `generic` rules read any file by text; `paths` keeps them to script files. A `#` / `rem` / `::` comment line is never
+# a hit. PowerShell accepts parameter abbreviations, so -r, -re ... -Recurse are all matched.
+rules:
+  - id: wnc-ps-remove-item-recurse
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      `Remove-Item -Recurse` (or -r / -rec) in a script, also when the flag is on a backtick-continued line. It follows
+      junctions and deleted real files (incident 2026-10-14). Remove links with `cmd /c rmdir` / [IO.Directory]::Delete
+      only after checking the reparse attribute, and walk without descending into reparse points (L-G12).
+    metadata:
+      wnc_severity: HIGH
+      wnc_gap: L-G12
+    paths:
+      include: ["*.ps1", "*.psm1", "*.psd1", "*.bat", "*.cmd", "*.sh"]
+    pattern-regex: '(?im)^(?![ \t]*(?:#|rem\b|::))[^#\r\n]*\bRemove-Item\b(?:[^#\r\n]*\s-r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?(?![A-Za-z])|[^#\r\n]*`[ \t]*\r?\n(?:[^\r\n]*`[ \t]*\r?\n)*[^\r\n]*(?:\s|^)-r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?(?![A-Za-z]))'
+
+  - id: wnc-ps-rm-rf-alias
+    languages: [generic]
+    severity: ERROR
+    message: >-
+      A recursive delete by alias (`rm -r`, `ri -Recurse`, `del /s`, `rd /s`, `rmdir /s`) in a script (L-G12).
+    metadata:
+      wnc_severity: HIGH
+      wnc_gap: L-G12
+    paths:
+      include: ["*.ps1", "*.psm1", "*.bat", "*.cmd"]
+    pattern-regex: '(?im)^(?![ \t]*(?:#|rem\b|::))(?:[^#\r\n]*[;|&{(][ \t]*|[ \t]*)(?<!git )(?:rm|ri|del|rd|rmdir)(?=\s)[^#\r\n|;]*(?:\s-r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?(?![A-Za-z])|\s/s\b)'
+
+  - id: wnc-sh-rm-rf
+    languages: [generic]
+    severity: WARNING
+    message: >-
+      `rm -rf` in a shell script. A recursive delete walks into a symlink target on some paths: check the path is not
+      a link and not empty first (L-G12).
+    metadata:
+      wnc_severity: MEDIUM
+      wnc_gap: L-G12
+    paths:
+      include: ["*.sh"]
+    pattern-regex: '(?m)^(?![ \t]*#)[^#\r\n]*\brm\s+(?:--?[a-zA-Z-]+\s+)*(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b'

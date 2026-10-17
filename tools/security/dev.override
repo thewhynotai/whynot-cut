@@ -1,0 +1,3 @@
+# uv override: semgrep 1.179.0 pins mcp==1.29.0 (GHSA-84m7-p3x7-pcfv, fixed in 1.30.0, released 2026-09-07, >14 days old).
+# semgrep imports mcp only for its `semgrep mcp` sub-command, which this kit never runs.
+mcp==1.30.0
