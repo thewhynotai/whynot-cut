@@ -41,12 +41,12 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
   look recommender; safe zones moved to the API-credit lane 2026-10-17, see below):
   - `docs/superpowers/specs/addendum-h/source-r-specs/**`
   - `whynot-cut/templates/after_effects/wnc_motion_lib.jsx`, `whynot-cut/engine/reel/lib/motion_library.py`
-  - `whynot-cut/engine/reel/lib/looks*.py`, `whynot-cut/engine/reel/lib/cut_proposals*.py`
+  - `whynot-cut/engine/reel/lib/looks*.py` (cut_proposals moved to API-credit lane 2 on 2026-10-17, see below)
   - `whynot-cut/config/defaults/looks/**`
   - `whynot-cut/skills/motion-craft/references/motion-scenes.md`
   - `tools/identity_scan.py`, `tools/identity_hashes.json`
-  - `whynot-cut/tests/test_looks*.py`, `whynot-cut/tests/test_motion_library*.py`, `whynot-cut/tests/test_cut_proposals*.py`,
-    `whynot-cut/tests/test_identity_scan*.py`
+  - `whynot-cut/tests/test_looks*.py`, `whynot-cut/tests/test_motion_library*.py`, `whynot-cut/tests/test_identity_scan*.py`
+  - `tools/identity_scan.py`: the release-gate modes (`--git`, `--archives`) are executor hunks (2026-10-17)
 - Phase 4 fan-out (2026-10-16, executor rules and commits stay with each track):
   - Adobe track, T4.1 smooth zoom/fades + T4.6 motion music:
     - `whynot-cut/engine/reel/lib/ppro_build.py`, `whynot-cut/engine/reel/lib/motion_audio.py`,
@@ -93,3 +93,6 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     `whynot-cut/tests/security/fuzz/**`, `whynot-cut/tests/test_security_scan*.py`, `whynot-cut/tests/test_fuzz*.py`.
     `adobe/` devDependencies (ESLint security plugins) go to the Adobe track as a patch; `docs/ci.md` minutes table and
     any fix in another owner's file arrive as patches.
+  - API-credit lane 2 also owns Phase 4 Task 25 R-4.3 cut proposals (2026-10-17, from the looks track; K-T7 builds on
+    it): `whynot-cut/engine/reel/lib/cut_proposals*.py`, `whynot-cut/tests/test_cut_proposals*.py`,
+    `whynot-cut/tests/fixtures/cut_proposals/**`; plan.py / ppro_build.py hooks arrive as patches.
