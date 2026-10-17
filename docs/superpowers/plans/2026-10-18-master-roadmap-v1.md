@@ -165,7 +165,7 @@ After the tag, the K1 safety switches turn on.
 
 **Deliverable:** a Stage R cut, «أول نسخة فيها شات جوه Premiere».
 
-## Stage 4: One-click tools (F2, F3, F10)
+## Stage 4: One-click tools (F2, F3, F3b, F10)
 **Owners:** tools track (Sonnet; host glue), Adobe (live), lanes (engine tests).
 
 **Existing:** the Kalam / Hush / Tidy engines (Phase 6B port, Kalam fix rounds), Task 25 proposals, K-T7 takes.
@@ -173,6 +173,7 @@ After the tag, the K1 safety switches turn on.
 - [ ] Hush tab: silence and filler detection with a sensitivity slider, results into the cut review list.
 - [ ] The cut review list: each row has a timecode, ▶ preview, a checkbox and the reason. Meaning-different takes are never pre-ticked. Apply on a copy, as one undo.
 - [ ] Tidy tab: a plan first, then the bins; never moves files on disk.
+- [ ] F3b client rules card + learning from the review list and from hand edits on the built copy (builds on T4.3; owner 2026-10-18).
 - [ ] Buttons: safe-zone preview, search-to-word, chapters.
 - [ ] Idempotency tests (Review focus 5) and odd-path tests (Review focus 3).
 

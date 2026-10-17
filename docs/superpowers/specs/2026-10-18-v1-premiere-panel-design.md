@@ -139,6 +139,15 @@ Each feature is a thin panel UI over an engine command. Engine logic lives in `w
 - "Apply" cuts on a copy, as one undo.
 - **Acceptance:** the negation cases (e.g. «مخدتش») are never pre-ticked; the list round-trips (untick → no cut).
 
+### F3b. Client rules: the learning loop in the panel (owner 2026-10-18)
+Builds on T4.3 (Gate 4: rules from chat comments, grouped by meaning, confirmed by the editor, conflicts, list/remove, never weakening safety).
+- A **"قواعد العميل" card**: the active rules (date, source, what it changes), with Remove, and the pending proposals with Confirm / Not now.
+- **Two more sources** feed the same grouping (`source` = `review_list` | `hand_edit`):
+  - the cut review list (F3): the same kind of proposal unticked on 2+ reels → a proposal («بتلغي قص التكرار دايمًا، أوقفه للعميل ده؟»);
+  - the editor's hand edits on the built copy: when the editor finishes, the panel reads the sequence back and compares it with what was built (caption size/position, deleted graphics, removed zooms, changed cut points). The same change on 2+ reels → a proposal.
+- **Agency default:** the same confirmed rule on 3+ clients → a suggestion to make it the agency default (the owner confirms).
+- **Acceptance:** each source has a test where 2 reels produce one proposal and 1 reel produces none; a confirmed rule changes the next build; safety rules cannot be learned away (the T4.3 tests run against the panel path too).
+
 ### F4. Caption look gallery
 - A grid of the 8 caption looks (Task 23) and the recommender (Task 28), with live preview stills.
 - Per-sentence or whole-sequence apply, and "apply to all".
