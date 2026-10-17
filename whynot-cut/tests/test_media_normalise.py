@@ -171,12 +171,18 @@ class _Out(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="whynot-t26-"))
         self.addCleanup(shutil.rmtree, self.tmp, True)
+        (self.tmp / "assets").mkdir()                   # a client folder: output/ sits next to assets/ and data/
+        (self.tmp / "data").mkdir()
         self.out = self.tmp / "output" / "intermediates"
+
+    def cf(self, src, out, d, **kw):
+        kw.setdefault("client_root", self.tmp)        # conform writes only into <client_root>/output
+        return MN.conform(src, out, d, **kw)
 
     def conform(self, name, **kw):
         m = MN.measure(fx(name))
         with quiet():
-            return m, MN.conform(fx(name), self.out, MN.decide(m), **kw)
+            return m, self.cf(fx(name), self.out, MN.decide(m), **kw)
 
 
 class TestConform(_Out):
@@ -291,7 +297,7 @@ class TestTools(_Out):
             self.assertIsNone(MN._abs_ffmpeg(None))
             m = MN.measure(fx("tag60_real30"))
             with mock.patch("lib.common.ffmpeg_exe", return_value="ffmpeg.exe"):
-                r = MN.conform(fx("tag60_real30"), self.out, MN.decide(m))
+                r = self.cf(fx("tag60_real30"), self.out, MN.decide(m))
         finally:
             os.chdir(old)
         self.assertFalse(r["ok"])
@@ -393,7 +399,7 @@ class TestReview1Conform(_Out):
         m = MN.measure(long)
         self.assertTrue(m["vfr"])
         with quiet():
-            r = MN.conform(long, self.out, MN.decide(m))
+            r = self.cf(long, self.out, MN.decide(m))
         self.assertTrue(r["ok"], r)
         import av
         with av.open(r["path"]) as c:
@@ -411,17 +417,17 @@ class TestReview1Conform(_Out):
             Path(cmd[-1]).write_bytes(b"partial")
             return subprocess.CompletedProcess(cmd, 1, b"", "killed")
         with quiet():
-            r = MN.conform(src, self.out, d, runner=dies)
+            r = self.cf(src, self.out, d, runner=dies)
         self.assertFalse(r["ok"])
         self.assertEqual([p.name for p in self.out.glob("*.mp4")], [])          # nothing under the final name
         self.assertEqual(list(self.out.glob("*.json")), [])
         with quiet():
-            r1 = MN.conform(src, self.out, d)
+            r1 = self.cf(src, self.out, d)
         self.assertTrue(r1["ok"] and not r1["reused"])
         with open(src, "ab") as f:
             f.write(b"\0")                                                     # the footage changed
         with quiet():
-            r2 = MN.conform(src, self.out, d)
+            r2 = self.cf(src, self.out, d)
         self.assertFalse(r2["reused"])
 
     def test_overlapping_windows_are_merged(self):
@@ -435,7 +441,7 @@ class TestReview1Conform(_Out):
         self.assertTrue(r["lines"]["en"] and r["lines"]["ar"])
         m = MN.measure(fx("tag60_real30"))
         with mock.patch.object(MN, "_engine_ffmpeg", return_value=None):
-            r = MN.conform(fx("tag60_real30"), self.out, MN.decide(m))
+            r = self.cf(fx("tag60_real30"), self.out, MN.decide(m))
         self.assertEqual(r["skipped"], "no ffmpeg")
         self.assertTrue(r["lines"]["en"] and r["lines"]["ar"])
 
@@ -444,6 +450,339 @@ class TestReview1Conform(_Out):
         import av
         with av.open(r["parts"][0]["path"]) as c:
             self.assertAlmostEqual(c.duration / 1e6, 3.0, delta=0.15)
+
+
+
+# --------------------------------------------------------------------------- batch B (executor acceptance of 8bd6b60)
+def _junction(link: Path, target: Path):
+    import _winapi
+    _winapi.CreateJunction(str(target), str(link))
+
+
+class TestBatchBNames(_Out):
+    def two_cams(self, root=None):
+        root = root or self.tmp
+        a, b = root / "data" / "camA" / "C0001.MP4", root / "data" / "camB" / "C0001.MP4"
+        for p, name in ((a, "tag60_real30"), (b, "film24")):
+            p.parent.mkdir(parents=True)
+            shutil.copyfile(fx(name), p)
+        return a, b
+
+    def test_p1_same_name_in_two_folders_never_overwrites(self):
+        a, b = self.two_cams()
+        da = MN.decide(MN.measure(a))
+        db = dict(MN.decide(MN.measure(b)), actions=["cfr"], cfr_fps=24.0)
+        with quiet():
+            ra, rb = self.cf(a, self.out, da), self.cf(b, self.out, db)
+        self.assertTrue(ra["ok"] and rb["ok"], (ra, rb))
+        self.assertNotEqual(ra["path"], rb["path"])
+        self.assertTrue(Path(ra["path"]).is_file() and Path(rb["path"]).is_file())
+        for r, src in ((ra, a), (rb, b)):
+            side = json.loads(Path(r["sidecar"]).read_text(encoding="utf-8"))
+            self.assertEqual(side["source_sha256"], sha(src))
+        self.assertTrue(Path(ra["path"]).name.startswith("C0001."))               # the clip name stays readable
+        with quiet():
+            again = self.cf(a, self.out, da)
+        self.assertTrue(again["reused"])
+        self.assertEqual(again["path"], ra["path"])
+
+    def test_tag_is_stable_and_ignores_the_path_case_on_windows(self):
+        a, b = self.two_cams()
+        self.assertEqual(MN._source_tag(a, self.tmp), MN._source_tag(a, self.tmp))
+        self.assertNotEqual(MN._source_tag(a, self.tmp), MN._source_tag(b, self.tmp))
+        if os.name == "nt":
+            self.assertEqual(MN._source_tag(Path(str(a).upper()), self.tmp), MN._source_tag(a, self.tmp))
+
+    def test_a_moved_client_or_a_touched_file_keeps_its_intermediate(self):
+        a, _ = self.two_cams()
+        moved = self.tmp / "moved client"
+        a2, _ = self.two_cams(moved)
+        self.assertEqual(MN._source_tag(a, self.tmp), MN._source_tag(a2, moved))  # relative to the client folder
+        d = MN.decide(MN.measure(a))
+        with quiet():
+            r1 = self.cf(a, self.out, d)
+        os.utime(a, (1_000_000_000, 1_000_000_000))                            # a sync tool rewrote the time only
+        with quiet():
+            r2 = self.cf(a, self.out, d)
+        self.assertTrue(r2["reused"])
+        self.assertEqual(r1["path"], r2["path"])
+        with open(a, "ab") as f:
+            f.write(b"\0")                                                     # new content: redone under its name
+        with quiet():
+            r3 = self.cf(a, self.out, d)
+        self.assertTrue(r3["ok"] and not r3["reused"])
+        self.assertEqual(r3["path"], r1["path"])
+        self.assertEqual(len(list(self.out.glob("*.mp4"))), 1)                  # no orphan copy left behind
+
+    def test_a_long_stem_is_capped(self):
+        src = self.tmp / "data" / ("زووم " * 30 + ".mp4")
+        shutil.copyfile(fx("tag60_real30"), src)
+        with quiet():
+            r = self.cf(src, self.out, MN.decide(MN.measure(src)))
+        self.assertTrue(r["ok"], r)
+        self.assertLessEqual(len(Path(r["path"]).name), 60 + len(".0123456789.conform.mp4"))
+
+
+class TestBatchBOutputOnly(_Out):
+    def refused(self, out_dir, **kw):
+        m = MN.measure(fx("tag60_real30"))
+        with quiet():
+            r = self.cf(fx("tag60_real30"), out_dir, MN.decide(m), **kw)
+        self.assertFalse(r["ok"], r)
+        self.assertEqual(r["skipped"], "not output")
+        self.assertTrue(r["lines"]["en"] and r["lines"]["ar"])
+        self.assertFalse(Path(out_dir).exists())                                   # refused before anything is made
+        return r
+
+    def test_outside_output_is_refused(self):
+        self.refused(self.tmp / "elsewhere" / "intermediates")
+
+    def test_a_folder_named_output_that_is_not_the_clients(self):
+        self.refused(self.tmp / "data" / "Raw" / "output")
+        (self.tmp / "assets" / "site" / "assets").mkdir(parents=True)          # looks like a client folder inside assets/
+        self.refused(self.tmp / "assets" / "site" / "output" / "x")
+
+    def test_no_client_folder_given_is_refused(self):
+        self.refused(self.out, client_root=None)                               # a folder named output proves nothing
+
+    def test_dot_dot_out_of_output_is_refused(self):
+        self.refused(self.tmp / "output" / ".." / "assets" / "conform")
+
+    def test_names_windows_mangles_are_refused(self):
+        self.refused(self.tmp / "output" / "con" / "x")
+        self.refused(self.tmp / "output" / "a:b")
+        self.refused(self.tmp / "output" / "tab\there")                     # control characters (0-31)
+
+    def test_project_folder_is_allowed(self):
+        out = self.tmp / "output" / "projects" / "V1" / "00_inputs" / "intermediates"
+        m = MN.measure(fx("tag60_real30"))
+        with quiet():
+            r = self.cf(fx("tag60_real30"), out, MN.decide(m))
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(Path(r["path"]).parent, Path(os.path.realpath(out)))
+
+    def test_client_root_given_refuses_another_clients_output(self):
+        other = self.tmp / "other"
+        (other / "assets").mkdir(parents=True)
+        self.refused(other / "output" / "intermediates")
+
+    @unittest.skipUnless(os.name == "nt", "junctions are a Windows feature")
+    def test_a_link_inside_output_is_never_written_through(self):
+        (self.tmp / "output").mkdir()
+        _junction(self.tmp / "output" / "lnk", self.tmp / "assets")
+        self.addCleanup(os.rmdir, self.tmp / "output" / "lnk")                 # the link only, before the tree goes
+        m = MN.measure(fx("tag60_real30"))
+        with quiet():
+            r = self.cf(fx("tag60_real30"), self.tmp / "output" / "lnk" / "x", MN.decide(m))
+        self.assertEqual(r["skipped"], "not output")
+        self.assertEqual(list((self.tmp / "assets").iterdir()), [])
+
+    @unittest.skipUnless(os.name == "nt", "junctions are a Windows feature")
+    def test_an_output_folder_that_is_itself_a_link_is_allowed(self):
+        elsewhere = self.tmp / "other drive" / "client output"
+        elsewhere.mkdir(parents=True)
+        _junction(self.tmp / "output", elsewhere)
+        self.addCleanup(os.rmdir, self.tmp / "output")
+        m = MN.measure(fx("tag60_real30"))
+        with quiet():
+            r = self.cf(fx("tag60_real30"), self.out, MN.decide(m))
+        self.assertTrue(r["ok"], r)
+        self.assertTrue(Path(r["path"]).is_relative_to(Path(os.path.realpath(elsewhere))))
+
+    @unittest.skipUnless(os.name == "nt", "junctions are a Windows feature")
+    def test_a_dangling_output_link_never_builds_its_target(self):
+        gone = self.tmp / "unplugged drive" / "client output"
+        gone.mkdir(parents=True)
+        _junction(self.tmp / "output", gone)
+        self.addCleanup(os.rmdir, self.tmp / "output")
+        gone.rmdir()                                                               # the drive is gone
+        self.refused(self.out)
+        self.assertFalse(gone.exists())
+
+    @unittest.skipUnless(os.name == "nt", "junctions are a Windows feature")
+    def test_an_output_link_into_the_clients_own_footage_is_refused(self):
+        for x in ("assets", "data"):
+            _junction(self.tmp / "output", self.tmp / x)
+            try:
+                self.refused(self.out)
+            finally:
+                os.rmdir(self.tmp / "output")
+            self.assertEqual(list((self.tmp / x).iterdir()), [])
+        _junction(self.tmp / "output", self.tmp)                                # output/ -> the client folder itself
+        try:
+            self.refused(self.tmp / "output" / "assets" / "x")
+            self.assertIsNone(MN.client_output(self.tmp / "output" / "x", self.tmp))
+        finally:
+            os.rmdir(self.tmp / "output")
+        self.assertEqual(list((self.tmp / "assets").iterdir()), [])
+
+    def test_client_output_helper(self):
+        self.assertEqual(MN.client_output(self.out, self.tmp),
+                         Path(os.path.realpath(self.tmp / "output")) / "intermediates")
+        self.assertEqual(MN.client_output(self.tmp / "output", self.tmp), Path(os.path.realpath(self.tmp / "output")))
+        self.assertIsNone(MN.client_output(self.tmp / "nope", self.tmp))
+        self.assertIsNone(MN.client_output(self.out, None))
+        self.assertIsNone(MN.client_output(self.out, self.tmp / "no such client"))
+
+
+class TestBatchBTimeout(_Out):
+    def test_timeout_scales_with_the_duration_and_the_picture(self):
+        self.assertEqual(MN.timeout_s(5, False), MN.TIMEOUT_MIN_S)
+        self.assertGreaterEqual(MN.timeout_s(7200, True), 7200 * 10)
+        self.assertGreater(MN.timeout_s(7200, True), MN.timeout_s(7200, False))
+        self.assertEqual(MN.timeout_s(600, True, 3840 * 2160 * 60), 600 * MN.TIMEOUT_X_TONEMAP * 8)   # 4K60 = 8x 1080p30
+        self.assertEqual(MN.timeout_s(600, True, 640 * 360 * 30), 600 * MN.TIMEOUT_X_TONEMAP)         # never under 1x
+        seen = []
+        real = subprocess.run
+
+        def spy(cmd, **kw):
+            seen.append(kw.get("timeout"))
+            return real(cmd, **kw)
+        m = MN.measure(fx("hdr_pq"))
+        d = dict(MN.decide(m), duration_s=7200.0)
+        self.assertTrue(d.get("tonemap"), d)
+        with mock.patch.object(MN.subprocess, "run", side_effect=spy), quiet():
+            self.cf(fx("hdr_pq"), self.out, d, ranges=[(0.0, 1000.0)])
+        self.assertEqual(seen[-1], 1002.0 * MN.TIMEOUT_X_TONEMAP)                 # the span: 0 .. 1000 s + the 2 s handle
+        with mock.patch.object(MN.subprocess, "run", side_effect=spy), quiet():
+            self.cf(fx("hdr_pq"), self.out, dict(d, duration_s=None, tonemap=None, actions=["cfr"], cfr_fps=24.0))
+        self.assertEqual(seen[-1], MN.TIMEOUT_MIN_S)
+
+    def test_a_timeout_leaves_no_partial_file(self):
+        def slow(cmd):
+            Path(cmd[-1]).write_bytes(b"half")
+            raise subprocess.TimeoutExpired(cmd, 1)
+        m, r = self.conform("tag60_real30", runner=slow)
+        self.assertFalse(r["ok"])
+        self.assertEqual(r["skipped"], "timeout")
+        self.assertTrue(r["lines"]["en"] and r["lines"]["ar"])
+        self.assertEqual(list(self.out.iterdir()), [])                            # no .partial.mp4, no sidecar
+
+    def test_a_locked_partial_is_retried_and_still_reported_as_a_timeout(self):
+        def slow(cmd):
+            Path(cmd[-1]).write_bytes(b"half")
+            raise subprocess.TimeoutExpired(cmd, 1)
+        real_unlink = Path.unlink
+
+        def held_for(n):                     # the .partial.mp4 is held for the first n tries (a scanner, a dying child)
+            calls = []
+
+            def unlink(self_, missing_ok=False):
+                if self_.name.endswith(".partial.mp4"):
+                    calls.append(self_)
+                    if len(calls) <= n:
+                        raise PermissionError("held by a scanner")
+                return real_unlink(self_, missing_ok=missing_ok)
+            return unlink, calls
+        unlink, calls = held_for(2)
+        with mock.patch.object(Path, "unlink", unlink), mock.patch.object(MN.time, "sleep"):
+            m, r = self.conform("tag60_real30", runner=slow)
+        self.assertEqual(r["skipped"], "timeout")
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(list(self.out.iterdir()), [])
+        unlink, calls = held_for(99)
+        with mock.patch.object(Path, "unlink", unlink), mock.patch.object(MN.time, "sleep"):
+            m, r = self.conform("tag60_real30", runner=slow)
+        self.assertEqual(r["skipped"], "timeout")                                 # still a timeout, never "failed"
+        self.assertIn("could not be removed", r["reason"])
+        self.assertEqual(len(calls), 5)
+
+    def test_an_open_old_copy_is_reported_and_kept_consistent(self):
+        m, r1 = self.conform("tag60_real30")
+        self.assertTrue(r1["ok"], r1)
+        side_before = Path(r1["sidecar"]).read_text(encoding="utf-8")
+        real_replace = Path.replace
+
+        def held(self_, target):
+            if str(target) == r1["path"]:
+                raise PermissionError("open in Premiere")
+            return real_replace(self_, target)
+        with mock.patch.object(Path, "replace", held):
+            m, r2 = self.conform("tag60_real30", crf=18)                            # a new copy is needed
+        self.assertFalse(r2["ok"])
+        self.assertEqual(r2["skipped"], "in use")
+        self.assertTrue(r2["lines"]["en"] and r2["lines"]["ar"])
+        self.assertEqual(sorted(p.name for p in self.out.iterdir()),
+                         sorted([Path(r1["path"]).name, Path(r1["sidecar"]).name]))  # no partial left
+        self.assertEqual(Path(r1["sidecar"]).read_text(encoding="utf-8"), side_before)
+        m, r3 = self.conform("tag60_real30")                                       # the old copy is still reused
+        self.assertTrue(r3["reused"])
+
+    def test_any_runner_error_leaves_no_partial_file(self):
+        def boom(cmd):
+            Path(cmd[-1]).write_bytes(b"half")
+            raise OSError("disk gone")
+        m, r = self.conform("tag60_real30", runner=boom)
+        self.assertFalse(r["ok"])
+        self.assertEqual(list(self.out.iterdir()), [])
+
+
+def _onsets(t, x, thr, gap=5.0):
+    """Times where x rises above thr after at least `gap` seconds below it (numpy arrays)."""
+    idx = np.flatnonzero(x > thr)
+    if not idx.size:
+        return np.array([])
+    return t[idx][np.concatenate(([True], np.diff(t[idx]) > gap))]
+
+
+class TestBatchBLongSync(_Out):
+    """P2: A/V sync after VFR -> CFR over 10 minutes, measured event by event (equal stream lengths would also pass a
+    constant offset). A flash (3 white frames) and a 1 kHz beep start together every 10 s; the video is dense around
+    each flash and every third frame elsewhere (VFR)."""
+
+    def make(self, name, af=None):
+        from lib.common import ffmpeg_exe
+        src = self.tmp / "data" / name
+        cmd = [ffmpeg_exe(), "-v", "error", "-y",
+               "-f", "lavfi", "-i", "color=black:size=64x36:rate=30:duration=600",
+               "-f", "lavfi", "-i", r"aevalsrc='if(lt(mod(t\,10)\,0.05)\,0.8*sin(2*PI*1000*t)\,0)':s=48000:d=600",
+               "-vf", r"drawbox=color=white:t=fill:enable='lt(mod(t\,10)\,0.1)',"
+                      r"select='not(mod(n\,3))+between(mod(n\,300)\,0\,40)'"]
+        cmd += ["-af", af] if af else []
+        subprocess.run(cmd + ["-fps_mode", "vfr", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
+                              "-c:a", "aac", "-b:a", "96k", str(src)], check=True, capture_output=True)
+        return src
+
+    def offsets(self, src):
+        import av
+        m = MN.measure(src)
+        self.assertTrue(m["vfr"], m)
+        d = MN.decide(m)
+        self.assertIn("cfr", d["actions"])
+        with quiet():
+            r = self.cf(src, self.out, d)
+        self.assertTrue(r["ok"], r)
+        with av.open(r["path"]) as c:
+            vt, vl = [], []
+            for f in c.decode(c.streams.video[0]):
+                vt.append(float(f.time))
+                vl.append(float(f.to_ndarray(format="gray").mean()))
+        with av.open(r["path"]) as c:
+            at, al = [], []
+            for f in c.decode(c.streams.audio[0]):
+                x = np.abs(f.to_ndarray()).max(axis=0)
+                at.append(float(f.time) + np.arange(len(x)) / f.sample_rate)
+                al.append(x)
+        v_on = _onsets(np.array(vt), np.array(vl), 128)
+        a_on = _onsets(np.concatenate(at), np.concatenate(al), 0.3)
+        self.assertGreaterEqual(len(v_on), 59, v_on[:5])
+        pairs = {round(float(v)): float(v - a_on[np.argmin(np.abs(a_on - v))]) for v in v_on}   # nearest beep
+        return float(r["fps"]), pairs
+
+    def test_av_offset_within_one_frame_over_ten_minutes(self):
+        fps, pairs = self.offsets(self.make("long sync وقت.mp4"))
+        self.assertEqual(len(pairs), 60)
+        for t in (0, 10, 590):                                                     # the start and the end
+            self.assertLessEqual(abs(pairs[t]), 1 / fps, (t, pairs[t], fps))
+        self.assertLessEqual(max(map(abs, pairs.values())), 1 / fps, pairs)       # and nothing drifts in between
+
+    def test_av_offset_with_a_late_audio_start_and_a_gap(self):
+        """Zoom / phone files: the audio starts 0.5 s after the picture and loses 0.2 s mid-clip (timestamps kept,
+        MKV), so the conform must place the audio by its timestamps, not end to end."""
+        fps, pairs = self.offsets(self.make("gap.mkv", r"atrim=start=0.5,aselect='not(between(t\,305\,305.2))'"))
+        for t in (10, 300, 310, 590):                                              # before and after the gap, the end
+            self.assertLessEqual(abs(pairs[t]), 1 / fps, (t, pairs[t], fps))
+        self.assertLessEqual(max(abs(v) for t, v in pairs.items() if t), 1 / fps, pairs)   # t=0: no audio yet
 
 
 if __name__ == "__main__":

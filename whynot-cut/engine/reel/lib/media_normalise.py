@@ -23,8 +23,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import shutil
+import stat
 import subprocess
+import time
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +44,8 @@ MIN_REAL_FPS = 10.0              # a measured real rate under this (or under a q
 WINDOWS, WINDOW_S = 3, 10.0
 VFR_SPREAD = 0.5                 # (p95 - p5) / median of the frame intervals above this: variable frame rate
 HANDLE_S = 2.0
+TIMEOUT_MIN_S = 3600.0           # an encode's time limit: at least this, else the span's length times the factor
+TIMEOUT_X, TIMEOUT_X_TONEMAP = 4.0, 12.0
 BITRATE_MBPS = 20                # the intermediate's size estimate for the disk check
 DISK_MARGIN = 5 * 1024 ** 3
 TRC = {16: "pq", 18: "hlg"}      # AVColorTransferCharacteristic: SMPTE ST 2084, ARIB STD-B67
@@ -302,6 +307,14 @@ LINES = {
                     "مفيش FFmpeg صالح، فماعملناش النسخة المظبوطة: هنستخدم الأصلي."),
     "failed": ("Making the evenly timed / SDR copy failed: the original is used.",
                "عمل النسخة المظبوطة فشل: هنستخدم الأصلي."),
+    "timeout": ("Making the evenly timed / SDR copy took too long and was stopped: the original is used.",
+                "عمل النسخة المظبوطة طوّل زيادة فوقفناه: هنستخدم الأصلي."),
+    "in_use": ("The earlier copy of this clip is open (close it in Premiere), so the new one could not replace it: "
+               "the original is used for now.",
+               "النسخة القديمة من الكليب ده مفتوحة (اقفلها في بريمير)، فالنسخة الجديدة ماقدرتش تحل مكانها: هنستخدم "
+               "الأصلي دلوقتي."),
+    "not_output": ("The copy can only be written into the client's output folder: none was made, the original is used.",
+                   "النسخة دي لازم تتكتب جوه فولدر output بتاع العميل: ماعملناهاش، وهنستخدم الأصلي."),
     "maybe_hdr": ("The file looks like HDR (10-bit, wide colour) but names no brightness curve: it is used as it is; "
                   "check the colours in Premiere.",
                   "الملف شكله HDR (10 بت وألوان واسعة) لكن من غير منحنى إضاءة: هنستخدمه زي ما هو، راجع الألوان في بريمير."),
@@ -319,7 +332,8 @@ def decide(m: dict, delivery_fps=None, *, ff=None) -> dict:
     """The actions and the plain lines for one measured file (see the module docstring)."""
     d = {"actions": [], "cfr_fps": None, "tonemap": None, "cadence": {"ok": True, "nearest": None},
          "duration_s": m.get("duration_s"), "has_audio": bool(m.get("audio_rate")), "width": m.get("width"),
-         "height": m.get("height"), "lines": {"en": [], "ar": []}}
+         "height": m.get("height"), "src_fps": m.get("real_fps") or m.get("container_fps"),
+         "lines": {"en": [], "ar": []}}
     if m.get("errors"):
         return d
 
@@ -394,20 +408,128 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _default_runner(cmd):
-    return subprocess.run(cmd, capture_output=True, timeout=3600)
+def timeout_s(span_s: float, tonemap: bool, px_rate: float | None = None) -> float:
+    """The encode's time limit: TIMEOUT_MIN_S, or the span's length times TIMEOUT_X (HDR tone-map: TIMEOUT_X_TONEMAP)
+    times the picture's pixel rate against 1080p30 (never under 1x) when that is longer: a 4K60 HDR tone-map on the
+    CPU runs far below real time."""
+    scale = max(1.0, float(px_rate or 0) / (1920 * 1080 * 30))
+    return max(TIMEOUT_MIN_S, float(span_s or 0) * (TIMEOUT_X_TONEMAP if tonemap else TIMEOUT_X) * scale)
+
+
+def _runner_for(limit: float):
+    def run(cmd):
+        return subprocess.run(cmd, capture_output=True, timeout=limit)   # on timeout: the child is killed, then raises
+    return run
+
+
+def _drop(p: Path) -> bool:
+    """Remove a file, retrying briefly (a just-killed encode or a virus scanner can hold it for a moment). Never
+    raises; False when it is still there."""
+    for i in range(5):
+        try:
+            p.unlink(missing_ok=True)
+            return True
+        except OSError:
+            time.sleep(0.2 * (i + 1))
+    return False
+
+
+def _is_link(p) -> bool:
+    """A symlink or a Windows junction / name-surrogate reparse point (never followed when writing)."""
+    try:
+        st = os.lstat(p)
+    except OSError:
+        return False
+    if stat.S_ISLNK(st.st_mode):
+        return True
+    if getattr(st, "st_file_attributes", 0) & 0x400:                     # FILE_ATTRIBUTE_REPARSE_POINT
+        tag = getattr(st, "st_reparse_tag", None)
+        return True if tag is None else bool(tag & 0x20000000)            # IO_REPARSE_TAG name surrogate
+    return False
+
+
+def _under(child: str, parent: str) -> str | None:
+    """child relative to parent ('' for the same folder), comparing normalised paths; None when outside."""
+    c, p = os.path.normcase(child).rstrip("\\/"), os.path.normcase(parent).rstrip("\\/")
+    if c == p:
+        return ""
+    return child[len(parent.rstrip("\\/")) + 1:] if c.startswith(p + os.sep) else None
+
+
+def _bad_name(part: str) -> bool:
+    return (part in ("", ".", "..") or part != part.rstrip(" .") or any(ch in ':*?"<>|' or ord(ch) < 32 for ch in part)
+            or part.split(".")[0].upper() in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(10)),
+                                               *(f"LPT{i}" for i in range(10))})
+
+
+def client_output(out_dir, client_root) -> Path | None:
+    """The folder to write into when out_dir is the client's output/ folder or a folder under it, else None.
+    `client_root` is the client folder (Paths.root; required: a folder that is merely named "output" proves nothing).
+    output/ itself may be a link (a client whose output lives on another drive); below it, no existing folder may be a
+    link (nothing is written through one) and no name may be one Windows mangles. `..` is resolved before the check.
+    Returns the out_dir under the REAL output folder."""
+    if client_root is None:
+        return None
+    root = os.path.abspath(str(client_root))
+    lex = os.path.join(root, "output")
+    real = os.path.realpath(lex)
+    o = os.path.abspath(str(out_dir))
+    rel = _under(o, lex)
+    if rel is None:
+        rel = _under(o, real)                       # the same folder written through its real (resolved) path
+    if rel is None:
+        return None
+    parts = [x for x in rel.replace("\\", "/").split("/") if x]
+    if any(_bad_name(x) for x in parts) or not os.path.isdir(root) or (os.path.lexists(real) and not os.path.isdir(real)):
+        return None
+    if _is_link(lex) and not os.path.isdir(real):
+        return None                                 # a dangling output/ link: never build its target's tree
+    if _under(os.path.realpath(root), real) is not None:
+        return None                                 # output/ pointing at the client folder (or above it)
+    cur = Path(real)
+    for x in parts:
+        cur = cur / x
+        if _is_link(cur) or (cur.exists() and not cur.is_dir()):
+            return None
+    if any(_under(str(cur), os.path.realpath(os.path.join(root, x))) is not None for x in ("assets", "data")):
+        return None                                 # the folder written into is the client's own footage
+    return cur
+
+
+def _source_tag(src: Path, client_root=None) -> str:
+    """A short hash naming the source: cam A's and cam B's `C0001.MP4` get different intermediates (the stem alone
+    let the second overwrite the first). The path relative to the client folder (case-folded on Windows, '/'
+    separators), so a moved client or a new drive letter keeps its intermediates; the resolved path when the source
+    lives outside the client. A changed file keeps its name and is redone in place (the sidecar's sha256). Callers
+    pass the path under the client folder (a source reached through its real path, past a link inside the client,
+    gets the real path's tag)."""
+    full = os.path.realpath(str(src))
+    rel = None
+    if client_root is not None:
+        rel = _under(os.path.abspath(str(src)), os.path.abspath(str(client_root))) or \
+              _under(full, os.path.realpath(str(client_root)))
+    key = os.path.normcase(rel if rel else full).replace("\\", "/")
+    return hashlib.sha256(key.encode("utf-8", "surrogatepass")).hexdigest()[:10]
 
 
 def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=None, runner=None,
-            disk=shutil.disk_usage, crf: int = 16) -> dict:
-    """Write the intermediate(s) for `decision` into out_dir (the project's output/ folder; never next to the source).
-    Returns {ok, path, parts, sidecar, lane, reused, fps, skipped, reason, lines}. Never raises."""
+            disk=shutil.disk_usage, crf: int = 16, client_root=None) -> dict:
+    """Write the intermediate(s) for `decision` into out_dir, which must be the client's output/ folder or a folder
+    under it (`client_output`, with client_root = the client folder; refused otherwise, before anything is written).
+    Named <stem (60 chars at most)>.<source tag>.conform[.r<from>-<to>].mp4. Returns {ok, path, parts, sidecar, lane,
+    reused, fps, skipped, reason, lines}. Never raises."""
     src, out_dir = Path(src), Path(out_dir)
     res = {"ok": True, "path": None, "parts": [], "sidecar": None, "lane": lane, "reused": False, "skipped": None,
            "reason": None, "fps": decision.get("cfr_fps"), "lines": {"en": [], "ar": []}}
     try:
         if not decision.get("actions"):
             return res
+        target = client_output(out_dir, client_root)
+        if target is None:
+            res.update(ok=False, skipped="not output", reason=f"{out_dir} is not inside the client's output/ folder")
+            res["lines"] = dict(zip(("en", "ar"), ([x] for x in LINES["not_output"])))
+            return res
+        out_dir = target
         ff = _abs_ffmpeg(ff) if ff else _engine_ffmpeg()
         if not ff:
             res.update(ok=False, skipped="no ffmpeg", reason="no ffmpeg by an absolute path: the original is used")
@@ -435,10 +557,12 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
             return res
         filters = _filters(decision)
         source_sha = _sha256(src)
+        stem = f"{src.stem[:60]}.{_source_tag(src, client_root)}"
+        px_rate = px * float(decision.get("cfr_fps") or decision.get("src_fps") or 30)
         out_dir.mkdir(parents=True, exist_ok=True)
         for a, b in spans:
             tag = "" if not ranges else f".r{int(a * 1000)}-{int(b * 1000)}"
-            out = out_dir / f"{src.stem}.conform{tag}.mp4"
+            out = out_dir / f"{stem}.conform{tag}.mp4"
             side = out.with_suffix(".json")
             want = {"source_sha256": source_sha, "filters": filters, "from_s": a, "to_s": b, "crf": crf}
             old = {}
@@ -449,7 +573,6 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
             if out.is_file() and all(old.get(k) == v for k, v in want.items()):
                 res["reused"] = True
             else:
-                side.unlink(missing_ok=True)               # no sidecar may outlive the file it describes
                 tmp = out.with_name(out.stem + ".partial.mp4")
                 def build(ln, a=a, b=b, out=tmp):
                     from . import accel
@@ -466,15 +589,33 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
                         cmd += ["-af", "aresample=async=1:first_pts=0", "-c:a", "aac", "-b:a", "192k"]
                     return cmd + [str(out)]
                 from . import accel
-                r, used = accel.run_ff(build, lane, runner=runner or _default_runner)
+                try:
+                    r, used = accel.run_ff(build, lane, runner=runner or _runner_for(
+                        timeout_s(b - a, bool(decision.get("tonemap")), px_rate)))
+                except subprocess.TimeoutExpired:
+                    gone = _drop(tmp)
+                    res.update(ok=False, skipped="timeout", reason="the encode took too long and was stopped"
+                               + ("" if gone else f"; {tmp.name} could not be removed yet"))
+                    res["lines"] = dict(zip(("en", "ar"), ([x] for x in LINES["timeout"])))
+                    return res
+                except BaseException:
+                    _drop(tmp)                                 # no half-written copy is ever left behind
+                    raise
                 res["lane"] = used
                 if getattr(r, "returncode", 1) != 0 or not tmp.is_file():
                     err = r.stderr.decode("utf-8", "replace") if isinstance(r.stderr, bytes) else str(r.stderr or "")
                     res.update(ok=False, reason=f"ffmpeg failed: {err.strip()[-300:]}")
                     res["lines"] = dict(zip(("en", "ar"), ([x] for x in LINES["failed"])))
-                    tmp.unlink(missing_ok=True)
+                    _drop(tmp)
                     return res
-                tmp.replace(out)                               # only a finished encode gets the final name
+                try:
+                    tmp.replace(out)                           # only a finished encode gets the final name
+                except OSError:                                # the old copy is open (Premiere) or locked
+                    gone = _drop(tmp)
+                    res.update(ok=False, skipped="in use", reason=f"{out.name} is in use and could not be replaced"
+                               + ("" if gone else f"; {tmp.name} could not be removed yet"))
+                    res["lines"] = dict(zip(("en", "ar"), ([x] for x in LINES["in_use"])))
+                    return res                                 # the old copy keeps its sidecar: still consistent
                 side.write_text(json.dumps(dict(want, reason=decision.get("actions"), encoder="libx264",
                                                 lane=used), indent=1), encoding="utf-8")
             res["parts"].append({"path": str(out), "sidecar": str(side), "from_s": a, "to_s": b})
