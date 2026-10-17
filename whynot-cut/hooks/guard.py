@@ -35,6 +35,12 @@ Limits (a guardrail against mistakes, not a sandbox; it errs on the side of allo
   * folders that hold a client deeper than one level (`rm -rf ~/work` when the client is ~/work/clients/X);
   * a client recognised only by output/client_database (no `.whynot-client`): deleting that folder through a form the
     guard misses switches its protection off, so run `reel doctor --fix` to write the marker.
+
+The guard is a guardrail, not a sandbox (Addendum L, L-G13). For a subagent's Bash / PowerShell command a backstop runs
+before the parsing above and denies by text: a gated step (BACKSTOP_STEPS, the word-plus-option combinations of the
+gate rules) anywhere in the lowercased command is refused however it is spelled or launched; only plain read-only text
+searches may name one (backstop()). Code a subagent writes and then runs, and Python that imports the engine, are out
+of scope by design: the second wall is the engine-side write gate (L-T8).
 """
 from __future__ import annotations
 
@@ -1493,6 +1499,9 @@ def reel_sub(args: list[str]) -> str | None:
     return None
 
 
+_REEL_PY_CLI = re.compile(r"reel\.cli(?!\w)|engine/reel/cli(?!\w)|(?<!\w)runpy(?!\w)")   # `reel py` naming the engine CLI
+
+
 def check_reel(exe: str, argv: list[str], agent: str | None, cwd: Path | None = None):
     rest = reel_args(exe, argv, cwd if cwd is not None else Path.cwd())
     if rest is not None:
@@ -1544,6 +1553,10 @@ def check_reel(exe: str, argv: list[str], agent: str | None, cwd: Path | None = 
             if role == "setup-doctor" and (sub in SETUP_DOCTOR_FORBIDDEN or (sub == "doctor" and has_opt(argv, "--fix"))):
                 block(f"setup-doctor diagnoses without changing anything: it may not run `reel {sub}`. Give the lead "
                       f"the exact fix instead.")
+            if sub == "py" and (_REEL_PY_CLI.search(" ".join(rest).lower().replace("\\", "/")) or
+                                any(is_reel_script(a, cwd if cwd is not None else Path.cwd()) for a in rest)):
+                block("a subagent's `reel py` may not start the engine CLI (reel.cli, engine/reel/cli, runpy). Run "
+                      "`reel <step>` itself, so the gate rules apply.")
 
 
 # --------------------------------------------------------------------------- PowerShell (Windows)
@@ -1789,7 +1802,9 @@ def check_powershell(cmd: str, cwd: Path, agent: str | None):
                     else:
                         TAINT.pop(k, None)
             continue
+        called = False                           # a call operator (`&` / `.`) starts this statement
         while argv and argv[0].lower() in PS_KEYWORDS:
+            called = called or argv[0] in ("&", ".")
             argv = argv[1:]
         if not argv:
             continue
@@ -1838,8 +1853,10 @@ def check_powershell(cmd: str, cwd: Path, agent: str | None):
             if hit:
                 block(f"a file method call on the client's source folder ({hit}) is not allowed — assets/ and data/ "
                       f"are read-only.")
-        if argv[0].startswith(("(", "$(")):      # & (Join-Path $root 'engine\reel\cli.py') approve-plan: the call
-            check_reel("", argv, agent, cwd)     # expression's program is unknown -> its words are the engine's
+        # & (Join-Path $root 'engine\reel\cli.py') approve-plan: the call expression's program is unknown -> its words
+        # are the engine's; a bare `(Get-Content x) -match 'approve-plan'` is a read, not a call
+        if argv[0].startswith("$(") or (called and argv[0].startswith("(")):
+            check_reel("", argv, agent, cwd)
         argv[0] = argv[0].lstrip("(") or argv[0]
         if argv and argv[0] in ("&", "."):
             argv = argv[1:]
@@ -1961,6 +1978,69 @@ def lock_write(text: str) -> bool:
     return any(norm_exe(seg.split()[0]) in LOCK_SHORT for seg in re.split(r"[;|&\n(){}]|\$\(", t) if seg.split())
 
 
+# --------------------------------------------------------------------------- subagent backstop (deny by text)
+# the gate rules of check_reel as (step, the options it needs, the roles it applies to; None = every subagent);
+# transcript-verify (an allow-list of --by values) is checked in backstop() itself
+BACKSTOP_STEPS = (
+    ("approve-plan", (), None), ("auto-approve", (), None), ("reels-select", (), None),
+    ("lock", ("--release",), None), ("settings", ("--init",), None), ("handoff", ("--delivered",), None),
+    ("verify", ("--record",), None), ("ae-probe", ("--record",), None), ("ref-style", ("--adopt", "--yes"), None),
+    ("needs-you", ("--write",), READ_ONLY_AGENTS), ("ref-style", ("--record",), {"qc-reviewer"}),
+    ("ref-style", ("--apply",), {"qc-reviewer"}), ("doctor", ("--fix",), {"setup-doctor"}))
+TEXT_TOOLS = {"rg", "grep", "findstr", "select-string", "get-content", "cat", "type", "head", "tail"}
+_NOT_PLAIN = re.compile(r"[$&`%!(]|@\(|--pre\b|(?<![\w.-])(?:iex|eval|env|xargs|python[\w.]*|pyw?|node|deno|bun|ruby|"
+                        r"perl|php|lua|bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|wscript|cscript|mshta|osascript|uvx?|"
+                        r"conda|pipx)(?![\w-])")
+_DASHES = str.maketrans({"\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u2015": "-"})
+_ESC = re.compile(r"\\x([0-9a-f]{2})|\\u([0-9a-f]{4})|\\([0-7]{3})")
+
+
+def _plain_read(t: str) -> bool:
+    """Every command of the (lowercased) text is a plain read-only text tool, with nothing that runs code."""
+    segs = [s.split() for s in re.split(r"[|;\r\n]", t)]
+    return not _NOT_PLAIN.search(t) and all(s[0] in TEXT_TOOLS for s in segs if s)
+
+
+def _text_forms(t: str) -> set[str]:
+    """The lowercased text as written and with the spelling stripped: `\\x61`-style escapes decoded, 'a' + 'b'
+    joined, quotes, backticks, carets and backslash escapes removed (`appr\\ove-plan`, ve`rify, 'approve'-plan)."""
+    s = _ESC.sub(lambda m: chr(int(m.group(3), 8) if m.group(3) else int(m.group(1) or m.group(2), 16)), t)
+    s = re.sub(r"['\"]\s*\+\s*['\"]", "", s)
+    s = re.sub(r"\\(?=[\w-])", "", re.sub(r"[\"'`^]", "", s))
+    return {t, s}
+
+
+def _bs_word(t: str, w: str) -> bool:
+    return re.search(r"(?<![\w.-])" + re.escape(w) + r"(?![\w.-])", t) is not None
+
+
+def _bs_opt(t: str, name: str) -> bool:
+    """The option `name` appears, also abbreviated (as is_opt)."""
+    return any(len(o) > 2 and name.startswith(o) for o in re.findall(r"(?<![\w-])--[a-z][\w-]*", t))
+
+
+def backstop(text: str, agent: str):
+    """A subagent's Bash / PowerShell text that names a gated step is denied, however it is launched (L-G13: deny by
+    default); only plain read-only text searches may name one. Runs before the parsing."""
+    t = text.lower().translate(_DASHES)
+    if _plain_read(t):
+        return
+    role = own_role(agent)
+    mine = SUBAGENT_VERIFY_BY | ({role} if role else set())
+    for f in _text_forms(t):
+        for step, opts, roles in BACKSTOP_STEPS:
+            if (roles is None or role in roles) and _bs_word(f, step) and all(_bs_opt(f, o) for o in opts):
+                block(f"this command names `{' '.join((step,) + opts)}`, a step only the lead editor runs, so a "
+                      f"subagent may not run it in any form. Report to the lead instead (plain read-only searches "
+                      f"with rg, grep, findstr, Select-String, Get-Content, cat, type, head or tail may name it).")
+        if _bs_word(f, "transcript-verify"):
+            bys = [v.strip("'\"") for v in re.findall(r"(?<![\w-])--by?(?:=|\s+)([^\s;|&]+)", f)]
+            if not bys or any(v not in mine for v in bys):
+                block("only the lead editor records `transcript-verify --by editor` (or without --by). A subagent "
+                      "may only name itself (--by " + ", ".join(sorted(mine)) + "), in a command of its own. Report "
+                      "the corrections instead.")
+
+
 def main():
     if sys.version_info < (3, 8):       # run_python.sh no longer probes the version: fail open, but say so
         print("WhyNot Cut guard: Python 3.8+ needed; protection is OFF (run reel doctor)", file=sys.stderr)
@@ -2019,7 +2099,10 @@ def check_call(data: dict, tool: str):
         hit = protected(fp, cwd)
         if hit:
             block(f"the client's source folder ({hit}) is read-only. Write outputs under <client>/output/.")
-    elif tool == "Bash":
+        return
+    if agent and tool in ("Bash", "PowerShell"):
+        backstop(str(ti.get("command") or ""), agent)
+    if tool == "Bash":
         check_bash(ti.get("command", ""), cwd, agent)
     elif tool == "PowerShell":
         check_powershell(ti.get("command", ""), cwd, agent)

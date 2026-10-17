@@ -223,15 +223,21 @@ class TestGuardSeesEveryEngineLaunch(ClientFixture):
                       f"& python '{win}' approve-plan",
                       f"Set-Location '{rd}'; python cli.py handoff --delivered"], tool="PowerShell")
         self.allowed([f'cd "{rd}" && python cli.py next', "python -m reel.cli next",
-                      f'cd "{rd}" && python -m pytest cli.py handoff --delivered',
-                      f'cd "{self.root}" && python -m cli handoff --delivered',       # not the engine folder
-                      f'python -c "import sys" "{cli}" handoff --delivered',
-                      "python other/cli.py handoff --delivered",
                       f'cat "{cli}" | grep -n delivered', f'grep -n "handoff --delivered" "{cli}"',
-                      'echo "python -X utf8 cli.py handoff --delivered" && echo done',
                       f'git log --oneline -- "{cli}"'])
-        self.allowed(['& $py "$root\\engine\\reel\\cli.py" next',
-                      'Write-Output "python -m reel.cli handoff --delivered"'], tool="PowerShell")
+        self.allowed(['& $py "$root\\engine\\reel\\cli.py" next'], tool="PowerShell")
+        # not the engine, but the text names a gated step: a subagent is denied (backstop, deny by default); the lead
+        # is not (the parser reads them as not the engine)
+        named = [f'cd "{rd}" && python -m pytest cli.py handoff --delivered',
+                 f'cd "{self.root}" && python -m cli handoff --delivered',       # not the engine folder
+                 f'python -c "import sys" "{cli}" handoff --delivered',
+                 "python other/cli.py handoff --delivered",
+                 'echo "python -X utf8 cli.py handoff --delivered" && echo done']
+        self.blocked(named)
+        self.allowed(named, agent=None)
+        named_ps = ['Write-Output "python -m reel.cli handoff --delivered"']
+        self.blocked(named_ps, tool="PowerShell")
+        self.allowed(named_ps, agent=None, tool="PowerShell")
 
     def test_c3_subcommand_found_by_position(self):
         self.blocked(["reel --root handoff handoff --delivered", "reel --video-id verify verify --record",
@@ -320,8 +326,10 @@ class TestGuardSeesEveryEngineLaunch(ClientFixture):
             self.assertLess(time.perf_counter() - t0, 4.0)
 
     def test_no_false_positives_for_ordinary_commands(self):
-        self.allowed(['reel handoff --note "remember --delivered later" --video-id C1',
-                      "echo --delivered && grep -rn -- --record output | head",
+        note = 'reel handoff --note "remember --delivered later" --video-id C1'
+        self.blocked([note])                    # a subagent: the text names `handoff --delivered` (backstop)
+        self.allowed([note], agent=None)        # the lead: --delivered is only the note's text
+        self.allowed(["echo --delivered && grep -rn -- --record output | head",
                       "reel range --in 00:01 --out 00:03 --footage data/Raw/C0001.MP4",
                       "reel verify --video-id C1", "reel transcript-verify --by agent",
                       "reel --root . --video-id C1 next", "python -m pip --version"])

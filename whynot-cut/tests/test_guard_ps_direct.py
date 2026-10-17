@@ -4,7 +4,7 @@ reached check_argv as the bare name `cli.py`, so a subagent skipped every gate (
 The whole class is covered: quoted / unquoted / relative / forward or back slashes / mixed case / no `.py` / byte-code
 / 8.3 short path / hard link, through `&`, `.`, cmd /c, Invoke-Expression, Start-Process, [Diagnostics.Process]::Start,
 variables set in the same command (and fail-closed for ones the guard cannot see), Bash `./cli.py`, `/d/...`,
-`bash -c`, wrappers and `eval`. Another project's `cli.py` stays allowed.
+`bash -c`, wrappers and `eval`. Another project's `cli.py` stays allowed for the lead; for a subagent the text backstop denies any gated step.
 Case list: D:/ClaudeData/Temp/wnc-p4/psguard/cases.md
 Run:  tools/test.sh -p test_guard_ps_direct.py
 """
@@ -206,12 +206,18 @@ class TestBashDirect(Base):
 
 class TestNotOurs(Base):
     def test_N1_other_projects_cli(self):
+        """Not the engine, but the text names a gated step: a subagent is denied (backstop, deny by default); the
+        lead is not (the parser reads them as another project's script)."""
         for tool in ("PowerShell", "Bash"):
-            self.allowed(tool, ['& "D:\\other\\proj\\cli.py" approve-plan --root .' if tool == "PowerShell"
-                                else '"/d/other/proj/cli.py" approve-plan --root .',
-                                "python D:/other/cli.py transcript-verify --root .",
-                                "python D:/x/reel/cli.py approve-plan" if tool == "Bash"
-                                else '& "D:\\x\\reel\\cli.py" approve-plan'])
+            cmds = ['& "D:\\other\\proj\\cli.py" approve-plan --root .' if tool == "PowerShell"
+                    else '"/d/other/proj/cli.py" approve-plan --root .',
+                    "python D:/other/cli.py transcript-verify --root .",
+                    "python D:/x/reel/cli.py approve-plan" if tool == "Bash"
+                    else '& "D:\\x\\reel\\cli.py" approve-plan']
+            for c in cmds:
+                with self.subTest(tool=tool, cmd=c, agent=AGENT):
+                    self.assertEqual(self.run_tool(tool, c, AGENT), 2)
+            self.allowed(tool, cmds, agent=None)
 
     def test_N2_allowed_engine_calls_by_path(self):
         E = str(REAL)
@@ -221,9 +227,15 @@ class TestNotOurs(Base):
         self.allowed("Bash", [f'"{msys(REAL)}" transcript-verify --root . --by agent', f'"{msys(REAL)}" plan'])
 
     def test_N3_N4_other_programs(self):
-        self.allowed("PowerShell", ["Start-Process notepad", "Start-Process python -ArgumentList 'D:\\other\\cli.py approve-plan'",
-                                    '$c = "git"; & $c status', '$c = "D:\\other\\cli.py"; & $c approve-plan',
-                                    "& $py D:\\other\\cli.py approve-plan", "(Get-Content notes.txt) | Select-String plan"])
+        self.allowed("PowerShell", ["Start-Process notepad", '$c = "git"; & $c status',
+                                    "(Get-Content notes.txt) | Select-String plan"])
+        # another program, but the text names approve-plan: a subagent is denied (backstop); the lead is not
+        named = ["Start-Process python -ArgumentList 'D:\\other\\cli.py approve-plan'",
+                 '$c = "D:\\other\\cli.py"; & $c approve-plan', "& $py D:\\other\\cli.py approve-plan"]
+        for c in named:
+            with self.subTest(tool="PowerShell", cmd=c, agent=AGENT):
+                self.assertEqual(self.run_tool("PowerShell", c, AGENT), 2)
+        self.allowed("PowerShell", named, agent=None)
         self.allowed("Bash", ['c=git; "$c" status', 'python "$SCRIPT"', "start notepad"])
 
 
