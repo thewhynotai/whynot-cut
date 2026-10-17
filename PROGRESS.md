@@ -43,7 +43,7 @@ security line. Each row is OPEN until it is accepted and pushed.
 | Item | Owner | State 2026-10-18 01:30 |
 |---|---|---|
 | T4.1 smooth zoom + fades | Adobe (+ executor applies the plan.py/style.json patches) | in progress |
-| T4.2 minors (AE width raw line, hand-edit warning, edge tests) | executor | patch done; re-run on a snapshot queued |
+| T4.2 minors (AE width raw line, hand-edit warnings, edge tests) | executor | **CLOSED 2026-10-18**: d5454f1, 70c6635, 72731dc, 7bd1c45; scoped reviews ending in a clean PASS (review-7bd1c45) |
 | T4.3 learning loop | lane 2 | queued (unblocked by T4.2) |
 | T4.5 part B (relative paths, client-move/clone, guard ratchet) | API backlog BL-14 | swaps done (87b2228 + the plan.py ×2 still to apply) |
 | T4.6 music in motion videos | Adobe | in progress (hunks in the tree) |
@@ -131,7 +131,7 @@ with `**passed**` or `**Gate <N> passed on Windows, Mac Not verified**` (else th
 | T4.13 reel review-flags (G-ENG-DATA) | **done 2026-10-17** (7 adversarial review rounds; invariant: a flag on on-screen wording never vanishes silently) | 0db008f | review_flags 88, skill_text 41, cli_consistency 57 | every reviewed line stored, domain-tied flags (DOMAIN_FLAGS, extensible for business/AI, Addendum M), new/changed lines re-reviewed per uncarried flag; contract §7.6 delta sent to Adobe; live stage-7 run = Gate 4 / Mac live list |
 | T20 R-T8 security-watch | **done 2026-10-17** (2 reviews) | 4bce441 | security_watch 72 | issue to thewhynotai on outsider push / force-push / deletion / touching .github / made public; normal owner pushes skipped (no minutes); trusted-ref checkout; first run = expected bootstrap issue #1 (closed). Not covered (GitHub limits): new collaborator, deploy key → monthly 5-step check in docs/ci.md |
 | T4.10 G-GPU | **done 2026-10-17** (review → fix round → re-review → minors → check) | 9820e3b; 196f6cc (step 8 A/B, lane 1) | gpu_accel 75; full suite on 9820e3b 4832 run: 13 non-T4.10 failures (routed) | A/B on the RTX 4060: GPU 35–50 % slower at every site → `SITE_LANES` all cpu, finals libx264. Not verified: Mac VideoToolbox (Phase 12) |
-| T4.2 style knobs | **done 2026-10-17** (review → 9 fixes → scoped check) | b61f808, 5de7e3a | t42 67; golden byte-identical | open: P2 follow-up (AE wrapping, skill wording) in progress; ppro_build `caption_hide_default(spec)` → Adobe T4.1; AE highlight colour → JSX follow-up |
+| T4.2 style knobs | **CLOSED 2026-10-18** (review → 9 fixes → P2 round e0bf821 → 3 minor rounds → clean PASS) | b61f808, 5de7e3a | t42 67; golden byte-identical | open: P2 follow-up (AE wrapping, skill wording) in progress; ppro_build `caption_hide_default(spec)` → Adobe T4.1; AE highlight colour → JSX follow-up |
 | T4.7 NEEDS-YOU + autopilot | **done 2026-10-17** (review → fixes → scoped check) | ac6fbef | t47 47 | contract kinds + `pick`; `reel auto-approve` lead-only; interim stop at QC while medical/religious open (until M1-T4) |
 | T4.4 episode sheet | **done 2026-10-17** (wnc-queue, 2 opus rounds) | c0a7c30 | t44 42 | writer-lock refuses output/ linked into data/ or assets/ (HEAD-wide fix) |
 | T4.11 lean runtime | **accepted 2026-10-17** (lane 1) | c6e80b5 | lean_runtime 48 | idle serve 42 MB / 0 % CPU; minors in lane follow-up |
