@@ -133,9 +133,10 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     - executor: `whynot-cut/tests/test_t42_style_knobs.py`, `skills/revise/SKILL.md` (T4.2);
     - `docs/legal/third-party-licences.md` + `THIRD-PARTY-NOTICES.md`: backlog item BL-02 only; lane 1 reports its rows
       in REPORT.md and does not edit these files.
-  - looks & motion track, AE wave 1 R-6.2 (2026-10-17): new `whynot-cut/engine/reel/lib/motion_scenes.py`,
+  - API backlog BL-13 (moved from the paused looks track 2026-10-17 21:35; was looks & motion track), AE wave 1 R-6.2: new `whynot-cut/engine/reel/lib/motion_scenes.py`,
     `whynot-cut/tests/test_motion_scenes*.py`, `whynot-cut/tests/fixtures/motion_scenes/**`; the `build_scene` branch in
-    `lib/motion_plan.py` and the type names in `lib/motion_script.py` arrive as a diff for the executor.
+    `lib/motion_plan.py` and the type names in `lib/motion_script.py` arrive as a diff for the executor; the wave-1 hunks in `templates/after_effects/wnc_motion_lib.jsx`
+    (from `park-ae1/ae1-wave1.patch`) go with BL-13.
   - API backlog (2026-10-17 20:05, `D:\ClaudeData\claude-api-lane\BACKLOG.md`; any API lane claims an item, the executor
     accepts and pushes): BL-01 `hooks/read_once.py`, `tests/test_read_once*.py`, `evals/read-once/**`; BL-02 root `LICENSE`,
     `TRADEMARKS.md`, `CONTRIBUTING.md`, `THIRD-PARTY-NOTICES.md`, `tools/build_notices.py`, `tools/spdx_headers.py`, their
