@@ -219,7 +219,9 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
     ttext, dur_ms = _transcript_text(paths)
     base = ed.get("global", {})
     rp = base.get("remove_pauses")
-    words = read_json(paths.p("02_transcription/words.json"), {"words": []})["words"]
+    raw_words = (read_json(paths.p("02_transcription/words.json"), {"words": []}) or {}).get("words") or []
+    words = [w for w in raw_words if _word_ok(w)]          # T4.2: an entry without id/word/times is skipped (warned)
+    bad_words = len(raw_words) - len(words)
     pauses = read_json(paths.p("06_audio/dialogue/pauses.json")) if rp else None
     wranges, wcut, _ = word_cut_ranges(words, base.get("cut_words") or [], dur_ms)
     timemap_on = bool((rp and pauses) or wranges)
@@ -246,6 +248,11 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
     knobs = style_knobs.resolve(style, base, tpl, tokens, lambda: frame_size_of(seq_cfg)[0],
                                 layers_=style_knobs.layers(ctx),
                                 subtitle_style=lambda: load_config("subtitle-style.json", ctx))
+    short_srt = None               # T4.2: the file a rebuild replaces (words cut, or a chosen caption size)
+    if wcut or knobs[0].get("caption_short_max_chars"):
+        from . import srt as srtlib
+        f = paths.p("02_transcription/captions-short.srt")
+        short_srt = srtlib.read_srt(f) if f.exists() else None
     return PlanInputs(
         ctx=ctx, paths=paths, root=paths.root, video_id=paths.video_id, ed=ed, base=base, tpl=tpl,
         known_assets={a["rel"]: a for a in manifest["assets"]}, ttext=ttext, dur_ms=dur_ms, fps=seq_fps(ctx),
@@ -254,7 +261,7 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
         seq_cfg=seq_cfg, style=style if isinstance(style, dict) else {}, knobs=knobs,
         podcast=load_config("podcast.json", ctx) if shots_on else {},
         speakers=(read_json(paths.p("00_inputs/speakers.json"), {}) or {}) if shots_on else {},
-        words=words, pauses=pauses, srts=srts,
+        words=words, bad_words=bad_words, short_srt=short_srt, pauses=pauses, srts=srts,
         subtitle_style=load_config("subtitle-style.json", ctx)
         if (wcut and timemap_on) or knobs[0].get("caption_short_max_chars") else None,
         flagged=flagged, profile=load_config("profile.json", ctx), sfx_kinds=_sfx_kinds(paths),
@@ -679,6 +686,38 @@ def _rebuilt_captions(inp: PlanInputs, words: list, force: bool = False) -> dict
     return dict(zip(_CAPTION_SRTS, caption_cues(words, sub_style)))
 
 
+HAND_EDITS_LOST = ("تعديلاتك اليدوية في captions-short.srt مش هتتستخدم: حجم الكابشن المختار أو الكلمات المقصوصة "
+                   "بيبنوا الكابشن من جديد من كلمات التفريغ، فصحّح الكلام في التفريغ — your hand edits in "
+                   "captions-short.srt are not used: a chosen caption size or cut words rebuild the captions from the "
+                   "transcript words; fix wording in the transcript (transcript-corrections.json, then "
+                   "`reel transcript-correct`), then run `reel plan` again")
+
+
+def _hand_edits_lost(inp: PlanInputs) -> list[str]:
+    """T4.2: [HAND_EDITS_LOST] when the captions-short.srt a rebuild replaces says other words than the transcript
+    words (an editor's hand edits there would silently vanish); [] when they agree or there is no file."""
+    srt_cues = getattr(inp, "short_srt", None)
+    if not srt_cues:
+        return []
+    said = norm(" ".join(c["text"].replace("\n", " ") for c in srt_cues))
+    return [HAND_EDITS_LOST] if said != norm(" ".join(w["word"] for w in inp.words)) else []
+
+
+def _word_ok(w) -> bool:
+    """A words.json entry the caption builders can use: an integer id, the word, numeric start and end times."""
+    num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool)
+    return (isinstance(w, dict) and isinstance(w.get("id"), int) and not isinstance(w.get("id"), bool)
+            and isinstance(w.get("word"), str) and num(w.get("start_ms")) and num(w.get("end_ms")))
+
+
+def check_words(inp: PlanInputs):
+    """The words.json entries read_inputs skipped (no id, word or times): one warning, never a KeyError."""
+    n = getattr(inp, "bad_words", 0) or 0
+    return {}, [], ([f"02_transcription/words.json: {n} word(s) without an id, the word or start/end times were "
+                     "skipped (captions and word cuts ignore them) — run `reel transcribe` again or fix the file"]
+                    if n else [])
+
+
 @_in_context
 def apply_timemap(inp: PlanInputs, camera: list, merged: list, events: list, broll: list, cues: list, box):
     """Pause removal and word cuts: the TimeMap of kept source ranges, everything moved onto the sequence clock, and
@@ -702,6 +741,7 @@ def apply_timemap(inp: PlanInputs, camera: list, merged: list, events: list, bro
         # clock: the "-seq" files equal the source times)
         rebuilt = _rebuilt_captions(inp, words_all)
         if rebuilt:
+            warnings += _hand_edits_lost(inp)
             out.update(captions_rebuilt=True, seq_srts={
                 name: [{"start_ms": q["start_ms"], "end_ms": q["end_ms"], "text": q["text"]} for q in cues_]
                 for name, cues_ in rebuilt.items()})
@@ -758,6 +798,8 @@ def apply_timemap(inp: PlanInputs, camera: list, merged: list, events: list, bro
     # captions on the sequence clock (rebuilt without the cut words, so they never show on screen)
     gone = {c["word_id"] for c in words_cut}
     rebuilt = _rebuilt_captions(inp, [w for w in words_all if w["id"] not in gone], force=bool(gone))
+    if rebuilt:
+        warnings += _hand_edits_lost(inp)
     seq_srts = {}
     for name in _CAPTION_SRTS:
         src = rebuilt[name] if name in rebuilt else inp.srts.get(name)
@@ -945,6 +987,7 @@ def build_plan(inp: PlanInputs) -> dict:
         return data
 
     step(apply_style(inp))
+    step(check_words(inp))
     vd = step(validate_decisions(inp))
     cam = step(build_camera(inp, vd["camera"], vd["events"]))
     fr = step(apply_framing(inp, cam))

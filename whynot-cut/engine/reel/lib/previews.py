@@ -836,9 +836,10 @@ def caption_width_warnings(paths: Paths, texts: list, knobs: dict) -> list[str]:
                             max_chars=t["max_chars"], shadow=False)
         if boxes and (min(bx[0] for bx in boxes) < left or max(bx[2] for bx in boxes) > right):
             wide.append((text, max(bx[2] for bx in boxes) - min(bx[0] for bx in boxes)))
-        # After Effects draws each caption line as point text, never wrapped: measure every SRT line as one line
+        # After Effects draws each caption line as point text, never wrapped, and as the SRT has it (no punctuation is
+        # stripped there): measure every SRT line as one line, whitespace-normalised only
         for line in (ln for ln in str(raw or "").split("\n") if ln.strip()):
-            one = caption_text(line, t.get("strip_punctuation"))
+            one = " ".join(line.split())
             bx = _text_block(probe, one, f, W // 2, t["y"], b.white, line_gap=t.get("line_gap", 1.3),
                              max_chars=10 ** 6, shadow=False) if one else []
             if bx and (min(x[0] for x in bx) < left or max(x[2] for x in bx) > right):

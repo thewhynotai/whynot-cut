@@ -687,7 +687,119 @@ class TestArabicCaptionStills(KnobCase):
             from lib.ae_builder import caption_data                              # After Effects gets the same cues
             ae = caption_data(self.p, spec, read_json(self.p.p("01_analysis/edit-decisions.json")))
             self.assertEqual(ae["size"], 140)
-            self.assertLessEqual(max(len(c["text"]) for c in ae["cues"]), max(len(c["text"]) for c in cues))
+            words = read_json(self.p.p("02_transcription/words.json"))["words"]
+            expected = [q["text"] for q in caption_cues(words, dict(common.load_config("subtitle-style.json"),
+                                                                     short_max_chars=8))[1]]
+            self.assertEqual([c["text"] for c in cues], expected, lang)         # the SRT = the words at 8 chars
+            ae_texts = [c["text"].replace("\r", "\n") for c in ae["cues"]]
+            self.assertTrue(ae_texts, lang)
+            rest = iter(c["text"] for c in cues)                                 # AE: the same cues, in order (those
+            self.assertTrue(all(t in rest for t in ae_texts), (lang, ae_texts))  # under a graphic are left out)
+
+    # ---------------------------------------------------------------- review e0bf821 minors
+    def test_m1_after_effects_width_is_measured_on_the_raw_line(self):
+        # After Effects draws the SRT text as it is: punctuation the Premiere stills strip still takes room there
+        write_json(self.prof / "graphics-templates.json", {"templates": {"highlight_caption": {
+            "strip_punctuation": "abcdefghijklmnopqrstuvwxyz"}}})
+        self.words("Isotretinoin-hydrochloride-solution works")
+        self.style({"caption_size_px": 140})
+        r = self.ok(self.compile())
+        ae = [w for w in r["warnings"] if w.startswith("After Effects") and "safe width" in w]
+        self.assertEqual(len(ae), 1, r["warnings"])
+        self.assertIn("Isotretinoin-hydrochloride-solution", ae[0])
+
+    def hand_edit(self):
+        from lib import srt as srtlib
+        f = self.p.p("02_transcription/captions-short.srt")
+        old = f.read_bytes()
+        self.addCleanup(f.write_bytes, old)
+        cues = srtlib.read_srt(f)
+        cues[0]["text"] = cues[0]["text"] + " تصحيح"                            # the editor fixed a word by hand
+        srtlib.write_srt(f, cues)
+
+    def test_m2_hand_edited_short_captions_replaced_by_a_rebuild_are_a_warning(self):
+        r = self.ok(self.compile())                                               # no size: the file is used, no warning
+        self.assertFalse([w for w in r["warnings"] if "captions-short.srt" in w])
+        self.style({"caption_size_px": 140})
+        r = self.ok(self.compile())                                               # unedited file: nothing lost
+        self.assertFalse([w for w in r["warnings"] if "captions-short.srt" in w], r["warnings"])
+        self.hand_edit()
+        r = self.ok(self.compile())
+        w = [x for x in r["warnings"] if "captions-short.srt" in x]
+        self.assertEqual(len(w), 1, r["warnings"])
+        self.assertTrue(w[0].startswith("تعديلاتك"), w[0])                       # Arabic first, then English
+        self.assertIn("your hand edits in captions-short.srt are not used", w[0])
+        self.assertIn("transcript", w[0])
+        self.style({})                                                            # the cut-words path too
+        r = self.ok(self.compile({"cut_words": [3]}))
+        self.assertEqual(len([x for x in r["warnings"] if "captions-short.srt" in x]), 1, r["warnings"])
+
+    def test_m3a_empty_words_with_a_size_falls_back_to_the_srt(self):
+        f = self.p.p("02_transcription/words.json")
+        old = f.read_bytes()
+        self.addCleanup(f.write_bytes, old)
+        write_json(f, {"words": []})
+        self.style({"caption_size_px": 140})
+        self.ok(self.compile())
+        self.assertEqual(self.spec()["caption_source"], "02_transcription/captions-short.srt")
+        self.assertEqual(self.spec()["style"]["caption_size_px"], 140)
+        self.assertTrue(self.render())                                            # today's captions still drawn
+
+    def test_m3b_pause_removal_only_with_a_size(self):
+        from lib import srt as srtlib
+        f = self.p.p("06_audio/dialogue/pauses.json")
+        f.parent.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(f.unlink, True)
+        write_json(f, {"keep_ms": [[0, 5000], [6000, 12000]], "cuts_ms": [[5000, 6000]], "removed_ms": 1000,
+                       "source_duration_ms": 12000})
+        glob = {"remove_pauses": {"min_pause_ms": 250, "pad_ms": 80}}
+        from lib.transcribe import caption_cues
+        self.ok(self.compile(glob))
+        texts0 = [c["text"] for c in srtlib.read_srt(self.p.p("02_transcription/captions-short-seq.srt"))]
+        self.style({"caption_size_px": 140})
+        self.ok(self.compile(glob))
+        spec = self.spec()
+        self.assertEqual(spec["caption_source"], "02_transcription/captions-short-seq.srt")
+        self.assertEqual(spec["time_map"]["removed_ms"], 1000)
+        cues = srtlib.read_srt(self.p.p(spec["caption_source"]))
+        words = read_json(self.p.p("02_transcription/words.json"))["words"]
+        scaled = caption_cues(words, dict(common.load_config("subtitle-style.json"), short_max_chars=8))[1]
+        expected = [q["text"] for q in scaled if not (5000 <= q["start_ms"] and q["end_ms"] <= 6000)]
+        self.assertEqual([c["text"] for c in cues], expected)                     # rebuilt at 8 chars, pause cut out
+        self.assertNotEqual([c["text"] for c in cues], texts0)
+        self.assertLessEqual(max(c["end_ms"] for c in cues), spec["duration_ms"] + 40)   # on the sequence clock
+
+    def test_m3c_mixed_arabic_and_english_line(self):
+        from lib import srt as srtlib
+        self.words("التشخيص الصحيح قبل Isotretinoin مهم جداً للبشرة")
+        self.style({"caption_size_px": 140})
+        r = self.ok(self.compile())
+        cues = srtlib.read_srt(self.p.p(self.spec()["caption_source"]))
+        self.assertIn("Isotretinoin", [w for c in cues for w in c["text"].split()])   # the Latin term stays whole
+        self.assertEqual(" ".join(c["text"] for c in cues).split(),
+                         "التشخيص الصحيح قبل Isotretinoin مهم جداً للبشرة".split())  # logical order kept
+        for c in self.render():
+            from PIL import Image
+            with Image.open(c["fg"]) as im:
+                bb = im.getchannel("A").getbbox()
+            self.assertTrue(0 <= bb[0] and bb[2] <= 1080, (c["text"], bb))
+        self.assertTrue(isinstance(r["warnings"], list))
+
+    def test_m3d_a_word_without_id_or_start_is_skipped_with_a_warning(self):
+        import test_pipeline as T
+        f = self.p.p("02_transcription/words.json")
+        old = f.read_bytes()
+        self.addCleanup(f.write_bytes, old)
+        ws = T.words_from("هل في حاجات معينة لازم أبقى".split(), 200, 600)
+        del ws[1]["id"]
+        del ws[3]["start_ms"]
+        write_json(f, {"words": ws})
+        for style in ({}, {"caption_size_px": 140}):
+            self.style(style)
+            r = self.ok(self.compile())                                           # no KeyError, with or without a size
+            w = [x for x in r["warnings"] if "words.json" in x]
+            self.assertEqual(len(w), 1, r["warnings"])
+            self.assertIn("2", w[0])                                              # two words skipped
 
     def test_r2f_after_effects_one_line_wider_than_the_safe_width_is_a_plan_warning(self):
         self.words("Isotretinoin-hydrochloride-solution works")
@@ -802,6 +914,10 @@ class TestSkillText(unittest.TestCase):
             s = self.read(rel)
             self.assertIn("After Effects captions follow it now", s, rel)
             self.assertIn("Premiere captions follow it after the next WhyNot Cut update", s, rel)
+
+    def test_m2b_a_chosen_size_rebuilds_captions_from_the_transcript_words(self):
+        self.assertIn("A chosen caption size rebuilds the captions from the transcript words",
+                      self.read("client-craft/SKILL.md"))
 
     def test_r3_the_highlight_colour_is_premiere_only_for_now(self):
         for rel in ("client-craft/SKILL.md", "story-craft/references/edit-decision-engine.md"):

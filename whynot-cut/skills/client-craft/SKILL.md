@@ -65,6 +65,8 @@ reel ref-style   --root "<CLIENT>" --record --by client-researcher   # after wri
     - `caption_size_px`: how big the captions are, a whole number of px on a 1080 px wide frame (32-140; e.g. 52
       for a series with small captions, 72 for bigger ones). Not set = the caption template's size. Bigger captions
       get shorter lines so they stay in the frame; the plan warns when a caption is still wider than the safe area.
+      A chosen caption size rebuilds the captions from the transcript words, so fix caption wording in the
+      transcript, not by hand in `captions-short.srt` (the plan warns when hand edits there would be lost).
     - `captions_during_hook`: `"show"` keeps the captions on screen while the hook title is up (as many Arabic
       channels do); `"hide"` (default) hides them so the hook is not read twice. After Effects captions follow it
       now; Premiere captions follow it after the next WhyNot Cut update (until then they stay hidden under the hook).
