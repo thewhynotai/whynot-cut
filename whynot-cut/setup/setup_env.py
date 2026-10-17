@@ -76,8 +76,42 @@ def uv_path(home: Path) -> Path:
 def uv_env(home: Path) -> dict:
     env = dict(os.environ)
     env.update(UV_PYTHON_INSTALL_DIR=str(home / "python"), UV_CACHE_DIR=str(home / "cache" / "uv"),
-               UV_HTTP_TIMEOUT="60", UV_HTTP_RETRIES="5", UV_NO_CONFIG="1")
+               UV_HTTP_TIMEOUT="60", UV_HTTP_RETRIES="5", UV_NO_CONFIG="1",
+               UV_SYSTEM_CERTS="1")       # T4.12: the OS trust store (antivirus HTTPS inspection), verification on
     return env
+
+
+def nvidia_present(runner=subprocess.run, smi: str | None = "auto") -> bool:
+    """An NVIDIA GPU: `nvidia-smi -L` (by its absolute path; never one in the current folder) exits 0 with a "GPU "
+    line within 10 s. Missing, slow or failing -> False (the cpu class, never a hang)."""
+    if smi == "auto":
+        smi = None
+        if plat.IS_WIN:              # the driver's own copy; older drivers: Program Files\NVIDIA Corporation\NVSMI
+            for cand in (Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32" / "nvidia-smi.exe",
+                         Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "NVIDIA Corporation" / "NVSMI"
+                         / "nvidia-smi.exe"):
+                if cand.is_absolute() and cand.is_file():
+                    smi = str(cand)
+                    break
+        else:
+            for d in os.environ.get("PATH", "").split(os.pathsep):
+                c = Path(d) / "nvidia-smi"
+                if d and Path(d).is_absolute() and c.is_file():
+                    smi = str(c)
+                    break
+    if not smi or not Path(smi).is_absolute():
+        return False
+    try:
+        r = runner([smi, "-L"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+    return getattr(r, "returncode", 1) == 0 and any(ln.startswith("GPU ") for ln in str(r.stdout or "").splitlines())
+
+
+GPU_FALLBACK = ("The GPU runtime couldn't be installed; installing the processor version instead",
+                "مقدرناش نثبت نسخة كارت الشاشة؛ هنثبت نسخة المعالج بدلها")
+INTEL_MAC_NOTE = ("Intel Mac: PyTorch publishes no macOS Intel wheels after 2.2, so the full runtime is the standard "
+                  "one on this Mac")
 
 
 MAC_CAFILE = "/etc/ssl/cert.pem"
@@ -366,6 +400,10 @@ def main(argv=None):
     # dev only (hidden): a runtime that may see the system site-packages, installed with --ignore-installed /
     # --reinstall so every locked package still lands inside the runtime
     ap.add_argument("--system-site-packages", dest="dev_system_site", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--runtime", choices=["base", "full"], default="base",
+                    help="base: the standard runtime (default); full: with PyTorch for this computer's hardware")
+    ap.add_argument("--class", dest="klass", choices=list(R.CLASSES), default=None,
+                    help=argparse.SUPPRESS)                              # builds and tests: force a hardware class
     a = ap.parse_args(argv)
     home = Path(a.home).expanduser() if a.home else plat.engine_home()
     key = R.platform_key()
@@ -383,7 +421,18 @@ def main(argv=None):
         rep["warnings"] = warns
         for w in warns:
             say(f"warning: {w['item']}. Fix: {w['fix']}")
-    ent = R.lock_entry(key, comp)
+    klass = None
+    if a.runtime == "full":
+        klass = a.klass or R.hardware_class(key, nvidia_present())
+        if klass is None:
+            rep["note_runtime"] = INTEL_MAC_NOTE if key == "mac-x64" else "this platform has no full runtime: standard"
+            say(rep["note_runtime"])
+    ent = R.lock_entry(key, comp, klass=klass)
+    if klass and ent["klass"] is None and ((comp.get("runtime") or {}).get("locks") or {}).get(klass) is None:
+        cand = PLUGIN / "setup" / "locks" / f"runtime-{klass}.txt"     # the shipped class lock (components.json
+        if cand.is_file():                                               # gets its entry from the installer track)
+            ent = {"file": cand, "declared_id": None, "klass": klass}
+    rep["runtime_class"] = ent["klass"]
     try:
         if not ent["file"].is_file():
             raise Failed(f"this plugin ships no runtime lock for {key or 'this platform'} ({ent['file'].name})",
@@ -398,8 +447,23 @@ def main(argv=None):
         if not a.check:
             home.mkdir(parents=True, exist_ok=True)
             (home / "models").mkdir(exist_ok=True)
-        rep["runtime"] = build(home, comp=comp, key=key, lock_file=ent["file"], rid=rid, by=a.by, check=a.check,
-                               force=a.force, dev_system_site=a.dev_system_site, uv=uv)
+        try:
+            rep["runtime"] = build(home, comp=comp, key=key, lock_file=ent["file"], rid=rid, by=a.by, check=a.check,
+                                   force=a.force, dev_system_site=a.dev_system_site, uv=uv)
+        except Failed:
+            if ent["klass"] != "cuda":
+                raise
+            for line in GPU_FALLBACK:                                    # once, with the processor lock
+                say(line)
+            rep["fallback"] = {"en": GPU_FALLBACK[0], "ar": GPU_FALLBACK[1]}
+            ent = R.lock_entry(key, comp, klass="cpu")
+            if ent["klass"] is None:
+                cand = PLUGIN / "setup" / "locks" / "runtime-cpu.txt"
+                ent = {"file": cand, "declared_id": None, "klass": "cpu"} if cand.is_file() else ent
+            rep["runtime_class"] = ent["klass"]
+            rid = R.runtime_id(ent["file"].read_bytes(), ent["declared_id"])
+            rep["runtime"] = build(home, comp=comp, key=key, lock_file=ent["file"], rid=rid, by=a.by, check=a.check,
+                                   force=a.force, dev_system_site=a.dev_system_site, uv=uv)
     except Failed as e:
         rep.update(error=str(e), how=e.how or "run reel setup again")
         if e.detail:

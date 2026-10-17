@@ -876,13 +876,18 @@ def cuda_home_bin() -> Path:
 
 def cuda_lib_dirs() -> list:
     """Folders with CUDA libraries for CTranslate2: the engine's own cuda/bin (NVIDIA redist), then NVIDIA's pip wheels
-    (nvidia-cublas-cu12 ...) in this interpreter's site-packages."""
+    (nvidia-cublas-cu12 ...) in this interpreter's site-packages, then torch/lib when it holds cuBLAS (T4.12: the cuda
+    class runtime's one CUDA library set, no separate download)."""
     sub = "bin" if IS_WIN else "lib"
     out = [cuda_home_bin()] if cuda_home_bin().is_dir() else []
+    blas = "cublas64_12.dll" if IS_WIN else "libcublas.so.12"
     for sp in sys.path:
         root = Path(sp) / "nvidia"
         if root.is_dir():
             out += [d / sub for d in sorted(root.iterdir()) if (d / sub).is_dir()]
+        tl = Path(sp) / "torch" / "lib"
+        if (tl / blas).is_file() and tl not in out:
+            out.append(tl)
     return out
 
 

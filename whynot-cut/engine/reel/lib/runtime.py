@@ -98,15 +98,41 @@ def components(path: Path | None = None) -> dict:
         return {}
 
 
-def lock_entry(key: str | None, comp: dict | None = None, plugin_dir: Path | None = None) -> dict:
-    """{file: Path, declared_id: str | None} for a platform: components.json runtime.locks.<key>, else the default
-    name setup/locks/runtime-<key>.lock."""
+CLASSES = ("cuda", "mps", "cpu")
+
+
+def hardware_class(key: str | None, nvidia: bool) -> str | None:
+    """The hardware-class lock for a platform (T4.12): "cuda" (Windows x64 with an NVIDIA GPU), "cpu" (Windows x64
+    without), "mps" (Apple Silicon), None (Intel Mac: PyTorch has no macOS x86_64 wheels after 2.2; Linux; unknown):
+    the base lock only."""
+    if key == "win-x64":
+        return "cuda" if nvidia else "cpu"
+    if key == "mac-arm64":
+        return "mps"
+    return None
+
+
+def lock_entry(key: str | None, comp: dict | None = None, plugin_dir: Path | None = None,
+               klass: str | None = None) -> dict:
+    """{file: Path, declared_id: str | None, klass: str | None} for a platform: components.json runtime.locks.<key>,
+    else the default name setup/locks/runtime-<key>.lock. With `klass` (T4.12: cuda | mps | cpu) the class lock
+    runtime.locks.<klass>.path is used unless it is missing, a placeholder ("<pending>"), outside the plugin folder or
+    not a file: then the platform entry, as before (klass None in the answer)."""
     plugin_dir = plugin_dir or PLUGIN_DIR
     comp = components() if comp is None else comp
-    e = (((comp.get("runtime") or {}).get("locks") or {}).get(key or "") or {})
+    locks = ((comp.get("runtime") or {}).get("locks") or {})
+    if klass in CLASSES:
+        ce = locks.get(klass) if isinstance(locks.get(klass), dict) else {}
+        rel = ce.get("path") if isinstance(ce.get("path"), str) else ce.get("file")
+        if isinstance(rel, str) and rel.strip() and not rel.strip().startswith("<"):
+            f = (plugin_dir / rel).resolve()
+            if f.is_relative_to(Path(plugin_dir).resolve()) and f.is_file():
+                did = ce.get("id") if isinstance(ce.get("id"), str) else None
+                return {"file": plugin_dir / rel, "declared_id": did, "klass": klass}
+    e = locks.get(key or "") or {}
     rel = e.get("file") if isinstance(e.get("file"), str) else f"setup/locks/runtime-{key}.lock"
     did = e.get("id") if isinstance(e.get("id"), str) else None
-    return {"file": plugin_dir / rel, "declared_id": did}
+    return {"file": plugin_dir / rel, "declared_id": did, "klass": None}
 
 
 def lock_sha256(data: bytes) -> str:
@@ -159,6 +185,63 @@ def parse_lock(text: str) -> dict[str, dict]:
         out[normalize(m.group(1))] = {"name": m.group(1), "version": m.group(3), "hashes": hashes,
                                      "marker": (m.group(4) or "").strip() or None}
     return out
+
+
+# --------------------------------------------------------------------------- TLS (T4.12, Addendum J J2.3)
+def trust_context(cafile: str | None = None):
+    """An SSL client context that verifies certificates and host names: the operating system's own trust store
+    (truststore: Windows CryptoAPI, macOS Keychain), so an antivirus doing HTTPS inspection with its root installed
+    works WITH verification on; `cafile` adds a trust file (tests, a pinned CA). Without truststore (a runtime from
+    before T4.12): Python's default verifying context. Verification is never turned off."""
+    import ssl
+    ctx = None
+    try:
+        import truststore
+        ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except Exception:  # noqa: BLE001  not installed (older runtime): the default verifying context
+        ctx = ssl.create_default_context()
+    if cafile:
+        ctx = ssl.create_default_context(cafile=cafile) if not isinstance(ctx, ssl.SSLContext) else ctx
+        ctx.load_verify_locations(cafile=cafile)
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.check_hostname = True
+    return ctx
+
+
+def configure_downloads() -> bool:
+    """Model / file downloads through huggingface_hub use a client built on trust_context() (one context per client,
+    never a global patch of ssl). True when it was set."""
+    try:
+        import huggingface_hub as hub
+        setter = getattr(hub, "set_client_factory", None)
+        if not callable(setter):
+            return False
+        import httpx
+        hooks = {}
+        try:                           # the hub's own request hook (HF_HUB_OFFLINE, its headers) stays in place
+            from huggingface_hub.utils._http import hf_request_event_hook
+            hooks = {"request": [hf_request_event_hook]}
+        except Exception:  # noqa: BLE001
+            pass
+
+        def factory():
+            return httpx.Client(verify=trust_context(), follow_redirects=True, timeout=None, event_hooks=hooks)
+        setter(factory)
+        aset = getattr(hub, "set_async_client_factory", None)
+        if callable(aset):
+            try:
+                from huggingface_hub.utils._http import async_hf_request_event_hook
+                ahooks = {"request": [async_hf_request_event_hook]}
+            except Exception:  # noqa: BLE001
+                ahooks = {}
+
+            def afactory():
+                return httpx.AsyncClient(verify=trust_context(), follow_redirects=True, timeout=None,
+                                         event_hooks=ahooks)
+            aset(afactory)
+        return True
+    except Exception:  # noqa: BLE001  an older hub: its own verifying defaults stay
+        return False
 
 
 # --------------------------------------------------------------------------- runtime folders and stamps

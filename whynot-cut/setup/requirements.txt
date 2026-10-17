@@ -2,9 +2,18 @@
 # platform (setup/locks/runtime-<platform>.lock, Python 3.12; 3.0 T2.1). After editing a line here, recompile the
 # three locks with the command written at the top of each lock, then run the suite on a runtime built from them.
 # macOS lines are the versions verified in production (2026-10-10).
+# Hardware-class locks (Phase 4 T4.12, opt-in `reel setup --runtime full`): requirements-torch.in = these lines + torch /
+# torchaudio 2.8. From whynot-cut/, with the uv in the engine home (uv: --extra-index-url has priority over --index-url,
+# so the CUDA index goes in --extra-index-url; the lock carries both lines for `uv pip sync --require-hashes`):
+#   uv pip compile setup/requirements-torch.in --generate-hashes --only-binary :all: --python-version 3.12 --python-platform x86_64-pc-windows-msvc --extra-index-url https://download.pytorch.org/whl/cu128 --emit-index-url --system-certs -o setup/locks/runtime-cuda.txt
+#   uv pip compile setup/requirements-torch.in --generate-hashes --only-binary :all: --python-version 3.12 --python-platform x86_64-pc-windows-msvc --system-certs -o setup/locks/runtime-cpu.txt
+#   uv pip compile setup/requirements-torch.in --generate-hashes --only-binary :all: --python-version 3.12 --python-platform aarch64-apple-darwin --system-certs -o setup/locks/runtime-mps.txt
 faster-whisper==1.2.1
 # faster-whisper's model download; 1.x is the verified major (2.x changed its HTTP stack, untested here)
 huggingface-hub>=0.21,<2
+# the operating system's own certificate store for every download (HTTPS inspection by antivirus works with
+# verification on; Addendum J J2.3, T4.12)
+truststore>=0.10,<1
 ctranslate2>=4.6,<5
 av>=14,<21
 numpy==2.0.2 ; python_version < "3.10"

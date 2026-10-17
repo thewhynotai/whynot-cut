@@ -1,0 +1,6 @@
+# WhyNot Cut runtime with PyTorch (Phase 4 T4.12): the engine's ranges plus torch + torchaudio 2.8, one lock per
+# hardware class (locks/runtime-cuda.txt, runtime-mps.txt, runtime-cpu.txt). Recompile with the commands in
+# requirements.txt's header.
+-r requirements.txt
+torch==2.8.*
+torchaudio==2.8.*
