@@ -62,3 +62,15 @@ file.
 
 - **What.** The cleanup of a wrong effect in the legacy blur path needs `remove()` on Premiere QE components.
 - **Gate 6 check.** Confirm on the installed Premiere version whether `remove()` exists.
+
+## R-L5. After Effects music ducking keys (open, T4.6)
+
+- **What.** T4.6 writes Audio Levels keys on the MUSIC layer with a floor of −60 dB. The old fade used −48 dB. The keys
+  are meant to use linear interpolation.
+- **Unknown until a live run.**
+  - Does After Effects accept −60 dB, or does it clamp the value?
+  - Does it keep the keys linear?
+
+  If it clamps, the read-back reports a mismatch.
+- **Gate 4 check.** Do one live motion build with a licensed track. Read the MUSIC layer's keys back on both channels,
+  then listen to the render at a dip.
