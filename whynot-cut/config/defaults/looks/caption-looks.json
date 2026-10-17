@@ -1,0 +1,230 @@
+{
+  "version": 1,
+  "note": "Caption looks (R-4.1): <grouping>-<presentation>, our own words. Pixel values are at a 1080 px wide frame and scale with the width. Every number marked starting is a starting value, measured on real reels before it is called final.",
+  "ref_width": 1080,
+  "groupings": {
+    "word": {
+      "desc": "one word per caption, timed to the word (fast, energetic content)",
+      "min_ms": 160
+    },
+    "phrase": {
+      "desc": "2-4 words, never across a pause or a sentence end",
+      "min_words": 2,
+      "max_words": 4,
+      "pause_break_ms": 250,
+      "min_ms": 300
+    },
+    "line": {
+      "desc": "one readable line up to the safe width, split at clause boundaries",
+      "pause_break_ms": 350,
+      "min_ms": 700,
+      "max_ms": 5500,
+      "conjunctions": [
+        "و",
+        "او",
+        "أو",
+        "لكن",
+        "بس",
+        "عشان",
+        "لان",
+        "لأن",
+        "يعني",
+        "ثم",
+        "and",
+        "but",
+        "or",
+        "so",
+        "because"
+      ]
+    }
+  },
+  "glue": {
+    "units_extra": [
+      "ملغ",
+      "مجم",
+      "مل",
+      "جم",
+      "جرام",
+      "كجم",
+      "كيلو",
+      "سم",
+      "مم",
+      "متر",
+      "mg",
+      "ml",
+      "g",
+      "cm",
+      "mm"
+    ],
+    "note": "on top of the motion_layout.glue units: a number and its unit are never split"
+  },
+  "presentations": {
+    "clean": {
+      "desc": "text with a soft brand-tinted drop plate, no outline stroke",
+      "drop_plate": {
+        "role": "ink",
+        "offset_px": 4,
+        "blur_px": 10,
+        "opacity": 0.35,
+        "max_opacity": 0.72,
+        "opacity_step": 0.15,
+        "scrim": {
+          "pad_x_px": 22,
+          "pad_y_px": 14,
+          "blur_px": 7,
+          "coverage": 0.95,
+          "target_contrast": 4.5,
+          "steady_ms": 4000,
+          "note": "only when white fails on the footage itself: a soft-edged ink scrim behind the line (judged as covering the text at `coverage` of its opacity), stepped until white reaches target_contrast (moving footage: past the large-text minimum) or max_opacity; the glyph-shaped drop plate alone is never counted for contrast"
+        }
+      }
+    },
+    "boxed": {
+      "desc": "text on a squared plate in brand ink with an accent foot along its bottom edge",
+      "plate": {
+        "role": "ink",
+        "radius_px": 6,
+        "pad_x_px": 26,
+        "pad_y_px": 12,
+        "opacity": 0.92
+      },
+      "foot": {
+        "role": "accent",
+        "height_px": 8
+      }
+    },
+    "highlight": {
+      "desc": "the word being spoken gets the system's foot rule in the brand highlight colour, sliding word to word under the line's lowest ink (never through Arabic joining strokes or descenders); the text keeps the clean look's soft drop plate; stacking: plate (and scrim), then the foot, then the text",
+      "drop_plate": {
+        "role": "ink",
+        "offset_px": 4,
+        "blur_px": 10,
+        "opacity": 0.35,
+        "max_opacity": 0.72,
+        "opacity_step": 0.15,
+        "scrim": {
+          "pad_x_px": 22,
+          "pad_y_px": 14,
+          "blur_px": 7,
+          "coverage": 0.95,
+          "target_contrast": 4.5,
+          "steady_ms": 4000,
+          "note": "only when white fails on the footage itself: a soft-edged ink scrim behind the line (judged as covering the text at `coverage` of its opacity), stepped until white reaches target_contrast (moving footage: past the large-text minimum) or max_opacity; the glyph-shaped drop plate alone is never counted for contrast"
+        }
+      },
+      "underlay": {
+        "role": "highlight",
+        "gap_em": 0.06,
+        "height_px": 8,
+        "pad_em": 0.04,
+        "slide_frames": 4,
+        "min_contrast": 3.0,
+        "colour": "the client's T4.2 highlight_colour (the compiled spec's style.highlight.hex) when set, else the brand highlight; it must show against what is behind it (scrim included) at min_contrast, else the next brand colour (highlight, accent, primary), else a note",
+        "geometry": "one y per line: the lower of the line's lowest ink and the font's descender line, + gap_em; height_px thick (the boxed foot's 8 px); each word's ink bounds + pad_em, square ends (R2 round 5, designer's pick)",
+        "note": "the band keeps the brand highlight colour on every frame (it is laid over the plate): on a bright frame the scrim gets stronger instead"
+      }
+    }
+  },
+  "emphasis": {
+    "colour": {
+      "desc": "the emphasised word takes the brand highlight colour (contrast-checked)",
+      "role": "highlight",
+      "on_band": {
+        "use": "weight",
+        "why": "a coloured word would sit on the moving highlight band"
+      }
+    },
+    "weight": {
+      "desc": "the emphasised word is 200 weight units heavier in the same family (never italic)",
+      "step_weight": 200
+    },
+    "tag": {
+      "desc": "the emphasised word sits on a squared accent tag whose bottom edge sits on the caption's bottom line (the plate's foot, or the line's bottom)",
+      "role": "accent",
+      "radius_px": 4,
+      "pad_em": 0.18,
+      "pad_y_px": 4,
+      "foot_px": 4,
+      "foot_role": "highlight",
+      "foot_note": "clean and highlight looks: a highlight rule flush with the tag's bottom edge anchors it like the boxed foot (R2 review); boxed tags merge into the plate's foot instead"
+    }
+  },
+  "refused": {
+    "word-highlight": {
+      "use": "word-boxed",
+      "why": "a one-word caption has nothing to move the highlight between"
+    }
+  },
+  "motion": {
+    "entrance": "focus_in",
+    "enter_frames": 6,
+    "enter_scale_from": 0.96,
+    "enter_travel_px": 0,
+    "enter_ease": "ease_out",
+    "exit_frames": 4,
+    "fps_base": 30
+  },
+  "fit": {
+    "shrink_step_px": 2,
+    "floor_ratio": 0.85,
+    "floor_min_px": 44,
+    "regroup_pause_ms": 150
+  },
+  "gallery_budget_s": 20,
+  "auto": {
+    "fast_wps": 3.2,
+    "slow_wps": 2.2,
+    "pause_ignore_ms": 1500,
+    "presentation": "clean",
+    "emphasis": "colour",
+    "basis": "starting values (R-4.1 §5), measured against editor picks on real reels"
+  },
+  "legacy": {
+    "clean": "phrase-clean",
+    "box": "phrase-boxed",
+    "highlight": "phrase-highlight",
+    "bold-large": "line-clean"
+  },
+  "looks": {
+    "word-clean": {
+      "grouping": "word",
+      "presentation": "clean",
+      "size": 84
+    },
+    "word-boxed": {
+      "grouping": "word",
+      "presentation": "boxed",
+      "size": 80
+    },
+    "phrase-clean": {
+      "grouping": "phrase",
+      "presentation": "clean",
+      "size": 64
+    },
+    "phrase-boxed": {
+      "grouping": "phrase",
+      "presentation": "boxed",
+      "size": 62
+    },
+    "phrase-highlight": {
+      "grouping": "phrase",
+      "presentation": "highlight",
+      "size": 64
+    },
+    "line-clean": {
+      "grouping": "line",
+      "presentation": "clean",
+      "size": 72
+    },
+    "line-boxed": {
+      "grouping": "line",
+      "presentation": "boxed",
+      "size": 58
+    },
+    "line-highlight": {
+      "grouping": "line",
+      "presentation": "highlight",
+      "size": 58
+    }
+  }
+}
