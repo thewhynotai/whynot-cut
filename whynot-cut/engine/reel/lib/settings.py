@@ -31,9 +31,11 @@ DEFAULTS = {
     "panel_link": True,           # start the engine the Premiere panel talks to (`reel serve`) at session start
     "magnific_budget_credits": 300,  # most Magnific credits one edit may spend (0 = never use Magnific)
     "evidence_gate": False,       # Stop hook: send back a turn that says "ready" without `reel qc` (hooks/README.md)
+    "background_priority": "below_normal",  # background `reel` work at a lower priority so Premiere stays smooth | normal
 }
 CHOICES = {"language": {"en", "ar"}, "approval": {"ask", "auto"},
-           "whisper_model": {"large-v3", "large-v3-turbo", "medium", "small"}}
+           "whisper_model": {"large-v3", "large-v3-turbo", "medium", "small"},
+           "background_priority": {"below_normal", "normal"}}
 NUMBERS = {"magnific_budget_credits"}        # numbers of 0 or more
 
 

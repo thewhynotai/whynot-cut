@@ -154,6 +154,7 @@ def _sandbox() -> None:
         "TMP": str(tmp), "TEMP": str(tmp), "TMPDIR": str(tmp),
         plat.FONT_DIRS_ENV: str(box / "fonts"),
         "WHYNOT_ACCEL": "off",          # T4.10: the suite never touches the GPU (tests opt in with fakes)
+        "WHYNOT_PRIORITY": "normal",    # T4.11: the dev-PC policy (full resources); BelowNormal is tested with fakes
     })
     if plat.IS_WIN:
         os.environ["APPDATA"] = str(user / "AppData" / "Roaming")

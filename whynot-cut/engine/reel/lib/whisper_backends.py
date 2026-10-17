@@ -11,9 +11,13 @@ A runner from `make_runner` decodes one stretch of 16 kHz audio and returns chun
    words: [{id, segment_id, word, start_ms, end_ms, probability}], language, language_probability}
 Models load from the complete local snapshot when there is one (no network: offline-safe, engine §4.4).
 `bench` measures the real-time factor on this machine and caches it in <engine home>/bench for `reel doctor`.
+T4.11 (G13-RUN): on an NVIDIA GPU the batch is fitted to the free VRAM at load time, leaving room for Premiere
+(`fit_batch`); nothing fits -> the CPU, with a message, never an out-of-memory loop. `run.release()` drops the model
+after the job (transcribe / bench call it), so the next GPU job finds the memory free.
 """
 from __future__ import annotations
 
+import gc
 import os
 import platform
 import subprocess
@@ -346,6 +350,62 @@ def redecode_span(raws: list, k: int, total_s: float) -> tuple[float, float]:
     return max(0.0, r["start"] - before), min(total_s, r["end"] + after)
 
 
+# --------------------------------------------------------------------------- VRAM fit (T4.11)
+HEADROOM_MB = 1536              # left free for Premiere (and the desktop) when Whisper takes the GPU
+PER_BATCH_MB = 700              # each item of a batched decode
+_MODEL_VRAM_MB_START = {("large-v3", "float16"): 3300, ("large-v3", "int8_float16"): 1900,
+                        ("large-v3-turbo", "float16"): 1800, ("large-v3-turbo", "int8_float16"): 1100}
+MODEL_VRAM_MB = dict(_MODEL_VRAM_MB_START)     # starting constants; T4.14 replaces them with measured peaks
+_FALLBACK_ROW = ("large-v3", "float16")        # an unknown model or type: the most conservative row
+
+
+def vram_free_mb(runner=None) -> int | None:
+    """Free memory of the first NVIDIA GPU in MB (nvidia-smi by its absolute path, never one planted in the current
+    folder; 10 s), None on any failure or when there is no nvidia-smi (then nothing is started). `runner` replaces
+    subprocess.run (tests; only an injected runner is ever given the bare name). WHYNOT_ACCEL=off (the suite, a user
+    who turned the GPU off) queries nothing."""
+    from . import accel
+    if accel.off():
+        return None
+    smi = accel._nvidia_smi() or (None if runner is None else "nvidia-smi")
+    if not smi:
+        return None
+    try:
+        p = (runner or subprocess.run)([smi, "--query-gpu=memory.free", "--format=csv,noheader,nounits"], capture_output=True, text=True,
+                   timeout=10)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if getattr(p, "returncode", 1) != 0:
+        return None
+    first = (str(p.stdout or "").strip().splitlines() or [""])[0].strip()
+    try:
+        mb = float(first)
+    except ValueError:
+        return None
+    return int(mb) if mb >= 0 and mb == mb else None
+
+
+def fit_batch(model: str, compute_type: str, configured, free_mb: int | None) -> tuple[int, str]:
+    """(batch size, "cuda" | "cpu"): the largest batch <= `configured` whose need fits `free_mb`, where need(bs) =
+    the model's VRAM + PER_BATCH_MB x max(bs, 1) + HEADROOM_MB. Batch 1 is sequential (0); nothing fits -> "cpu".
+    free_mb None (not measurable) -> (configured, "cuda"): today's behaviour, the out-of-memory halving still guards."""
+    try:
+        conf = max(0, int(configured or 0))
+    except (TypeError, ValueError):
+        conf = 0
+    conf = conf if conf > 1 else 0
+    if free_mb is None:
+        return conf, "cuda"
+    base = MODEL_VRAM_MB.get((model, compute_type), MODEL_VRAM_MB.get(_FALLBACK_ROW, _MODEL_VRAM_MB_START[_FALLBACK_ROW]))
+
+    def need(bs):
+        return base + PER_BATCH_MB * max(bs, 1) + HEADROOM_MB
+    for bs in range(conf, 1, -1):
+        if need(bs) <= free_mb:
+            return bs, "cuda"
+    return (0, "cuda") if need(1) <= free_mb else (0, "cpu")
+
+
 def _oom(e: Exception) -> bool:
     s = str(e).lower()
     return "out of memory" in s or "cuda_error_out_of_memory" in s
@@ -363,10 +423,21 @@ def _ct2_runner(model_size: str, vad: bool, log_to, batch_size: int, cfg: dict, 
 
     def load(device: str | None = None):
         expected = None if "device" in state else signature()
-        state["model"], state["device"], state["compute_type"] = load_ct2(model_size, compute_type,
-                                                                          device=device or want)
+        dev_req, fit = device or want, None
+        if dev_req != "cpu" and _device_tries(cfg, dev_req, compute_type)[0][0] == "cuda":
+            free = vram_free_mb()      # inside the job's GPU slot: another engine job's model is never counted
+            fit = fit_batch(model_size, _gpu_compute_type(cfg), effective_batch("cuda"), free)
+            if fit[1] == "cpu":       # Premiere (or another app) holds the card: the CPU now, not an OOM loop
+                log(log_to, f"The graphics card is busy ({free / 1024:.1f} GB free): transcribing on the processor")
+                state.setdefault("fallback_from", expected or signature())
+                dev_req = "cpu"
+        state["model"], state["device"], state["compute_type"] = load_ct2(model_size, compute_type, device=dev_req)
         state["cpu_threads"] = cpu_threads(cfg)
-        set_batch(effective_batch(state["device"]))
+        bs = effective_batch(state["device"])
+        if fit and state["device"] == "cuda" and fit[0] < bs:      # a smaller batch fits: the run still WANTED bs,
+            state.setdefault("fallback_from", expected or signature())   # so resumed chunks match (MI-12, as OOM)
+            bs = fit[0]
+        set_batch(bs)
         if expected and expected["device"] != state["device"]:      # the GPU would not even load the model
             state.setdefault("fallback_from", expected)
         log(log_to, f"Whisper {model_size} on {state['device']} ({state['compute_type']}), VAD {'on' if vad else 'off'}, "
@@ -455,9 +526,43 @@ def _ct2_runner(model_size: str, vad: bool, log_to, batch_size: int, cfg: dict, 
                 if state["device"] != "cuda":
                     raise
                 degrade(e)
+    def release():
+        """Drop the model and the batched pipeline (VRAM / RAM back) and keep what the caller reads afterwards
+        (device, compute type, batch size, redecoded). Idempotent; the next run() loads again."""
+        state.pop("pipeline", None)
+        state.pop("model", None)
+        gc.collect()
+
     run.state, run.backend, run.signature = state, "ct2", signature
     run.load = lambda: run.state.get("model") or load()
+    run.release = release
     return run
+
+
+def _gpu_compute_type(cfg: dict) -> str:
+    return str(cfg.get("gpu_compute_type") or "float16")
+
+
+def _mlx_holders() -> list:
+    """mlx-whisper's cached model holder(s) (it keeps the last model in a class attribute)."""
+    out = []
+    for name in ("mlx_whisper.transcribe", "mlx_whisper.load_models"):
+        mod = sys.modules.get(name)
+        h = getattr(mod, "ModelHolder", None) if mod else None
+        if h is not None and h not in out:
+            out.append(h)
+    return out
+
+
+def _mlx_clear_cache() -> None:
+    mx = sys.modules.get("mlx.core")
+    for f in (getattr(mx, "clear_cache", None), getattr(getattr(mx, "metal", None), "clear_cache", None)):
+        if callable(f):
+            try:
+                f()
+            except Exception:  # noqa: BLE001  advisory
+                pass
+            return
 
 
 def _mlx_runner(model_size: str, vad: bool, log_to):
@@ -477,9 +582,19 @@ def _mlx_runner(model_size: str, vad: bool, log_to):
                                       word_timestamps=True, condition_on_previous_text=False, initial_prompt=prompt,
                                       temperature=tuple(TEMPERATURES), verbose=None)
         return mlx_result(res, language)
+    def release():
+        state.pop("mlx", None)
+        for h in _mlx_holders():
+            for attr in ("model", "model_path"):
+                if hasattr(h, attr):
+                    setattr(h, attr, None)
+        gc.collect()
+        _mlx_clear_cache()
+
     run.state, run.backend = state, "mlx"
     run.signature = lambda: {"device": "metal", "batch_size": 0, "vad": False}
     run.load = lambda: run.state.get("mlx") or load()
+    run.release = release
     return run
 
 
@@ -531,19 +646,25 @@ def bench_file() -> Path:
 def bench(audio, model: str = "large-v3", backend: str | None = None, batch_size: int | None = None,
           source: str | None = None, clock=None) -> dict:
     """Decode `audio` (16 kHz float32, ~5 minutes of speech) once with VAD, as an episode chunk is decoded, and
-    record the real-time factor (minutes of audio per minute of decoding) for `reel doctor`. The client's vocabulary
+    record the real-time factor (minutes of audio per minute of decoding) for `reel doctor`. Advisory: it runs outside
+    the engine GPU slot and measures the machine as it is (the VRAM fit counts whatever else holds the card). The client's vocabulary
     hint is used when the request has a client (`--root`): it changes the speed (prompt tokens x beams x batch), so
     the cache key records it and the exact batch size."""
     import time
     clock = clock or time.perf_counter
     run = make_runner(model, vad=True, backend=backend, batch_size=batch_size)
     prompt = load_config("transcription.json").get("initial_prompt")
-    t0 = clock()
-    run.load()
-    t1 = clock()
-    t2 = clock()
-    r = run(audio, 0, None, prompt)
-    t3 = clock()
+    try:
+        t0 = clock()
+        run.load()
+        t1 = clock()
+        t2 = clock()
+        r = run(audio, 0, None, prompt)
+        t3 = clock()
+    finally:
+        rel = getattr(run, "release", None)
+        if callable(rel):
+            rel()
     st = run.state
     audio_s = round(len(audio) / 16000, 1)
     el = max(t3 - t2, 1e-6)

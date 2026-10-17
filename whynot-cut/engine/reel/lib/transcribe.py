@@ -66,6 +66,26 @@ def _glossary_terms() -> list[str]:
     return [t for grp in g.get("terms", {}).values() for t in grp]
 
 
+def _decode(paths, run, audio, chunked, out, rng, cfg, source_video, model_size, language, initial_prompt, force):
+    """(segs, words, lang, prob, extra, decoders): one pass, or the episode chunk runner for a long clip."""
+    import json
+    from .common import sha1_head
+    if not chunked:
+        r = run(audio, 0, language, initial_prompt)
+        return r["segments"], r["words"], r["language"], r["language_probability"], {}, {}
+    from .episode import chunk_plan, run_chunks, stitch
+    cdir = out / "chunks"
+    fp = sha1_head(source_video) + ":" + json.dumps(rng or {}, sort_keys=True, default=str)
+    plan = chunk_plan(cdir, audio, fp, int(float(cfg.get("chunk_minutes", 10)) * 60000), language, force)
+    done = run_chunks(paths, cdir, audio, plan, run, model=model_size, prompt=initial_prompt,
+                      language=language, label=f"{paths.video_id} (long clip)")
+    segs, words = stitch(done["results"])
+    extra = {"chunks": len(plan["chunks"]), "chunks_run": done["ran"]}
+    decoders = {"decoders": done["decoders"], "mixed_decoders": len(done["decoders"]) > 1,
+                "redecoded_segments": done["redecoded"]}
+    return segs, words, done["language"], done["language_probability"], extra, decoders
+
+
 def transcribe(paths: Paths, source_video: Path, model_size: str = "large-v3",
                language: str | None = None, initial_prompt: str | None = None,
                compute_type: str = "int8", *, backend: str | None = None, batch_size: int | None = None,
@@ -73,9 +93,8 @@ def transcribe(paths: Paths, source_video: Path, model_size: str = "large-v3",
     """The clip's transcript. Up to `long_clip_minutes` (transcription.json, default 10): one pass without VAD, as in
     2.x. A longer clip (IM-14) goes through the episode chunk runner: ~`chunk_minutes` chunks cut in silence, VAD,
     resumable checkpoints in 02_transcription/chunks/ (`force` drops them), batched on an NVIDIA GPU."""
-    import json
     from . import whisper_backends as WB
-    from .common import sha1_head, source_range
+    from .common import source_range
     out = paths.p("02_transcription")
     rng = source_range(paths)
     wav = extract_audio(source_video, out / "dialogue_16k_mono.wav", rng)
@@ -100,21 +119,13 @@ def transcribe(paths: Paths, source_video: Path, model_size: str = "large-v3",
         gpu_wait = round(t0 - tw, 1)
         run = WB.make_runner(model_size, chunked, paths, backend=backend, batch_size=batch_size,
                              compute_type=compute_type, device=accel.whisper_device(lane))
-        if chunked:
-            from .episode import chunk_plan, run_chunks, stitch
-            cdir = out / "chunks"
-            fp = sha1_head(source_video) + ":" + json.dumps(rng or {}, sort_keys=True, default=str)
-            plan = chunk_plan(cdir, audio, fp, int(float(cfg.get("chunk_minutes", 10)) * 60000), language, force)
-            done = run_chunks(paths, cdir, audio, plan, run, model=model_size, prompt=initial_prompt,
-                              language=language, label=f"{paths.video_id} (long clip)")
-            segs, words = stitch(done["results"])
-            lang, prob = done["language"], done["language_probability"]
-            extra = {"chunks": len(plan["chunks"]), "chunks_run": done["ran"]}
-            decoders = {"decoders": done["decoders"], "mixed_decoders": len(done["decoders"]) > 1,
-                        "redecoded_segments": done["redecoded"]}
-        else:
-            r = run(audio, 0, language, initial_prompt)
-            segs, words, lang, prob = r["segments"], r["words"], r["language"], r["language_probability"]
+        try:
+            segs, words, lang, prob, extra, decoders = _decode(paths, run, audio, chunked, out, rng, cfg, source_video,
+                                                              model_size, language, initial_prompt, force)
+        finally:                        # T4.11: the model leaves memory before the slot does (success, error, Ctrl+C)
+            rel = getattr(run, "release", None)
+            if callable(rel):
+                rel()
     st = getattr(run, "state", {}) or {}
     elapsed = round(time.time() - t0, 1)
     log(paths, f"Transcribed {len(segs)} segments / {len(words)} words in {elapsed}s; lang={lang} p={prob}")
@@ -741,22 +752,26 @@ def relisten(paths: Paths, word_ids: list | None = None, model_size: str = "larg
             wins.append({"a": a, "b": b, "ids": [i]})
     audio = whisper_audio(out / "dialogue_16k_mono.wav")
     model, device, _ct = whisper_model(model_size)
-    lang = read_json(out / "transcript.json", {}).get("meta", {}).get("language")
-    hint = load_config("transcription.json").get("initial_prompt")
-    res = []
-    for w in wins:
-        clip = audio[int(w["a"] * 16):int(w["b"] * 16)]
-        heard = " ".join(words[k]["word"] for k in sorted(words) if w["a"] <= words[k]["start_ms"] < w["b"])
-        alts = {}
-        for label, kw in (("no_hint", {}), ("profile_hint", {"initial_prompt": hint}), ("warmer", {"temperature": 0.4})):
-            if label == "profile_hint" and not hint:
-                continue
-            segs, _ = model.transcribe(clip, language=lang, beam_size=5, condition_on_previous_text=False, **kw)
-            alts[label] = " ".join(s.text.strip() for s in segs)
-        res.append({"from": fmt_ts(w["a"], "."), "to": fmt_ts(w["b"], "."), "word_ids": w["ids"],
-                    "flagged": [words[k]["word"] for k in w["ids"]], "transcript": heard, "alternatives": alts})
-    rep = {"generated": __import__("time").strftime("%Y-%m-%dT%H:%M:%S"), "device": device, "windows": res,
-           "note": "candidates only: correct a word only when the editor hears it (or the alternatives agree and "
-                   "the context makes it clear), via transcript-corrections.json"}
-    write_json(out / "relisten.json", rep)
-    return rep
+    try:
+        lang = read_json(out / "transcript.json", {}).get("meta", {}).get("language")
+        hint = load_config("transcription.json").get("initial_prompt")
+        res = []
+        for w in wins:
+            clip = audio[int(w["a"] * 16):int(w["b"] * 16)]
+            heard = " ".join(words[k]["word"] for k in sorted(words) if w["a"] <= words[k]["start_ms"] < w["b"])
+            alts = {}
+            for label, kw in (("no_hint", {}), ("profile_hint", {"initial_prompt": hint}), ("warmer", {"temperature": 0.4})):
+                if label == "profile_hint" and not hint:
+                    continue
+                segs, _ = model.transcribe(clip, language=lang, beam_size=5, condition_on_previous_text=False, **kw)
+                alts[label] = " ".join(s.text.strip() for s in segs)
+            res.append({"from": fmt_ts(w["a"], "."), "to": fmt_ts(w["b"], "."), "word_ids": w["ids"],
+                        "flagged": [words[k]["word"] for k in w["ids"]], "transcript": heard, "alternatives": alts})
+        rep = {"generated": __import__("time").strftime("%Y-%m-%dT%H:%M:%S"), "device": device, "windows": res,
+               "note": "candidates only: correct a word only when the editor hears it (or the alternatives agree and "
+                       "the context makes it clear), via transcript-corrections.json"}
+        write_json(out / "relisten.json", rep)
+        return rep
+    finally:                            # T4.11: Whisper leaves memory after the job, on the error path too
+        model = segs = clip = None      # a lazy segment generator holds the model too
+        __import__("gc").collect()
