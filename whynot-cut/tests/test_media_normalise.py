@@ -455,8 +455,29 @@ class TestReview1Conform(_Out):
 
 # --------------------------------------------------------------------------- batch B (executor acceptance of 8bd6b60)
 def _junction(link: Path, target: Path):
-    import _winapi
-    _winapi.CreateJunction(str(target), str(link))
+    """A folder link: a junction on Windows (no privilege needed), a symlink on macOS / Linux."""
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        os.symlink(target, link, target_is_directory=True)
+
+
+def _unlink_dir(link: Path):
+    """Remove a folder link as a name, never its target."""
+    if os.name == "nt":
+        os.rmdir(link)
+    else:
+        os.unlink(link)
+
+
+def _can_symlink() -> bool:
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            os.symlink(os.path.join(d, "t"), os.path.join(d, "l"))
+            return True
+        except (OSError, NotImplementedError):
+            return False
 
 
 class TestBatchBNames(_Out):
@@ -486,12 +507,17 @@ class TestBatchBNames(_Out):
         self.assertTrue(again["reused"])
         self.assertEqual(again["path"], ra["path"])
 
-    def test_tag_is_stable_and_ignores_the_path_case_on_windows(self):
+    def test_tag_is_stable_and_never_folds_case(self):
+        """Review 19049fe #8: names differing only in case (a case-sensitive folder, WSL, a Linux share) never share
+        an intermediate, on any OS; the client folder's own spelling does not matter (the tag is relative to it)."""
         a, b = self.two_cams()
         self.assertEqual(MN._source_tag(a, self.tmp), MN._source_tag(a, self.tmp))
         self.assertNotEqual(MN._source_tag(a, self.tmp), MN._source_tag(b, self.tmp))
-        if os.name == "nt":
-            self.assertEqual(MN._source_tag(Path(str(a).upper()), self.tmp), MN._source_tag(a, self.tmp))
+        lower = a.with_name("c0001.mp4")
+        self.assertNotEqual(MN._source_tag(lower, self.tmp), MN._source_tag(a, self.tmp))
+        self.assertEqual(MN._source_tag(Path(str(a).replace("\\", "/")), self.tmp), MN._source_tag(a, self.tmp))
+        if os.name == "nt":                                                     # the client folder spelled in upper case
+            self.assertEqual(MN._source_tag(a, Path(str(self.tmp).upper())), MN._source_tag(a, self.tmp))
 
     def test_a_moved_client_or_a_touched_file_keeps_its_intermediate(self):
         a, _ = self.two_cams()
@@ -566,55 +592,109 @@ class TestBatchBOutputOnly(_Out):
         (other / "assets").mkdir(parents=True)
         self.refused(other / "output" / "intermediates")
 
-    @unittest.skipUnless(os.name == "nt", "junctions are a Windows feature")
     def test_a_link_inside_output_is_never_written_through(self):
         (self.tmp / "output").mkdir()
         _junction(self.tmp / "output" / "lnk", self.tmp / "assets")
-        self.addCleanup(os.rmdir, self.tmp / "output" / "lnk")                 # the link only, before the tree goes
+        self.addCleanup(_unlink_dir, self.tmp / "output" / "lnk")              # the link only, before the tree goes
         m = MN.measure(fx("tag60_real30"))
         with quiet():
             r = self.cf(fx("tag60_real30"), self.tmp / "output" / "lnk" / "x", MN.decide(m))
         self.assertEqual(r["skipped"], "not output")
         self.assertEqual(list((self.tmp / "assets").iterdir()), [])
 
-    @unittest.skipUnless(os.name == "nt", "junctions are a Windows feature")
     def test_an_output_folder_that_is_itself_a_link_is_allowed(self):
-        elsewhere = self.tmp / "other drive" / "client output"
+        drive = Path(tempfile.mkdtemp(prefix="whynot-t26-drive-"))             # outside the client folder
+        self.addCleanup(shutil.rmtree, drive, True)
+        elsewhere = drive / "renders" / "client output"
         elsewhere.mkdir(parents=True)
         _junction(self.tmp / "output", elsewhere)
-        self.addCleanup(os.rmdir, self.tmp / "output")
+        self.addCleanup(_unlink_dir, self.tmp / "output")
         m = MN.measure(fx("tag60_real30"))
         with quiet():
             r = self.cf(fx("tag60_real30"), self.out, MN.decide(m))
         self.assertTrue(r["ok"], r)
         self.assertTrue(Path(r["path"]).is_relative_to(Path(os.path.realpath(elsewhere))))
 
-    @unittest.skipUnless(os.name == "nt", "junctions are a Windows feature")
     def test_a_dangling_output_link_never_builds_its_target(self):
         gone = self.tmp / "unplugged drive" / "client output"
         gone.mkdir(parents=True)
         _junction(self.tmp / "output", gone)
-        self.addCleanup(os.rmdir, self.tmp / "output")
+        self.addCleanup(_unlink_dir, self.tmp / "output")
         gone.rmdir()                                                               # the drive is gone
         self.refused(self.out)
         self.assertFalse(gone.exists())
 
-    @unittest.skipUnless(os.name == "nt", "junctions are a Windows feature")
     def test_an_output_link_into_the_clients_own_footage_is_refused(self):
         for x in ("assets", "data"):
             _junction(self.tmp / "output", self.tmp / x)
             try:
                 self.refused(self.out)
             finally:
-                os.rmdir(self.tmp / "output")
+                _unlink_dir(self.tmp / "output")
             self.assertEqual(list((self.tmp / x).iterdir()), [])
         _junction(self.tmp / "output", self.tmp)                                # output/ -> the client folder itself
         try:
             self.refused(self.tmp / "output" / "assets" / "x")
             self.assertIsNone(MN.client_output(self.tmp / "output" / "x", self.tmp))
         finally:
-            os.rmdir(self.tmp / "output")
+            _unlink_dir(self.tmp / "output")
         self.assertEqual(list((self.tmp / "assets").iterdir()), [])
+
+    def test_an_output_link_into_any_clients_folder_is_refused(self):
+        """Review 19049fe #4: output/ linked to another client's assets/ (marked or not), into this client's own
+        footage/, or into the configured clients folder is refused; nothing is written there."""
+        other = Path(tempfile.mkdtemp(prefix="whynot-t26-other-"))
+        self.addCleanup(shutil.rmtree, other, True)
+        for x in ("assets", "data"):
+            (other / "client B" / x).mkdir(parents=True)
+        (self.tmp / "footage").mkdir()
+        clients = other / "clients"
+        (clients / "renders").mkdir(parents=True)
+        for target in (other / "client B" / "assets", other / "client B" / "data" / "Raw", self.tmp / "footage",
+                       clients / "renders"):
+            target.mkdir(parents=True, exist_ok=True)
+            _junction(self.tmp / "output", target)
+            try:
+                with mock.patch("lib.common.clients_root", return_value=clients):
+                    self.refused(self.out)
+            finally:
+                _unlink_dir(self.tmp / "output")
+            self.assertEqual(list(target.iterdir()), [], target)
+        second = other / "second clients"                                      # output/ -> a folder that holds clients
+        for x in ("assets", "data"):
+            (second / "zeta" / x).mkdir(parents=True)
+        _junction(self.tmp / "output", second)
+        try:
+            self.refused(self.tmp / "output" / "zeta" / "assets" / "x")
+            self.refused(self.tmp / "output" / "zeta" / "x")
+        finally:
+            _unlink_dir(self.tmp / "output")
+        self.assertEqual(list((second / "zeta" / "assets").iterdir()), [])
+
+    def test_the_folder_is_checked_again_after_the_source_is_hashed(self):
+        """Review 19049fe #3: a link put in place while the source is hashed (minutes on a big file) is never written
+        through."""
+        real_sha = MN._sha256
+
+        def slow_hash(p):
+            (self.tmp / "output").mkdir(exist_ok=True)
+            _junction(self.out, self.tmp / "assets")                          # output/intermediates -> assets
+            return real_sha(p)
+        self.addCleanup(lambda: _unlink_dir(self.out) if os.path.lexists(self.out) else None)
+        m = MN.measure(fx("tag60_real30"))
+        with mock.patch.object(MN, "_sha256", slow_hash), quiet():
+            r = self.cf(fx("tag60_real30"), self.out, MN.decide(m))
+        self.assertFalse(r["ok"], r)
+        self.assertEqual(r["skipped"], "not output")
+        self.assertEqual(list((self.tmp / "assets").iterdir()), [])
+
+    def test_device_names_with_spaces_or_superscripts_are_refused(self):
+        """Review 19049fe #5: names Windows 11 treats as devices."""
+        for name in ("CON .txt", "nul .x", "CONIN$", "conout$", "COM\u00b9", "LPT\u00b2", "aux.tar.gz", "Com3",
+                     " con"):
+            self.assertIsNone(MN.client_output(self.tmp / "output" / name / "x", self.tmp), name)
+        for name in ("console", "COM10", "lpt", "nullable", "CONTENT .x"):
+            self.assertIsNotNone(MN.client_output(self.tmp / "output" / name / "x", self.tmp), name)
 
     def test_client_output_helper(self):
         self.assertEqual(MN.client_output(self.out, self.tmp),
@@ -708,6 +788,215 @@ class TestBatchBTimeout(_Out):
         m, r3 = self.conform("tag60_real30")                                       # the old copy is still reused
         self.assertTrue(r3["reused"])
 
+    def test_a_failed_record_write_never_lets_a_wrong_copy_be_reused(self):
+        """Review 19049fe #1: the crf18 copy replaced the crf16 one but its sidecar could not be written (read-only):
+        the next crf16 run must not reuse the crf18 file."""
+        m, r1 = self.conform("tag60_real30")
+        self.assertTrue(r1["ok"], r1)
+        side, h16 = Path(r1["sidecar"]), sha(r1["path"])
+        os.chmod(side, 0o444)
+        self.addCleanup(lambda: [os.chmod(x, 0o666) for x in self.out.glob("*.json")])
+        m, r2 = self.conform("tag60_real30", crf=18)
+        m, r3 = self.conform("tag60_real30")
+        self.assertTrue(r3["ok"], r3)
+        if r3["reused"]:
+            self.assertEqual(sha(r3["path"]), h16, (r2, r3))                     # reused = really the crf16 copy
+        else:
+            self.assertEqual(json.loads(Path(r3["sidecar"]).read_text(encoding="utf-8"))["crf"], 16)
+        self.assertEqual(sorted(p.name for p in self.out.iterdir()),
+                         sorted([Path(r1["path"]).name, side.name]))              # no partial, no record aside
+
+    def test_a_record_that_cannot_be_set_aside_keeps_the_old_pair(self):
+        m, r1 = self.conform("tag60_real30")
+        before = (sha(r1["path"]), Path(r1["sidecar"]).read_text(encoding="utf-8"))
+        real = os.replace
+
+        def held(a, b):
+            if str(a) == r1["sidecar"]:
+                raise PermissionError("the record is open")
+            return real(a, b)
+        with mock.patch.object(MN.os, "replace", held):
+            m, r2 = self.conform("tag60_real30", crf=18)
+        self.assertEqual(r2["skipped"], "in use")
+        self.assertEqual((sha(r1["path"]), Path(r1["sidecar"]).read_text(encoding="utf-8")), before)
+        self.assertEqual(len(list(self.out.iterdir())), 2)
+        m, r3 = self.conform("tag60_real30")
+        self.assertTrue(r3["reused"])
+
+    def test_a_source_named_like_a_windows_device_is_conformed(self):
+        """Review r2 #1: `Con.Edison promo.mp4` (made freely on a Mac, and on Windows 11) gets a copy that every OS
+        can write."""
+        self.assertEqual(MN._safe_stem("CON"), "_CON")
+        self.assertEqual(MN._safe_stem("aux.final"), "_aux.final")
+        self.assertEqual(MN._safe_stem("nul .2024"), "_nul .2024")
+        self.assertEqual(MN._safe_stem("a:b\x07c|d"), "a_b_c_d")
+        self.assertEqual(MN._safe_stem("a\\b"), "a_b")                            # a Mac / Linux name, read on a PC
+        self.assertEqual(MN._safe_stem("console"), "console")
+        self.assertEqual(MN._safe_stem("زووم " * 30), ("زووم " * 30)[:60])
+        src = self.tmp / "data" / "Con.Edison promo.mp4"
+        shutil.copyfile(fx("tag60_real30"), src)
+        with quiet():
+            r = self.cf(src, self.out, MN.decide(MN.measure(src)))
+        self.assertTrue(r["ok"], r)
+        self.assertTrue(Path(r["path"]).name.startswith("_Con.Edison promo."))
+
+    def test_a_stuck_held_record_is_found_before_the_encode(self):
+        """Review r2 #2: a leftover `.held.json` that can't be removed is reported before hours of encoding."""
+        m, r1 = self.conform("tag60_real30")
+        real = MN.linksafe.remove
+        ran = []
+
+        def stuck(path, root, within=None):
+            if str(path).endswith(".held.json"):
+                raise MN.Guidance("held by a sync tool", "close it")
+            return real(path, root, within)
+
+        def runner(cmd):
+            ran.append(cmd)
+            raise AssertionError("never encoded")
+        with mock.patch.object(MN.linksafe, "remove", stuck):
+            m, r2 = self.conform("tag60_real30", crf=18, runner=runner)
+        self.assertEqual(ran, [])
+        self.assertEqual(r2["skipped"], "in use")
+        self.assertIn(".held.json", r2["reason"])
+        m, r3 = self.conform("tag60_real30")
+        self.assertTrue(r3["reused"])                                              # the old pair is untouched
+
+    def test_a_record_that_is_not_an_object_is_redone(self):
+        """Review r2 #3: a sidecar of valid JSON that is not an object never blocks the source."""
+        m, r1 = self.conform("tag60_real30")
+        for junk in ("[1, 2]", "3", "null", '"x"'):
+            Path(r1["sidecar"]).write_text(junk, encoding="utf-8")
+            m, r = self.conform("tag60_real30")
+            self.assertTrue(r["ok"] and not r["reused"], (junk, r))
+            self.assertEqual(json.loads(Path(r["sidecar"]).read_text(encoding="utf-8"))["crf"], 16)
+
+    def no_wrong_reuse(self, r16_sha):
+        """The next crf16 run reuses only the crf16 copy (else it re-encodes); nothing is left aside."""
+        m, r = self.conform("tag60_real30")
+        self.assertTrue(r["ok"], r)
+        if r["reused"]:
+            self.assertEqual(sha(r["path"]), r16_sha)
+        self.assertEqual(json.loads(Path(r["sidecar"]).read_text(encoding="utf-8"))["crf"], 16)
+        self.assertEqual(len(list(self.out.iterdir())), 2, list(self.out.iterdir()))
+
+    def test_the_new_record_cannot_be_written(self):
+        """Review r2 #5: the crf18 copy took the name but its record failed: no record is left that describes
+        another copy."""
+        m, r1 = self.conform("tag60_real30")
+        h16 = sha(r1["path"])
+        with mock.patch.object(MN.linksafe, "replace_atomic", side_effect=MN.Guidance("disk full", "free space")):
+            m, r2 = self.conform("tag60_real30", crf=18)
+        self.assertFalse(r2["ok"])
+        self.assertFalse(Path(r1["sidecar"]).exists())                            # the crf16 record went aside
+        self.no_wrong_reuse(h16)
+
+    def test_the_old_record_cannot_be_put_back(self):
+        """Review r2 #5: the old copy is open AND its record can't return: it is redone next time, never misread."""
+        m, r1 = self.conform("tag60_real30")
+        h16 = sha(r1["path"])
+        real_path_replace, real_replace = Path.replace, os.replace
+
+        def open_copy(self_, target):
+            if str(target) == r1["path"]:
+                raise PermissionError("open in Premiere")
+            return real_path_replace(self_, target)
+
+        def no_return(a, b):
+            if str(a).endswith(".held.json"):
+                raise PermissionError("held")
+            return real_replace(a, b)
+        with mock.patch.object(Path, "replace", open_copy), mock.patch.object(MN.os, "replace", no_return):
+            m, r2 = self.conform("tag60_real30", crf=18)
+        self.assertEqual(r2["skipped"], "in use")
+        self.assertIn("aside", r2["reason"])
+        self.assertFalse(Path(r1["sidecar"]).exists())
+        self.assertEqual(sha(r1["path"]), h16)                                     # the old copy is untouched
+        self.no_wrong_reuse(h16)
+
+    def test_the_old_record_cannot_be_removed_after_success(self):
+        m, r1 = self.conform("tag60_real30")
+        real = MN.linksafe.remove
+        calls = []
+
+        def late(path, root, within=None):
+            if str(path).endswith(".held.json") and os.path.lexists(path):
+                calls.append(path)
+                raise MN.Guidance("read-only", "clear it")
+            return real(path, root, within)
+        with mock.patch.object(MN.linksafe, "remove", late):
+            m, r2 = self.conform("tag60_real30", crf=18)
+        self.assertTrue(r2["ok"], r2)
+        self.assertEqual(len(calls), 1)
+        self.assertIn(".held.json", r2["reason"])
+        self.assertEqual(json.loads(Path(r2["sidecar"]).read_text(encoding="utf-8"))["crf"], 18)
+        m, r3 = self.conform("tag60_real30", crf=18)
+        self.assertTrue(r3["reused"])
+        m, r4 = self.conform("tag60_real30")                                       # the leftover is cleared next run
+        self.assertTrue(r4["ok"] and not r4["reused"], r4)
+        self.assertEqual(len(list(self.out.iterdir())), 2)
+
+    def test_a_linked_copy_with_a_matching_record_is_never_reused(self):
+        """Review r2 #5: a hard-linked .mp4 or .json with a VALID matching record is still not ours."""
+        m, r1 = self.conform("tag60_real30")
+        out, side = Path(r1["path"]), Path(r1["sidecar"])
+        victim = self.tmp / "assets" / "victim.mp4"
+        shutil.copyfile(out, victim)
+        before = sha(victim)
+        out.unlink()
+        os.link(victim, out)                                                       # the copy is someone's footage
+        m, r2 = self.conform("tag60_real30")
+        self.assertTrue(r2["ok"] and not r2["reused"], r2)
+        self.assertEqual(sha(victim), before)
+        record = self.tmp / "assets" / "record.json"
+        shutil.copyfile(side, record)
+        rec_before = sha(record)
+        side.unlink()
+        os.link(record, side)                                                      # the record is someone else's file
+        m, r3 = self.conform("tag60_real30")
+        self.assertTrue(r3["ok"] and not r3["reused"], r3)
+        self.assertEqual(sha(record), rec_before)
+        self.assertEqual(os.stat(side).st_nlink, 1)
+
+    def names(self, name="tag60_real30"):
+        src = fx(name)
+        stem = f"{src.stem[:60]}.{MN._source_tag(src, self.tmp)}.conform"
+        return self.out / f"{stem}.partial.mp4", self.out / f"{stem}.json", self.out / f"{stem}.mp4"
+
+    def planted(self, link):
+        """Hard links named like our partial, sidecar and copy, pointing at the client's footage."""
+        self.out.mkdir(parents=True)
+        victims = []
+        for i, p in enumerate(self.names()):
+            v = self.tmp / "assets" / f"victim{i}.bin"
+            v.write_bytes(b"FOOTAGE %d" % i)
+            link(v, p)
+            victims.append(v)
+        m, r = self.conform("tag60_real30")
+        self.assertTrue(r["ok"], r)
+        for i, v in enumerate(victims):
+            self.assertEqual(v.read_bytes(), b"FOOTAGE %d" % i, v)              # never written through
+        self.assertFalse(r["reused"])                                             # a link is never taken as our copy
+        for p in self.names()[1:]:
+            self.assertFalse(os.path.islink(p))
+            self.assertEqual(os.stat(p).st_nlink, 1)
+        return r
+
+    def test_hard_links_under_our_names_are_never_written_through(self):
+        """Review 19049fe #2 (hard links work on NTFS and every POSIX file system without privileges)."""
+        self.planted(os.link)
+
+    @unittest.skipUnless(_can_symlink(), "this account may not create symlinks (Windows without developer mode)")
+    def test_symlinks_under_our_names_are_never_written_through(self):
+        """Review 19049fe #2 and #6: the symlink branch, on macOS / Linux (and Windows with developer mode)."""
+        self.planted(lambda v, p: os.symlink(v, p))
+
+    def test_the_symlink_branch_of_the_link_test(self):
+        """Review 19049fe #6: the POSIX branch of the link test, on every OS (os.lstat mocked)."""
+        st = os.stat_result((0o120777, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+        with mock.patch("lib.linksafe.os.lstat", return_value=st):
+            self.assertTrue(MN._is_link(self.tmp / "x"))
+
     def test_any_runner_error_leaves_no_partial_file(self):
         def boom(cmd):
             Path(cmd[-1]).write_bytes(b"half")
@@ -763,6 +1052,11 @@ class TestBatchBLongSync(_Out):
                 x = np.abs(f.to_ndarray()).max(axis=0)
                 at.append(float(f.time) + np.arange(len(x)) / f.sample_rate)
                 al.append(x)
+        with av.open(r["path"]) as c:                    # review 19049fe #7: an editor reads samples back to back
+            fr = [(float(f.time), f.samples / f.sample_rate) for f in c.decode(c.streams.audio[0])]
+        self.assertLessEqual(abs(fr[0][0]), 1 / float(r["fps"]), fr[0])          # the audio starts with the picture
+        holes = [(t1, t1 - t0 - n) for (t0, n), (t1, _) in zip(fr, fr[1:]) if abs(t1 - t0 - n) > 0.001]
+        self.assertEqual(holes, [])                                                # gaps filled, never left as holes
         v_on = _onsets(np.array(vt), np.array(vl), 128)
         a_on = _onsets(np.concatenate(at), np.concatenate(al), 0.3)
         self.assertGreaterEqual(len(v_on), 59, v_on[:5])
