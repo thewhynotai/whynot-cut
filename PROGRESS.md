@@ -57,7 +57,8 @@ security line. Each row is OPEN until it is accepted and pushed.
 | K-T2 / K-T7 hooks, K-T1 guard test | executor (apply) | wait for the Task 25 round-2 acceptance and the guard |
 | Task 23 / Task 28 hooks, T4.5 plan.py swaps | executor (apply) | after the T4.2 minors commit |
 | BL-01 read-once hook, BL-04 run-state/resume | API backlog | open |
-| **L-T8 engine write gate** (gated steps refused inside the engine; the real fix for the subagent guard hole; guard commits 42a675b + a2dcf71 = review FAIL, improvement, not counted) | executor | design after T4.15 |
+| **BL-15 lead-step approval token** (engine refuses a lead-only step unless the guard saw that exact plain lead call: the real fix for the subagent guard hole; guard commits 42a675b + a2dcf71 = review FAIL, improvement, not counted) | API backlog (design by executor) | open |
+| L-T8 engine write gate (client sources; ~190 call sites) | executor | spec says Gate 5 (Addendum L table); not on the Gate 4 line |
 
 **Full-suite failures to clear (last batch suite, 7ab97e1):**
 - test_installer r5_1 ×12: installer track (precise engine-home scan), plus tools (`user_home` in kalam/platform.py). Both tracks are paused, so the executor takes it over if they are not woken before the gate.

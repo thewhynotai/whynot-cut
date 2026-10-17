@@ -128,6 +128,7 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     `lib/client_move.py`, `lib/client_move_paths.py`, the writer hunks in `lib/ref_analysis.py`, the `_caption_fonts` hunk in
     `lib/looks_captions.py`, `tests/test_t45_*.py`, `tests/fixtures/t45/**`; cli, plan, previews, ae_builder and
     motion_plan hunks arrive as patches.
+  - API backlog BL-15 (2026-10-18, lead-step approval token): `lib/lead_steps.py`, `tests/test_lead_token*.py`; guard.py and cli.py hunks arrive as patches.
   - **ONE writer per shared file (2026-10-17, ownership audit; this overrides any grant above):**
     - executor is the only committer of `lib/plan.py`, `config/defaults/style.json`, `lib/qc.py`, `lib/previews.py`,
       `lib/handoff.py`, `lib/ps_builder.py`, `lib/publish.py`. Every other owner (Adobe T4.1/T4.6, lanes, wnc-queue swaps,
