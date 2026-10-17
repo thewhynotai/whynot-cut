@@ -1444,6 +1444,10 @@ def check_reel(exe: str, argv: list[str], agent: str | None, cwd: Path | None = 
                           "name itself (--by " + ", ".join(sorted(mine)) + "). Report the corrections instead.")
             if role == "qc-reviewer" and sub == "ref-style" and (has_opt(argv, "--record") or has_opt(argv, "--apply")):
                 block("qc-reviewer is independent and read-only: it may not record or apply the client reference style.")
+            if sub == "ref-style" and has_opt(argv, "--adopt") and has_opt(argv, "--yes"):    # T4.9
+                block("only the lead editor writes an adopted per-video style into the client style (`reel ref-style "
+                      "--adopt <ID> --yes`), after the editor OKs the diff. Report the diff (`--adopt <ID>` without "
+                      "--yes) instead.")
             if sub == "ae-probe" and has_opt(argv, "--record"):
                 block("only the lead editor records the After Effects probe verdict, after viewing the probe frames itself.")
             if role == "qc-reviewer" and sub in QC_FORBIDDEN:
