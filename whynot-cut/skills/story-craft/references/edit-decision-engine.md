@@ -57,6 +57,22 @@ no drift); don't hand-compute. Times are on the transcript's clock (0 = the reel
 }
 ```
 
+### Style knobs for this reel (`global`, optional)
+The client's `reel-profile/style.json` sets the standing caption and hook style (see client-craft); set these in
+`global` only when the editor wants this one reel different. `reel plan` records the result in the timeline-spec's
+`style` block (nothing is written when everything is at the default).
+- `caption_size_px`: this reel's caption size, a whole number of px (32-140 on a 1080 px wide frame), e.g. `72` for
+  bigger captions; caption lines get shorter as it grows.
+- `hook_title_sfx`: `false` = no sound when the hook title appears (`true` brings it back for this reel). A graphic's
+  own `"sfx"` still wins.
+- `highlight_colour`: the keyword caption box for this reel: `"brand"`, `"accent"`, `"ink"` or `"#RRGGBB"` (with the
+  `#`). A colour too faint behind the caption text is replaced by a readable brand colour, and the plan warns (G68).
+  It colours the Premiere captions; After Effects captions use the brand colour for now.
+- Captions under the hook are a client setting (`captions_during_hook`). For one reel, write
+  `captions_hidden_during` with or without `hook_title`: that list replaces the client's whole list (copy the other
+  graphics you still want), and an empty `[]` falls back to the client's list.
+A wrong value here is a plan error naming the field; fix it and run `reel plan` again.
+
 ## Templates (see `config/defaults/graphics-templates.json (+ client profile overrides)`)
 | template | required params | track |
 |---|---|---|

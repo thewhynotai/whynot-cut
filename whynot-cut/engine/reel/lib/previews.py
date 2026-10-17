@@ -277,7 +277,13 @@ BAR_TEMPLATES = {"hook_title", "term_callout", "statement_highlight", "highlight
 
 
 def _role_color(b: "Brand", role: str) -> tuple:
-    """Brand colour by role name (templates choose box_role / text_role): primary | neutral_light | paper | ink."""
+    """Brand colour by role name (templates choose box_role / text_role): primary | neutral_light | paper | ink, or a
+    colour code "#RRGGBB" (the T4.2 highlight colour the plan resolved)."""
+    if isinstance(role, str) and len(role) == 7 and role.startswith("#"):
+        try:
+            return tuple(int(role[i:i + 2], 16) for i in (1, 3, 5))
+        except ValueError:
+            pass
     return {"primary": b.teal, "neutral_light": b.white, "paper": b.paper, "ink": b.ink}.get(role, b.teal)
 
 
@@ -800,6 +806,43 @@ def caption_text(text: str, strip: str | None = None) -> str:
     return out
 
 
+def _caption_template(t: dict, knobs: dict) -> dict:
+    """The highlight_caption template with the plan's T4.2 caption size and the line length scaled with it (unchanged
+    when the spec has no caption size)."""
+    if not (knobs or {}).get("caption_size_px"):
+        return t
+    return dict(t, size=int(knobs["caption_size_px"]),
+                max_chars=int(knobs.get("caption_max_chars") or t.get("max_chars", 30)))
+
+
+def caption_width_warnings(paths: Paths, texts: list, knobs: dict) -> list[str]:
+    """T4.2: captions that, at the plan's caption size, are wider than the safe width (subtitle-style.json safe_area),
+    measured with the client's caption font exactly as render_captions draws them. One warning (or none)."""
+    if not (knobs or {}).get("caption_size_px"):
+        return []
+    t = _caption_template(load_config("graphics-templates.json")["templates"]["highlight_caption"], knobs)
+    W, _ = frame_size(paths)
+    sa = load_config("subtitle-style.json").get("safe_area") or {}
+    left, right = int(sa.get("left", 90)), W - int(sa.get("right", 90))
+    b = Brand(paths.client_db)
+    f = b.font("caption", t["size"])
+    probe = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    wide = []
+    for raw in texts:
+        text = caption_text(raw, t.get("strip_punctuation"))
+        if not text:
+            continue
+        boxes = _text_block(probe, text, f, W // 2, t["y"], b.white, line_gap=t.get("line_gap", 1.3),
+                            max_chars=t["max_chars"], shadow=False)
+        if boxes and (min(bx[0] for bx in boxes) < left or max(bx[2] for bx in boxes) > right):
+            wide.append((text, max(bx[2] for bx in boxes) - min(bx[0] for bx in boxes)))
+    if not wide:
+        return []
+    shown = ", ".join(f"«{x}» ({w:.0f} px)" for x, w in wide[:3]) + (f" and {len(wide) - 3} more" if len(wide) > 3 else "")
+    return [f"{len(wide)} caption(s) wider than the safe width ({right - left} px) at caption_size_px "
+            f"{t['size']}: {shown} — choose a smaller caption_size_px (or shorter caption lines)"]
+
+
 def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None,
                     warnings: list | None = None) -> list[dict]:
     """Animated caption stills on the SEQUENCE clock: text (pop) + teal box (RTL sweep) on keyword cues.
@@ -813,6 +856,10 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None,
     spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     ed = read_json(paths.p("01_analysis/edit-decisions.json"), {})
     t = load_config("graphics-templates.json")["templates"]["highlight_caption"]
+    # T4.2: the plan's style knobs (absent at the defaults: today's stills, byte for byte)
+    knobs = spec.get("style") or {}
+    t = _caption_template(t, knobs)
+    t_hl = dict(t, box_role=knobs["highlight"]["hex"]) if (knobs.get("highlight") or {}).get("hex") else t
     b = Brand(paths.client_db)
     style = ed.get("global", {}).get("caption_style", "keywords")
     hl = [norm(h["text"]) for h in spec.get("caption_highlights", [])]
@@ -856,12 +903,13 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None,
             up = top - half - 24
             ev["params"]["y"] = int(up) if up - half >= SAFE_TOP_PX else int(min(H - 300, bot + half + 24))
         fg = out_dir / f"CAP_{i + 1:03d}_fg.png"
-        render_event(ev, t, b, {}, None, fg, layer="fg", size=size)
+        tc = t_hl if is_hl else t
+        render_event(ev, tc, b, {}, None, fg, layer="fg", size=size)
         item = {"id": f"CAP_{i + 1:03d}", "fg": str(fg), "start_ms": s, "end_ms": e, "highlight": is_hl, "text": text}
         prev_end = e
         if is_hl or t.get("box_all") or ev["params"].get("on_fill"):
             bar = out_dir / f"CAP_{i + 1:03d}_bar.png"
-            render_event(ev, t, b, {}, None, bar, layer="bars", size=size)
+            render_event(ev, tc, b, {}, None, bar, layer="bars", size=size)
             item["bar"] = str(bar)
         res.append(item)
     write_json(out_dir / "captions-manifest.json", {"generated": now_iso(), "captions": res})

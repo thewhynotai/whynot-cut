@@ -120,7 +120,7 @@ def caption_data(paths: Paths, spec: dict, ed: dict) -> dict | None:
     # captions are suppressed while a primary graphic carries the words (reference behaviour) or
     # a full-screen visual covers the speaker; plus explicit ranges from edit-decisions.global
     g = ed.get("global", {})
-    hide_t = set(g.get("captions_hidden_during") or caption_hide_default())
+    hide_t = set(g.get("captions_hidden_during") or caption_hide_default(spec))
     blocked = [(e["start_frame"], e["end_frame"]) for e in spec["events"] if e["template"] in hide_t]
     tm = spec.get("time_map")   # hidden ranges are authored in SOURCE time; events/captions are on the sequence clock
     if tm:
@@ -140,7 +140,8 @@ def caption_data(paths: Paths, spec: dict, ed: dict) -> dict | None:
             continue
         is_hl = style == "highlight_all" or any(h and h in norm(c["text"]) for h in hl)
         cues.append({"text": c["text"].replace("\n", "\r"), "start_frame": sf, "end_frame": ef, "highlight": is_hl})
-    return {"duration_frames": spec["duration_frames"], "cues": cues, "size": tpl["size"], "y": tpl["y"]}
+    size = (spec.get("style") or {}).get("caption_size_px") or tpl["size"]      # T4.2 caption size knob
+    return {"duration_frames": spec["duration_frames"], "cues": cues, "size": size, "y": tpl["y"]}
 
 
 def generate(paths: Paths) -> dict:

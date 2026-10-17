@@ -15,5 +15,10 @@
     "amount": 15,
     "grain_percent": 0,
     "why": "a 9:16 crop of a 16:9 1080p source is upscaled ~178 % and looks soft; Premiere Sharpen 15-20 and optional Noise 2-3 % hide it (client plan EP02 §2). Set amount 0 to turn off."
-  }
+  },
+  "caption_size_px": null,
+  "captions_during_hook": "hide",
+  "hook_title_sfx": true,
+  "highlight_colour": "brand",
+  "knobs_note": "Read by `reel plan` (T4.2); builds follow the compiled plan, so run `reel plan` after a change. caption_size_px: null = the caption template's size, or a whole number 32-140 px on a 1080 px wide frame (caption lines get shorter as it grows); one reel may set global.caption_size_px in edit-decisions. captions_during_hook: hide | show (captions under the hook title; client only). hook_title_sfx: true | false (the hook title's sound). highlight_colour: brand | accent | ink | #RRGGBB (the keyword caption box in Premiere; checked for contrast against the caption text and replaced by a readable brand colour, with a warning, when too faint; After Effects captions use the brand colour for now). A reel may override hook_title_sfx and highlight_colour in edit-decisions global."
 }

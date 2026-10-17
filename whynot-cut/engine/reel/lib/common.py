@@ -828,10 +828,19 @@ CAPTION_HIDE_SAFE = ["broll_card", "logo_outro", "hook_title", "statement_highli
                      "stat_card"]
 
 
-def caption_hide_default() -> list:
+def caption_hide_default(spec: dict | None = None) -> list:
     """Templates during which captions are hidden when edit-decisions don't say: the profile's style.json value, else
-    every graphic that already shows words (a caption repeating or crossing them reads as a mistake)."""
-    return list(load_config("style.json").get("captions_hidden_during") or CAPTION_HIDE_SAFE)
+    every graphic that already shows words (a caption repeating or crossing them reads as a mistake). T4.2: the
+    compiled plan's `style.captions_during_hook: "show"` (from the client's style.json at `reel plan`) keeps captions on
+    under the hook title. The mode is read from the spec only, never from the live style.json, so changing it reaches a
+    build only through a new plan; without a spec (or its `style` block) the hook title hides captions."""
+    st = load_config("style.json")
+    st = st if isinstance(st, dict) else {}
+    hide = list(st.get("captions_hidden_during") or CAPTION_HIDE_SAFE)
+    knobs = spec.get("style") if isinstance(spec, dict) else None
+    if isinstance(knobs, dict) and knobs.get("captions_during_hook") == "show":
+        hide = [t for t in hide if t != "hook_title"]
+    return hide
 
 
 EDU_TEMPLATES = {"checklist", "broll_card", "broll_video"}

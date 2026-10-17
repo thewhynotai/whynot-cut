@@ -237,12 +237,21 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
     shots_on = bool((pre_all.get("shots") or {}).get("shots") and base.get("base_scale_percent") in (None, "auto")
                     and main_video(pre_all, main_file))
     flagged = transcript_flags(paths)
+    # T4.2: the client's style knobs (reel-profile/style.json) and this reel's overrides (global), resolved once; the
+    # brand tokens are read only for a highlight colour, the frame width only for a caption size
+    from . import style_knobs
+    seq_cfg, style = load_config("sequence-settings.json", ctx), load_config("style.json", ctx)
+    tokens = read_json(paths.client_db / "branding/brand-tokens.json", {}) \
+        if style_knobs.needs_tokens(style, base) else {}
+    knobs = style_knobs.resolve(style, base, tpl, tokens, lambda: frame_size_of(seq_cfg)[0],
+                                layers_=style_knobs.layers(ctx),
+                                subtitle_style=lambda: load_config("subtitle-style.json", ctx))
     return PlanInputs(
         ctx=ctx, paths=paths, root=paths.root, video_id=paths.video_id, ed=ed, base=base, tpl=tpl,
         known_assets={a["rel"]: a for a in manifest["assets"]}, ttext=ttext, dur_ms=dur_ms, fps=seq_fps(ctx),
         recipe=for_paths(paths), pre_all=pre_all, rng=rng, main_file=main_file, main_default=main_default,
         main_default_why=main_default_why,
-        seq_cfg=load_config("sequence-settings.json", ctx), style=load_config("style.json", ctx),
+        seq_cfg=seq_cfg, style=style if isinstance(style, dict) else {}, knobs=knobs,
         podcast=load_config("podcast.json", ctx) if shots_on else {},
         speakers=(read_json(paths.p("00_inputs/speakers.json"), {}) or {}) if shots_on else {},
         words=words, pauses=pauses, srts=srts,
@@ -314,12 +323,21 @@ def _try_ms(v) -> int | None:
         return None
 
 
+def apply_style(inp: PlanInputs):
+    """T4.2: the style knobs (lib/style_knobs.py) resolved by read_inputs -> (the spec's `style` block, errors from
+    this reel's overrides, warnings from the client's style.json). Empty at the defaults."""
+    import copy
+    block, errors, warnings = getattr(inp, "knobs", None) or ({}, [], [])
+    return copy.deepcopy(block), list(errors), list(warnings)
+
+
 @_in_context
 def validate_decisions(inp: PlanInputs):
     """Decisions -> graphic events, B-roll entries, SFX cues and the story camera moves; overlap and recipe checks."""
     import copy
     ed = copy.deepcopy(inp.ed)            # the steps never mutate their inputs
     FPS_, tpl, dur_ms, ttext = inp.fps, inp.tpl, inp.dur_ms, inp.ttext
+    knobs = (getattr(inp, "knobs", None) or ({}, [], []))[0]
     errors, warnings = [], []
     events, cues, broll, camera = [], [], [], []
     seen_ids = set()
@@ -449,8 +467,10 @@ def validate_decisions(inp: PlanInputs):
                                  "preview_png": f"03_broll/{still_category(t)}/{gid}.png"},
                 "approval_status": "PENDING_APPROVAL" if ev_["approval_required"] else "AUTO_APPROVED_STYLE",
                 "validation_status": "PLANNED"})
-            # template default sound
+            # template default sound (T4.2: hook_title_sfx off drops the hook title's; the graphic's own sfx still wins)
             kind = g.get("sfx", info.get("sfx"))
+            if t == "hook_title" and "sfx" not in g and knobs.get("hook_title_sfx") is False:
+                kind = None
             if kind not in (None, "", "none") and _sfx_kind_ok(errors, f"{did}: graphics sfx", kind, inp):
                 cues.append({"cue_id": f"SFX_{gid}", "kind": kind, "at_ms": gs, "related_visual": gid,
                              "decision_id": did, "segment_id": d.get("segment_id"), "auto": True,
@@ -716,7 +736,11 @@ def apply_timemap(inp: PlanInputs, camera: list, merged: list, events: list, bro
     # captions on the sequence clock (rebuilt without the cut words, so they never show on screen)
     from .transcribe import caption_cues
     gone = {c["word_id"] for c in words_cut}
-    rebuilt = dict(zip(_CAPTION_SRTS, caption_cues([w for w in words_all if w["id"] not in gone], inp.subtitle_style))) \
+    sub_style = inp.subtitle_style          # T4.2: a bigger caption size gives shorter short-caption lines
+    knobs = (getattr(inp, "knobs", None) or ({}, [], []))[0]
+    if knobs.get("caption_short_max_chars") and isinstance(sub_style, dict):
+        sub_style = dict(sub_style, short_max_chars=knobs["caption_short_max_chars"])
+    rebuilt = dict(zip(_CAPTION_SRTS, caption_cues([w for w in words_all if w["id"] not in gone], sub_style))) \
         if gone else {}
     seq_srts = {}
     for name in _CAPTION_SRTS:
@@ -816,7 +840,9 @@ def final_checks(inp: PlanInputs, events: list):
 @_in_context
 def assemble_spec(inp: PlanInputs, cam: dict, fr: dict, tm: dict, au: dict, recipe_info) -> dict:
     """The timeline spec (01_analysis/timeline-spec.json) from the steps' data."""
+    import copy
     FPS_, rng = inp.fps, inp.rng
+    knobs = (getattr(inp, "knobs", None) or ({}, [], []))[0]
     caption_hl = [{"text": h["text"], "at_ms": _try_ms(h["at"]) if h.get("at") else None}   # bad "at": a plan error
                   for h in inp.ed.get("caption_highlights", [])]
     return {"generated": now_iso(), "video_id": inp.video_id, "fps": FPS_,
@@ -828,7 +854,9 @@ def assemble_spec(inp: PlanInputs, cam: dict, fr: dict, tm: dict, au: dict, reci
             "main_segments": tm["merged"], "events": sorted(tm["events"], key=lambda e: (e["start_frame"], e["track"])),
             "caption_source": "02_transcription/captions-short-seq.srt" if tm["tmap"] else "02_transcription/captions-short.srt",
             "caption_highlights": caption_hl, "time_map": tm["time_map_info"],
-            "music": au["music"], "recipe": recipe_info}
+            "music": au["music"], "recipe": recipe_info,
+            # T4.2: only knobs that change something, so a client at the defaults keeps a byte-identical spec
+            **({"style": copy.deepcopy(knobs)} if knobs else {})}
 
 
 def write_outputs(paths: Paths, plan: dict) -> dict:
@@ -850,8 +878,12 @@ def _write_outputs(paths: Paths, plan: dict) -> dict:
     from .previews import arabic_font_warnings      # G72: Arabic on screen or in the captions, no Arabic brand font
     cap = paths.p(spec.get("caption_source") or "02_transcription/captions-short.srt")
     shown = [c["text"] for c in srtlib.read_srt(cap)] if cap.exists() else []
+    cap_texts = list(shown)
     shown += [s for e in events for s in onscreen_strings(e.get("params"))]
     warnings += [w for w in arabic_font_warnings(paths.client_db, shown) if w not in warnings]
+    if (spec.get("style") or {}).get("caption_size_px"):   # T4.2: a chosen caption size, measured with the real font
+        from .previews import caption_width_warnings
+        warnings += [w for w in caption_width_warnings(paths, cap_texts, spec["style"]) if w not in warnings]
     write_json(paths.p("01_analysis/plan-validation.json"), {"generated": now_iso(), "ok": ok,
                "errors": errors, "warnings": warnings, "decisions": plan["decisions"],
                "events": len(events), "cues": len(cues), "main_segments": len(merged)})
@@ -890,6 +922,7 @@ def build_plan(inp: PlanInputs) -> dict:
         warnings.extend(w)
         return data
 
+    step(apply_style(inp))
     vd = step(validate_decisions(inp))
     cam = step(build_camera(inp, vd["camera"], vd["events"]))
     fr = step(apply_framing(inp, cam))

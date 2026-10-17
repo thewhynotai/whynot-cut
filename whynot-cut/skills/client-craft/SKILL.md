@@ -33,6 +33,12 @@ reel ref-style   --root "<CLIENT>" --record --by client-researcher   # after wri
     standing style changed, then `--record` again. `--record` warns when the profile files were not touched.
   - No reference edits at all: write the three files from the profile's `style.json`/`notes.md` and the editor's own
     words, marked "no reference edits", and record them.
+  - **Old videos with their own style** (2.x authored `01_analysis/editing-style.json` per video): seed or extend the
+    client style from one with `reel ref-style --adopt <ID>`. It prints the diff first (added keys, rules, and
+    conflicts where the client value is kept); report it to the lead, who shows it to the editor and, only with their
+    OK, runs `--adopt <ID> --yes` (subagents may not: the guard blocks it).
+    Conflicts land in `editing-rules.json` `conflicts` for you and the editor to settle; then review the three files
+    against the current references and `--record`. It never changes the video's own files.
 - **Client reel-profile** (`output/client_database/reel-profile/`, created by `reel client-init`):
   - `profile.json`: id, display name, prefix, languages, specialty, and `people[]`:
     `{"name": "Dr. Name / د. الاسم", "role": "client", "gender": "male" | "female" | "unknown",
@@ -54,6 +60,23 @@ reel ref-style   --root "<CLIENT>" --record --by client-researcher   # after wri
     upscaled 9:16 crop; `framing` "9:16" or "4:5" (the speaker in a 1080×1350 window over a blurred fill);
     `export` {name pattern with {episode} {video_id} {name} {version}, video, audio, folder} from the client's
     delivery spec, which the handoff turns into the exact file name
+  - `style.json`, the four caption and hook knobs that `reel plan` reads (set one only when the references or the
+    editor say so; leave it out to keep today's look):
+    - `caption_size_px`: how big the captions are, a whole number of px on a 1080 px wide frame (32-140; e.g. 52
+      for a series with small captions, 72 for bigger ones). Not set = the caption template's size. Bigger captions
+      get shorter lines so they stay in the frame; the plan warns when a caption is still wider than the safe area.
+    - `captions_during_hook`: `"show"` keeps the captions on screen while the hook title is up (as many Arabic
+      channels do); `"hide"` (default) hides them so the hook is not read twice.
+    - `hook_title_sfx`: `false` = no click or pop when the hook title appears; `true` (default) = its usual sound.
+    - `highlight_colour`: the box behind the keyword caption: `"brand"` (default), `"accent"`, `"ink"` or a code such
+      as `"#81613D"`. The plan checks it against the caption text; a colour too faint to read is swapped for the most
+      readable brand colour and the plan warns, so pick a darker one if the warning shows. It colours the Premiere
+      captions; After Effects captions use the brand colour for now.
+
+    Builds follow the compiled plan: after changing a knob, run `reel plan` again. One reel may differ (the story editor sets `global.caption_size_px`, `global.hook_title_sfx` or
+    `global.highlight_colour` in its edit-decisions); a reel that must hide captions under its hook while the client
+    shows them lists `hook_title` in that reel's `global.captions_hidden_during`. These keys stay at the top level of
+    `style.json`, never inside its `captions` block (that block is the caption-look choice).
   - `brand.json`: only if the client supplied HEX codes the extraction missed
 - Every statement cites a source file. Missing facts stay "unavailable". A missing font is reported, never substituted.
   Brand files outrank references, and references outrank generic templates.

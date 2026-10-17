@@ -24,6 +24,11 @@
         "captions_hidden_during": {"type": "array", "items": {"type": "string"}},
         "captions_hidden_ranges": {"type": "array", "items": {"$ref": "#/$defs/range"}},
         "native_caption_track": {"type": "boolean"},
+        "caption_size_px": {"type": ["integer", "null"], "minimum": 1, "maximum": 400,
+                            "description": "this reel's caption size in px (T4.2; reel-profile/style.json sets the client's; the plan checks 32-140 px on a 1080 px wide frame)"},
+        "hook_title_sfx": {"type": ["boolean", "null"], "description": "false: no sound on this reel's hook title (a graphic's own sfx still wins)"},
+        "highlight_colour": {"type": ["string", "null"], "pattern": "^ *(brand|accent|ink|#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{3}) *$",
+                             "description": "the keyword caption box: brand | accent | ink | #RRGGBB (contrast-checked)"},
         "remove_pauses": {
           "type": ["object", "boolean", "null"],
           "properties": {

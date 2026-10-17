@@ -48,7 +48,16 @@ agent: never guess an option name.
    next unused id, nothing is renumbered. A graphic that is truly gone is reported by the command as `dropped`, and an
    earlier flag now passed as ok on the same words as `cleared`: mention both to the editor.
 3. If the comment is a **standing preference** ("always glass only at the end"), record it in the client's
-   `output/client_database/reel-profile/style.json` and `notes.md`, so the next video follows it.
+   `output/client_database/reel-profile/style.json` and `notes.md`, so the next video follows it. Four of them are
+   knobs `reel plan` applies by itself (client-craft lists them):
+   - "bigger captions" «الكابشن أكبر» → `caption_size_px`;
+   - "keep the captions during the hook" «سيب الكابشن على الهوك» → `captions_during_hook: "show"` (a client
+     setting only: for one clip, the story-editor edits that clip's `captions_hidden_during` list);
+   - "no click on the title" «من غير صوت على العنوان» → `hook_title_sfx: false`;
+   - "the highlight colour" «لون التمييز» → `highlight_colour`.
+
+   For one clip only, the story-editor sets the size, sound or colour knob in that clip's edit-decisions `global`
+   instead. Then run `reel plan` again: builds follow the compiled plan, not the live `style.json`.
 4. `reel plan` must compile, then previews, then `reel preview-video` (preferences `preview_video`) so the editor can
    watch the change. Summarise the changed plan for the editor to approve; with preferences `approval: auto`, record
    the delegated approval citing `_where.approval` from `reel settings`.
