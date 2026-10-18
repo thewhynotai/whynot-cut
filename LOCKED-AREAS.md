@@ -163,7 +163,12 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
       - ADOBE-G4 = the Adobe track;
       - UI-P4 = the UI track;
       - REL-PREVIEW = the release / live-preview track;
-      - BLD-C (queue Q1) gets the BL-14 and BL-16 paths, then BL-04's, when it opens;
+      - **Queue Q1 = API lane 1 (track API-200), 2026-10-18 late; it replaces BLD-C.** Claims BL-14 / BL-16 / BL-04. Order: BL-14, then BL-16, then BL-04.
+        - **BL-14:** `lib/client_db.py`, new `lib/client_move.py`, `lib/client_move_paths.py`, the writer hunks in `lib/ref_analysis.py`, the `_caption_fonts` swap hunk in `lib/looks_captions.py` (that hunk only), `tests/test_t45_*.py`, `tests/fixtures/t45/**`.
+        - **BL-16:** the BL-16 paths listed above.
+        - **BL-04:** new `lib/run_state.py`, `tests/test_run_state*.py`, `tests/fixtures/run_state/**`.
+        - **Everything else arrives as patches** under `D:\ClaudeData\claude-api-lane\hooks\BL-xx\`: cli, plan, previews, ae_builder, setup_env, runtime, autopilot and skills to the executor; motion_plan (BL-14) and the ae_render text (BL-16) as separate files for ADOBE-G4.
+        - Lane 1 commits with explicit paths and never pushes. The executor accepts and pushes.
       - BLD-D (queue Q2) gets BL-02 / BL-03 / S6b's.
       When a track ENDs, its paths go back to the executor until the next owner is registered here.
   - **ONE writer per shared file (2026-10-17, ownership audit; this overrides any grant above):**
