@@ -423,9 +423,15 @@ class TestGuardIssues(Client):
                     self.assertEqual(self.guard(tool, ti, agent, recorded=False)[0], 2)
 
     def test_the_store_is_compared_without_case_on_macos(self):
+        """POSIX normcase keeps case (on Windows it already folds it, so it is replaced here): macOS (APFS) folds,
+        Linux does not."""
+        import posixpath
         g = load(GUARD, "guard_bl15_fold")
-        with mock.patch.object(g.sys, "platform", "darwin"):
-            self.assertEqual(g._fold("/Users/Ed/.CLAUDE/Projects"), g._fold("/users/ed/.claude/projects"))
+        with mock.patch.object(g.os.path, "normcase", posixpath.normcase):
+            with mock.patch.object(g.sys, "platform", "darwin"):
+                self.assertEqual(g._fold("/Users/Ed/.CLAUDE/Projects"), g._fold("/users/ed/.claude/projects"))
+            with mock.patch.object(g.sys, "platform", "linux"):
+                self.assertNotEqual(g._fold("/Users/Ed/.CLAUDE/Projects"), g._fold("/users/ed/.claude/projects"))
 
     def test_a_glob_names_the_folder_only_when_it_spells_its_name(self):
         """Review r3 P3-1: the glob branch; 6 literal characters or more, matching the folder's name."""
