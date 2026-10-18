@@ -363,9 +363,14 @@ class TestSelfReviewRound1(unittest.TestCase):
         self.assertEqual(rt[0]["default"], "keep")
         self.assertIn("الخفيف", rt[0]["reason"])
         self.assertEqual(rt[0]["differs"], {"words": {"a": ["الخفيف"], "b": []}})
-        # the same meaning in other words, compared by the reader ("with food" / "with a full meal"), is no loss
-        res = proposals("you should take it with food", "you should take it with a full meal.", "en")
+        # the same meaning in other words, compared by the reader ("with food" / "with a meal"), is no loss
+        res = proposals("you should take it with food", "you should take it with a meal.", "en")
         self.assertEqual([p["default"] for p in res if p["kind"] == "retake"], ["proposed"])
+        # but a word the reader did not compare ("full") is a word the kept take adds: since Task 25 round 4 the
+        # exemption after an abandoned take holds only at a real cut-off (EXECUTOR RULINGS 2026-10-18 (2) item 2)
+        res = proposals("you should take it with food", "you should take it with a full meal.", "en")
+        [r] = [p for p in res if p["kind"] == "retake"]
+        self.assertEqual((r["default"], r["differs"]), ("keep", {"words": {"a": [], "b": ["full"]}}))
 
 
 PROBES_R2 = [

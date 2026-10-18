@@ -17,7 +17,11 @@ Rules (R-4.3 "Our version"; every number is a starting value of ours with its ba
 - text is compared with the one shared normaliser (cut_proposals_norm.py; digits of any script are the same digit);
 - retakes: word runs (2–12 words) inside a 20 s window, similarity = (Jaccard + longest common subsequence / run
   length) / 2 ≥ 0.65 with ≥ 2 shared content words; the better take is kept (complete, higher confidence, no filler;
-  a tie keeps the later); an exact short repeat that is complete both times is emphasis, never proposed;
+  a tie keeps the later); an exact short repeat that is complete both times is emphasis, never proposed; takes that
+  differ in meaning, or in a content word either take says and the other does not (each to the end of its sentence;
+  only after a take abandoned at a real cut-off, `cut_off`, do the kept take's later words go uncounted), are left
+  unticked; a medical or religious client, one whose domain is not set, or one whose settings cannot be read never
+  gets a retake ticked (`retake_rule`);
 - false starts: a short or unsure cut-off word restarted within 400 ms;
 - fillers: pure hesitation sounds always; «امم» only stretched; context words («يعني», «بص», «طب», «إيه», «اه», "like",
   "so", "you know") only stretched, with a pause of 250 ms on both sides, not before a question or a sentence end;
@@ -140,21 +144,220 @@ def _holds_number(*raw: str) -> bool:
                for w in raw)
 
 
-def _lost_words(ws: list, toks: list, drop: tuple, keep: tuple, fill: dict, read: set) -> list:
-    """The content words of the take to drop that the kept take does not say, as said: a clitic («للضغط» / «الضغط»)
-    or a word the dropped take cut off («تعرفي» in «تعرفيها») is said in both, and a word whose meaning the takes'
-    reader compared and found the same (read: "with food" / "with a full meal") is no loss."""
+_CLOSING = re.compile(r"[.!?؟…؛:;]$")                          # a take the transcript closed
+_TRAILING_QUOTES = re.compile(r"[\s\"'»”’›)\]}」』]+$")          # quotes and brackets after the mark («آمنة.»»)
+_CUT_MARK = re.compile(r"\w[-‐‑–—]$")                           # a word written as cut off ("am-", «آمـ-»)
+_NUMBER_CLITICS = ("و", "ب", "ف", "ل", "ك")                   # written onto a number: «بربع», «ب٥», «لعشرة», «كتسعة»
+_NEGATED_TAIL = ("ش", "شي", "n't", "nt", "'t", "not")         # «بيقلل» + «ش» is «بيقللش»: a negation, never a cut-off
+
+
+def _closed(raw) -> bool:
+    """The transcript closed the take with this word: «.», «؟», "!", «…», «؛», «:» (also with a quote or a bracket
+    after the mark: «آمنة.»», 'safe."'). A comma or no mark leaves it open."""
+    return bool(_CLOSING.search(_TRAILING_QUOTES.sub("", str(raw or "").strip())))
+
+
+def _number_word(raw) -> bool:
+    """The word is a number or holds one, also with a clitic written onto it («بربع», «بنص», «ب٥», «لعشرة»,
+    «بخمستاشر»): the reader may not read such a word as a number (lane 5 b563d74 P1-4), so it is never left out of
+    the word check as "read" and never taken for the start of a longer word («بخمس» / «بخمستاشر»)."""
+    from .safety.numbers import find_numbers, fold, stems
+    t = fold(raw)
+    cands = set(stems(t)) | ({t[1:]} if len(t) > 1 and t.startswith(_NUMBER_CLITICS) else set())
+    return any(c and (re.search(r"\d", c) or find_numbers([c])) for c in cands)
+
+
+def _completes(frag: str, word: str) -> bool:
+    """`word` (folded) is `frag` (folded) said whole: a strict prefix of two or more letters that adds more than a
+    negation («بيقلل» / «بيقللش», "do" / "don't" never), and neither of them is a number word («بخمس» / «بخمستاشر»,
+    "four" / "fourteen" never)."""
+    from .safety.risk_words import _negation
+    return len(frag) >= 2 and len(word) > len(frag) and word.startswith(frag) \
+        and word[len(frag):] not in _NEGATED_TAIL and not _negation(word) \
+        and not _number_word(frag) and not _number_word(word)
+
+
+def cut_off(last, kept, fill: dict | None = None) -> bool:
+    """An abandoned take really stops mid-way at its last word `last` (as said): the word is written as cut ("am-"),
+    is a hesitation sound («اممم», "um"), or is the start of a word the other take says (`kept`, as said: «آم» /
+    «آمنة»). Only then may the other take's later words be where it goes on (EXECUTOR RULINGS 2026-10-18 (2) item 2);
+    a whole word followed by more words («آمنة» / «آمنة للحامل», "women" / "women nope") is a difference."""
+    from .safety.numbers import fold
+    fill = fill or FILLERS
+    raw = str(last or "").strip()
+    tok = norm_word(raw)
+    if _CUT_MARK.search(_TRAILING_QUOTES.sub("", raw)) and not _number_word(raw):
+        return True
+    if tok and (_always(tok, fill, "en") or tok in fill.get("stretched_only", [])):
+        return True
+    frag = fold(raw)
+    return any(_completes(frag, fold(w)) for w in kept)
+
+
+def _shown(raw) -> str:
+    """A word as said, without the marks, quotes and brackets around it («"للحامل".» -> للحامل)."""
+    return re.sub(r"^\W+|\W+$", "", str(raw or "").strip())
+
+
+def _word_changes(ws: list, toks: list, drop: tuple, keep: tuple, fill: dict, read_d: set, read_k: set,
+                  numbers_read: set) -> tuple:
+    """(lost, added): the content words, as said, of the take to drop that the kept take does not say, and of the
+    kept take that the dropped one does not say («الحباية دي مفيدة.» / «… مفيدة للعضم.»). drop / keep: (start, length)
+    over the whole retake match (each take to the end of its sentence, lane 5 b563d74 P2-1).
+    - A clitic is said in both («للضغط» / «الضغط»).
+    - A word whose meaning the takes' reader compared and found the same (read_d / read_k: "with food" / "with a full
+      meal") is no change, except a number word the reader did not read as a number (numbers_read: «بربع» / «بساعة»).
+    - Only when the take to drop was abandoned at a real cut-off (`cut_off`: its last word cut off, a hesitation
+      sound) is its last word said in full by the kept take («تعرفي» / «تعرفيها»), and are the kept take's words after
+      the last word the dropped one got to where it goes on («أول حاجة لازم تعرفي» / «… تعرفيها كويس.»)."""
     from .safety.numbers import fold, stems
-    kept = [fold(ws[k]["word"]) for k in range(keep[0], keep[0] + keep[1])]
-    said = {s for t in kept for s in stems(t)}
-    out = []
-    for k in range(drop[0], drop[0] + drop[1]):
+    dspan, kspan = range(drop[0], drop[0] + drop[1]), range(keep[0], keep[0] + keep[1])
+    last_d = drop[0] + drop[1] - 1
+    while last_d > drop[0] and not norm_word(ws[last_d]["word"]):
+        last_d -= 1                                   # a mark written as its own word
+    cut = not _closed(ws[drop[0] + drop[1] - 1]["word"]) and \
+        cut_off(ws[last_d]["word"], [ws[k]["word"] for k in kspan], fill)
+    frag = fold(ws[last_d]["word"])
+
+    def trusted(k, read):
+        return k in read and not (_number_word(ws[k]["word"]) and k not in numbers_read)
+
+    def stems_of(span):
+        return {s for k in span for s in stems(fold(ws[k]["word"])) if s}
+    kept_stems, dropped_stems = stems_of(kspan), stems_of(dspan)
+    lost = []
+    for k in dspan:
         t = fold(ws[k]["word"])
-        if k in read or not _content(toks[k], fill) or not t or set(stems(t)) & said \
-                or any(x.startswith(t) for x in kept):
+        if not t or trusted(k, read_d) or not _content(toks[k], fill) or set(stems(t)) & kept_stems \
+                or (cut and k == last_d):
             continue
-        out.append(ws[k]["word"].strip().strip(".,!?؟…،"))
+        lost.append(_shown(ws[k]["word"]))
+
+    def in_dropped(t):
+        return bool(set(stems(t)) & dropped_stems) or (cut and _completes(frag, t))
+    last = max((k for k in kspan if fold(ws[k]["word"]) and in_dropped(fold(ws[k]["word"]))), default=keep[0] - 1)
+    added = []
+    for k in kspan:
+        t = fold(ws[k]["word"])
+        if not t or trusted(k, read_k) or not _content(toks[k], fill) or in_dropped(t) or (cut and k > last):
+            continue
+        added.append(_shown(ws[k]["word"]))
+    return lost, added
+
+
+# --- medical and religious clients (owner pre-mortem 2026-10-18, Gate 4) -----------------------------------------------
+# A retake of a medical or religious client is never ticked for the editor, whatever the meaning reader finds: the
+# editor still sees each one with its reason and ticks it in one click. The client's reel-profile cut-proposals.json
+# may set another list; only [] turns the rule off, which the executor does for one client only after the reader is
+# measured on that client's real clips. The default lives here, in code, so a damaged file cannot lose it (EXECUTOR
+# RULINGS 2026-10-18 (2) item 3). Fail closed (item 4): a client whose domain is not set (`domain: null`, the shipped
+# default, or the template's placeholder) is never pre-ticked, and a typo or an unknown entry anywhere in the rule's
+# inputs is "unclear", never pre-ticked, with a line that names the bad value. An explicit `general` allows pre-ticks.
+NEVER_PRETICK_KEY = "retakes_never_preticked_for"
+NEVER_PRETICK_DEFAULT = ("medical", "religious")
+SUBJECT_AREAS = ("medical", "religious", "general")           # profile.json `domain`
+_AREA_AR = {"medical": "طبي", "religious": "ديني", "general": "عام", "business": "بيزنس", "ai": "ذكاء اصطناعي"}
+UNSET_LINE = ("حدّد مجال العميل (domain) في reel-profile عشان نقدر نعلّم الإعادات تلقائي",
+              "set the client's domain in reel-profile to allow pre-ticked retakes")
+
+
+def _area(v) -> str:
+    return " ".join(v.split()).lower() if isinstance(v, str) else ""
+
+
+def retake_rule(ctx=None) -> dict:
+    """{"never": bool, "domains": [the setting], "client": [the client's areas], "unset": bool, "unclear": bool,
+    "problem": str | None, "problem_ar": str | None}. The client's areas: profile.json `domain` and the areas its own
+    `review_domains` lists (the always-on reviews every client gets are not among them). Never raises."""
+    from .common import load_config
+    en, ar = [], []
+
+    def bad(e, a):
+        en.append(e)
+        ar.append(a)
+    try:
+        from .review_domains import TEMPLATE_DOMAIN, registry
+        known, template = set(registry()), _area(TEMPLATE_DOMAIN)
+    except Exception as e:  # noqa: BLE001  (fail closed: the reason is named)
+        known, template = set(), None
+        bad(f"the review-domain registry could not be read ({e})", "سجل مجالات المراجعة مش مقروء")
+    try:
+        cfg = load_config("cut-proposals.json", ctx)
+    except Exception as e:  # noqa: BLE001
+        cfg = {}
+        bad(f"cut-proposals.json could not be read ({e})", "ملف cut-proposals.json مش مقروء")
+    if not isinstance(cfg, dict):
+        bad(f"cut-proposals.json is {type(cfg).__name__}, not an object", "ملف cut-proposals.json مش مكتوب صح")
+        cfg = {}
+    raw = cfg.get(NEVER_PRETICK_KEY, NEVER_PRETICK_DEFAULT)
+    allowed = known | set(SUBJECT_AREAS)
+    if isinstance(raw, (list, tuple)) and all(isinstance(x, str) for x in raw):
+        domains = sorted({_area(x) for x in raw})
+        for x in raw:
+            if _area(x) not in allowed:
+                bad(f"{NEVER_PRETICK_KEY} lists {x!r}, which is not a subject area ({', '.join(sorted(allowed))})",
+                    f"«{NEVER_PRETICK_KEY}» فيها {x!r} ودي مش مجال معروف")
+        domains = [d for d in domains if d in allowed]
+        off = not raw
+    else:
+        domains, off = list(NEVER_PRETICK_DEFAULT), False
+        bad(f"{NEVER_PRETICK_KEY} is {raw!r}, not a list of subject areas ([] turns the rule off)",
+            f"«{NEVER_PRETICK_KEY}» قيمتها {raw!r} ودي مش قايمة مجالات")
+    client, unset = set(), False
+    try:
+        prof = load_config("profile.json", ctx)
+    except Exception as e:  # noqa: BLE001
+        prof = {}
+        bad(f"profile.json could not be read ({e})", "ملف profile.json مش مقروء")
+    if not isinstance(prof, dict):
+        bad(f"profile.json is {type(prof).__name__}, not an object", "ملف profile.json مش مكتوب صح")
+        prof = {}
+    d = prof.get("domain")
+    if d is None or isinstance(d, str) and _area(d) in ("", template):
+        unset = True                                  # not chosen yet: may be medical, so fail closed
+    elif _area(d) in SUBJECT_AREAS:
+        client.add(_area(d))
+    else:
+        bad(f"profile.json `domain` is {d!r}, not medical, religious or general",
+            f"«domain» في profile.json قيمته {d!r} ودي مش medical ولا religious ولا general")
+    rd = prof.get("review_domains")
+    if isinstance(rd, list) and all(isinstance(x, str) for x in rd):
+        for x in rd:
+            if _area(x) in known:
+                client.add(_area(x))
+            else:
+                bad(f"profile.json `review_domains` lists {x!r}, which is not a review domain "
+                    f"({', '.join(sorted(known))})", f"«review_domains» فيها {x!r} ودي مش مجال مراجعة معروف")
+    elif rd is not None:
+        bad(f"profile.json `review_domains` is {rd!r}, not a list of review domains",
+            f"«review_domains» قيمتها {rd!r} ودي مش قايمة مجالات")
+    unclear = bool(en)
+    never = not off and (unclear or unset or bool(client & set(domains)))
+    return {"never": never, "domains": domains, "client": sorted(client), "unset": unset, "unclear": unclear,
+            "problem": "; ".join(en) or None, "problem_ar": "؛ ".join(ar) or None}
+
+
+def _rule_lines(rule: dict) -> list:
+    """[(ar, en)]: why a retake is not ticked for this client, Arabic first."""
+    out = []
+    if rule.get("unclear"):
+        out.append((f"مجال العميل مش واضح في إعداداته ({rule.get('problem_ar')})، فالإعادة عمرها ما بتتعلّم لوحدها: "
+                    "اسمعها وعلّم عليها بنفسك",
+                    f"the client's subject area could not be read ({rule.get('problem')}), so a retake is never "
+                    "ticked for you: listen and tick it yourself"))
+    area = next((a for a in rule.get("client", []) if a in rule.get("domains", [])), None)
+    if area:
+        out.append((f"العميل ده مجاله {_AREA_AR.get(area, area)}، فالإعادة عمرها ما بتتعلّم لوحدها: اسمعها وعلّم "
+                    "عليها بنفسك", f"this is a {area} client, so a retake is never ticked for you: listen and tick it "
+                                   "yourself"))
+    if rule.get("unset"):
+        out.append(UNSET_LINE)
     return out
+
+
+def _rule_reason(rule: dict) -> tuple:
+    lines = _rule_lines(rule)
+    return "".join("؛ " + a for a, _ in lines), "".join("; " + e for _, e in lines)
 
 
 def _never_filler(raw: str) -> bool:
@@ -203,9 +406,9 @@ def clean_words(words) -> list:
 
 
 def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", protect: dict | None = None,
-            samples=None, sr: int = 0, media_end_ms=None) -> dict:
+            samples=None, sr: int = 0, media_end_ms=None, rule: dict | None = None) -> dict:
     """{"proposals": [...], "notes": [(ar, en)]} for clean words. protect: {"word_ids": set, "spans": [[a, b]],
-    "anchors": [ms], "after_ms": ms | None}. Deterministic."""
+    "anchors": [ms], "after_ms": ms | None}. rule: retake_rule() (never pre-tick a retake when "never"). Deterministic."""
     cfg = cfg or {"values": dict(DEFAULTS), "fillers": {k: list(v) for k, v in FILLERS.items()}}
     V, F = cfg["values"], cfg["fillers"]
     protect = protect or {}
@@ -362,7 +565,7 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
             while hi_ < n - 1 and not sentence_end(hi_) and not other[0] <= hi_ + 1 < other[0] + other[1]:
                 hi_ += 1
             return lo_, [ws[k]["word"] for k in range(lo_, hi_ + 1)]
-        (lo_d, sent_d), (_, sent_k) = sentence_of(drop[0], drop[1], keep), sentence_of(keep[0], keep[1], drop)
+        (lo_d, sent_d), (lo_k, sent_k) = sentence_of(drop[0], drop[1], keep), sentence_of(keep[0], keep[1], drop)
         differs = compare_takes(sent_d, sent_k)
         kept_text = " ".join(ws[k]["word"].strip() for k in range(keep[0], keep[0] + keep[1]))
         number_ar = "؛ بس فيها رقم أو جرعة، فسايبينها لحد ما تسمعها" if has_number else ""
@@ -388,19 +591,45 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
             conf = min(conf, V["conf_on_purpose"])
             extra["differs"] = differs
         # a word the take to drop says and the kept one does not (no word list can know every medical word: «سلبي» /
-        # «إيجابي», «الشمال» / «اليمين»): dropping it would lose what was said, so the editor hears both
-        lost = [] if differs else _lost_words(ws, toks, drop, keep, F, {lo_d + k for k in reading(sent_d)["read"]})
+        # «إيجابي», «الشمال» / «اليمين»): dropping it would lose what was said, so the editor hears both; and the other
+        # way round: keeping a take that says «لست» / «سلبي» where the dropped one did not changes what is said just as
+        # much. Each take is compared to the end of its sentence (the whole retake match: «… السكر حلال» / «… حرام»
+        # past the twelfth word, lane 5 b563d74 P2-1).
+        lost, added = [], []
+        if not differs:
+            from .safety.numbers import find_numbers, fold as _fold
+
+            def numbers_in(lo_, sent):
+                return {lo_ + k for x in find_numbers([_fold(w) for w in sent]) if x.get("value") is not None
+                        for k in range(x["start"], x["end"])}
+            lost, added = _word_changes(
+                ws, toks, (drop[0], lo_d + len(sent_d) - drop[0]), (keep[0], lo_k + len(sent_k) - keep[0]), F,
+                {lo_d + k for k in reading(sent_d)["read"]}, {lo_k + k for k in reading(sent_k)["read"]},
+                numbers_in(lo_d, sent_d) | numbers_in(lo_k, sent_k))
         if lost:
             said = "، ".join(f"«{w}»" for w in lost)
             number_ar += f"؛ بس الإعادة اللي هتتشال فيها كلام مش في التانية ({said})، فسايبينها لحد ما تسمعهم وتختار"
             number_en += (f"; but the take to drop says words the kept one does not ({', '.join(lost)}), so it is left "
                           "unticked for you to choose")
+        if added:
+            said = "، ".join(f"«{w}»" for w in added)
+            number_ar += f"؛ بس الإعادة اللي هتفضل فيها كلام مش في اللي هتتشال ({said})، فسايبينها لحد ما تسمعهم وتختار"
+            number_en += (f"; but the take to keep says words the dropped one does not ({', '.join(added)}), so it is "
+                          "left unticked for you to choose")
+        if lost or added:
             conf = min(conf, V["conf_on_purpose"])
-            extra["differs"] = {"words": {"a": lost, "b": []}}
+            extra["differs"] = {"words": {"a": lost, "b": added}}
+        never = bool(rule and rule.get("never"))
+        if never:
+            r_ar, r_en = _rule_reason(rule)
+            number_ar += r_ar
+            number_en += r_en
         add("retake", drop[0], drop[0] + drop[1] - 1, conf, ar + number_ar, en + number_en,
-            default="keep" if differs or lost or mid or has_number else None, extra=extra)
+            default="keep" if differs or lost or added or mid or has_number or never else None, extra=extra)
         used.update(range(a, a + la))
         used.update(range(b, b + lb))
+    if rule and rule.get("never") and any(p["kind"] == "retake" for p in props):
+        notes.extend(_rule_lines(rule))              # once, at the top of the list: why no retake is ticked
 
     # false starts ----------------------------------------------------------------------------------------------------
     for i in range(n - 1):
@@ -686,6 +915,7 @@ def _inputs(paths, data: bytes, wj: dict, ctx=None) -> dict:
     meta = wj.get("meta") if isinstance(wj.get("meta"), dict) else {}
     lang = "en" if str(meta.get("language") or "").lower().startswith("en") else "ar"
     cfg = settings(ctx)
+    rule = retake_rule(ctx)
     ws = clean_words(wj["words"])
     media_end = _num(meta.get("duration_ms"))
     protect, notes = _protections(paths, ws, [norm_word(w["word"]) for w in ws], lang, ctx, media_end)
@@ -693,8 +923,10 @@ def _inputs(paths, data: bytes, wj: dict, ctx=None) -> dict:
     pauses = pj.get("cuts_ms") if isinstance(pj, dict) and isinstance(pj.get("cuts_ms"), list) else []
     key = json.dumps([hashlib.sha1(data).hexdigest(), cfg["values"], cfg["fillers"], pauses,
                       sorted(map(str, protect["word_ids"])), protect["anchors"], protect["turns"],
-                      protect["after_ms"], media_end, lang], ensure_ascii=False, sort_keys=True, default=str)
-    return {"words": ws, "lang": lang, "cfg": cfg, "protect": protect, "notes": notes, "pauses": pauses,
+                      protect["after_ms"], media_end, lang,
+                      [rule[k] for k in ("never", "domains", "client", "unset", "unclear")]],
+                     ensure_ascii=False, sort_keys=True, default=str)
+    return {"words": ws, "lang": lang, "cfg": cfg, "rule": rule, "protect": protect, "notes": notes, "pauses": pauses,
             "media_end_ms": media_end, "sha1": hashlib.sha1(key.encode("utf-8")).hexdigest()}
 
 
@@ -711,7 +943,7 @@ def propose(paths, ctx=None, samples=None, sr: int = 0) -> dict:
                        "Run `reel transcribe` (or fix the file), then `reel cut-proposals` again", where=str(wf))
     inp = _inputs(paths, data, wj, ctx)
     res = compute(inp["words"], inp["pauses"], cfg=inp["cfg"], lang=inp["lang"], protect=inp["protect"],
-                  samples=samples, sr=sr, media_end_ms=inp["media_end_ms"])
+                  samples=samples, sr=sr, media_end_ms=inp["media_end_ms"], rule=inp["rule"])
     cfg, lang, notes = inp["cfg"], inp["lang"], inp["notes"]
     totals = {}
     for p in res["proposals"]:
@@ -721,6 +953,7 @@ def propose(paths, ctx=None, samples=None, sr: int = 0) -> dict:
     doc = {"schema": SCHEMA, "video_id": paths.video_id, "words_sha1": hashlib.sha1(data).hexdigest(),
            "inputs_sha1": inp["sha1"], "language": lang, "snapped": bool(samples is not None and sr),
            "settings": {"values": cfg["values"], "basis": cfg["basis"]},
+           "retake_pretick": {k: inp["rule"][k] for k in ("never", "domains", "client", "unset", "unclear", "problem")},
            "notes": [{"ar": a, "en": e} for a, e in notes + res["notes"]],
            "proposals": res["proposals"], "totals": totals,
            "how": "لا شيء يتقص قبل موافقتك: اختار الأرقام وشغّل `reel cut-proposals --accept CP-001,CP-004`، بعدين "

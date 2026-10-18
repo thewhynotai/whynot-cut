@@ -146,12 +146,21 @@ class TestRetakes(unittest.TestCase):
         self.assertIn("timing", p["differs"])
         spec2 = [("أول", 250, 60), ("حاجة", 300, 60), ("لازم", 300, 60), ("تشربي", 350, 600),
                  ("أول", 250, 60), ("حاجة", 300, 60), ("لازم", 300, 60), ("تشربي", 350, 60), ("كتير.", 300, 400)]
-        self.assertEqual(kinds(C.compute(words(spec2))), [("retake", ["أول", "حاجة", "لازم", "تشربي"])])
+        # Task 25 round 4 (EXECUTOR RULINGS 2026-10-18 (2) item 2): the first take stops on a whole word, not at a
+        # real cut-off, so «كتير» is a word the kept take adds: found, never pre-ticked, named
+        res = C.compute(words(spec2))
+        self.assertEqual(kinds(res, "keep"), [("retake", ["أول", "حاجة", "لازم", "تشربي"])])
+        self.assertEqual(res["proposals"][0]["differs"], {"words": {"a": [], "b": ["كتير"]}})
+        spec3 = [("أول", 250, 60), ("حاجة", 300, 60), ("لازم", 300, 60), ("تشر", 350, 600),
+                 ("أول", 250, 60), ("حاجة", 300, 60), ("لازم", 300, 60), ("تشربي", 350, 60), ("كتير.", 300, 400)]
+        self.assertEqual(kinds(C.compute(words(spec3))), [("retake", ["أول", "حاجة", "لازم", "تشر"])])
 
     def test_retake_across_a_long_pause_but_not_past_the_window(self):
         near = [("لو", 200, 60), ("نمتي", 300, 60), ("بدري", 300, 60), ("هتصحي", 400, 1800),
                 ("لو", 200, 60), ("نمتي", 300, 60), ("بدري", 300, 60), ("هتصحي", 400, 60), ("فايقة.", 400, 300)]
-        self.assertEqual(kinds(C.compute(words(near)))[0][0], "retake")
+        # (found either way; since Task 25 round 4 «فايقة», added after a take that stopped on a whole word, leaves it
+        # unticked: EXECUTOR RULINGS 2026-10-18 (2) item 2)
+        self.assertEqual(kinds(C.compute(words(near)), None)[0][0], "retake")
         far = list(near)
         far[3] = ("هتصحي", 400, 25000)
         self.assertEqual(kinds(C.compute(words(far))), [])

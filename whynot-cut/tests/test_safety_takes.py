@@ -63,13 +63,25 @@ class TestNumberingAndGroups(unittest.TestCase):
                 fx = fixture(name)
                 res = T.groups(fx["words"])
                 self.assertEqual(group_numbers(res), fx["groups"])
-                self.assertEqual([g["best"] for g in res], fx["best"])
+                # the proposed best: the hand label, unless the takes differ in a word (en: take 4 stops before
+                # "should", which may be a correction: no best is proposed, owner pre-mortem 2026-10-18)
+                self.assertEqual([g["best"] for g in res], fx.get("best_proposed", fx["best"]))
 
     def test_three_takes_best_is_the_last_one(self):
         res = T.groups(fixture("ar")["words"])
         g = [g for g in res if len(g["takes"]) == 3][0]
-        self.assertEqual(g["best"], 6)
-        self.assertTrue(g["line_ar"].startswith("٤ و ٥ و ٦ نفس الجملة: الأفضل ٦"))
+        # round 4 (EXECUTOR RULINGS 2026-10-18 (2) item 2): takes 4 and 5 stop on a whole word, so «في الضغط» is a
+        # word difference and no best is proposed
+        self.assertIsNone(g["best"])
+        self.assertEqual(g["differ"]["words"], ["الضغط"])
+        self.assertTrue(g["line_ar"].startswith("٤ و ٥ و ٦ نفس الجملة، بس مختلفين في الكلام (الضغط)"))
+        # three takes of the same words: the last, complete one without a filler is the best
+        g = T.groups(words([("الأكل الصحي بيفرق جدا في الضغط", 0.95, 900),
+                            ("الأكل الصحي يعني بيفرق جدا في الضغط", 0.95, 900),
+                            ("الأكل الصحي بيفرق جدا في الضغط.", 0.95, 300)]))[0]
+        self.assertEqual(len(g["takes"]), 3)
+        self.assertEqual(g["best"], 3)
+        self.assertTrue(g["line_ar"].startswith("١ و ٢ و ٣ نفس الجملة: الأفضل ٣"))
         self.assertIn("same sentence", g["line_en"])
 
     def test_better_take_features(self):
@@ -81,8 +93,12 @@ class TestNumberingAndGroups(unittest.TestCase):
         self.assertEqual(T.groups(words(filler))[0]["best"], 1)
         restart = [("الدوا ده مهم جدا للضغط.", 0.95, 900), ("الدوا ده مه مهم جدا للضغط.", 0.95, 300)]
         self.assertEqual(T.groups(words(restart))[0]["best"], 1)
+        # a later take without «للضغط» may be a correction that drops it: the editor listens (owner pre-mortem
+        # 2026-10-18: any word difference means no proposed best)
         cut = [("الدوا ده مهم جدا للضغط.", 0.95, 900), ("الدوا ده مهم جدا", 0.95, 900), ("خلاص.", 0.95, 0)]
-        self.assertEqual(T.groups(words(cut))[0]["best"], 1)
+        g = T.groups(words(cut))[0]
+        self.assertIsNone(g["best"])
+        self.assertEqual(g["differ"], {"words": ["للضغط"]})
 
     def test_clipping_counts_only_when_audio_is_given(self):
         ws = words([("الدوا ده مهم جدا للضغط.", 0.95, 900), ("الدوا ده مهم جدا للضغط.", 0.95, 300)])
@@ -412,13 +428,13 @@ class TestMeaningDiffers(unittest.TestCase):
         self.assertEqual(g["differ"]["numbers"], ["حباية واحدة", "حبايتين"])
         self.assertNoBest(g)
 
-    def test_c5_negation_reported_past_the_words_cap(self):
+    def test_c5_negation_reported_and_every_word_named(self):
         a = ("الدكتور قال إن الدوا ده بيقلل الضغط عند الكبار في السن وده مهم جدا للناس اللي عندها مشاكل في القلب "
              "والكلى والسكر والكبد وكمان للستات الحوامل في الشهور الأولى من الحمل")
         b = ("الدكتور قال إن الدوا ده مبيقللش الضغط عند الكبار في السن وده مهم جدا للناس اللي عندها مشاكل في الرئة "
              "والمعدة والعظام والمخ وكمان للستات الحوامل في الشهور الأولى من الحمل.")
         g = pair(a, b)
-        self.assertNotIn("words", g["differ"])                 # more than 4 words differ: the word list stays quiet
+        self.assertEqual(g["differ"]["words"], ["والعظام", "والمخ"])     # no cap any more (owner pre-mortem 2026-10-18)
         self.assertEqual(g["differ"]["negation"], ["مبيقللش"])
         self.assertNoBest(g)
 
@@ -441,10 +457,11 @@ class TestMeaningDiffers(unittest.TestCase):
                 self.assertEqual(g["differ"], {})
                 self.assertEqual(g["best"], 2)
 
-    def test_c8_a_content_word_alone_warns_and_keeps_the_proposal(self):
+    def test_c8_a_content_word_alone_gives_no_best(self):
+        # owner pre-mortem 2026-10-18: no word list knows every medical word, so any word difference means no best
         g = pair("النهاردة هنتكلم عن موضوع مهم", "النهاردة هنتكلم عن موضوع جديد.")
         self.assertEqual(g["differ"], {"words": ["جديد", "مهم"]})
-        self.assertEqual(g["best"], 2)
+        self.assertIsNone(g["best"])
         self.assertIn("⚠", g["line_ar"])
         # review 62efd2d P3: «السكر» / «الضغط» is a different medical word (a measure), so no take is proposed
         g = pair("النهاردة هنتكلم عن مرض السكر", "النهاردة هنتكلم عن مرض الضغط.")
@@ -503,7 +520,9 @@ class TestMeaningDiffers(unittest.TestCase):
     def test_r1_i1_an_abandoned_start_names_what_it_left_out_not_as_words(self):
         g = T.groups(words([("خدي حباية واحدة الصبح", 0.95, 900), ("خدي حباية واحدة الصبح يوميا كمان", 0.95, 300)]))[0]
         self.assertIsNone(g["best"])                               # 7193e9a P2-1: no best past a meaning
-        self.assertNotIn("words", g["differ"])
+        # «يوميا» is named as timing, never as a word; «كمان» is a word the later take adds after a take that stopped
+        # on a whole word (round 4, EXECUTOR RULINGS 2026-10-18 (2) item 2: no real cut-off, so it counts)
+        self.assertEqual(g["differ"]["words"], ["كمان"])
         self.assertIn("توقيت «يوميا»", g["line_ar"])
 
     def test_r2_minors_the_note_and_the_words_after_an_abandoned_start(self):
@@ -512,7 +531,12 @@ class TestMeaningDiffers(unittest.TestCase):
         self.assertNotIn("«مش»", g["line_ar"])
         g = T.groups(words([("خدي حباية واحدة من", 0.95, 900), ("خدي حباية واحدة من الدوا ده", 0.95, 900),
                             ("خدي حباية واحدة من الدوا ده مرتين في اليوم بعد الأكل", 0.95, 300)]))[0]
-        self.assertNotIn("words", g["differ"])                   # take 1 only stopped before «الدوا»
+        # take 1 stopped on the whole word «من», not at a real cut-off: «الدوا» that takes 2 and 3 add is a word
+        # difference (round 4, EXECUTOR RULINGS 2026-10-18 (2) item 2); the meaning words are never listed as words
+        self.assertEqual(g["differ"]["words"], ["الدوا"])
+        g = T.groups(words([("خدي حباية واحدة من الدو", 0.95, 900), ("خدي حباية واحدة من الدوا ده", 0.95, 900),
+                            ("خدي حباية واحدة من الدوا ده مرتين في اليوم بعد الأكل", 0.95, 300)]))[0]
+        self.assertNotIn("الدوا", g["differ"].get("words", []))   # take 1 cut off mid-word: compared as far as it got
 
     def test_r3_a_word_said_again_and_words_among_the_full_takes(self):
         g = T.groups(words([("you should not take this pill", 0.95, 900),
@@ -553,7 +577,8 @@ class TestApplyWhenMeaningDiffers(Project):
         self.assertEqual(e["reason"], "TK-1 take dropped (no best proposed: the takes differ in meaning)")
         with self.assertRaises(Guidance) as cm:
             T.apply(self.p, drop=[2])
-        self.assertNotIn("None", str(cm.exception) + str(getattr(cm.exception, "fix", "")))
+        self.assertNotIn("None", str(cm.exception) + cm.exception.how)
+        self.assertIn("they differ in meaning", cm.exception.how)
 
 
 if __name__ == "__main__":

@@ -289,5 +289,10 @@
  "best": [
   3,
   6
- ]
+ ],
+ "best_proposed": [
+  null,
+  null
+ ],
+ "best_proposed_why": "takes 2 and 4/5 stop on a whole word («نعرف», «جدا»), not at a real cut-off, so the words the longer take adds («إن الضغط مرض صامت», «في الضغط») count and no best is proposed (EXECUTOR RULINGS 2026-10-18 (2) item 2); best stays the hand label"
 }

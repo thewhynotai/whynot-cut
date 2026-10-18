@@ -228,5 +228,9 @@
  ],
  "best": [
   3
- ]
+ ],
+ "best_proposed": [
+  null
+ ],
+ "best_proposed_why": "take 4 stops before should: a later, shorter take may be a correction that drops a word, so no best is proposed (owner pre-mortem 2026-10-18); best stays the hand label"
 }

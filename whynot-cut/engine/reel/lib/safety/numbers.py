@@ -213,15 +213,18 @@ TIME = {"ساعه", "ساعات", "دقيقه", "دقايق", "دقائق", "ي�
         "سنين", "سنوات", "مره", "مرات", "اليوم", "يوميا", "يوما", "اياما", "اسبوعا", "شهرا", "عام", "عاما",
         "اعوام",
         "hour", "hours", "minute", "minutes", "day", "days", "week", "weeks", "month", "months", "year", "years",
-        "time", "times", "daily", "weekly", "monthly", "hourly", "nightly", "night"}
+        "time", "times", "daily", "weekly", "monthly", "hourly", "nightly", "night",
+        # the short forms a transcript writes ("2 hrs", "5 min"); "h", "m" and "d" are left out: «vitamin D», "5 m"
+        "hr", "hrs", "min", "mins", "sec", "secs", "seconds", "wk", "wks", "yr", "yrs"}
 TIME = {fold(w) for w in TIME}
 # which period a duration counts («خمس أيام» / «خمس أسابيع»)
-_TIME_CLASS = {"hour": ("ساعه", "ساعات", "hour", "hours", "hourly", "ساعتين"),
-               "minute": ("دقيقه", "دقايق", "دقائق", "minute", "minutes", "دقيقتين"),
+_TIME_CLASS = {"hour": ("ساعه", "ساعات", "hour", "hours", "hourly", "ساعتين", "hr", "hrs"),
+               "minute": ("دقيقه", "دقايق", "دقائق", "minute", "minutes", "دقيقتين", "min", "mins"),
+               "second": ("sec", "secs", "seconds"),
                "day": ("يوم", "ايام", "اليوم", "يوميا", "يوما", "اياما", "day", "days", "daily", "يومين"),
-               "week": ("اسبوع", "اسابيع", "اسبوعا", "week", "weeks", "weekly", "اسبوعين"),
+               "week": ("اسبوع", "اسابيع", "اسبوعا", "week", "weeks", "weekly", "اسبوعين", "wk", "wks"),
                "month": ("شهر", "شهور", "اشهر", "شهرا", "month", "months", "monthly", "شهرين"),
-               "year": ("سنه", "سنين", "سنوات", "عام", "عاما", "اعوام", "year", "years", "سنتين"),
+               "year": ("سنه", "سنين", "سنوات", "عام", "عاما", "اعوام", "year", "years", "سنتين", "yr", "yrs"),
                "times": ("مره", "مرات", "time", "times", "مرتين"), "night": ("night", "nightly")}
 TIME_CLASS = {fold(w): k for k, words in _TIME_CLASS.items() for w in words}
 # dual forms: the word itself says 2 («حبايتين» = two pills, «ساعتين» = two hours)
@@ -419,11 +422,15 @@ def _unsure(toks: list, start: int, end: int, kind: str) -> dict:
 DUAL_FRACTIONS = {"نصين", "ربعين"}
 
 
+GLUED = ("و", "ب", "ف", "ل", "ك")      # a clitic written onto a number: «و٢٠», «بربع ساعة», «ب٥», «لعشرة», «كتسعة»
+
+
 def _glued_and(t: str) -> bool:
-    """«و» written onto a number («و٢٠», «ونص حباية», «وخمسة»): read as the number («حباية ونص», «ساعة ونص» stay a
-    half added to what comes before)."""
-    return len(t) > 1 and t[0] == "و" and (t[1].isdigit() or t[1:] in AR_UNITS or t[1:] in AR_HUNDRED
-                                           or t[1:] in SCALES)
+    """«و», «ب», «ف», «ل» or «ك» written onto a number («و٢٠», «ونص حباية», «وخمسة», «بربع ساعة», «بخمستاشر يوم»,
+    «ب٥ دقايق»; lane 5 b563d74 P1-4): read as the number («حباية ونص», «ساعة ونص» stay a half added to what comes
+    before). An everyday word left over stays one («لست» is «ست», read only beside a unit or a time word)."""
+    return len(t) > 1 and t[0] in GLUED and (t[1].isdigit() or t[1:] in AR_UNITS or t[1:] in AR_HUNDRED
+                                             or t[1:] in SCALES)
 
 
 def find_numbers(toks: list) -> list:
