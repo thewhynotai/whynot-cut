@@ -531,6 +531,14 @@ def require_plan_approval(p: Paths):
         raise SystemExit(2)
 
 
+def cmd_removed_review(a):
+    """K-T2: a short MP4 of only what the plan removes (cuts, retakes, pauses, trimmed head and tail), each part with
+    a 1 s slate and 0.5 s of dimmed kept context; words whose loss changes meaning are highlighted and listed first in
+    removed-review.md. Writes only 08_quality_control/removed-review/."""
+    from lib.safety import removed_review
+    out(removed_review.render(P(a)))
+
+
 def cmd_approve_plan(a):
     from lib.plan import APPROVAL_FORMAT, plan_fingerprint
     from lib.motion_config import is_motion
@@ -994,7 +1002,7 @@ OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (
 # scaffold creates a new folder: there is nothing to lock yet (it runs before the lock is taken).
 CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze", "preflight", "transcribe",
                "transcript-correct", "transcript-verify", "transcript-relisten", "audio-clean", "plan",
-               "review-flags", "approve-plan", "previews", "sfx", "preview-video", "ppro-build", "ppro-frames", "premiere", "verify",
+               "review-flags", "removed-review", "approve-plan", "previews", "sfx", "preview-video", "ppro-build", "ppro-frames", "premiere", "verify",
                "qc", "handoff", "mogrt-build", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build",
                "episode-sheet"}
 # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
@@ -1550,6 +1558,8 @@ CORE_COMMANDS: dict[str, str] = {
     "validate": "check an authored JSON file (edit-decisions, reels-plan, motion-script, publish...) against its schema",
     "review-flags": "write the medical/religious review (--from <file|->) as review-flags.json, keyed by the plan's "
                     "event ids (the lead runs it with the medical-reviewer's table)",
+    "removed-review": "render a short MP4 of only what the plan removes, with a slate per part (words, reason) and "
+                      "the words whose loss changes meaning listed first",
     "approve-plan": "record the approval of the compiled plan (editor or delegated)",
     "auto-approve": "record the approval a standing `approval: auto` gives (by auto; refused unless this client's "
                     "merged preferences say auto); medical and religious lines are never covered",
