@@ -72,7 +72,7 @@ security line. Each row is OPEN until it is accepted and pushed.
 - [ ] independent review, 0 Critical / 0 Important
 - [ ] full suite on a snapshot, 0 failures, `WNC_REQUIRE_SCANNERS=1`
 - [ ] `validate --strict` ×2
-- [ ] evals, with bulk grading on the Batch API
+- [ ] evals on the subscription CLI (`claude plugin eval`, the same judge as the p3 baseline), Task 53 cases included; run at the END, after code freeze, `-j 2` through heavy.sh; re-auth the bundled CLI first (H11: Yunus's one browser click; an `auth_failed` run is no result, not a fail); the Task 53 verse cases stay pending until K-T8 and do not block the tag (plan ruling 2026-10-18)
 - [ ] full macOS CI on the tag
 - [ ] live PODCAST-TEST check
 - [ ] security line
@@ -94,7 +94,7 @@ The Premium bar line and the Mac line go into the gate record.
   7. tag
 
   Lane 3's uncommitted `versions.json` and fuzz files are never half-committed.
-- [ ] **Evals:** the plugin suite keeps its current judge (the p3 baseline). Batch is only for Task 53's deterministic engine evals, through review-runner, in November. Add cases for the Phase 4 skills (rules/T4.3, episode sheet, autopilot, music NEEDS-YOU).
+- [ ] **Evals:** on the subscription CLI, in the pause window (plan ruling 2026-10-18: nothing in them needs the API; Batch was only a cost plan). The plugin suite keeps its current judge (the p3 baseline). Task 53's domain cases run on the same runner (regex graders on the trace, ANSWERS Q53-1). Add cases for the Phase 4 skills (rules/T4.3, episode sheet, autopilot, music NEEDS-YOU): S6 work for a free builder.
 - [ ] **macOS CI:**
   1. raise the workflow time caps (the suite is now 6300+ tests);
   2. `minutes.sh`;

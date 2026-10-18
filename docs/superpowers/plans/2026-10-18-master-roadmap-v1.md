@@ -98,7 +98,7 @@
 - independent review 0 Critical / 0 Important;
 - full suite 0 failures (snapshot);
 - `validate --strict` ×2;
-- evals (bulk grading on the Batch API);
+- evals on the subscription CLI (`claude plugin eval`, the p3 baseline judge), Task 53 cases included, at the end after code freeze;
 - **full** macOS CI;
 - live PODCAST-TEST check;
 - security line;
@@ -127,7 +127,7 @@ At the budget switch the API lanes pause for about 13 days. Gate 4 keeps moving 
   - the executor marks each lane's done items CLOSED in its ASSIGNMENT;
   - the executor gives the files back in LOCKED-AREAS;
   - the executor rewrites the handoff's "Resume on the 1st" list.
-- **Gate exit items that wait for November's credit:** the evals (Batch API grading). Everything else on the exit list (suite, `validate --strict`, macOS CI, live PODCAST-TEST, security line, T4.14 budgets) can run in the window.
+- **Gate exit in the window (plan ruling 2026-10-18):** Gate 4 closes fully in the pause window, tag included. The evals run on the subscription CLI (same runner and judge as Gate 3), at the end after code freeze, with the bundled CLI re-authed first; Task 53's verse cases stay pending until K-T8 and do not block the tag. Everything else on the exit list (suite, `validate --strict`, macOS CI, live PODCAST-TEST, security line, T4.14 budgets) also runs in the window.
 
 **Deliverable to Yunus:** the Gate 4 tag report; the release cut after it is made in the attended sessions, one at a time (owner 2026-10-18).
 
