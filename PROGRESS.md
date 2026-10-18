@@ -63,7 +63,8 @@ security line. Each row is OPEN until it is accepted and pushed.
 | L-T8 engine write gate (client sources; ~190 call sites) | executor | spec says Gate 5 (Addendum L table); not on the Gate 4 line |
 | L-T10 parser fuzzing | lane 3 (paused to Stage 8) | cfc5576 review FAIL; the red test (P1-1) fixed by the executor in 834d609; the rest waits for Stage 8 |
 
-**Last batch suite (c463376, 2026-10-18 02:30–03:35): 6727 tests, 0 failures, 0 errors.** Pushed: origin/release/3.0 = c463376.
+**Last batch suite (447ea2a, 2026-10-18 10:55–12:15): 7307 tests OK, 0 failures, 0 errors (RAM peak 94 %).** Pushed: origin/release/3.0 = 447ea2a. Since c463376 it adds the hooks (cf31580, 47a8b41, acad4aa), adobe_run 09d56c5, the K-T2 verb 447ea2a and the lanes' commits up to 36cd6ad.
+**Earlier (c463376, 02:30–03:35): 6727 tests, 0 failures, 0 errors.**
 - 3 unexpected successes (serve-findings OPEN): fixed by ae726b4.
 - 1 unclosed SSL socket (TLS loopback test): fixed in 8461da4.
 - The lanes' later suites showed test_security_scan_fuzz_install red (cfc5576): fixed in 834d609.
