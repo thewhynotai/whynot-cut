@@ -30,7 +30,7 @@ licence-notice patch, in the third-party notices); the tests pin `unicodedata.un
 
 API: direction(), paragraph(), line_runs(), logical_runs(), visual(), reorder(), word_pieces(), line_pieces(),
 host_text(), phone_spans(), breaks(), word_breaks(), wrap(), lay_out(), set_digits(), punctuation_findings(),
-control_findings().
+control_findings(), phone_findings().
 """
 from __future__ import annotations
 
@@ -357,8 +357,100 @@ _INTL = {z + z for z in _ZEROS}                                # «00» + countr
 # the token after a number chain, past spaced ranges and alternatives («1000 – 2000 مجم», «1000 أو 2000 مجم»)
 # marks and zero-width characters (ZWSP, ZWNJ, ZWJ, WJ, BOM) between a chain and its unit are passed over
 _GAP = "".join(sorted(_MARKS)) + "".join(map(chr, (0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF)))
-_CONNECT = rf"(?:[-–—−]|(?<=[\s{_GAP}])(?:أو|او|إلى|الى|to|or)(?=[\s{_GAP}]))"
-_NEXT_TOKEN = re.compile(rf"(?:[\s{_GAP}]*{_CONNECT}[\s{_GAP}]*[{_D}]+){{0,15}}[\s{_GAP}]+(\S+)")   # ≤ 15: linear
+# a dose list may join its values with a dash, a comma, a slash, a sign or a word («05 120 135 ثم 150 مجم», «120 و150
+# مجم», «0.5 - 1.5 مجم»). The connectors share no character with a value or a space, so the pattern cannot backtrack
+# through a long list (no comma inside a value: «1,500» reads as two values, which is the same for the guard)
+_HARAKAT = "".join(map(chr, range(0x064B, 0x0653)))
+_CONNECT_WORD = (rf"(?:(?:و)?(?:إلى|إلي|الى|الي|حتى|حتي|لحد|لغاية|لغايه|لين|الين|إلين|بعدين|بعدها|بعد)|أو|او|ولا|مع|يا|كده|كدا|ان|"
+                 rf"ث[ـ{_HARAKAT}]*م|و|ل|ف|(?i:to|or|till|until|then|and|x|through|up[\s{_GAP}]+to))[{_HARAKAT}ـ]*")
+# one sign or one whole word per step: a word must end at a space, a mark or a digit, so each text reads one way
+_CONNECT = rf"(?:[-–—−‒―~،,/&×؛:;…+.ـ]|{_CONNECT_WORD}(?=[\s{_GAP}{_D}]))"
+_VALUE = rf"(?:[.٫]?[{_D}]+(?:[.٫٬][{_D}]+)*|[½¼¾⅓⅔])"
+_NEXT_TOKEN = re.compile(rf"(?:[.٫٬][{_D}]+)*(?:(?:[\s{_GAP}]*(?:{_CONNECT}[\s{_GAP}]*)+|[\s{_GAP}]+){_VALUE}){{0,15}}"
+                         rf"[\s{_GAP}]+(\S{{1,40}})")          # ≤ 15 values, a token read for ≤ 40 characters: linear
+_TO_WEST = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+_EG_MOBILE = re.compile(r"01[0125][0-9]{8}")
+# cue words, compared folded (see _fold). An article and a possessive never go together («الرقمي» is "digital»)
+_STRONG_STEMS = "تليفون|تلفون|تيليفون|موبايل|واتساب|وتساب|واتس|هاتف|جوال"
+_WEAK_STEMS = "رقم|نمره|محمول"                        # «رقم» is also "a reading": «الرقم هو 080 120 135 150»
+_SUFFIX = "(?:ي|نا|ك|كم|ه|ها|هم)"
+_STRONG_NOUN = re.compile(rf"(?:و|ف)?(?:ب|ل|ع)?(?:(?:ال|لل)(?:{_STRONG_STEMS})|(?:{_STRONG_STEMS}){_SUFFIX}?)")
+_WEAK_NOUN = re.compile(rf"(?:و|ف)?(?:ب|ل|ع)?(?:(?:ال|لل)(?:{_WEAK_STEMS})|(?:{_WEAK_STEMS}){_SUFFIX}?|نمرت{_SUFFIX})")
+_CUE_VERB = re.compile(r"(?:و|ف)?(?:ه|ب)?(?:ل|لل|ال)?(?:اتصل|تتصل|يتصل|نتصل|اتصال)(?:وا|و|ي|نا)?|"
+                       r"(?:و|ف)?(?:ه|ب)?(?:ت|ي)?كلم(?:نا|ونا|ني|وني|يني|ينا)|"
+                       r"(?:و|ف)?(?:ل|لل|ال)?(?:حجز|استفسار|استفسارات|تواصل)|(?:و|ف)?احجز(?:وا|ي)?")
+_CUE_LATIN = {"call", "phone", "telephone", "tel", "whatsapp", "mobile", "mob", "cell", "hotline", "contact"}
+_CUE_ABBR = {"tel.", "ph.", "mob.", "ت:", "ت.", "م:"}
+_WEAK_LATIN = {"number", "no.", "nr"}
+# words that may stand between a cue and its number («اتصلوا بينا على», «رقم الواتساب بتاعنا», «call us at»)
+_FILLER = {"us", "me", "at", "on", "our", "my", "the", "is", "now", "new", "app", "today"} | {
+    _f for _f in ("علي", "ع", "بينا", "بنا", "بيا", "بيه", "بيها", "ليا", "لينا", "لنا", "علينا", "عليا", "ده", "دا",
+                  "دي", "هو", "هي", "بتاعنا", "بتاعي", "بتاعتنا", "بتاعتي", "بتاعه", "بتاعها", "الخاص", "الجديد",
+                  "الجديده", "الان", "دلوقتي", "حالا", "فورا", "اب")}
+# words that join two phones («رقمنا 02 2345 6789 أو 02 3456 7890»): the second has a weak cue
+_PHONE_JOIN = {"أو", "او", "و", "or", "and", "-", "–", "/", "،", ",", "&"}
+_LOOK_BACK = 32                     # characters: no cue word or filler is longer
+STRONG, WEAK, JOINED = 3, 2, 1
+
+
+def _cue_kind(tok: str) -> int | str | None:
+    """STRONG, WEAK, "filler" or None for a word before a number chain. A cue or filler may end in «:», «-» or a
+    comma («رقمي:», «رقمنا،»); a sentence end cuts it («اتصل. 02 …», «اتصل . 02 …»: it stays in the word, which then
+    matches nothing), except in an abbreviation («Tel.», «ت:»). The bare noun «رقم / الرقم / رقمي / نمرة» is WEAK: it
+    also names a reading, so the chain must look dialled too (see phone_spans)."""
+    if tok.casefold() in _CUE_ABBR:
+        return STRONG
+    core = tok.strip("\"'«»‹›“”‘’„()[]{}:-–—،,")
+    if not core:
+        return "filler"                             # «:», «-» or a comma alone
+    w = _fold(core).casefold()
+    if w in _CUE_LATIN or _STRONG_NOUN.fullmatch(w) or _CUE_VERB.fullmatch(w):
+        return STRONG
+    if w in _WEAK_LATIN or _WEAK_NOUN.fullmatch(w):
+        return WEAK
+    return "filler" if w in _FILLER else None
+
+
+def _cue_before(text: str, pos: int) -> int:
+    """STRONG, WEAK or 0: the best cue word that ends at most 4 words (fillers or weak cues) before `pos`, on the same
+    line («كلمنا على الرقم ده 02 …», «call our number 02 …»). Each word read is at most _LOOK_BACK characters (a space
+    run lies between two chains and is read once), so a chain costs a constant and phone_spans stays linear
+    («(1(1(1…», «:1:1:1…»)."""
+    i, best = pos, 0
+    for _ in range(5):
+        j = i
+        while j > 0 and text[j - 1].isspace():
+            if _HARD.match(text[j - 1]):
+                return best
+            j -= 1
+        k = j
+        while k > 0 and not text[k - 1].isspace():
+            if j - k >= _LOOK_BACK:
+                return best
+            k -= 1
+        if k == j:
+            return best
+        kind = _cue_kind(text[k:j])
+        if kind == STRONG:
+            return STRONG
+        if kind == WEAK:
+            best = WEAK
+        elif kind != "filler":
+            return best
+        i = k
+    return best
+
+
+def _joined_phone(text: str, start: int, end: int) -> bool:
+    """`text[start:end]`, between an earlier phone and this chain, holds only «أو / و / or / - / ،» on one line (at
+    most 16 characters: each gap is read once, so the scan stays linear)."""
+    if end - start > 16:
+        return False
+    gap = text[start:end]
+    if _HARD.search(gap):
+        return False
+    toks = gap.split()
+    return len(toks) <= 2 and all(t in _PHONE_JOIN for t in toks)
 
 
 _YEAR = re.compile(r"(?:19|20|١٩|٢٠|۱۹|۲۰)[0-9٠-٩۰-۹]{2}")
@@ -400,30 +492,40 @@ def _value_list(gs: list[str]) -> bool:
 
 
 def phone_spans(text: str) -> list[tuple[int, int]]:
-    """Phone numbers, as dialled: 7–15 digits in groups joined by single spaces (a no-break space too) or hyphens, and
-    either
+    """Phone numbers, as dialled: 7–15 digits in groups joined by single spaces (a no-break space too) or hyphens.
+    A digit chain is a phone ONLY with a positive cue (executor ruling 2026-10-18); anything else is a list or a
+    number and is drawn as one (an Egyptian landline with no cue, «02 2345 6789», and «05 250 500» are lists):
     - «+» and a country code («+20 100 123 4567», «+966 5 1234 5678», «+201001234567»), or
     - «00», a country code in the same group, 2+ groups, the last of 3+ digits, and 7–15 digits after the «00»
       («00966 50 123 4567», «0020 100 123 4567»; not «00 966 …», not one unbroken group; «0030 15 200» reads as
       dialled too), or
-    - a leading zero in a first group of 2+ digits, groups of 3+ digits after it and at most 12 digits («010 1234
-      5678», «02 2345 6789», «٠١٠ ١٢٣٤ ٥٦٧٨»; not «0 250 500» or «٠ ١٠٠ ٢٠٠٠»),
-    and not a list of values: round values («05 250 500», «05 100 200 300», «+120 140 160»; see _value_list), or a
-    chain that runs into a measuring or money unit: then no part of it is a phone («05 250 500 1000 مجم», «02 500
-    1000 2000 وحدة», «05 120 135 15 %»). Time and count words and everyday words that are also units do not count
-    («010 1234 5678 مرة تانية», «… يوم الجمعة», «… سعر الكشف», «… كيلو 21»; see _is_value_unit). Values joined by
-    dashes or «أو / إلى / or / to» (up to 15) still lead to the unit («05 250 500 1000 أو 2000 مجم»). The cost: a phone
-    followed straight by an amount and its unit («010 1234 5678 2 جنيه», «… أو 5 جنيه») is read as values too, and so
-    is a second phone after « - » before a unit. A list ending in a word kept out of the units («02 500 1000 درجات»,
-    «… 2000 لكل يوم») is read as dialled. A chain with neither
-    is read as dialled: «قيس السكر 080 120 135 150» stays a phone shape (the text cannot tell).
+    - a leading zero in a first group of 2+ digits, groups of 3+ digits after it and at most 12 digits, AND either
+      the Egyptian mobile shape (01[0125] + 8 digits, first group of 3+ digits: «010 1234 5678», «0100 123 4567»,
+      «٠١٠ ١٢٣٤ ٥٦٧٨») or a cue word before the chain's first group: STRONG «تليفون / موبايل / واتساب / هاتف /
+      جوال / اتصل / اتصال / كلمنا / للحجز / للتواصل», call, phone, tel, WhatsApp, mobile, contact, hotline; WEAK
+      «رقم / رقمي / الرقم / نمرة / محمول», number, which also name a reading, so the chain must also hold a group
+      of 4+ digits («الرقم ده 02 2345 6789» is a phone, «الرقم هو 080 120 135 150» a reading). At most 4 filler
+      words stand between («اتصلوا بينا على», «كلمنا على الرقم ده», «call us at»; see _cue_kind), on the same
+      line and in the same sentence. «رقم السكر 080 120 135 150» has a word that is not a filler: no cue. A chain
+      right after a phone, joined by «أو / و / or / - / ،», has a weak cue.
+    Never a phone: a list of values (round values: «رقمنا 05 250 500», «+120 140 160»; see _value_list), and a
+    chain that runs into a dose or measuring unit, past decimals and values joined by dashes, commas, slashes, «&»,
+    «×» or «أو / إلى / ثم / و / لـ / حتى / لغاية / ولا / مع / or / to / up to / then / and / till» (up to 15):
+    «05 250 500 1000 مجم», «080 120 135 150 مجم/دل», «010 1234 5678 0.5 مجم»,
+    «010 1234 5678 ثم 150 مجم». A dose unit is absolute, so «اتصل 010 1234 5678 وحدة الكلى» is read as numbers (the
+    cost), and so is «اتصل 010 1234 5678 حبة حبة». Money, size and percent words («جنيه», «%», «سم»; _SOFT) and
+    time, count and everyday words («مرة», «يوم», «سعر», «كيلو»; _NOT_VALUE) do not undo a phone («اتصل 010 1234 5678
+    جنيه بس»). The cost: a phone followed
+    straight by an amount and its dose unit («010 1234 5678 2 مجم») is read as values too.
     Numbers set off by a space before or after it are not part of it («اتصل 3 010 1234 5678», «010 1234 5678 24/7»,
     «010 1234 5678 2024»); two phones in a row are two. Not phones: lists («2020 2021 2022», «05 10 15 20»), dates
     («01-02-2024»), times, decimals, a number glued to a letter, «%», «/» or a hyphenated tail («010 1234 5678/9»,
     «010 1234 5678-9»). A number may stand right before a sentence mark or right after a colon («رقمي:010 1234
-    5678.»). Linear in the text: a phone has at most 15 groups."""
+    5678.»). Linear in the text: a phone has at most 15 groups; a cue is at most 5 words back, each read for at most
+    32 characters."""
     out = []
     for m in _PHONE_CHAIN.finditer(text):
+        cued = _cue_before(text, m.start()) or (JOINED if out and _joined_phone(text, out[-1][1], m.start()) else 0)
         groups = [(g.start() + m.start(), g.end() + m.start()) for g in _PHONE_GROUP.finditer(m.group())]
         seps = [" " if text[x - 1] in _PHONE_SPACE else text[x - 1] for x, _ in groups]   # before group k ≥ 1
         nxt = text[m.end():m.end() + 2]
@@ -433,10 +535,10 @@ def phone_spans(text: str) -> list[tuple[int, int]]:
         glued_end = bool(nxt[:1]) and (re.match(r"[\w%٪]", nxt[:1]) is not None
                                        or (nxt[:1] in ".,٫٬/:" and nxt[1:2].isdigit()))
         after = _NEXT_TOKEN.match(text, m.end())
-        if after and not _HARD.search(after.group()) and _is_value_unit(after.group(1).strip(_GAP)):
-            continue                                        # values with their unit: no part of the chain is a phone
+        if after and not _HARD.search(after.group()) and _is_dose_unit(after.group(1).strip(_GAP)):
+            continue                                        # values with their dose unit: no part is ever a phone
 
-        def valid(st, en):
+        def valid(st, en, level):
             if st and seps[st] != " ":
                 return False                                # «5678-010…»: a hyphenated head belongs to something else
             if en == len(groups):
@@ -454,12 +556,22 @@ def phone_spans(text: str) -> list[tuple[int, int]]:
                 return (len(gs) == 1 or len(gs[-1]) >= 3) and 7 <= digits <= 15
             if gs[0][:2] in _INTL and len(gs[0]) >= 3 and len(gs) > 1 and len(gs[-1]) >= 3 and 7 <= digits - 2 <= 15:
                 return True
-            return gs[0][:1] in _ZEROS and len(gs[0]) >= 2 and len(gs) > 1 and all(len(g) >= 3 for g in gs[1:]) \
+            shaped = gs[0][:1] in _ZEROS and len(gs[0]) >= 2 and len(gs) > 1 and all(len(g) >= 3 for g in gs[1:]) \
                 and 7 <= digits <= 12
+            if not shaped:
+                return False
+            if level == STRONG or len(gs[0]) >= 3 and _EG_MOBILE.fullmatch("".join(gs).translate(_TO_WEST)):
+                return True
+            if level == JOINED:
+                return len(gs[-1]) >= 4                             # «… 5678 0120 135 150» is a reading
+            return level == WEAK and any(len(g) >= 4 for g in gs)     # «الرقم هو 080 120 135 150» is a reading
 
         st = 0
         while st < len(groups):
-            en = next((e for e in range(min(len(groups), st + 15), st, -1) if valid(st, e)), None)
+            # the chain's cue belongs to its first group; a phone that ends right before gives a JOINED one («رقمنا
+            # 010 1234 5678 012 3456»); a later group after a number has none («رقم 1 080 120 135 150»)
+            level = cued if st == 0 else JOINED if out and out[-1][1] == groups[st - 1][1] else 0
+            en = next((e for e in range(min(len(groups), st + 15), st, -1) if valid(st, e, level)), None)
             if en is None:
                 st += 1
                 continue
@@ -788,8 +900,11 @@ _LATIN_UNITS = {
     "capsule", "capsules", "cap", "caps", "dose", "doses", "drop", "drops", "puff", "puffs", "times", "lbs", "lb",
     "cc", "tsp", "tbsp", "cm2", "cm3", "cm²", "cm³", "mm2", "mm3", "mm²", "mm³", "m2", "m3", "m²", "m³", "ampoule",
     "ampoules", "amp", "amps", "patch", "patches", "sachet", "sachets", "vial", "vials", "day", "days", "week",
-    "weeks", "wk", "le", "l.e",
+    "weeks", "wk", "le", "l.e", "miu", "miu/l", "miu/ml", "mgs", "gm", "gms", "gram", "grams", "milligram",
+    "milligrams", "microgram", "micrograms", "mcgs", "percent", "pct", "‰", "µmol", "umol", "u", "u/l", "u/ml",
+    "iu/l", "units/l", "i.u", "c.c", "m.g", "cm3", "pill", "pills",
 }
+_LATIN_UNITS_CF = {u.casefold() for u in _LATIN_UNITS}   # the micro sign «µ» casefolds to the Greek «μ»
 # compared after _fold: no harakat, «أ إ آ» -> «ا», «ة» -> «ه», «ى» -> «ي» (Whisper writes «دقيقه», «وحده», «مره»)
 _ARABIC_UNITS = {
     "٪", "مجم", "مج", "م.ج", "ملجم", "ملغ", "مغ", "مل", "ملل", "مللي", "ملي", "ميلي", "ميللي", "مليجرام", "ملليجرام", "ميليجرام",
@@ -803,6 +918,13 @@ _ARABIC_UNITS = {
     "ملجم/كجم", "وحدة/كجم", "سم٣", "سم٢", "مم٣", "م٢", "م٣",
     "نقطة", "نقط", "سعر", "سعرة", "سعرات", "كالوري", "وحدة", "وحدات", "مليون", "ألف", "آلاف", "مليار",
     "بالمية", "بالمئة", "بالمائة", "درجة", "درجات",
+    "ملغم", "مكجم", "ميكروغرام", "نانوجرام", "نانوغرام", "ملغرام", "ميلليجرام", "ملجرام", "مليجرامات", "ملليجرامات",
+    "غم", "دل", "ديسيلتر", "مليمول", "ملم", "و.د", "نبضة", "نبضات", "مليلتر", "ملليلتر", "ميلليلتر", "ميليلتر", "مكغ",
+    "مكغم", "مغم", "ملج", "ملغرامات", "ميكروجرامات", "ميكروغرامات", "ملمول", "ميكرومول", "قطرة", "قطرات", "بخاخ",
+    "بخاخة", "لبوس", "لبوسات", "تحاميل", "تحميلة", "كبسوله", "أظرف", "أكياس", "ميكروجم", "مكروجرام", "ملليليتر",
+    "ميليليتر", "مليليتر", "ضربة", "ضربات", "ممول", "ميكرو", "ميكروغ", "سم³", "سم3", "ميليغرام", "يونت", "يونيت",
+    "يونتات", "يونيتات", "شرطة", "شرط", "شرطات", "سنتي", "إبرة", "إبر", "رشة", "رشات", "°م", "مئوية",
+    "كغ", "دسل", "مجمات", "نانو",
 }
 _CURRENCY_BEFORE = {"$", "€", "£", "¥", "us$", "e£", "egp", "usd", "sar", "aed", "eur", "gbp", "ج.م"}
 _NUM = re.compile(r"^[+\-−]?[$€£]?\d+(?:[.,٫٬:/\-–]\d+)*[%٪]?$")
@@ -839,9 +961,9 @@ _FOLD = str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ة": "ه
 
 
 def _fold(word: str) -> str:
-    """An Arabic word for the unit list: harakat (and the dagger alef) dropped, the alef, tah marbuta and alef
-    maqsura spellings folded."""
-    return "".join(c for c in word if not ("\u064b" <= c <= "\u065f" or c == "\u0670")).translate(_FOLD)
+    """An Arabic word for the unit and cue lists: harakat, the dagger alef and the tatweel («مـجـم») dropped,
+    the alef, tah marbuta and alef maqsura spellings folded."""
+    return "".join(c for c in word if not ("\u064b" <= c <= "\u065f" or c in "\u0670\u0640")).translate(_FOLD)
 
 
 _ARABIC_UNITS_FOLDED = {_fold(u) for u in _ARABIC_UNITS}
@@ -852,20 +974,44 @@ _DUALS = {_fold(d): _fold(u) for u in (
     "ساعة", "دقيقة", "ثانية", "سنة", "يوم", "شهر", "أسبوع", "مرة", "درجة")
     for d in ((u[:-1] + "تين", u[:-1] + "تان") if u.endswith("ة") else (u + "ين", u + "ان"))}
 # not values when a phone runs into them: time and count words, and everyday words that are also units («010 1234
-# 5678 مرة تانية», «… سعر الكشف», «… كيلو 21 الساحل», «… ألف مبروك», «… كم مرة», «… حبة حبة», «… في ظرف ساعة»)
+# 5678 مرة تانية», «… سعر الكشف», «… كيلو 21 الساحل», «… ألف مبروك», «… كم مرة»). Dose words that are also everyday
+# words («حبة», «نقطة», «ظرف», «كيس», «درجة») are dose units: a dose is never drawn reversed (ruling 2026-10-18)
 _NOT_VALUE = {"h", "hr", "hrs", "min", "mins", "sec", "s", "ms", "x", "times", "day", "days", "week", "weeks", "wk",
               "m"} | {
     _fold(u) for u in ("ساعة", "ساعات", "دقيقة", "دقايق", "دقائق", "ثانية", "ثواني", "سنة", "سنين", "سنوات", "يوم",
                        "أيام", "شهر", "شهور", "أشهر", "أسبوع", "أسابيع", "مرة", "مرات", "سعر", "سعرة", "كيلو", "ألف",
-                       "آلاف", "مليون", "مليار", "كم", "حبة", "ظرف", "درجة", "درجات", "نقطة", "نقط", "كيس")}
+                       "آلاف", "مليون", "مليار", "كم")}
+
+
+# not dose units: money, magnitudes, lengths, areas, data sizes, frequencies and percentages. A cued phone before one
+# of them stays a phone («اتصل 010 1234 5678 جنيه بس»); every other value unit is a dose unit (see _is_dose_unit)
+_SOFT = {"egp", "usd", "sar", "aed", "kwd", "qar", "eur", "gbp", "$", "€", "£", "¥", "le", "l.e", "k", "km", "m", "cm",
+         "kb", "mb", "gb", "tb", "hz", "khz", "km/h", "m2", "m3", "m²", "m³", "cm2", "cm²", "mm2", "mm²", "%", "percent",
+         "pct", "‰", "kcal", "cal"} | {
+    _fold(u) for u in ("جنيه", "جنيهات", "ج.م", "دولار", "ريال", "درهم", "يورو", "دينار", "مليون", "مليار", "ألف",
+                       "آلاف", "سم", "كم", "م٢", "م٣", "سم٢", "بالمية", "بالمئة", "بالمائة", "٪", "سعر", "سعرة",
+                       "سعرات", "كالوري")}
+_UNIT_PREFIX = re.compile(r"(?:و|ف)?(?:ب|ل)?(?:ال|لل)")      # «بالمجم», «والمجم»: a dose unit after the article
+_PREFIXED_UNITS = {"مجم", "ملجم", "ملغ", "ملغم", "مكجم", "مللي", "ملي", "ميلي", "جرام", "غرام", "مليجرام", "ملليجرام",
+                   "ميكروجرام", "ميكروغرام", "مليمول"}
 
 
 def _unit_word(word: str) -> str | None:
-    """The unit a word names (its casefolded or folded form; a dual names its singular), or None."""
-    if word.casefold() in _LATIN_UNITS:
+    """The unit a word names (its casefolded or folded form; a dual names its singular; «بالمجم» names «مجم»), or
+    None."""
+    if word.casefold() in _LATIN_UNITS_CF:
         return word.casefold()
     f = _fold(word)
-    return f if f in _ARABIC_UNITS_FOLDED else _DUALS.get(f)
+    if f in _ARABIC_UNITS_FOLDED or f in _DUALS:
+        return f if f in _ARABIC_UNITS_FOLDED else _DUALS[f]
+    p = _UNIT_PREFIX.match(f)
+    return f[p.end():] if p and f[p.end():] in _PREFIXED_UNITS else None
+
+
+def _part_word(part: str) -> str | None:
+    """A unit inside a compound: any unit, or «ل» (litre: «مليمول/ل») or «مول» («مول/ل»), which alone are a letter
+    and a word («مول العرب»)."""
+    return _unit_word(part) or (_fold(part) if _fold(part) in ("ل", "مول") else None)
 
 
 def _is_unit(tok: str) -> bool:
@@ -873,16 +1019,22 @@ def _is_unit(tok: str) -> bool:
     if tok in ("%", "٪"):
         return True
     c = _core(tok) or tok
-    return _unit_word(c) is not None or ("/" in c and all(_unit_word(p) for p in c.split("/")))
+    return _unit_word(c) is not None or ("/" in c and all(_part_word(p) for p in c.split("/")))
 
 
-def _is_value_unit(tok: str) -> bool:
-    """A unit that makes the numbers before it values (a dose, a reading, a price), never a phone: not one of
-    _NOT_VALUE (a compound such as «مرة/يوم» is a rate: a value)."""
-    c = _core(tok) or tok
-    if c.casefold() == "le":
-        return c == "LE"                                    # the Egyptian pound; «Call … Le Caire» is French
-    return _is_unit(tok) and _unit_word(c) not in _NOT_VALUE
+def _is_dose_unit(tok: str) -> bool:
+    """A dose or measuring unit («مجم», «ملغم», «مجم/دل», «IU», «وحدة», «قرص», «mmHg»): the numbers before it are a
+    dose or a reading, so no part of them is ever a phone (executor ruling 2026-10-18). Not _NOT_VALUE (time and
+    count words, everyday words) and not _SOFT (money, size, percent). A compound is a dose unit when one part is,
+    and so is a rate made of time and count words («مرة/يوم»); «جنيه/شهر» is not."""
+    c = (_core(tok) or tok).strip("/-–")            # «مجم/ كجم», «مجم-»: the unit, read alone
+    if not c or not _is_unit(c):
+        return False
+    if "/" in c and _unit_word(c) is None:
+        ws = [_part_word(p) for p in c.split("/")]
+        return any(w not in _NOT_VALUE and w not in _SOFT for w in ws) or all(w in _NOT_VALUE for w in ws)
+    w = _unit_word(c)
+    return w not in _NOT_VALUE and w not in _SOFT
 
 
 def _al_prefix(tok: str) -> bool:
@@ -1198,8 +1350,11 @@ def control_findings(text: str) -> list[dict]:
     controls between them do not cut its effect (W2, W7 and N1 take the nearest strong character), so it can turn a
     range or a list around («خد [LRM] 1000 - 2000 وحدة» reads 2000 → 1000; «250[LRM] 500» reads 500, 250), in a
     right-to-left or a left-to-right line. Such a finding may be harmless («الساعة 5[RLM].»): the editor checks the
-    line. A mark between letters is left alone. Detect only; the text is never rewritten (the transcript is the
-    editor's). Linear in the text."""
+    line. A mark that decides the direction of the caption (lay_out decides one direction for the whole text, hard
+    lines included), so that a caption holding a number reads the other way without it («[RLM]x ٥٨٧٩ 2040» puts 2040
+    first; «[RLM]hello[LF]5 6 2040» too), is a finding too. Any other mark between
+    letters is left alone. Detect only; the text is never rewritten (the transcript is the editor's). Linear in the
+    text."""
     def stop(ch):                                    # a letter, a digit or a paragraph separator: the rest is skipped
         return ch not in _MARKS and _cls(ch) in ("L", "R", "AL", "EN", "AN", "B")
 
@@ -1220,4 +1375,38 @@ def control_findings(text: str) -> list[dict]:
                         "why": "directional mark near a number: it can change the order the numbers are read in"})
         if stop(ch):
             digit_before = digit(ch)
+    unmark = {ord(m): None for m in _MARKS}
+    d1, d0 = direction(text), direction(text.translate(unmark))
+    if d1 != d0 and any(digit(c) for c in text) and any(
+            visual(paragraph(g, base=d1)).translate(unmark) != visual(paragraph(g.translate(unmark), base=d0))
+            for g, _ in _hard_segments(text)):
+        cls = [_cls(c) for c in text]
+        i = next(i for i, c in _isolate_scan(cls, 0, len(cls), False) if c in ("L", "R", "AL"))   # the deciding mark
+        if i not in {x["index"] for x in out}:
+            out.append({"index": i, "char": text[i], "name": unicodedata.name(text[i]),
+                        "why": "directional mark decides the paragraph direction: without it the numbers read in "
+                               "the other order"})
+    return sorted(out, key=lambda x: x["index"])
+
+
+_LEAD_NUMBER = re.compile(rf"^[{_D}.,٫٬]+")
+
+
+def phone_findings(text: str, force_rtl: bool = False) -> list[dict]:
+    """Phone numbers drawn left to right as dialled (HL3) on a right-to-left line that also holds a dose unit («اتصل
+    010 1234 5678 وخد 500 مجم»): the editor checks that the forced span really is a phone and not a dose list. Each
+    finding is {"start", "end", "text", "why"} with indices in `text`. A dose glued to its number («500مجم») counts;
+    a line with the author's own bidi controls has no forced span (see paragraph). `force_rtl` as in lay_out. Detect
+    only. Linear in the text."""
+    out = []
+    if not direction(text, force_rtl=force_rtl):
+        return out                                  # lay_out decides one direction per caption: LTR has no HL3
+    for seg, off in _hard_segments(text):
+        if any(_cls(c) in _INVISIBLE for c in seg):
+            continue
+        spans = phone_spans(seg)
+        if spans and any(_is_dose_unit(w) or _is_dose_unit(_LEAD_NUMBER.sub("", _core(w))) for w in seg.split()):
+            out.extend({"start": off + a, "end": off + b, "text": seg[a:b],
+                        "why": "phone drawn left to right on a line with a dose unit: check it is not a dose list"}
+                       for a, b in spans)
     return out

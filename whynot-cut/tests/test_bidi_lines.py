@@ -293,7 +293,7 @@ class TestNoBreak(unittest.TestCase):
         for t, want in (("اتصل 010 1234 5678 24 ساعة", ["010 1234 5678"]),       # a short number after it is not part
                         ("رقمي:010 1234 5678،", ["010 1234 5678"]),
                         ("+966 5 1234 5678", ["+966 5 1234 5678"]),
-                        ("0100 123 4567", ["0100 123 4567"]), ("02 2345 6789", ["02 2345 6789"]),
+                        ("0100 123 4567", ["0100 123 4567"]), ("02 2345 6789", []),             # no cue: a list (ruling)
                         ("+201001234567", ["+201001234567"]),
                         ("010 1234 5678/9", []), ("010 1234 5678٪", []),          # glued: never a shorter prefix
                         ("الدقايق 05 10 15 20", []), ("10:00 15 20 30", []), ("٠١-٠٢-٢٠٢٤", []),
@@ -310,11 +310,9 @@ class TestNoBreak(unittest.TestCase):
                         ("2024-010-1234-5678", [])):
             with self.subTest(t):
                 self.assertEqual(ph(t), want)
-        import time
-        t0 = time.perf_counter()
         bl.lay_out("السنوات " + " ".join(str(2000 + i) for i in range(23)), 30)
-        bl.phone_spans(" ".join(["123"] * 3000))
-        self.assertLess(time.perf_counter() - t0, 2.0)          # linear: a long list of numbers never stalls a render
+        assert_linear(self, lambda n: bl.phone_spans(" ".join(["123"] * n)), 3000, 12000,
+                      "number list")                            # linear: a long list of numbers never stalls a render
         self.assertEqual(bl.word_breaks(["اتصل", "010", "1234", "5678", "24", "ساعة"]),
                          ["ok", "never", "never", "ok", "never"])
 
@@ -609,7 +607,7 @@ class TestReviewRound1(unittest.TestCase):
                   "0555 123 456", "0501 234 567", "٠٥٥٥ ١٢٣ ٤٥٦", "+966 512 600 789", "+962 791 534 267",
                   "+971 501 502 503", "+34 612 700 800", "050 123 456", "0555 120 140"):
             with self.subTest(t):
-                self.assertEqual(bl.phone_spans("رقمنا " + t), [(6, 6 + len(t))])
+                self.assertEqual(bl.phone_spans("اتصل " + t), [(5, 5 + len(t))])
 
     def test_a_phone_written_with_no_break_spaces_reads_as_dialled(self):
         for sp in ("\u00a0", "\u202f", "\u2007"):
@@ -621,10 +619,9 @@ class TestReviewRound1(unittest.TestCase):
                 self.assertEqual(bl.phone_spans(t), [(7, len(t))])
 
     def test_phone_spans_is_linear(self):
-        t0 = time.perf_counter()
-        bl.phone_spans(" ".join(["0123"] * 30000))                  # was 39.8 s (a slice per candidate)
-        bl.breaks(" ".join(["010 1234 5678"] * 3000))
-        self.assertLess(time.perf_counter() - t0, 3.0)
+        assert_linear(self, lambda n: bl.phone_spans(" ".join(["0123"] * n)), 7500, 30000,
+                      "0123 list")                              # was 39.8 s (a slice per candidate)
+        assert_linear(self, lambda n: bl.breaks(" ".join(["010 1234 5678"] * n)), 750, 3000, "phones")
 
     def test_more_units_stay_with_their_number(self):
         self.assertEqual(lines("خد ٢ ملعقة بعد الأكل", 4), ["خد", "٢ ملعقة", "بعد", "الأكل"])
@@ -679,10 +676,9 @@ class TestReviewRound1(unittest.TestCase):
         self.assertEqual(bl.word_breaks([" الـ", "MRI "]), ["never"])
 
     def test_set_digits_is_linear_on_a_huge_token(self):
-        t0 = time.perf_counter()
-        self.assertEqual(bl.set_digits("1" * 40000, "arabic"), "١" * 40000)        # was 13 s (_VERSION.search)
-        bl.set_digits("1." * 20000, "arabic")
-        self.assertLess(time.perf_counter() - t0, 2.0)
+        self.assertEqual(bl.set_digits("1" * 40000, "arabic"), "١" * 40000)
+        assert_linear(self, lambda n: bl.set_digits("1" * n, "arabic"), 10000, 40000, "digits")   # was 13 s
+        assert_linear(self, lambda n: bl.set_digits("1." * n, "arabic"), 5000, 20000, "versions")
 
     def test_set_digits_leaves_a_url_or_handle_without_latin_letters(self):
         self.assertEqual(bl.set_digits("تابعنا @2024 و 50", "arabic"), "تابعنا @2024 و ٥٠")
@@ -710,10 +706,9 @@ class TestReviewRound1(unittest.TestCase):
     def test_greedy_wrap_is_linear_and_the_balance_cap_is_named(self):
         rnd = random.Random(1)
         text = " ".join(rnd.choice(["كلمة", "test", "500", "mg", "الـ", "MRI"]) for _ in range(5000))
-        t0 = time.perf_counter()
-        bl.wrap(text, 30)
-        bl.lay_out(text, 30)
-        self.assertLess(time.perf_counter() - t0, 1.0)              # was 1.5 s for wrap alone
+        words = text.split(" ")
+        assert_linear(self, lambda n: bl.wrap(" ".join(words[:n]), 30), 1250, 5000, "wrap")   # was 1.5 s
+        assert_linear(self, lambda n: bl.lay_out(" ".join(words[:n]), 30), 1250, 5000, "lay_out")
         self.assertEqual(bl.BALANCE_MAX_BREAKS, 120)
         big = " ".join(["كلمة"] * (bl.BALANCE_MAX_BREAKS + 2))
         self.assertEqual(bl.wrap(big, 12, balanced=True), bl.wrap(big, 12))
@@ -755,7 +750,7 @@ class TestReviewRound2(unittest.TestCase):
         self.assertEqual(bl.phone_spans("قيس +5 2500 3000"), [(4, 16)])          # no unit: dialled
         for t, tail in (("اتصل 010 1234 5678", " سعر الكشف 300 جنيه"), ("اتصل 010 1234 5678", " كيلو 21 الساحل"),
                         ("اتصل 010 1234 5678", " ألف مبروك"), ("اتصل 010 1234 5678", " كم مرة"),
-                        ("اتصل 010 1234 5678", " حبة حبة"), ("call 010 1234 5678", " days only"),
+                        ("call 010 1234 5678", " days only"),
                         ("اتصل 010 1234 5678", "\nمجم"), ("اتصل +20 100 123 4567", " في ظرف ساعة")):
             with self.subTest(ascii(t + tail)):                # everyday words, and a unit on the next line
                 self.assertEqual(bl.phone_spans(t + tail)[:1], [(len(t) - len(t.split(" ", 1)[1]), len(t))])
@@ -782,7 +777,7 @@ class TestReviewRound2(unittest.TestCase):
                 self.assertEqual(bl.phone_spans("رقمنا " + t), [])
 
     def test_value_list_bounds(self):
-        self.assertEqual(bl.phone_spans("رقمنا 010 500 250 750"), [(6, 21)])     # turns: not a list
+        self.assertEqual(bl.phone_spans("اتصل 010 500 250 750"), [(5, 20)])      # turns: not a list
         self.assertEqual(bl.phone_spans("رقمنا 0100 100 200"), [(6, 18)])        # head not below every value
         self.assertEqual(bl.phone_spans("رقمنا 0100 101 200"), [(6, 18)])        # not round
         self.assertEqual(bl.phone_spans("رقمنا 099 100 200"), [])                # head below every value
@@ -841,27 +836,25 @@ class TestReviewRound2(unittest.TestCase):
             with self.subTest(ascii(t)):
                 self.assertEqual(bl.phone_spans(t), [])
         for t, tail in (("Call 010 1234 5678", " Le Caire"), ("Call 010 1234 5678", " m"),
-                        ("اتصل 010 1234 5678", " درجة أولى"), ("اتصل 010 1234 5678", " نقطة"),
-                        ("اتصل 010 1234 5678", " كيس"), ("اتصل 010 1234 5678", " ظرف ساعة"),
                         ("اتصل 010 1234 5678", " مليون مبروك"),
-                        ("اتصل 010 1234 5678", " مجم")):
+                        ("اتصل 010 1234 5678", "\u2028مجم")):
             with self.subTest(ascii(t + tail)):
                 self.assertEqual(bl.phone_spans(t + tail), [(5, len(t))])
         self.assertEqual(bl.word_breaks(["خد", "20", "يومان"]), ["ok", "never"])          # the «…ان» dual
         f = [x["index"] for x in bl.control_findings("خد \u200e\n1000") if x["char"] == "\u200e"]
         self.assertEqual(f, [])                                       # a paragraph separator stops the look
-        t0 = time.perf_counter()
-        bl.phone_spans("05 250" + " " * 100000 + "x")
-        bl.phone_spans(("05 250 - " * 20000) + "مجم")
-        bl.phone_spans("05 " + "- 05 " * 20000)                       # self-review r3: each «05» is a chain; was
-        bl.phone_spans("05 " + "أو 5 " * 20000)                       # quadratic (10.5 s at 8,000 repeats)
-        bl.lay_out("خد " + "1 - " * 10000 + "مجم", 20)
-        self.assertLess(time.perf_counter() - t0, 3.0)
+        # self-review r3: each «05» is a chain; was quadratic (10.5 s at 8,000 repeats). Growth ratios, not a
+        # wall-clock bound: the 3 s bound failed at 3.76 s under full-suite load (4babf5e suite)
+        for label, fn, n in (("spaces", lambda k: bl.phone_spans("05 250" + " " * k + "x"), 25000),
+                             ("dash values", lambda k: bl.phone_spans(("05 250 - " * k) + "مجم"), 5000),
+                             ("dash heads", lambda k: bl.phone_spans("05 " + "- 05 " * k), 5000),
+                             ("or heads", lambda k: bl.phone_spans("05 " + "أو 5 " * k), 5000),
+                             ("lay out", lambda k: bl.lay_out("خد " + "1 - " * k + "مجم", 20), 2500)):
+            with self.subTest(label):
+                assert_linear(self, fn, n, 4 * n, label)
 
     def test_control_findings_are_linear(self):
-        t0 = time.perf_counter()
-        bl.control_findings("5" + "\u200e" * 200000 + "5")
-        self.assertLess(time.perf_counter() - t0, 2.0)
+        assert_linear(self, lambda n: bl.control_findings("5" + "\u200e" * n + "5"), 50000, 200000, "marks")
 
     def test_host_text_refuses_a_bare_string(self):
         for src in ("abc", "خد 1000 - 2000 وحدة", ""):
@@ -891,6 +884,386 @@ class TestReviewRound2(unittest.TestCase):
             bl.wrap("سطر طويل", None)
         for w in (Decimal("4"), Fraction(9, 2), 4.5):                 # any positive finite number
             self.assertEqual(lines("سطر طويل", w), ["سطر", "طويل"])
+
+
+def best_time(fn, arg, tries=3):
+    out = []
+    for _ in range(tries):
+        t0 = time.perf_counter()
+        fn(arg)
+        out.append(time.perf_counter() - t0)
+    return min(out)
+
+
+def assert_linear(test, fn, small, big, label):
+    """`fn(big)` on 4× the input of `fn(small)` takes < 10× as long: linear grows 4×, quadratic 16×. A ratio, not a
+    wall-clock bound, so a loaded machine does not fail it (the 3 s bound failed at 3.76 s in the 4babf5e suite)."""
+    t1, t4 = best_time(fn, small), best_time(fn, big)
+    test.assertLess(t4, 10 * max(t1, 0.01), (label, t1, t4))
+
+
+def ph(t):
+    return [t[a:b] for a, b in bl.phone_spans(t)]
+
+
+def plain(t):
+    return bl.visual(bl.paragraph(t, base=bl.direction(t), hl1=False))
+
+
+class TestExecutorRuling(unittest.TestCase):
+    """Executor ruling 2026-10-18 (review ad85d58 FAIL r3): a digit chain is a phone ONLY with a positive cue (Egyptian
+    01[0125] + 8 digits, «+», «00», or a cue word right before it); a number before a dose unit is never drawn
+    reversed; review P3-3 … P3-6."""
+    MOBILE = "اتصل 010 1234 5678"
+
+    def test_without_a_cue_a_leading_zero_chain_is_a_list(self):
+        for t in ("02 2345 6789", "050 123 4567", "0555 123 456", "05 250 500", "قيس السكر 080 120 135 150",
+                  "07911 123 456", "النتيجة 02 2400 1100", "٠٢ ٢٣٤٥ ٦٧٨٩", "0100 1234 5678"):
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans(t), [])
+                self.assertEqual(bl.visual(bl.paragraph(t)), plain(t))       # plain UAX #9: read right to left
+
+    def test_the_egyptian_mobile_shape_is_a_cue_alone(self):
+        for t in ("010 1234 5678", "0100 123 4567", "011 2345 6789", "012 3456 7890", "015 5555 0000", "0101 234 5678",
+                  "٠١٠ ١٢٣٤ ٥٦٧٨", "۰۱۰ ۱۲۳۴ ۵۶۷۸", "010 1234 5678", "010-1234-5678", "015 555 50000"):
+            with self.subTest(ascii(t)):
+                self.assertEqual(ph("الجديد " + t), [t])
+        for t in ("013 1234 5678", "014 1234 5678", "016 1234 5678", "01 250 500 750", "010 1234 567",
+                  "010 1234 56789", "01 0123 45678", "020 1234 5678"):
+            with self.subTest(t):                                       # not 01[0125], first group < 3, 10 / 12 digits
+                self.assertEqual(ph("الجديد " + t), [])
+
+    def test_plus_and_00_are_cues(self):
+        for t in ("+966 5 1234 5678", "+20 2 2345 6789", "00966 50 123 4567", "0020 2 2345 6789", "۰۰۹۶۶ ۵۰ ۱۲۳ ۴۵۶۷"):
+            with self.subTest(ascii(t)):
+                self.assertEqual(ph("الجديد " + t), [t])
+
+    def test_every_cue_word_makes_a_landline_a_phone(self):
+        for cue in ("رقم", "رقمي", "رقمنا", "الرقم", "برقم", "ورقم", "عالرقم", "للرقم", "رقمه", "تليفون", "التليفون",
+                    "تليفوني", "تلفون", "التلفون", "موبايل", "الموبايل", "موبايلي", "واتساب", "الواتساب", "واتس", "الواتس",
+                    "هاتف", "الهاتف", "جوال", "الجوال", "جوالي", "اتصل", "اتصلوا", "اتصلي", "واتصل", "تتصل", "هتتصل",
+                    "يتصل", "اتصال", "للاتصال", "كلمنا", "كلمونا", "كلمني", "كلموني", "وكلمنا", "call", "Call", "CALL",
+                    "phone", "Phone:", "phone:", "WhatsApp", "whatsapp", "tel", "Tel.", "Tel:", "mobile", "hotline",
+                    "رقمي:", "الرقم:", "رقمنا،", "رقمٌ", "الرقـم", "Phone-"):
+            t = cue + " 02 2345 6789"
+            with self.subTest(cue):
+                self.assertEqual(ph(t), ["02 2345 6789"])
+        self.assertEqual(ph("رقمي:02 2345 6789"), ["02 2345 6789"])               # glued after a colon
+        self.assertEqual(ph("رقمي: 02 2345 6789."), ["02 2345 6789"])
+
+    def test_fillers_between_the_cue_and_the_number(self):
+        for t in ("اتصلوا بينا على 02 2345 6789", "كلمنا على الرقم ده 02 2345 6789", "رقم الواتساب بتاعنا 02 2345 6789",
+                  "call us at 02 2345 6789", "Call us on: 02 2345 6789", "رقم التليفون هو 02 2345 6789",
+                  "ابعتلنا واتساب على 02 2345 6789", "رقمنا الجديد 02 2345 6789", "call our number 02 2345 6789",
+                  "كلمني ع 02 2345 6789", "اتصل الآن 02 2345 6789", "اتصل حالا على 02 2345 6789",
+                  "اتصل على على على على 02 2345 6789", "اتصل - 02 2345 6789", "Phone : 02 2345 6789"):   # 4 back
+            with self.subTest(t):
+                self.assertEqual(ph(t), ["02 2345 6789"])
+
+    def test_a_word_that_is_not_a_filler_cuts_the_cue(self):
+        for t in ("رقم السكر 080 120 135 150", "اتصل بالدكتور لو السكر 080 120 135 150", "call the doctor if 080 120 135 150",
+                  "رقم الضغط النهارده 080 120 135 150", "اتصل بينا على طول يا جماعة 02 2345 6789",
+                  "اتصل بالدكتور لو 080 120 135 150", "رقم الجرعة 080 120 135 150"):
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans(t), [])
+                self.assertEqual(bl.visual(bl.paragraph(t)), plain(t))
+
+    def test_a_cue_after_the_number_on_another_line_or_sentence_is_not_a_cue(self):
+        for t in ("قيس 080 120 135 150 واتصل", "02 2345 6789 رقمنا", "اتصل\n02 2345 6789", "اتصل. 02 2345 6789",
+                  "اتصل؟ 02 2345 6789", "اتصل! 02 2345 6789", "call; 02 2345 6789", "اتصل\u2029 02 2345 6789",
+                  "اتصل بينا على على على على 02 2345 6789",               # > 4 words back
+                  "اتصل . 02 2345 6789", "اتصل ؟ 02 2345 6789", "call ... 02 2345 6789"):
+            with self.subTest(ascii(t)):
+                self.assertEqual(bl.phone_spans(t), [])
+
+    def test_words_that_look_like_cues_but_are_not(self):
+        for t in ("الأرقام 080 120 135 150", "ارقام 080 120 135 150", "كلمة 02 2345 6789", "كلمه 02 2345 6789",
+                  "الكلمات 02 2345 6789", "الرقمية 02 2345 6789", "telescope 02 2345 6789", "phones? 02 2345 6789",
+                  "recall 02 2345 6789", "متصل 02 2345 6789", "الاتصالات 02 2345 6789"):
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans(t), [])
+
+    def test_a_cued_value_list_stays_a_list(self):
+        for t in ("رقمنا 05 250 500", "رقمنا 099 100 200", "اتصل 05 100 200 300"):
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans(t), [])
+
+    DOSE_UNITS = (
+        "mg", "MG", "mcg", "µg", "ml", "mL", "IU", "iu", "mmol", "mg/dl", "mg/dL", "mmol/L", "mIU/L", "mIU/ml", "mgs",
+        "mIU", "gm", "gms", "gram", "grams", "milligram", "milligrams", "microgram", "micrograms", "units", "cc", "drops",
+        "tablets", "mmHg", "bpm", "°C", "ng/ml",
+        "مجم", "مج", "م.ج", "ملجم", "ملغ", "مغ", "ملغم", "مكجم", "ميكروغرام", "ميكروجرام", "نانوجرام", "نانوغرام",
+        "ملغرام", "ميلليجرام", "ملجرام", "مليجرامات", "ملليجرامات", "مليجرام", "ملليجرام", "ميليجرام", "مليغرام",
+        "جم", "غم", "غرام", "جرام", "جرامات", "دل", "ديسيلتر", "مل", "ملل", "مللي", "ملي", "ميلي", "لتر", "مليمول",
+        "ملم", "مم", "وحدة", "وحدات", "وحده", "و.د", "نبضة", "نبضات", "قرص", "أقراص", "قرصين", "كبسولة", "حقنة",
+        "ملعقة", "بخة", "جرعة", "أمبول", "لزقة", "فيال", "سيسي", "سم٣",
+        "مـجـم", "بالمجم", "بالملي", "والمجم", "مجم/دل", "ملجم/دل", "مليمول/لتر", "مجم/ديسيلتر", "ملغ/دل", "مغ/دل",
+        "جم/دل", "و.د/مل", "مرة/يوم", "مجم،", "مجم.", "(مجم)", "مَجم",
+        "مليلتر", "ملليلتر", "مكغ", "مكغم", "مغم", "ملج", "ملغرامات", "ميكروجرامات", "ملمول", "مليمول/ل", "µmol", "umol",
+        "U", "U/L", "قطرة", "قطرات", "بخاخ", "لبوس", "تحاميل", "مجم/", "حبة", "حبات", "ظرف", "كيس", "درجة", "درجات",
+        "نقطة", "نقط", "درجتين", "حبتين", "℃", "tablet", "unit", "g", "mg/kg", "حقن", "كبسولات", "مجم/كجم",
+        "ميكروجم", "مكروجرام", "ملليليتر", "ضربة", "ممول/ل", "ميكرو", "ميكروغ", "سم³", "سم3", "I.U.",
+        "i.u", "c.c", "m.g", "مول/ل", "مجم-", "cm3", "ميليغرام", "يونت", "يونيت", "يونتات", "شرطة", "شرط", "سنتي",
+        "ابرة", "إبرة", "ابر", "رشة", "رشات", "°م", "مئوية", "مجم/كغ", "ملغم/كغ", "مجم/دسل", "pills", "مجمات", "نانو")
+
+    def test_every_dose_unit_after_a_cued_phone_shape_is_absolute(self):
+        self.assertEqual(ph(self.MOBILE + " كمان"), ["010 1234 5678"])           # the base is a phone
+        for u in self.DOSE_UNITS:
+            for t in (self.MOBILE + " " + u, "رقمنا 02 2345 6789 " + u, "+20 2 2345 6789 " + u):
+                with self.subTest(t):
+                    self.assertEqual(bl.phone_spans(t), [])
+                    self.assertEqual(bl.visual(bl.paragraph(t)), plain(t))
+
+    def test_the_reviews_dose_lists(self):
+        for t in ("قيس السكر 080 120 135 150 مجم/دل", "خد 05 120 135 ثم 150 مجم", "قيس السكر 080 120 135 150 ملغم",
+                  "خد 05 120 135 و 150 مجم", "خد 05 120 135 لـ 150 مجم", "خد 05 120 135 حتى 150 مجم"):
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans(t), [])
+                self.assertEqual(bl.visual(bl.paragraph(t)), plain(t))
+
+    def test_dose_connectors_reach_the_unit(self):
+        for c in (" و 150", " و150", " ثم 150", " لـ 150", " ل 150", " لحد 150", " حتى 150", " till 150", " then 150",
+                  " and 150", " ، 150", "، 150", ", 150", " / 150", " الى 150", " او 150", " to 150", " إلى 150",
+                  " أو 150", " or 150", " - 150", " – 150", " وبعدين 150"):
+            t = self.MOBILE + c + " مجم"
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans(t), [])
+        for c in (" toe 150", " xto 150", " الىx 150", " ثمن 150", " وكمان 150"):          # not connectors: a word
+            t = self.MOBILE + c + " مجم"
+            with self.subTest(t):
+                self.assertEqual(ph(t), ["010 1234 5678"])
+
+    def test_the_look_past_values_stops_after_15(self):
+        self.assertEqual(bl.phone_spans(self.MOBILE + " - 5" * 15 + " مجم"), [])
+        self.assertEqual(ph(self.MOBILE + " - 5" * 16 + " مجم"), ["010 1234 5678"])
+        self.assertEqual(bl.phone_spans(self.MOBILE + " ثم 5" * 15 + " مجم"), [])
+        self.assertEqual(ph(self.MOBILE + " ثم 5" * 16 + " مجم"), ["010 1234 5678"])
+
+    def test_a_money_size_or_percent_word_does_not_undo_a_cued_phone(self):
+        # review ad85d58 P3-3: «اتصل 010 1234 5678 جنيه بس» was drawn reversed
+        for tail in (" جنيه بس", " جنيه", " دولار", " ريال", " درهم", " دينار", " يورو", " % من الناس", " ٪", " سم", " كم",
+                     " بالمية", " بالمائة", " percent", " pct", " ‰", " EGP", " LE", " $", " مليون", " مليار", " ألف",
+                     " km", " cm", " GB", " k", " سعر", " كيلو"):
+            for head, phone in ((self.MOBILE, "010 1234 5678"), ("رقمنا 02 2345 6789", "02 2345 6789")):
+                t = head + tail
+                with self.subTest(t):
+                    self.assertEqual(ph(t)[:1], [phone])
+
+    def test_a_second_phone_joined_by_or_keeps_the_cue(self):
+        for t in ("رقمنا 02 2345 6789 أو 02 3456 7890", "اتصل 02 2345 6789 و 02 3456 7890",
+                  "call 02 2345 6789 or 02 3456 7890", "اتصل 02 2345 6789 - 02 3456 7890", "رقمنا 02 2345 6789، 02 3456 7890"):
+            with self.subTest(t):
+                self.assertEqual(ph(t), ["02 2345 6789", "02 3456 7890"])
+        self.assertEqual(ph("رقمنا 02 2345 6789 والسكر 02 3456 7890"), ["02 2345 6789"])
+        self.assertEqual(ph("رقمنا 02 2345 6789. 02 3456 7890"), ["02 2345 6789"])
+        self.assertEqual(ph("رقمنا 02 2345 6789\nأو 02 3456 7890"), ["02 2345 6789"])          # another line
+        self.assertEqual(ph("رقمنا 02 2345 6789 و أو و 02 3456 7890"), ["02 2345 6789"])       # 3 joiners
+        self.assertEqual(ph("رقمنا 02 2345 6789 أو  و 02 3456 7890"), ["02 2345 6789", "02 3456 7890"])
+        self.assertEqual(ph("رقمنا 02 2345 6789" + " " * 14 + "أو 02 3456 7890"), ["02 2345 6789"])   # > 16 chars
+        self.assertEqual(ph("رقمنا 02 2345 6789" + " " * 6 + "أو" + " " * 6 + "02 3456 7890"),
+                         ["02 2345 6789", "02 3456 7890"])                                     # 14 chars
+
+    def test_a_phone_before_the_word_unit_is_the_documented_cost(self):
+        # «وحدة» is the insulin unit: a dose unit is absolute (ruling), so this real phone reads as numbers
+        self.assertEqual(bl.phone_spans("اتصل 010 1234 5678 وحدة الكلى"), [])
+
+    def test_time_and_count_words_keep_the_phone(self):
+        for w in ("h", "hr", "hrs", "min", "mins", "sec", "s", "ms", "x", "times", "day", "days", "week", "weeks", "wk",
+                  "m", "ساعة", "ساعات", "دقيقة", "دقايق", "دقائق", "ثانية", "ثواني", "سنة", "سنين", "سنوات", "يوم",
+                  "أيام", "شهر", "شهور", "أشهر", "أسبوع", "أسابيع", "مرة", "مرات", "سعر", "سعرة", "كيلو", "ألف", "آلاف",
+                  "مليون", "مليار", "كم", "مرتين", "يومين", "ساعتين"):
+            with self.subTest(w):
+                self.assertEqual(ph(self.MOBILE + " " + w), ["010 1234 5678"])
+
+    def test_single_spellings_and_duals_stay_with_their_number(self):
+        for u in ("ميليجرام", "مليغرام", "ميلي", "درجتين", "ملغم", "مكجم", "ميكروغرام", "دل", "مليمول", "نبضة", "مـجـم",
+                  "مجم/دل", "mIU/L", "grams"):
+            with self.subTest(u):
+                self.assertEqual(bl.word_breaks(["خد", "2", u]), ["ok", "never"])
+        for w in ("بالغ", "والغ", "الم", "بس", "بالك"):          # «بال» + a one-letter unit («غ») is a word: «adult»
+            with self.subTest(w):
+                self.assertEqual(bl.word_breaks(["سن", "18", w]), ["ok", "ok"])
+                self.assertEqual(ph(self.MOBILE + " " + w), ["010 1234 5678"])
+
+    def test_dose_words_that_are_also_everyday_words_are_absolute(self):
+        # review r1 P2-3(b) + ruling: «حبة», «نقطة», «ظرف», «كيس», «درجة» after a cued phone shape: never a phone
+        for w in ("حبة", "حبة حبة", "ظرف", "ظرف ساعة", "كيس", "درجة", "درجة أولى", "درجات", "نقطة", "نقط", "درجتين"):
+            with self.subTest(w):
+                self.assertEqual(bl.phone_spans(self.MOBILE + " " + w), [])
+        self.assertEqual(ph("اتصل +20 100 123 4567 في ظرف ساعة"), ["+20 100 123 4567"])     # a word between
+
+    def test_every_unit_of_the_module_is_classified_and_tested(self):
+        # ruling: each unit gets a test. Every unit the module knows is a dose unit (it undoes a cued phone) unless it
+        # is one of the explicit money/size/percent or time/count words below (they keep the phone)
+        soft = {"egp", "usd", "sar", "aed", "kwd", "qar", "eur", "gbp", "$", "€", "£", "¥", "le", "l.e", "k", "km", "m",
+                "cm", "kb", "mb", "gb", "tb", "hz", "khz", "km/h", "m2", "m3", "m²", "m³", "cm2", "cm²", "mm2", "mm²", "%",
+                "percent", "pct", "‰", "kcal", "cal", "جنيه", "جنيهات", "ج.م", "دولار", "ريال", "درهم", "يورو", "دينار",
+                "مليون", "مليار", "ألف", "آلاف", "سم", "كم", "م٢", "م٣", "سم٢", "بالمية", "بالمئة", "بالمائة", "٪", "سعر",
+                "سعرة", "سعرات", "كالوري"}
+        count = {"h", "hr", "hrs", "min", "mins", "sec", "s", "ms", "x", "times", "day", "days", "week", "weeks", "wk",
+                 "ساعة", "ساعات", "دقيقة", "دقايق", "دقائق", "ثانية", "ثواني", "سنة", "سنين", "سنوات", "يوم", "أيام",
+                 "شهر", "شهور", "أشهر", "أسبوع", "أسابيع", "مرة", "مرات", "كيلو"}
+        units = sorted(bl._LATIN_UNITS | bl._ARABIC_UNITS)
+        self.assertGreater(len(units), 200)
+        for u in units:
+            keeps = u in soft or u in count or bl._fold(u) in {bl._fold(w) for w in soft | count}
+            for t in (self.MOBILE + " " + u, "اتصل 02 2345 6789 " + u):
+                with self.subTest(t):
+                    self.assertEqual(bl.phone_spans(t) == [], not keeps)
+
+    def test_a_weak_cue_needs_a_dialled_looking_number(self):
+        # review r1 P2-2: «رقم» is also "a reading"; a weak cue needs a group of 4+ digits
+        for t in ("الرقم هو 080 120 135 150", "الرقم ده 080 120 135 150", "الرقم بتاعي 080 120 135 150",
+                  "رقمه دلوقتي 080 120 135 150", "الرقم الجديد 080 120 135 150", "رقمي 05 120 135 150",
+                  "رقمنا 080 120 135 150 %", "رقمنا 080 120 135 150 سم", "محمول 080 120 135 150", "number 080 120 135",
+                  "رقمنا 050 123 456"):                                    # the cost: a 3-3-3 number with a weak cue
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans(t), [])
+        for t, want in (("الرقم ده 02 2345 6789", "02 2345 6789"), ("رقمي 0555 123 456", "0555 123 456"),
+                        ("محمول 02 2345 6789", "02 2345 6789"), ("اتصل 050 123 456", "050 123 456"),
+                        ("call our number 050 123 456", "050 123 456"), ("number 02 2345 6789", "02 2345 6789"),
+                        ("النمرة 02 2345 6789", "02 2345 6789"), ("نمرتي 02 2345 6789", "02 2345 6789")):
+            with self.subTest(t):
+                self.assertEqual(ph(t), [want])
+
+    def test_more_cue_words_and_fillers(self):
+        for t in ("للحجز 02 2345 6789", "للاستفسار 02 2345 6789", "للتواصل 02 2345 6789", "Contact 02 2345 6789",
+                  "Mob: 02 2345 6789", "ت: 02 2345 6789", "واتس اب 02 2345 6789", "اتصل بنا 0555 123 456",
+                  "اتصلوا علينا 02 2345 6789", "احجز 02 2345 6789", "احجزوا على 02 2345 6789"):
+            with self.subTest(t):
+                self.assertEqual(len(bl.phone_spans(t)), 1)
+        for t in ("عالموبايل 02 2345 6789", "بالتليفون 02 2345 6789", "وعالواتساب 02 2345 6789"):    # prefixed
+            with self.subTest(t):
+                self.assertEqual(ph(t), ["02 2345 6789"])
+        for t in ("الرقمي 02 2345 6789", "التليفوني 02 2345 6789", "الرقمنا 02 2345 6789"):   # article + possessive
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans(t), [])
+
+    def test_the_cue_belongs_to_the_first_group_of_the_chain(self):
+        # review r1 P3-5: «رقم 1 080 …» / a joined list
+        self.assertEqual(bl.phone_spans("رقم 1 080 120 135 150"), [])
+        self.assertEqual(bl.phone_spans("اتصل 1 02 2345 6789"), [])
+        self.assertEqual(ph("اتصل 010 1234 5678 و 080 120 135 150"), ["010 1234 5678"])
+        self.assertEqual(ph("رقمنا 010 1234 5678 012 3456"), ["010 1234 5678", "012 3456"])
+        # review r2 P3-4: a strong cue gives the next phone in the same chain only a weak one
+        self.assertEqual(ph("اتصل 010 1234 5678 080 120 135 150"), ["010 1234 5678"])
+        self.assertEqual(ph("اتصل 010 1234 5678 02 3456 7890"), ["010 1234 5678", "02 3456 7890"])
+
+    def test_more_connectors_and_decimals_reach_the_unit(self):
+        # review r1 P3-4
+        for c in (" لغاية 150", " لين 150", " الين 150", " إلين 150", " ولا 150", " بعدين 150", " مع 150", " ثمَّ 150",
+                  " ثمّ 150", " up to 150", " up  to 150", " & 150", " × 150", " ؛ 150", " 0.5", " 1.5 - 2.5", " ٠٫٥",
+                  " 1.5", ",5", " 2 و 2.5", " لغايه 150", " الي 150", " إلي 150", " حتي 150", " ثـم 150", " To 150",
+                  " Or 150", " And 150", " Up to 150", " x 150", " X 150", " -- 150", " ‒ 150", " ― 150", " ~ 150", " : 150",
+                  " ; 150", " … 150", " + 150", " يا 150", " ثم بعدين 150", " أو حتى 150", " and then 150", " .5", " ٫٥",
+                  " ½", " ¼", " .. 150", " ... 150", " ولحد 150", " وحتى 150", " ولغاية 150", " وإلى 150", " والى 150",
+                  " وبعدها 150", " بعدها 150", " وبعد كده 150", " الى ان 150", " ف 150", " فـ 150", " through 150",
+                  " ـ 150", " ثُمَّ 150", " 2 و 1٫5", " 2 و ١٬٥٠٠", " 2 - ٢٫٥"):
+            t = self.MOBILE + c + " مجم"
+            with self.subTest(t):
+                self.assertEqual(bl.phone_spans(t), [])
+        self.assertEqual(bl.phone_spans("الرقم هو 05 120 135 1.5 مجم"), [])
+        self.assertEqual(ph(self.MOBILE + " 0.5 كمان"), ["010 1234 5678"])
+        self.assertEqual(ph(self.MOBILE + " upto 150 مجم"), ["010 1234 5678"])                  # not «up to»
+        for c in (" وبعدينوبعدين 150", " ثمن 150", " xo 150", " Andrew 150", " يارب 150"):          # not connectors
+            with self.subTest(c):
+                self.assertEqual(ph(self.MOBILE + c + " مجم"), ["010 1234 5678"])
+
+    def test_everyday_words_after_a_phone_keep_it_and_joined_phones_end_in_four_digits(self):
+        # review r3 P3-5: «سي محمد», «مول العرب» (a mall) are words; «مول» is a unit only inside «مول/ل»
+        for tail in (" سي محمد", " مول العرب", " سي سي"):
+            with self.subTest(tail):
+                self.assertEqual(ph(self.MOBILE + tail), ["010 1234 5678"])
+        # review r3 P3-4: a reading right after a phone is not a second phone
+        for t in ("اتصل 010 1234 5678 0120 135 150", "اتصل 010 1234 5678 أو 0120 135 150",
+                  "رقمنا 02 2345 6789 أو 0555 123 456"):                # the cost: a 4-3-3 second phone
+            with self.subTest(t):
+                self.assertEqual(len(bl.phone_spans(t)), 1)
+
+    def test_the_article_only_joins_a_dose_unit(self):
+        # review r2 P3-5: «اليوم», «الملل» (boredom), «السم» (poison) are words, not units
+        for w in ("اليوم", "المرة", "الكم", "السم", "الملل", "الغم", "والسعر", "الدرجة", "الوحدة"):
+            with self.subTest(w):
+                self.assertEqual(bl.word_breaks(["عندي", "5", w]), ["ok", "ok"])
+        self.assertEqual(ph(self.MOBILE + " الدرجة الأولى"), ["010 1234 5678"])
+        for w in ("بالمجم", "والملي", "بالمليجرام", "الجرام"):
+            with self.subTest(w):
+                self.assertEqual(bl.word_breaks(["خد", "5", w]), ["ok", "never"])
+                self.assertEqual(bl.phone_spans(self.MOBILE + " " + w), [])
+
+    def test_00_phones_in_every_digit_script(self):
+        for t in ("اتصل ۰۰۹۶۶ ۵۰ ۱۲۳ ۴۵۶۷", "اتصل ٠٠٩٦٦ ٥٠ ١٢٣ ٤٥٦٧", "اتصل 00966 50 123 4567"):
+            with self.subTest(ascii(t)):
+                self.assertEqual(bl.phone_spans(t), [(5, len(t))])
+
+    def test_a_leading_mark_that_flips_the_paragraph_direction_is_a_finding(self):
+        # review ad85d58 P3-4: «[RLM]x ٥٨٧٩ 2040» reverses the number order with no digit next to the mark
+        def marks(t):
+            return [x["index"] for x in bl.control_findings(t) if x["char"] in "\u200e\u200f\u061c"]
+        for t, want in (("\u200fx ٥٨٧٩ 2040", [0]), ("\u061cx ٥ ٦", [0]), ("\u061cx 5 6", []), ("\u200fx 5\nhello", []), ("abc\n\u200fx 5 6", []), ("\u200fhello\n5 6 2040", [0]),
+                        ("\u200ex ٥ ٦", []), ("\u200fhello", []), ("\u200fhello world.", []), ("\u200fسكر 500", []), ("x \u200fy 5 6", []),
+                        ("\u2066\u200f\u2069x 5 6", []), (". \u200fx 5 6", [2])):
+            with self.subTest(ascii(t)):
+                self.assertEqual(marks(t), want)
+        f = [x for x in bl.control_findings("\u200fx ٥٨٧٩ 2040") if x["index"] == 0][0]
+        self.assertIn("direction", f["why"])
+        self.assertEqual(marks("\u200f5 6"), [0])                         # near a digit AND deciding: one finding
+        self.assertEqual(marks("\u200fx ٥\u200e ٦"), [0, 4])               # in text order
+
+    def test_phone_findings_name_a_forced_phone_on_a_line_with_a_dose(self):
+        f = bl.phone_findings("اتصل 010 1234 5678 وخد 500 مجم")
+        self.assertEqual([(x["start"], x["end"], x["text"]) for x in f], [(5, 18, "010 1234 5678")])
+        self.assertIn("dose", f[0]["why"])
+        for t in ("اتصل 010 1234 5678", "اتصل 010 1234 5678\nخد 500 مجم", "خد 500 مجم", "اتصل 010 1234 5678 جنيه"):
+            with self.subTest(ascii(t)):
+                self.assertEqual(bl.phone_findings(t), [])
+        self.assertEqual(len(bl.phone_findings("خد 500 mg ثم اتصل 010 1234 5678")), 1)
+        self.assertEqual(bl.phone_findings("Call 010 1234 5678, take 500 mg"), [])     # LTR caption: no HL3
+        f = bl.phone_findings("سطر\nاتصل 010 1234 5678 وخد 500 مجم")
+        self.assertEqual([(x["start"], x["end"]) for x in f], [(9, 22)])               # indices in the whole text
+        self.assertEqual(len(bl.phone_findings("Call 010 1234 5678, take 500 mg", force_rtl=True)), 1)
+        self.assertEqual(bl.phone_findings("اتصل 010 1234 5678 \u2066x\u2069 خد 500 مجم"), [])   # author's controls: no HL3
+        self.assertEqual(len(bl.phone_findings("اتصل 010 1234 5678 وخد 500مجم")), 1)     # a glued dose
+        for t in ("اتصل 010 1234 5678 وخد (500مجم)", "اتصل 010 1234 5678 خد 500-mg"):
+            with self.subTest(t):
+                self.assertEqual(len(bl.phone_findings(t)), 1)
+
+    def test_the_test_file_has_no_raw_invisible_characters(self):
+        # review ad85d58 P3-5: a raw U+2028 read as a space in the diff
+        src = Path(__file__).read_text(encoding="utf-8")
+        bad = [(i, hex(ord(c))) for i, c in enumerate(src)
+               if unicodedata.category(c) in ("Cf", "Zl", "Zp", "Co", "Cn") or (unicodedata.category(c) == "Cc" and c != "\n")]
+        self.assertEqual(bad, [])
+
+    def test_linear_paths_by_growth_ratio(self):
+        cases = (("spaces", lambda n: bl.phone_spans("05 250" + " " * n + "x"), 50000),
+                 ("dash values", lambda n: bl.phone_spans(("05 250 - " * n) + "مجم"), 5000),
+                 ("dash heads", lambda n: bl.phone_spans("05 " + "- 05 " * n), 5000),
+                 ("or heads", lambda n: bl.phone_spans("05 " + "أو 5 " * n), 5000),
+                 ("then heads", lambda n: bl.phone_spans("05 " + "ثم 5 " * n), 5000),
+                 ("cue words", lambda n: bl.phone_spans("اتصل على " * n + "02 2345 6789 " * n), 2000),
+                 ("phones", lambda n: bl.phone_spans("رقمنا 02 2345 6789 " * n), 2000),
+                 ("dose lines", lambda n: bl.phone_findings(("اتصل 010 1234 5678 خد 5 مجم\n") * n), 1000),
+                 ("lay out", lambda n: bl.lay_out("خد " + "1 - " * n + "مجم", 20), 2500),
+                 ("marks", lambda n: bl.control_findings(("\u200fx 5 6\n") * n), 5000),
+                 ("colon ones", lambda n: bl.phone_spans("اتصل " + ":1" * n), 5000),
+                 ("paren ones", lambda n: bl.phone_spans("(1" * n), 5000),
+                 ("paren lay out", lambda n: bl.lay_out("خد " + "(1)" * n, 40), 1000),
+                 ("paren findings", lambda n: bl.phone_findings("اتصل " + "(1" * n + " مجم"), 2000),
+                 ("long word", lambda n: bl.phone_spans("ا" * n + ":02 2345 6789"), 50000),
+                 ("decimals", lambda n: bl.phone_spans("010 1234 5678 " + "1.5 - " * n), 3000),
+                 ("comma values", lambda n: bl.phone_spans("010 1234 5678 " + "1,5," * n), 3000),
+                 ("mark tails", lambda n: bl.phone_spans(("1" + chr(0x200F) + ":") * n), 2000),
+                 ("zero-width tails", lambda n: bl.phone_spans(("1" + chr(0x200B) * 40) * n), 1000),
+                 ("dash runs", lambda n: bl.phone_spans("010 1234 5678 " + "-" * n + " مجم"), 20000),
+                 ("glued connectors", lambda n: bl.phone_spans("010 1234 5678 " + "وبعدين" * n + " 5"), 5000),
+                 ("tatweel la", lambda n: bl.lay_out("خد 5 " + "لـ " * n + "دلوقتي", 30), 3000),
+                 ("tatweel la phone", lambda n: bl.phone_spans("اتصل 010 1234 5678 " + "لـــ " * n + "x"), 3000),
+                 ("dot runs", lambda n: bl.phone_spans("010 1234 5678 " + "." * n + "x"), 20000),
+                 ("connector runs", lambda n: bl.phone_spans("010 1234 5678 " + "و ثم لـ ف ـ . " * n + "x"), 3000))
+        for label, fn, n in cases:
+            with self.subTest(label):
+                assert_linear(self, fn, n, 4 * n, label)
 
 
 if __name__ == "__main__":
