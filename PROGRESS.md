@@ -113,10 +113,10 @@ The Premium bar line and the Mac line go into the gate record.
 - [ ] **Installer r5_1:** the failure message names the list to edit (`ENGINE_LAYOUT` / `ENGINE_KEPT`), and the test joins each lane's fast pre-commit set.
 - [ ] **BL-15:** the executor is the fallback owner if the API pauses before a lane claims it. The Write/Edit guard must also cover `run/lead-tokens/`, so a subagent cannot forge a token.
 - [ ] **Owner items** (asked of Yunus by the plan session):
-  - the 60 s verified transcript;
-  - the GPLv3 §7 NVIDIA exception text (BL-02 drafts it; Yunus signs);
-  - the Quran source permissions (K-T8);
-  - a qualified reviewer for the verse text in the T53 fixtures.
+  - the 60 s verified transcript (Yunus sends it next session, into `Editing Plugin/whynot-test/`);
+  - the GPLv3 §7 NVIDIA exception: APPROVED 2026-10-18 («اعملها انت وانا موافق عليه بما لا يضرنا باي شكل»). Narrow scope: it only permits combining our code with the CUDA/cuDNN runtime libraries in the PyTorch wheels and other system GPU libraries, and changes nothing else. BL-02 drafts it; the executor reviews it with opus and adds it next to LICENSE at the gate;
+  - ~~the Quran source permissions (K-T8)~~ DECIDED 2026-10-18: Tanzil Uthmani Hafs, shipped verbatim and sha256-pinned with its notice; KFGQPC is only a local cross-check, never shipped; a span that is not unique or not confident is never replaced and needs approval (lane 2's K-T8 block);
+  - a qualified reviewer for the verse text in the T53 fixtures. The lanes list every verse they use in `D:\ClaudeData\claude-api-lane\QURAN-REVIEW-LIST.md`, and the plan session sends that list to Yunus.
 
 ## Gate record
 
