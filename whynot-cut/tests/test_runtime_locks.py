@@ -262,6 +262,7 @@ class TestTls(unittest.TestCase):
         import urllib.request
         from http.server import BaseHTTPRequestHandler, HTTPServer
         d = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, d, True)
         ca, cert, key = _make_ca(d)
         if not (cert.is_file() and key.is_file()):          # the J-T1 loopback fixture lands with Addendum J's commit
             self.skipTest("tests/fixtures/brand_web/tls is not committed yet (J-T1)")
@@ -284,10 +285,12 @@ class TestTls(unittest.TestCase):
         try:
             with self.assertRaises(Exception):
                 urllib.request.urlopen(url, context=R.trust_context(), timeout=10)
-            r = urllib.request.urlopen(url, context=R.trust_context(cafile=str(ca)), timeout=10)
-            self.assertEqual(r.read(), b"ok")
+            with urllib.request.urlopen(url, context=R.trust_context(cafile=str(ca)), timeout=10) as r:
+                self.assertEqual(r.read(), b"ok")
         finally:
             srv.shutdown()
+            srv.server_close()
+            th.join(5)
 
     def test_truststore_branch_when_installed(self):
         import importlib.util
