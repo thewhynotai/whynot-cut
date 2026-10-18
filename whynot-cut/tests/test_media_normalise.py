@@ -514,7 +514,15 @@ class TestBatchBNames(_Out):
         self.assertEqual(MN._source_tag(a, self.tmp), MN._source_tag(a, self.tmp))
         self.assertNotEqual(MN._source_tag(a, self.tmp), MN._source_tag(b, self.tmp))
         lower = a.with_name("c0001.mp4")
-        self.assertNotEqual(MN._source_tag(lower, self.tmp), MN._source_tag(a, self.tmp))
+        with mock.patch.object(MN, "_REAL_CASE", False):                        # the macOS rule: the given case
+            self.assertNotEqual(MN._source_tag(lower, self.tmp), MN._source_tag(a, self.tmp))
+        if os.path.exists(lower):                                               # one file under two spellings
+            if os.name == "nt":                                                 # review 2063755 P3-5: the on-disk
+                self.assertEqual(MN._source_tag(lower, self.tmp), MN._source_tag(a, self.tmp))   # case, one tag
+        else:                                                                   # a case-sensitive folder: two files
+            lower.write_bytes(b"another clip")
+            with mock.patch.object(MN, "_REAL_CASE", True):                     # the Windows rule keeps them apart
+                self.assertNotEqual(MN._source_tag(lower, self.tmp), MN._source_tag(a, self.tmp))
         self.assertEqual(MN._source_tag(Path(str(a).replace("\\", "/")), self.tmp), MN._source_tag(a, self.tmp))
         if os.name == "nt":                                                     # the client folder spelled in upper case
             self.assertEqual(MN._source_tag(a, Path(str(self.tmp).upper())), MN._source_tag(a, self.tmp))
@@ -623,6 +631,60 @@ class TestBatchBOutputOnly(_Out):
         gone.rmdir()                                                               # the drive is gone
         self.refused(self.out)
         self.assertFalse(gone.exists())
+
+    def test_a_dangling_output_link_outside_the_client_is_refused(self):
+        """Review 2063755 P3-6: the dangling check itself (a target inside the client is refused by the footage rule
+        anyway)."""
+        far = Path(tempfile.mkdtemp(prefix="whynot-t26-far-"))
+        self.addCleanup(shutil.rmtree, far, True)
+        gone = far / "client output"
+        gone.mkdir()
+        _junction(self.tmp / "output", gone)
+        self.addCleanup(_unlink_dir, self.tmp / "output")
+        gone.rmdir()
+        self.assertIsNone(MN.client_output(self.out, self.tmp))
+        self.refused(self.out)
+        self.assertFalse(gone.exists())
+
+    def test_footage_linked_into_output_is_never_written_into(self):
+        """Review 2063755 P3-1: assets/ (or data/) linked INTO a plain output/: the write folder is the footage."""
+        for x in ("assets", "data"):
+            with self.subTest(x):
+                own, out = self.tmp / x, self.tmp / "output"
+                own.rmdir()
+                out.mkdir(exist_ok=True)
+                _junction(own, out)                                                # x -> output/
+                try:
+                    self.assertIsNone(MN.client_output(self.out, self.tmp))
+                    self.assertIsNone(MN.client_output(out, self.tmp))
+                    _unlink_dir(own)
+                    (out / "footage").mkdir()
+                    _junction(own, out / "footage")                                # x -> output/footage
+                    self.assertIsNone(MN.client_output(out / "footage" / "x", self.tmp))
+                    self.assertIsNotNone(MN.client_output(self.out, self.tmp))     # its sibling folder is fine
+                    _unlink_dir(own)
+                    _junction(own, self.tmp.parent)                                # x -> a share that holds the
+                    self.assertIsNone(MN.client_output(self.out, self.tmp))        # client: output/ lies in the
+                finally:                                                           # footage (client_move_paths)
+                    _unlink_dir(own)
+                    own.mkdir()
+                    shutil.rmtree(out)
+
+    def test_an_output_link_inside_linked_footage_is_refused(self):
+        """Review r3b P2: assets/ -> E:/shoot and output/ -> E:/shoot/exports (no client layout there): the copy
+        would land in the footage. Refused like every engine write (client_move_paths.protected_refusal)."""
+        far = Path(tempfile.mkdtemp(prefix="whynot-t26-shoot-"))
+        self.addCleanup(shutil.rmtree, far, True)
+        (far / "exports").mkdir()
+        (self.tmp / "assets").rmdir()
+        _junction(self.tmp / "assets", far)
+        self.addCleanup(_unlink_dir, self.tmp / "assets")
+        _junction(self.tmp / "output", far / "exports")
+        self.addCleanup(_unlink_dir, self.tmp / "output")
+        self.assertIsNone(MN.client_output(self.out, self.tmp))
+        self.refused(self.out)
+        self.assertEqual([p.name for p in far.iterdir()], ["exports"])
+        self.assertEqual(list((far / "exports").iterdir()), [])
 
     def test_an_output_link_into_the_clients_own_footage_is_refused(self):
         for x in ("assets", "data"):
@@ -883,13 +945,25 @@ class TestBatchBTimeout(_Out):
     def test_the_new_record_cannot_be_written(self):
         """Review r2 #5: the crf18 copy took the name but its record failed: no record is left that describes
         another copy."""
-        m, r1 = self.conform("tag60_real30")
-        h16 = sha(r1["path"])
-        with mock.patch.object(MN.linksafe, "replace_atomic", side_effect=MN.Guidance("disk full", "free space")):
-            m, r2 = self.conform("tag60_real30", crf=18)
-        self.assertFalse(r2["ok"])
-        self.assertFalse(Path(r1["sidecar"]).exists())                            # the crf16 record went aside
-        self.no_wrong_reuse(h16)
+        for err in (MN.Guidance("access denied", "close it"), PermissionError("locked by a virus scan")):
+            with self.subTest(type(err).__name__):
+                m, r1 = self.conform("tag60_real30")
+                h16 = sha(r1["path"])
+                with mock.patch.object(MN.linksafe, "replace_atomic", side_effect=err):
+                    m, r2 = self.conform("tag60_real30", crf=18)
+                # Review 2063755 P2-1 / owner pre-mortem (a): a line of its own, never a stopped run; the copy is
+                # right and used now, it only has no record (made again next time). Not a skip: skipped means unused.
+                self.assertTrue(r2["ok"], r2)
+                self.assertIsNone(r2["skipped"])
+                self.assertIsNone(r2["sidecar"])
+                self.assertIsNone(r2["parts"][0]["sidecar"])
+                self.assertIn("could not be saved", r2["reason"])
+                self.assertIn(str(err), r2["reason"])
+                self.assertEqual(r2["lines"], {"en": [MN.LINES["no_record"][0]], "ar": [MN.LINES["no_record"][1]]})
+                self.assertTrue(MN._plain_file(Path(r2["path"])))
+                self.assertFalse(Path(r1["sidecar"]).exists())                    # the crf16 record went aside
+                self.assertFalse([p for p in self.out.iterdir() if p.name.endswith(".held.json")])
+                self.no_wrong_reuse(h16)
 
     def test_the_old_record_cannot_be_put_back(self):
         """Review r2 #5: the old copy is open AND its record can't return: it is redone next time, never misread."""
@@ -929,10 +1003,14 @@ class TestBatchBTimeout(_Out):
         self.assertTrue(r2["ok"], r2)
         self.assertEqual(len(calls), 1)
         self.assertIn(".held.json", r2["reason"])
+        name = Path(calls[0]).name                                                 # review 2063755 P3-3: a line
+        self.assertEqual(r2["lines"], {"en": [MN.LINES["held_left"][0].format(name=name)],
+                                       "ar": [MN.LINES["held_left"][1].format(name=name)]})
         self.assertEqual(json.loads(Path(r2["sidecar"]).read_text(encoding="utf-8"))["crf"], 18)
         m, r3 = self.conform("tag60_real30", crf=18)
         self.assertTrue(r3["reused"])
-        m, r4 = self.conform("tag60_real30")                                       # the leftover is cleared next run
+        self.assertFalse(os.path.lexists(calls[0]))                                # cleared on reuse (P3-2)
+        m, r4 = self.conform("tag60_real30")
         self.assertTrue(r4["ok"] and not r4["reused"], r4)
         self.assertEqual(len(list(self.out.iterdir())), 2)
 
@@ -1004,6 +1082,191 @@ class TestBatchBTimeout(_Out):
         m, r = self.conform("tag60_real30", runner=boom)
         self.assertFalse(r["ok"])
         self.assertEqual(list(self.out.iterdir()), [])
+
+
+class TestReview2063755(_Out):
+    """Review 2063755 (owner pre-mortem item b): nothing planted while the encode runs is handed back as our copy, and
+    a record set aside by a stopped run is cleared."""
+    names = TestBatchBTimeout.names                                                 # our partial, record, copy
+
+    def encode_then(self, plant):
+        def runner(cmd):
+            r = subprocess.run(cmd, capture_output=True, timeout=600)
+            plant(Path(cmd[-1]))                                                   # right after FFmpeg finished
+            return r
+        return runner
+
+    def victim(self, name="victim.bin"):
+        v = self.tmp / "assets" / name
+        v.write_bytes(b"CLIENT FOOTAGE")
+        return v
+
+    def assert_changed(self, r):
+        self.assertFalse(r["ok"], r)
+        self.assertEqual(r["skipped"], "changed")
+        self.assertIsNone(r["path"])
+        self.assertEqual(r["lines"], {"en": [MN.LINES["changed"][0]], "ar": [MN.LINES["changed"][1]]})
+
+    def planted_partial(self, link):
+        m, r1 = self.conform("tag60_real30")                                       # an earlier crf16 pair
+        pair = sorted([Path(r1["path"]).name, Path(r1["sidecar"]).name])
+        before = (sha(r1["path"]), Path(r1["sidecar"]).read_text(encoding="utf-8"))
+        v = self.victim()
+
+        def plant(tmp):
+            tmp.unlink()
+            link(v, tmp)
+        m, r2 = self.conform("tag60_real30", crf=18, runner=self.encode_then(plant))
+        self.assert_changed(r2)
+        self.assertEqual(v.read_bytes(), b"CLIENT FOOTAGE")
+        self.assertEqual(os.stat(v).st_nlink, 1)                                   # the planted name was removed
+        self.assertEqual(sorted(p.name for p in self.out.iterdir()), pair)
+        self.assertEqual((sha(r1["path"]), Path(r1["sidecar"]).read_text(encoding="utf-8")), before)
+        m, r3 = self.conform("tag60_real30")
+        self.assertTrue(r3["reused"])                                              # the old pair was never touched
+
+    def test_a_hard_link_planted_at_the_partial_during_the_encode_is_not_handed_back(self):
+        self.planted_partial(os.link)
+
+    @unittest.skipUnless(_can_symlink(), "this account may not create symlinks (Windows without developer mode)")
+    def test_a_symlink_planted_at_the_partial_during_the_encode_is_not_handed_back(self):
+        self.planted_partial(lambda v, p: os.symlink(v, p))
+
+    def test_the_folder_swapped_for_a_link_during_the_encode_is_never_written_through(self):
+        """output/intermediates renamed and replaced by a link into assets/ while FFmpeg runs (macOS allows the rename
+        with the file open; on Windows once FFmpeg has closed it)."""
+        moved = self.tmp / "output" / "moved"
+        decoy = []
+
+        def plant(tmp):
+            os.replace(self.out, moved)
+            _junction(self.out, self.tmp / "assets")
+            decoy.append(self.victim(tmp.name))                                    # the partial's name, in assets/
+        self.addCleanup(lambda: _unlink_dir(self.out) if os.path.lexists(self.out) else None)
+        m, r = self.conform("tag60_real30", runner=self.encode_then(plant))
+        self.assert_changed(r)
+        self.assertEqual(sorted(p.name for p in (self.tmp / "assets").iterdir()), [decoy[0].name])
+        self.assertEqual(decoy[0].read_bytes(), b"CLIENT FOOTAGE")                 # never removed or renamed through it
+        self.assertEqual([p.name.endswith(".partial.mp4") for p in moved.iterdir()], [True])
+
+    def test_a_folder_planted_at_the_partial_is_left_as_it_is(self):
+        def plant(tmp):
+            tmp.unlink()
+            tmp.mkdir()
+            (tmp / "keep.txt").write_text("someone's", encoding="utf-8")
+        m, r = self.conform("tag60_real30", runner=self.encode_then(plant))
+        self.assert_changed(r)
+        self.assertIn("is a folder now", r["reason"])
+        keep = next(self.out.glob("*.partial.mp4/keep.txt"))
+        m, r2 = self.conform("tag60_real30")                                       # review r3 P3-1: and on the next
+        self.assert_changed(r2)                                                    # run too, before any encode
+        self.assertIn("is a folder", r2["reason"])
+        self.assertEqual(keep.read_text(encoding="utf-8"), "someone's")
+
+    def test_a_folder_under_a_record_name_is_never_moved_or_removed(self):
+        partial, side, out = self.names()
+        held = side.with_name(side.stem + ".held.json")
+        for name in (held, side, out):
+            with self.subTest(name.name):
+                (name / "sub").mkdir(parents=True)
+                (name / "sub" / "keep.txt").write_text("someone's", encoding="utf-8")
+                ran = []
+                m, r = self.conform("tag60_real30", runner=lambda cmd: ran.append(cmd))
+                self.assert_changed(r)
+                self.assertEqual(ran, [])                                          # found before the encode
+                self.assertEqual((name / "sub" / "keep.txt").read_text(encoding="utf-8"), "someone's")
+                shutil.rmtree(name)
+        m, r1 = self.conform("tag60_real30")                                       # a folder at the held name, on
+        (held / "sub").mkdir(parents=True)                                         # the reuse path
+        (held / "sub" / "keep.txt").write_text("someone's", encoding="utf-8")
+        m, r2 = self.conform("tag60_real30")
+        self.assertTrue(r2["ok"] and r2["reused"], r2)
+        self.assertIn("is a folder", r2["reason"])
+        self.assertEqual((held / "sub" / "keep.txt").read_text(encoding="utf-8"), "someone's")
+
+    def fake(self, cmd):
+        Path(cmd[-1]).write_bytes(b"a finished encode")
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    def two_parts(self, **kw):
+        d = MN.decide(MN.measure(fx("tag60_real30")))
+        d["duration_s"] = 20.0
+        with quiet():
+            return self.cf(fx("tag60_real30"), self.out, d, ranges=[(1.0, 2.0), (10.0, 11.0)], **kw)
+
+    def test_a_later_part_without_a_record_keeps_the_first_parts_record(self):
+        """Review r3 P3-2: the parts are the truth for which copy has a record."""
+        real, calls = MN.linksafe.replace_atomic, []
+
+        def second_fails(path, root, data, within=None):
+            calls.append(path)
+            if len(calls) == 2:
+                raise MN.Guidance("access denied", "close it")
+            return real(path, root, data, within)
+        with mock.patch.object(MN.linksafe, "replace_atomic", second_fails):
+            r = self.two_parts(runner=self.fake)
+        self.assertTrue(r["ok"], r)
+        self.assertIsNone(r["skipped"])
+        self.assertEqual([p["sidecar"] is not None for p in r["parts"]], [True, False])
+        self.assertEqual(r["sidecar"], r["parts"][0]["sidecar"])
+        self.assertTrue(Path(r["parts"][0]["sidecar"]).is_file())
+        self.assertEqual(r["lines"], {"en": [MN.LINES["no_record"][0]], "ar": [MN.LINES["no_record"][1]]})
+
+    def test_a_later_failure_drops_the_used_note_and_keeps_the_junk_note(self):
+        """Review r3 P3-3: part 1 has no record and an old record it can't remove, then part 2 fails: the original
+        is used, so 'it is used now' goes; the junk file to delete is still named."""
+        r0 = self.two_parts(runner=self.fake)
+        first_side = Path(r0["parts"][0]["sidecar"])
+        held = first_side.with_name(first_side.stem + ".held.json")
+        real_remove, n = MN.linksafe.remove, []
+
+        def stuck(path, root, within=None):
+            if str(path) == str(held) and os.path.lexists(path):
+                raise MN.Guidance("read-only", "clear it")
+            return real_remove(path, root, within)
+
+        def runner(cmd):
+            n.append(cmd)
+            if len(n) == 2:                                                        # part 2: a link planted
+                Path(cmd[-1]).write_bytes(b"x")
+                Path(cmd[-1]).unlink()
+                os.link(self.tmp / "assets" / "victim.bin", cmd[-1])
+            else:
+                self.fake(cmd)
+            return subprocess.CompletedProcess(cmd, 0, b"", b"")
+        (self.tmp / "assets" / "victim.bin").write_bytes(b"CLIENT FOOTAGE")
+        with mock.patch.object(MN.linksafe, "replace_atomic", side_effect=MN.Guidance("access denied", "x")), \
+                mock.patch.object(MN.linksafe, "remove", stuck):
+            r = self.two_parts(runner=runner, crf=18)
+        self.assertFalse(r["ok"], r)
+        self.assertEqual(r["skipped"], "changed")
+        self.assertEqual(r["lines"]["en"], [MN.LINES["changed"][0], MN.LINES["held_left"][0].format(name=held.name)])
+        self.assertEqual(r["lines"]["ar"], [MN.LINES["changed"][1], MN.LINES["held_left"][1].format(name=held.name)])
+        self.assertNotIn("is used", r["reason"])
+        self.assertEqual((self.tmp / "assets" / "victim.bin").read_bytes(), b"CLIENT FOOTAGE")
+
+    def test_a_held_record_left_by_a_stopped_run_is_cleared_on_reuse(self):
+        """Review 2063755 P3-2: a run that stopped after its new record left `.held.json` behind."""
+        m, r1 = self.conform("tag60_real30")
+        held = Path(r1["sidecar"]).with_name(Path(r1["sidecar"]).stem + ".held.json")
+        held.write_text("{}", encoding="utf-8")
+        m, r2 = self.conform("tag60_real30")
+        self.assertTrue(r2["ok"] and r2["reused"], r2)
+        self.assertFalse(os.path.lexists(held))
+        self.assertEqual(r2["lines"], {"en": [], "ar": []})
+        held.write_text("{}", encoding="utf-8")
+        real = MN.linksafe.remove
+
+        def stuck(path, root, within=None):
+            if str(path).endswith(".held.json"):
+                raise MN.Guidance("read-only", "clear it")
+            return real(path, root, within)
+        with mock.patch.object(MN.linksafe, "remove", stuck):
+            m, r3 = self.conform("tag60_real30")
+        self.assertTrue(r3["ok"] and r3["reused"], r3)                             # still used, and said plainly
+        self.assertIn(held.name, r3["reason"])
+        self.assertEqual(r3["lines"]["en"], [MN.LINES["held_left"][0].format(name=held.name)])
+        self.assertEqual(r3["lines"]["ar"], [MN.LINES["held_left"][1].format(name=held.name)])
 
 
 def _onsets(t, x, thr, gap=5.0):

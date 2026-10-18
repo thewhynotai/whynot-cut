@@ -319,6 +319,17 @@ LINES = {
                "الأصلي دلوقتي."),
     "not_output": ("The copy can only be written into the client's output folder: none was made, the original is used.",
                    "النسخة دي لازم تتكتب جوه فولدر output بتاع العميل: ماعملناهاش، وهنستخدم الأصلي."),
+    "changed": ("Something else changed the output folder or took the copy's name (a link or a folder appeared): no "
+                "copy is used, the original is used.",
+                "فيه حاجة تانية غيّرت فولدر الـ output أو خدت اسم النسخة (ظهر link أو فولدر): مش هنستخدم نسخة، "
+                "وهنستخدم الأصلي."),
+    "no_record": ("The copy was made, but its record could not be saved (the reason is in the details): it is used now "
+                  "and made again next time.",
+                  "النسخة اتعملت، بس ملف البيانات بتاعها ماتحفظش (السبب مكتوب في التفاصيل): هنستخدمها دلوقتي "
+                  "وهتتعمل تاني المرة الجاية."),
+    "held_left": ("An old record file ({name}) could not be removed: it is never read again; delete it by hand (the "
+                  "reason is in the details).",
+                  "ملف بيانات قديم ({name}) ماقدرناش نمسحه: مش هيتقري تاني، امسحه بإيدك (السبب مكتوب في التفاصيل)."),
     "maybe_hdr": ("The file looks like HDR (10-bit, wide colour) but names no brightness curve: it is used as it is; "
                   "check the colours in Premiere.",
                   "الملف شكله HDR (10 بت وألوان واسعة) لكن من غير منحنى إضاءة: هنستخدمه زي ما هو، راجع الألوان في بريمير."),
@@ -520,6 +531,10 @@ def client_output(out_dir, client_root) -> Path | None:
             cur = cur / x
             if _is_link(cur) or (cur.exists() and not cur.is_dir()) or (linked and has_layout(cur)):
                 return None                         # below a linked output/: never into a client folder either
+        from .client_move_paths import protected_refusal
+        if protected_refusal(root, cur) is not None:
+            return None                             # the engine's one rule: never into data/ or assets/ (followed
+                                                    # through links: assets -> output, or output/ inside the footage)
     except Guidance:
         return None
     return cur
@@ -532,22 +547,36 @@ def _anchor(client_root) -> tuple[str, str | None]:
     return (os.path.realpath(lex), None) if _is_link(lex) else (os.path.abspath(str(client_root)), "output")
 
 
+_REAL_CASE = os.name == "nt"        # realpath gives the on-disk case here (not on macOS, where it keeps the given one)
+
+
 def _source_tag(src: Path, client_root=None) -> str:
     """A short hash naming the source: cam A's and cam B's `C0001.MP4` get different intermediates (the stem alone
-    let the second overwrite the first). The path relative to the client folder ('/' separators, the case kept as
-    given on every OS), so a moved client or a new drive letter keeps its intermediates; the resolved path when the
-    source lives outside the client. The case is never folded: two files whose names differ only in case (a
-    case-sensitive folder, WSL, a Linux share) must never share an intermediate; the price is a second copy when one
-    file is reached under two spellings. A changed file keeps its name and is redone in place (the sidecar's sha256).
-    Callers pass the path under the client folder (a source reached through its real path, past a link inside the
-    client, gets the real path's tag)."""
+    let the second overwrite the first). The path relative to the client folder ('/' separators), so a moved client
+    or a new drive letter keeps its intermediates; the resolved path when the source lives outside the client. The
+    case is never folded: two files whose names differ only in case (a case-sensitive folder, WSL, a Linux share)
+    must never share an intermediate. On Windows the real path's on-disk case is used when the source resolves inside
+    the client, so one file reached under two spellings still gets one tag; on macOS realpath keeps the given case,
+    and the price there is a second copy for a second spelling. A changed file keeps its name and is redone in place
+    (the sidecar's sha256). A source reached past a link inside the client: on Windows the link's target is tagged
+    when it lies inside the client too (one file, one tag), else the path as given; on macOS / Linux the path as
+    given. A client moved between Windows and a Mac may so get one extra encode per such source."""
     full = os.path.realpath(str(src))
     rel = None
     if client_root is not None:
-        rel = _under(os.path.abspath(str(src)), os.path.abspath(str(client_root))) or \
-              _under(full, os.path.realpath(str(client_root)))
+        given = _under(os.path.abspath(str(src)), os.path.abspath(str(client_root)))
+        real = _under(full, os.path.realpath(str(client_root)))
+        rel = (real or given) if _REAL_CASE else (given or real)
     key = (rel if rel else full).replace("\\", "/")
     return hashlib.sha256(key.encode("utf-8", "surrogatepass")).hexdigest()[:10]
+
+
+def _real_dir(p: Path) -> bool:
+    """p is a real folder (not a link to one): someone's, never removed under one of our names."""
+    try:
+        return stat.S_ISDIR(os.lstat(p).st_mode) and not _is_link(p)
+    except FileNotFoundError:
+        return False
 
 
 def _plain_file(p: Path) -> bool:
@@ -563,11 +592,16 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
             disk=shutil.disk_usage, crf: int = 16, client_root=None) -> dict:
     """Write the intermediate(s) for `decision` into out_dir, which must be the client's output/ folder or a folder
     under it (`client_output`, with client_root = the client folder; refused otherwise, before anything is written,
-    and checked again after the source is hashed and before each encode). Named <stem (60 chars at most)>.<source
-    tag>.conform[.r<from>-<to>].mp4. A sidecar exists only while it describes the .mp4 beside it: the old one is set
-    aside before a new copy takes the name, and the new one is written atomically (linksafe). Nothing is written
-    through a link: a link or hard link under one of our names is removed or replaced as a name. Returns {ok, path,
-    parts, sidecar, lane, reused, fps, skipped, reason, lines}. Never raises."""
+    and checked again after the source is hashed, before each encode and after it, with the finished partial). Named
+    <stem (60 chars at most)>.<source tag>.conform[.r<from>-<to>].mp4. A sidecar exists only while it describes the
+    .mp4 beside it: the old one is set aside before a new copy takes the name, and the new one is written atomically
+    (linksafe). Nothing is written through a link: a link or hard link under one of our names is removed or replaced
+    as a name. Returns {ok, path, parts, sidecar, lane, reused, fps, skipped, reason, lines}. `skipped` names why no
+    copy is used ("not output", "no ffmpeg", "disk", "timeout", "in use", "changed"; None with ok=False when FFmpeg
+    failed). With ok=True, `lines` may hold notes beside copies that are used: a part whose record could not be saved
+    has `sidecar` None in `parts` (the parts are the truth; `sidecar` is the first part's) and is made again next
+    time; an old record that could not be removed is named. A later failure keeps the notes that stay true. Never
+    raises."""
     src, given = Path(src), Path(out_dir)
     res = {"ok": True, "path": None, "parts": [], "sidecar": None, "lane": lane, "reused": False, "skipped": None,
            "reason": None, "fps": decision.get("cfr_fps"), "lines": {"en": [], "ar": []}}
@@ -575,10 +609,33 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
     def why(msg):                                          # an earlier part's note is kept, never overwritten
         return "; ".join(filter(None, (res["reason"], msg)))
 
+    def fail(key):                                         # no copy is used: the failure's line, and the notes
+        res["lines"] = {lang: [line, *(x for x in res["lines"][lang] if x not in LINES["no_record"])]
+                        for lang, line in zip(("en", "ar"), LINES[key])}   # still true (a junk file to delete)
+        return res
+
     def refuse():
         res.update(ok=False, skipped="not output", reason=why(f"{given} is not inside the client's output/ folder"))
-        res["lines"] = dict(zip(("en", "ar"), ([x] for x in LINES["not_output"])))
-        return res
+        return fail("not_output")
+
+    def changed(msg):
+        res.update(ok=False, skipped="changed", reason=why(msg))
+        return fail("changed")
+
+    def note(key, **kw):                                   # a line beside a copy that is still used
+        for lang, line in zip(("en", "ar"), _line(key, **kw)):
+            if line not in res["lines"][lang]:
+                res["lines"][lang].append(line)
+
+    def clear_held(held, anchor, within):                  # a record set aside earlier: never read, so only junk
+        if _real_dir(held):                                # someone's folder under that name: never removed
+            res["reason"] = why(f"{held.name} is a folder: it was left as it is")
+            return
+        try:
+            linksafe.remove(held, anchor, within)
+        except Guidance as e:                              # read-only or locked: reported, the copy stays usable
+            res["reason"] = why(f"{held.name} could not be removed ({e})")
+            note("held_left", name=held.name)
     try:
         if not decision.get("actions"):
             return res
@@ -588,7 +645,7 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
         ff = _abs_ffmpeg(ff) if ff else _engine_ffmpeg()
         if not ff:
             res.update(ok=False, skipped="no ffmpeg", reason="no ffmpeg by an absolute path: the original is used")
-            res["lines"] = dict(zip(("en", "ar"), ([x] for x in LINES["skip_ffmpeg"])))
+            fail("skip_ffmpeg")
             return res
         dur = float(decision.get("duration_s") or 0)
         if ranges:
@@ -631,19 +688,25 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
                 old = {}
             if not isinstance(old, dict):
                 old = {}                                   # a record that is not ours: redone, never a crash
+            held = side.with_name(side.stem + ".held.json")
+            record = side
             if _plain_file(out) and all(old.get(k) == v for k, v in want.items()):
                 res["reused"] = True
+                if os.path.lexists(held):
+                    clear_held(held, anchor, within)       # left by a run that stopped after its new record
             else:
                 if client_output(given, client_root) != out_dir:
                     return refuse()                        # checked again before each (possibly hours-long) encode
                 tmp = out.with_name(out.stem + ".partial.mp4")
-                held = side.with_name(side.stem + ".held.json")
+                blocked = next((x for x in (tmp, held, side, out) if _real_dir(x)), None)
+                if blocked is not None:                    # someone's folder under one of our names: never moved
+                    return changed(f"{blocked.name} is a folder: it was left as it is")   # or removed
                 linksafe.remove(tmp, anchor, within)       # a leftover partial, or a link planted under its name
                 try:
                     linksafe.remove(held, anchor, within)  # a leftover from an earlier run: before the encode, so
                 except Guidance as e:                      # a stuck one never costs a finished encode
                     res.update(ok=False, skipped="in use", reason=why(f"{held.name} could not be removed ({e})"))
-                    res["lines"] = dict(zip(("en", "ar"), ([x] for x in LINES["in_use"])))
+                    fail("in_use")
                     return res
                 def build(ln, a=a, b=b, out=tmp):
                     from . import accel
@@ -667,24 +730,38 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
                     gone = _drop(tmp)
                     res.update(ok=False, skipped="timeout", reason=why("the encode took too long and was stopped"
                                + ("" if gone else f"; {tmp.name} could not be removed yet")))
-                    res["lines"] = dict(zip(("en", "ar"), ([x] for x in LINES["timeout"])))
+                    fail("timeout")
                     return res
                 except BaseException:
                     _drop(tmp)                                 # no half-written copy is ever left behind
                     raise
                 res["lane"] = used
-                if getattr(r, "returncode", 1) != 0 or not tmp.is_file():
+                if getattr(r, "returncode", 1) != 0 or not os.path.lexists(tmp):
                     err = r.stderr.decode("utf-8", "replace") if isinstance(r.stderr, bytes) else str(r.stderr or "")
                     res.update(ok=False, reason=why(f"ffmpeg failed: {err.strip()[-300:]}"))
-                    res["lines"] = dict(zip(("en", "ar"), ([x] for x in LINES["failed"])))
+                    fail("failed")
                     _drop(tmp)
                     return res
+                if client_output(given, client_root) != out_dir or not _plain_file(tmp):
+                    # A link planted at the partial's name, or the folder swapped for a link, during the encode:
+                    # never handed back as our copy. Removed only as a name, and never through a link (linksafe
+                    # refuses one on the way). The gap between this check and the rename below stays, as in linksafe.
+                    try:
+                        if _real_dir(tmp):
+                            left = f"{tmp.name} is a folder now and was left as it is"
+                        else:
+                            linksafe.remove(tmp, anchor, within)
+                            left = ""
+                    except (Guidance, OSError) as e:
+                        left = f"{tmp.name} was left in place ({e})"
+                    return changed("the output folder or the partial copy changed during the encode (a link or a "
+                                   "folder appeared): the copy is not used" + (f"; {left}" if left else ""))
 
                 def in_use(what):
                     gone = _drop(tmp)
                     res.update(ok=False, skipped="in use", reason=why(f"{what} is in use and could not be replaced"
                                + ("" if gone else f"; {tmp.name} could not be removed yet")))
-                    res["lines"] = dict(zip(("en", "ar"), ([x] for x in LINES["in_use"])))
+                    fail("in_use")
                     return res
                 try:
                     if os.path.lexists(side):
@@ -703,19 +780,22 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
                     in_use(out.name)
                     res["reason"] += restored
                     return res
-                linksafe.replace_atomic(side, anchor, json.dumps(dict(
-                    want, reason=decision.get("actions"), encoder="libx264", lane=used), indent=1).encode("utf-8"),
-                    within)
                 try:
-                    linksafe.remove(held, anchor, within)
-                except Guidance as e:                          # read-only or locked: never read again; reported
-                    res["reason"] = why(f"{held.name} could not be removed ({e})")
-            res["parts"].append({"path": str(out), "sidecar": str(side), "from_s": a, "to_s": b})
+                    linksafe.replace_atomic(side, anchor, json.dumps(dict(
+                        want, reason=decision.get("actions"), encoder="libx264", lane=used), indent=1).encode("utf-8"),
+                        within)
+                except (Guidance, OSError) as e:               # locked folder, a virus scan, a full disk: the copy
+                    res["reason"] = why(f"the record {side.name} could not be saved ({e}): that copy has no record "
+                                        "and is made again next time")   # is right; without a record never reused
+                    note("no_record")
+                    record = None
+                clear_held(held, anchor, within)
+            res["parts"].append({"path": str(out), "sidecar": record and str(record), "from_s": a, "to_s": b})
         res["path"], res["sidecar"] = res["parts"][0]["path"], res["parts"][0]["sidecar"]
         return res
     except Exception as e:  # noqa: BLE001  G10: the original stays the one used
         res.update(ok=False, reason=why(f"{type(e).__name__}: {str(e)[:200]}"))
-        res["lines"] = dict(zip(("en", "ar"), ([x] for x in LINES["failed"])))
+        fail("failed")
         return res
 
 
