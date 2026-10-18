@@ -108,6 +108,27 @@
 
 After the tag, the K1 safety switches turn on.
 
+### Pause window: API off, ~18 Oct 16:00 → 1 Nov (plan session, 2026-10-18)
+At the budget switch the API lanes pause for about 13 days. Gate 4 keeps moving on the subscription sessions. Pre-mortem first:
+- **Capacity.** The subscription limit is one pool shared by every session. Extra sessions spend it faster; they do not add to it. Run at most the executor, Adobe and **two builders**. The auto-resume watchdog restarts them after each limit.
+- **Bottleneck: acceptance.** The executor clears its acceptance queue (the lanes' last commits and their lane-5 reviews) before anything else. Builders never wait on acceptance to start their next item.
+- **Reviews cost API money.** Lane 5 and the review runner both use the Console credit, so neither runs in the window. Instead, each builder spawns a fresh read-only **Opus** reviewer subagent per commit, with lane 5's brief (`lane5\ASSIGNMENT.md` step 2). It writes `reviews\<sha>.md` in the same format, and the executor accepts from it. A builder never reviews its own commit in its own context.
+- **Default assignment** (the executor may change it):
+  - **Builder A = the Addenda K + M session:** lane 4's queue (Tasks 53, 55–60, then the Task 52 / 54 follow-ups). These items come from its own Addendum M.
+  - **Builder B = the Addendum L session:** BL-15 (its own Addendum L, on the Gate 4 security line), then BL-01.
+  - **Executor:** acceptance; BL-02 (licence files and the §7 text, gate items); then lane 2's remaining items (Task 25 round 4, K-T3, K-T6, K-T8 code) or lane 1's (Task 26 close-out, BL-04, BL-14), in Gate 4 order, as its pool allows.
+  - **Adobe:** T4.1 / T4.6 as now.
+- **Prerequisites.**
+  - Lane 5's `API-PAUSE-HANDOFF.md` exists before any builder starts.
+  - A builder reads the lane's ASSIGNMENT (pre-mortem blocks included), REPORT, `work\` and `hooks\` before touching anything.
+  - LOCKED-AREAS moves the lane's files to the builder's session name in the same commit as its first change.
+- **Hole, and its fix.** On the 1st the budget guard removes the lanes' STOP files on its own, and two writers on one file is how work gets lost. So by **31 Oct 22:00**:
+  - the builders stop at a commit boundary;
+  - the executor marks each lane's done items CLOSED in its ASSIGNMENT;
+  - the executor gives the files back in LOCKED-AREAS;
+  - the executor rewrites the handoff's "Resume on the 1st" list.
+- **Gate exit items that wait for November's credit:** the evals (Batch API grading). Everything else on the exit list (suite, `validate --strict`, macOS CI, live PODCAST-TEST, security line, T4.14 budgets) can run in the window.
+
 **Deliverable to Yunus:** the Gate 4 tag report; the release cut after it is made in the attended sessions, one at a time (owner 2026-10-18).
 
 ## Stage R: Release cut (recurring; first one at the October budget limit)
