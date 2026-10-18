@@ -55,7 +55,7 @@ security line. Each row is OPEN until it is accepted and pushed.
 | K1 follow-ups (K-T2 sheet, K-T4 qc line, K-T5 unit) | lane 2 | committed 008257b; review PASS-WITH-MINORS: minors back to lane 2 |
 | Task 26 fix (two cameras' C0001.MP4) | lane 1 → executor (subscription) | final round **3b587ee**, review PASS-WITH-MINORS (0 P1/P2, 6 P3 accepted) → CLOSED once the full suite runs |
 | **Task 26 conform wiring** (plan session 2026-10-18: a feature the editor can't reach isn't done): `media.py.patch` (preflight measure/decide + the bilingual lines) + the conform step after intake (`media_normalise.conform` into `00_inputs/intermediates`; Premiere imports the copy: the ppro_build hunk is the Adobe track's) + the sequence fps from `real_fps` | executor (build) + Adobe (ppro_build hunk) | open, before the tag, own fresh review; spec `D:\ClaudeData\claude-api-lane\hooks\t26\README.md` |
-| Task 29 emphasis + endings | lane 2 | waits for T4.1 |
+| Task 29 emphasis + endings | BLD-A (plan ruling 2026-10-19 00:10; lane 2 stopped) | after the Task 50 mini round; waits for the T4.1 commit |
 | Tasks 50–60 (Addendum M Gate 4 list) | lane 4 | 50: 4babf5e PWM (round 3) → ESCALATED; ruling: one final bounded round (bare prices mid-sentence, «عرض … ٪», zone floor, mutants), then P3 minors accepted. 51 accepted with follow-ups. 52 patch set v2 owed. 54: bdbfe06 in review; design ruling = structural rule A + unit list B. 53, 55–60 queued |
 | K-T2 / K-T7 hooks, K-T1 guard test | executor (apply) | K-T2 `cli.py` hunk next (accel.py.patch dropped, SITE_LANES stays cpu); K-T7 hooks wait for the Task 25 close |
 | Task 23 / Task 28 hooks, T4.5 plan.py swaps | executor (apply) | Task 23 47a8b41 and swaps cf31580 committed; Task 28 hooks being applied |
@@ -82,6 +82,7 @@ security line. Each row is OPEN until it is accepted and pushed.
 - [ ] security line
 - [ ] T4.14 budgets
 - [ ] PROGRESS + gate record
+- [ ] owner report in Egyptian Arabic at `Editing Plugin\GATE-4-REPORT-AR.md` (plan session 2026-10-19). It covers: done and verified with the commits; deferred and to where; the exit-list results; what the editor can use now; the risks accepted; what Stage 2 starts with. Then message the plan session "Gate 4 closed: <tag>"
 - [ ] tag `v3.0.0-p4`, then the K1 switches turn on
 
 The Premium bar line and the Mac line go into the gate record.
