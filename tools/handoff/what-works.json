@@ -1,6 +1,6 @@
 {
   "_note": "Data for WHAT-WORKS-NOW-AR.md and the PREVIEW banner of Mac/START-HERE.md (tools/release.py handoff). Update it at every phase gate from PROGRESS.md (verified items only, no marketing claims), then run the handoff again. Gate state (passed phases, the phase in progress, the macOS CI and live-Mac line) is NOT written here: it is generated from PROGRESS.md (phase table + \"## Gate record\" table + gate tags). An item may carry \"until_passed\": \"<N>\" to drop out by itself once phase N has passed. The passed phases and their tags are read from PROGRESS.md automatically; list here only what a tester can rely on and what is still missing.",
-  "as_of": "2026-10-14",
+  "as_of": "2026-10-18",
   "works": [
     {"ar": "تحويل فيديو كلام (talking-head) لمشروع Premiere Pro جاهز للتعديل، على ويندوز: اتجرّب على عميل تجربة عربي واتشافت الفريمات من Premiere نفسه (المرحلة 2).",
      "en": "Talking-head clip to an editable Premiere Pro project on Windows: verified live on an Arabic test client, frames viewed from Premiere itself (Phase 2)."},
@@ -16,6 +16,24 @@
      "en": "The automated unit suite passes on Windows (thousands of tests)."}
   ],
   "partial": [
+    {"ar": "المرحلة 4 (مميزات المونتير) شغّالة دلوقتي ولسه ما عدّتش الاختبار. اللي تحت دخل الكود المقبول واتعمله اختبارات أوتوماتيك، بس لسه ما اتجرّبش لايف على بريمير في بوابة المرحلة 4.",
+     "en": "Phase 4 (editor features) is in progress and has not passed its gate. The items below are in the accepted code with automated tests, but not yet checked live in Premiere at the Phase 4 gate.",
+     "until_passed": "4"},
+    {"ar": "أشكال الكابشن (8 أشكال) واقتراح شكل واحد للريل (`reel looks recommend`)، ومقاس الكابشن ولون التمييز من ستايل العميل.",
+     "en": "Caption looks (8 looks) and one suggested look per reel (`reel looks recommend`); caption size and highlight colour from the client style.",
+     "until_passed": "4"},
+    {"ar": "مقطع قصير بكل اللي اتشال من الريل عشان تراجعه بسرعة (`reel removed-review`).",
+     "en": "A short clip of everything the plan removes, for a quick review (`reel removed-review`).",
+     "until_passed": "4"},
+    {"ar": "تنبيهات بدري عند استلام الملفات (ناقص لوجو أو ألوان أو خطوط، ترجمة محروقة في الفيديو، إلخ)، ومناطق الأمان لكل منصة في الـ QC.",
+     "en": "Early warnings at intake (missing logo/colours/fonts, burned-in captions, ...) and per-platform safe zones in QC.",
+     "until_passed": "4"},
+    {"ar": "وضع من غير أسئلة (autopilot) بقائمة واحدة للحاجات اللي محتاجاك (`NEEDS-YOU.md`)، وشيت الحلقة.",
+     "en": "A no-questions autopilot with one checklist of what needs you (`NEEDS-YOU.md`), and the episode sheet.",
+     "until_passed": "4"},
+    {"ar": "استخدام كارت الشاشة (NVENC) للملفات الوسيطة مع رجوع للمعالج لوحده.",
+     "en": "GPU (NVENC) for intermediate files with a CPU fallback.",
+     "until_passed": "4"},
     {"ar": "المُثبّت (install.ps1 / install.sh) موجود وبيتجرّب، بس مرحلة المُثبّت (7) لسه ما اتقفلتش: جرّبه على جهاز تجربة الأول.",
      "en": "The installer scripts (install.ps1 / install.sh) exist and are being tested, but the installer phase (7) has not passed: try it on a test machine first."},
     {"ar": "لوحة Premiere (.ccx) ولوحة الجسر (.zxp) متبنيين، بس شغل اللوحة الكامل لسه في المرحلة 6. الـ .zxp متوقّع بشهادة تجربة (self-signed) مش شهادة تجارية.",
@@ -24,6 +42,8 @@
      "en": "The Arabic PDF guide is a draft: no screenshots yet."}
   ],
   "coming": [
+    {"ar": "اللوحة جوّه Premiere للعرض بس دلوقتي: بتوري الحالة، بس أزرار الموافقة وإعادة البناء والشات جوّه بريمير لسه (المرحلة 3 في خطة الواجهة). الشغل كله من شات Claude.",
+     "en": "The Premiere panel is view-only for now: it shows state, but approve / rebuild buttons and chat inside Premiere are not built yet (UI Stage 3). All work runs from the Claude chat."},
     {"ar": "نقل أدوات Kalam وHush وTidy (المرحلة 6B).",
      "en": "The Kalam / Hush / Tidy port (Phase 6B)."},
     {"ar": "الموافقة على الخطة وتشغيل الشغل من جوّه لوحة Premiere (المرحلة 6).",
