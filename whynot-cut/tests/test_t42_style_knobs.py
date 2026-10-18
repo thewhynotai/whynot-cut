@@ -300,8 +300,10 @@ class TestBadValues(KnobCase):
     def test_e1_other_tracks_keys_are_ignored_silently(self):
         base = self.baseline()
         warn0 = read_json(self.p.p("01_analysis/plan-validation.json"))["warnings"]
+        # `captions` is not here: it is the caption-look choice (Task 23), which `reel plan` reads for its fit-or-fail
+        # notices (tests/test_looks_captions.py)
         self.style({"camera": {"ease_ms": 250}, "fades": {"video_in_ms": 0}, "export": {"name": "x"},
-                    "captions": {"digits": "western"}, "remove_pauses": None, "zz_future": 1})
+                    "remove_pauses": None, "zz_future": 1})
         r = self.ok(self.compile())
         self.assertEqual(spec_body(self.spec()), base)
         self.assertEqual(r["warnings"], warn0)

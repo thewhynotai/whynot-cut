@@ -871,6 +871,21 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None,
     from .stamps import read_compiled
     spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     ed = read_json(paths.p("01_analysis/edit-decisions.json"), {})
+    # Task 23 (R-4.1): a client's saved caption look, or this reel's global.caption_look, draws the captions in that
+    # look (lib/looks_captions). No look (the default) = today's captions below, byte for byte; the clip's words are
+    # read only when there is a look. [] = every caption hidden by graphics (returned as is); None = no text engine
+    # or caption font here, so today's captions are drawn instead (G10: never a build without captions).
+    from . import looks
+    override = ed.get("global", {}).get("caption_look")
+    style = load_config("style.json")
+    style = style if isinstance(style, dict) else {}    # T4.2: a style.json that is not an object is warned about
+    res = looks.resolve(override=override, style=style)
+    if res["look"]:
+        from . import looks_captions
+        res = looks.resolve(words=looks_captions.seq_words(paths, spec), override=override, style=style)
+        items = looks_captions.render_captions(paths, res, hidden_ms, avoid=avoid, warnings=warnings)
+        if items is not None:
+            return items
     t = load_config("graphics-templates.json")["templates"]["highlight_caption"]
     # T4.2: the plan's style knobs (absent at the defaults: today's stills, byte for byte)
     knobs = spec.get("style") or {}

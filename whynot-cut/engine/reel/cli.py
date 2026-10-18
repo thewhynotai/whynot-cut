@@ -461,6 +461,24 @@ def cmd_previews(a):
          **({"warnings": r["warnings"]} if r.get("warnings") else {})})
 
 
+def cmd_caption_looks(a):
+    """Task 23 (R-4.1): the caption-look gallery on two frames of this clip (08_quality_control/previews/caption-looks/,
+    never 03_broll), or --pick: one look becomes the client's fixed caption choice, the diff first, written to the
+    client's reel-profile/style.json only with --yes (Task 16's names clean, box, highlight, bold-large too)."""
+    from lib import looks_captions
+    from lib.arglists import items
+    p = P(a)
+    if a.pick:
+        r = looks_captions.pick(p, a.pick, yes=a.yes, emphasis=a.emphasis)
+        out({"ok": True, "look": r.get("look"), "diff": r.get("diff", []), "written": bool(r.get("written")),
+             "file": str(r["file"]) if r.get("file") else None,
+             **({} if a.yes or not r.get("diff") else {"how": "run it again with --yes to save this caption look"})})
+        return
+    r = looks_captions.render(p, looks_=items(a.look) or None, emphasis=a.emphasis)
+    out({"ok": True, "sheet": r["sheet"], "elapsed_s": r["elapsed_s"], "warnings": r["warnings"], "dir": r["dir"],
+         "looks": [{"name": x["name"], "label": x["label"], "png": x["png"]} for x in r["looks"]]})
+
+
 def cmd_sfx(a):
     from lib.sfx import MAP_REL, install_needed, load_map
     p = P(a)
@@ -968,6 +986,8 @@ WRITES_IF = {
     "settings": lambda a: bool(a.init),
     "range": lambda a: bool(a.footage),
     "ref-style": lambda a: bool(a.record or a.apply or (getattr(a, "adopt", None) and getattr(a, "yes", False))),
+    # Task 23: the gallery writes its stills under 08_quality_control/; --pick without --yes only shows the diff
+    "caption-looks": lambda a: not getattr(a, "pick", None) or bool(getattr(a, "yes", False)),
 }
 
 
@@ -1513,6 +1533,8 @@ CORE_COMMANDS: dict[str, str] = {
     "needs-you": "one checklist of what only the editor can do for this client (words by ear, medical/religious "
                  "approvals, music, fonts, logo, final mix); --write puts output/NEEDS-YOU.md and needs-you.json",
     "previews": "render PNG previews of the graphics and captions, with QC composites",
+    "caption-looks": "the caption-look gallery on two frames of this clip (--look, --emphasis), or --pick NAME: "
+                     "make one look the client's caption choice (the diff first; saved only with --yes)",
     "sfx": "prepare the sound effects the plan needs: the client's mapped library files (06_audio/sfx-map.json) "
            "converted to wav, built-in synthesized sounds for the rest",
     "preview-video": "render a watchable MP4 of the planned edit (no Premiere needed)",
@@ -1700,6 +1722,17 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--yes", action="store_true", help="with --adopt: write the merge")
         if name == "previews":
             sp.add_argument("--no-composite", action="store_true")
+        if name == "caption-looks":
+            sp.add_argument("--look", action="append", metavar="NAME",
+                            help="only these looks (a comma list or repeated; the starter names clean, box, "
+                                 "highlight and bold-large too); default: every look")
+            sp.add_argument("--emphasis", choices=["colour", "weight", "tag"],
+                            help="how the emphasised word stands out (default: the catalog's auto emphasis)")
+            sp.add_argument("--pick", metavar="NAME",
+                            help="make NAME this client's fixed caption look: prints the diff against the client's "
+                                 "reel-profile/style.json; writes only with --yes")
+            sp.add_argument("--yes", action="store_true", help="with --pick: save the caption look")
+            sp.add_argument("--json", action="store_true", help="accepted for scripts; the output is always one JSON document")
         if name == "handoff":
             sp.add_argument("--delivered", action="store_true",
                             help="record that the finished video went to the client (status DELIVERED; only after "

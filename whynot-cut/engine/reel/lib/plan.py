@@ -747,7 +747,7 @@ def apply_timemap(inp: PlanInputs, camera: list, merged: list, events: list, bro
     base, words_all = inp.base, inp.words
     dur_ms, dur_f, FPS_ = inp.dur_ms, ms_to_frame(inp.dur_ms), inp.fps
     out = {"merged": merged, "events": events, "broll": broll, "cues": cues, "tmap": None, "time_map_info": None,
-           "seq_srts": {}, "dur_ms": dur_ms, "dur_f": dur_f}
+           "seq_srts": {}, "seq_words": None, "dur_ms": dur_ms, "dur_f": dur_f}
     rp = base.get("remove_pauses")
     wcut_ranges, words_cut, wcut_err = word_cut_ranges(words_all, base.get("cut_words") or [], dur_ms)
     errors += wcut_err
@@ -827,9 +827,14 @@ def apply_timemap(inp: PlanInputs, camera: list, merged: list, events: list, bro
             continue
         seq_srts[name] = [{"start_ms": round(tmap.ms(q["start_ms"])), "end_ms": round(tmap.ms(q["end_ms"])),
                            "text": q["text"]} for q in src if not tmap.removed(q["start_ms"], q["end_ms"])]
+    # Task 23 (R-4.1): the spoken words on the sequence clock (cut and removed words dropped) for the caption looks;
+    # each keeps its SOURCE times, where the looks grab the frame behind a caption for the contrast check
+    seq_words = [dict(w, src_start_ms=w["start_ms"], src_end_ms=w["end_ms"], start_ms=round(tmap.ms(w["start_ms"])),
+                      end_ms=round(tmap.ms(w["end_ms"])))
+                 for w in words_all if w["id"] not in gone and not tmap.removed(w["start_ms"], w["end_ms"])]
     dur_f = tmap.total_frames
     out.update(merged=merged, events=events, broll=broll, cues=cues, tmap=tmap, time_map_info=time_map_info,
-               seq_srts=seq_srts, dur_f=dur_f, dur_ms=round(dur_f * 1000 / FPS_))
+               seq_srts=seq_srts, seq_words=seq_words, dur_f=dur_f, dur_ms=round(dur_f * 1000 / FPS_))
     return out, errors, warnings
 
 
@@ -943,6 +948,41 @@ def assemble_spec(inp: PlanInputs, cam: dict, fr: dict, tm: dict, au: dict, reci
             **({"style": copy.deepcopy(knobs)} if knobs else {})}
 
 
+def caption_hidden_ms(spec: dict, g: dict) -> list:
+    """The sequence-clock ranges where no caption shows, by ppro_build's rule: the graphics named in
+    global.captions_hidden_during (else the compiled default) and global.captions_hidden_ranges (source time, mapped
+    through the time map; an entry that is not a time is left to the build to report)."""
+    from .common import caption_hide_default
+    from .timemap import TimeMap
+    hide_t = set(g.get("captions_hidden_during") or caption_hide_default(spec))
+    hidden = [(e["start_ms"], e["end_ms"]) for e in spec["events"] if e["template"] in hide_t]
+    tm = spec.get("time_map")
+    remap = TimeMap(tm["keep_ms"]) if tm else None
+    for r in g.get("captions_hidden_ranges") or []:
+        a, b = (_try_ms(r[0]), _try_ms(r[1])) if isinstance(r, (list, tuple)) and len(r) == 2 else (None, None)
+        if a is None or b is None:
+            continue
+        hidden.append((remap.ms(a), remap.ms(b)) if remap else (a, b))
+    return hidden
+
+
+def _caption_look_notices(paths: Paths, spec: dict, g: dict) -> list[str]:
+    """Task 23 (R-4.1 fit-or-fail): with a caption look (the client's saved one, or this reel's global.caption_look),
+    the notices of the clip's captions in that look (hidden, shrunk or split captions, characters no font has; or that
+    today's captions are used when this computer has no text engine or caption font). [] with no look: the words are
+    not even read."""
+    from . import looks
+    override = g.get("caption_look")
+    style = load_config("style.json")
+    style = style if isinstance(style, dict) else {}    # T4.2: a style.json that is not an object warns elsewhere
+    res = looks.resolve(override=override, style=style)
+    if not res["look"]:
+        return []
+    from . import looks_captions
+    res = looks.resolve(words=looks_captions.seq_words(paths, spec), override=override, style=style)
+    return looks_captions.plan_check(paths, spec, res, caption_hidden_ms(spec, g))
+
+
 def write_outputs(paths: Paths, plan: dict) -> dict:
     """Every write of `reel plan`: the sequence-clock captions, plan-validation.json and, when valid, the timeline
     spec, B-roll manifest, audio cue sheet, edit-plan.md and the stale mark on an earlier approval (edit-plan.md's
@@ -968,6 +1008,15 @@ def _write_outputs(paths: Paths, plan: dict) -> dict:
     if (spec.get("style") or {}).get("caption_size_px"):   # T4.2: a chosen caption size, measured with the real font
         from .previews import caption_width_warnings
         warnings += [w for w in caption_width_warnings(paths, cap_texts, spec["style"]) if w not in warnings]
+    if ok:
+        # Task 23 (R-4.1): the words on the sequence clock, written with the spec they were mapped by (no time map:
+        # a stale file goes, and the caption looks map words.json themselves)
+        sw = paths.p("02_transcription/words-seq.json")
+        if plan.get("seq_words") is not None:
+            write_json(sw, {"words": plan["seq_words"]})
+        elif sw.exists():
+            sw.unlink()
+        warnings += [w for w in _caption_look_notices(paths, spec, plan.get("global") or {}) if w not in warnings]
     write_json(paths.p("01_analysis/plan-validation.json"), {"generated": now_iso(), "ok": ok,
                "errors": errors, "warnings": warnings, "decisions": plan["decisions"],
                "events": len(events), "cues": len(cues), "main_segments": len(merged)})
@@ -1017,7 +1066,7 @@ def build_plan(inp: PlanInputs) -> dict:
     step(final_checks(inp, tm["events"]))
     return {"ok": not errors, "errors": errors, "warnings": warnings, "spec": spec, "broll": tm["broll"],
             "cues": au["cues"], "seq_srts": tm["seq_srts"], "decisions": len(inp.ed.get("decisions", [])),
-            "ctx": inp.ctx}
+            "ctx": inp.ctx, "seq_words": tm.get("seq_words"), "global": inp.base}
 
 
 def compile_plan(paths: Paths, ctx=None) -> dict:

@@ -29,5 +29,8 @@ After rendering:
   `"<ffmpeg>" -ss <t> -i "<mp4>" -frames:v 1 "<CLIENT>/output/projects/<ID>/08_quality_control/preview/frame_<t>.png"`.
   For a full check use `/whynot-cut:status`.
 - It is a proxy: not the deliverable, not proof of the Premiere build (QC uses Premiere's own frames).
+- To compare caption styles before choosing one, `reel caption-looks --root "<CLIENT>" --video-id <ID>` draws every
+  caption look on two frames of this clip (one sheet in `08_quality_control/previews/caption-looks/`); `--pick <look>`
+  shows what would change, and `--pick <look> --yes` saves it as the client's caption look (only with the editor's OK).
 
 If it fails with "graphics stills missing", run `reel previews`; "timeline-spec.json missing", run `reel plan`.
