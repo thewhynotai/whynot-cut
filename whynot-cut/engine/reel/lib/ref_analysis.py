@@ -63,8 +63,12 @@ def loudness_envelope(video: Path, hop_ms: int = 100) -> list[float]:
 
 
 def analyze_reference(video: Path, out_dir: Path, duration_s: float, root=None) -> dict:
-    """Measure one reference video into out_dir/<stem>/. With the client `root`, the paths it records are stored
-    root-relative (T4.5: a moved client keeps its analysis); the returned record holds the same stored form."""
+    """Measure one reference video into out_dir/<stem>/. Inside a client (`root`, or out_dir is the client's
+    output/client_database/reference_analysis) the paths it records are stored root-relative (T4.5: a moved client
+    keeps its analysis); the returned record holds the same stored form."""
+    if root is None and [p.casefold() for p in Path(out_dir).parts[-3:]] == ["output", "client_database",
+                                                                              "reference_analysis"]:
+        root = Path(out_dir).parents[2]
     cuts = detect_cuts(video)
     bounds = [0.0] + cuts + [duration_s]
     shots = [round(b - a, 3) for a, b in zip(bounds, bounds[1:]) if b - a > 0.04]
@@ -146,7 +150,7 @@ def analyze_all(paths: Paths, refs: list[Path], durations: dict) -> dict:
             results.append(hit)
             continue
         log(paths, f"Analyzing reference {v.name}")
-        r = analyze_reference(v, cache_dir, durations.get(str(v), 0), root=root)
+        r = analyze_reference(v, cache_dir, durations.get(str(v), 0))   # stored relative: cache_dir names the client
         idx[key] = r
         results.append(r)
     with file_locked(idx_f):          # T2.4: reels of one episode share this cache: merge, keep what others added

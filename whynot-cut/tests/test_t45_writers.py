@@ -186,8 +186,8 @@ def fake_analyze(calls):
         res = {"video": str(video), "duration_s": duration_s, "cut_count": 1, "cuts_per_minute": 30.0,
                "shot_durations_s": [1.0, 1.0], "shot_stats": {}, "first_cut_s": 1.0,
                "contact_sheets": [str(sd / "sheet_00.jpg")], "cut_frames": [str(sd / "cuts" / "t0001.08.jpg")]}
-        if root is not None:
-            CDB.stored(root, "reference_analysis/x/measurements.json", res)
+        root = root or Path(out_dir).parents[2]              # as analyze_reference: out_dir names the client
+        CDB.stored(root, "reference_analysis/x/measurements.json", res)
         write_json(sd / "measurements.json", res)
         return res
     return run
@@ -294,8 +294,10 @@ class TestAnalyzeReferenceWritesRelative(Base):
                 mock.patch.object(RA, "contact_sheet", side_effect=sheet), \
                 mock.patch.object(RA, "frames_at", return_value=[]), \
                 mock.patch.object(RA, "loudness_envelope", return_value=[]):
-            res = RA.analyze_reference(ref, out, 1.0)                   # no root (another caller): as before
-        self.assertEqual(res["video"], str(ref))
+            inferred = RA.analyze_reference(ref, out, 1.0)              # no root given: out_dir names the client
+            elsewhere = RA.analyze_reference(ref, self.tmp / "scratch", 1.0)    # outside a client: as before
+        self.assertEqual(inferred["video"], "data/References/r.mp4")
+        self.assertEqual(elsewhere["video"], str(ref))
 
 
 class TestCaptionFontsReadThroughLoad(Base):
