@@ -139,7 +139,10 @@ class TestCuesAndReadback(unittest.TestCase):
         self.assertEqual(units["S01_text_3"], ["characters"])
         self.assertEqual(units["S01_text_4"], [])
         f = AI.check_readback(rb)
-        self.assertEqual([(x["rule"], x["layer"]) for x in f], [("readback_unit", "S01_text_2")])
+        self.assertEqual([(x["rule"], x["layer"]) for x in f if x["level"] == "error"], [("readback_unit", "S01_text_2")])
+        # S01_text_4 (Arabic, no `animators` field): its unit is "Not verified", a warning (owner pre-mortem 2026-10-18)
+        self.assertEqual([(x["rule"], x["layers"]) for x in f if x["level"] == "warning"],
+                         [("readback_unit_unread", ["S01_text_4"])])
 
 
 class TestProject(unittest.TestCase):
@@ -192,7 +195,7 @@ class TestReviewRound1(TestProject):
     def test_m2_a_font_after_effects_substituted(self):
         rb = {"scenes": [{"id": "S01", "layers": [{"name": "S01_text_1", "kind": "text", "text": "الضغط",
                                                    "substitute": True}]}]}
-        self.assertEqual(rules(AI.check_readback(rb)), ["font_no_arabic"])
+        self.assertEqual(rules(AI.check_readback(rb)), ["font_no_arabic", "readback_unit_unread"])
 
     def test_i5_a_word_split_in_a_caption_file(self):
         write_json(self.p.p("02_transcription/words.json"),

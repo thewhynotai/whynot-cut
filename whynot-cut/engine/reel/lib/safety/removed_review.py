@@ -123,7 +123,7 @@ def plan(paths, ctx=None) -> dict:
               and all(_num(x) is not None for x in c)] if isinstance(pj, dict) else []
     ed = _read(paths.p("01_analysis/edit-decisions.json"))
     cut_words = ((ed.get("global") or {}).get("cut_words") or []) if isinstance(ed, dict) else []
-    meaning_items = _meaning(ws, meta, ctx)
+    meaning_items, check = _meaning(ws, meta, ctx)
     pieces = []
     for k, (a, b) in enumerate(spans):
         # a word belongs to the removed part when at least half of it is inside (timing drift at a cut edge)
@@ -142,7 +142,8 @@ def plan(paths, ctx=None) -> dict:
                         if set(m["word_ids"]) & ids],
             "context_before_ms": cb, "context_after_ms": ca,
             "file_from_ms": in_ms + a - cb, "file_to_ms": in_ms + b + ca})
-    return {"pieces": pieces, "source": spec.get("main_footage"), "in_ms": in_ms, "duration_ms": dur}
+    return {"pieces": pieces, "source": spec.get("main_footage"), "in_ms": in_ms, "duration_ms": dur,
+            "meaning_check": check}
 
 
 def _inside(w: dict, a: int, b: int) -> bool:
@@ -153,16 +154,31 @@ def _inside(w: dict, a: int, b: int) -> bool:
     return min(b, e) - max(a, s) >= 0.5 * (e - s)
 
 
-def _meaning(ws, meta, ctx) -> list:
-    """K-T1's high-risk items of the whole transcript (sure or not)."""
-    if not ws:
-        return []
+def _meaning(ws, meta, ctx) -> tuple:
+    """(K-T1's high-risk items of the whole transcript (sure or not), the check's state {"ran", "why", "partly"}).
+    A check that did not run never reads as "nothing found": no transcript words, or K-T1 failing (the clip is still
+    made, and the sheet says the words were not marked); a drug list K-T1 refused is named."""
+    if not any(w["word"].strip() for w in ws):
+        return [], {"ran": False, "why": "no transcript words (02_transcription/words.json missing, empty or unusable)",
+                    "partly": []}
     try:
         from . import risk_words
         c = risk_words.context(ctx)
-        return risk_words.classify(ws, meta, domain=c["domain"], terms=c["terms"], groups=c["groups"])
-    except Exception:  # noqa: BLE001  (a helper on the slate: never blocks the review clip)
-        return []
+        items = risk_words.classify(ws, meta, domain=c["domain"], terms=c["terms"], groups=c["groups"])
+    except Exception as e:  # noqa: BLE001  (a helper on the slate: never blocks the review clip; said on the sheet)
+        return [], {"ran": False, "why": f"the meaning reader failed: {type(e).__name__}: {str(e)[:120]}",
+                    "partly": []}
+    if not isinstance(items, list) or not all(
+            isinstance(m, dict) and isinstance(m.get("text"), str) and isinstance(m.get("risk"), str)
+            and isinstance(m.get("word_ids"), list) for m in items):
+        return [], {"ran": False, "why": "the meaning reader gave an answer that cannot be read", "partly": []}
+    refused = c.get("lexicon_refused") if isinstance(c, dict) else None
+    if refused is None or isinstance(refused, list) and all(isinstance(r, dict) for r in refused):
+        partly = [{"ar": str(r.get("reason_ar") or r.get("id")), "en": f"{r.get('id')}: {r.get('reason')}"}
+                  for r in refused or []]
+    else:
+        partly = [{"ar": "قايمة مصادر الأدوية المرفوضة مش مقروءة", "en": "the list of refused drug sources cannot be read"}]
+    return items, {"ran": True, "why": None, "partly": partly}
 
 
 def duration_s(pieces) -> float:
@@ -174,6 +190,20 @@ def duration_s(pieces) -> float:
 RISK_AR = {"dose": "جرعة", "drug": "اسم دوا", "negation": "نفي", "duration": "مدة أو عدد مرات", "number": "رقم"}
 
 
+def not_checked(doc: dict) -> str:
+    """The line that says the meaning words were not marked, or only partly ("" when the check ran whole). A doc with
+    no record of the check counts as not run."""
+    mc = doc.get("meaning_check") if isinstance(doc.get("meaning_check"), dict) else {}
+    if mc.get("ran") is not True:
+        return ("فحص المعنى ماشتغلش، فالكلمات اللي بتغيّر المعنى مش متعلّم عليها: اسمع الكليب كله / the meaning check "
+                f"did not run ({mc.get('why') or 'no record of it'}): words whose loss changes meaning are not marked; "
+                "listen to the whole clip")
+    if mc.get("partly"):
+        return ("أسماء الأدوية اتفحصت جزئيًا (" + "؛ ".join(x["ar"] for x in mc["partly"]) + ") / drug names partly "
+                "checked (" + "; ".join(x["en"] for x in mc["partly"]) + ")")
+    return ""
+
+
 def sheet(doc: dict) -> str:
     """The text sheet next to the clip, Arabic first: the meaning words first (each at its own time), then every
     removed part in order."""
@@ -183,8 +213,12 @@ def sheet(doc: dict) -> str:
          f"- {len(pieces)} جزء، طول الكليب {duration_s(pieces):.1f} ثانية / {len(pieces)} parts, a "
          f"{duration_s(pieces):.1f} s clip", "",
          "## كلمات بتغيّر المعنى — Words whose loss changes meaning", ""]
-    L += [f"- #{k} `{_tc(m.get('start_ms'))}` «{m['text']}» — {RISK_AR.get(m['risk'], m['risk'])} / {m['risk']}"
-          for k, m in risky] or ["- مفيش / none"]
+    ran = isinstance(doc.get("meaning_check"), dict) and doc["meaning_check"].get("ran") is True
+    if ran:
+        L += [f"- #{k} `{_tc(m.get('start_ms'))}` «{m['text']}» — {RISK_AR.get(m['risk'], m['risk'])} / {m['risk']}"
+              for k, m in risky] or ["- مفيش / none"]
+    if not_checked(doc):
+        L.append(f"- ⚠ {not_checked(doc)}")
     L += ["", "## كل اللي اتشال بالترتيب — Every removed part, in order", ""]
     for k, p in enumerate(pieces, 1):
         ar, en = REASON[p["reason"]]
@@ -405,7 +439,7 @@ def render(paths, ctx=None, runner=None) -> dict:
     return {"clip": str(clip), "sheet": str(sheet_path), "pieces": len(doc["pieces"]),
             "duration_s": duration_s(doc["pieces"]), "lane": lane,
             "message": f"كليب المراجعة جاهز: {len(doc['pieces'])} جزء / the review clip is ready: "
-                       f"{len(doc['pieces'])} parts"}
+                       f"{len(doc['pieces'])} parts" + (f" — ⚠ {not_checked(doc)}" if not_checked(doc) else "")}
 
 
 def _parts(paths, doc, ff, src, size, has_audio, lane, work, runner, Guidance, log) -> tuple:

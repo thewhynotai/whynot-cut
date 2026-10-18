@@ -20,7 +20,9 @@ uses `feed_4x5`. A 4:5 window inside a 9:16 reel is delivered 9:16 and is checke
 checks the platform's right-to-left layout. Premiere QC frames carry no element boxes: when the frames step records
 them (`08_quality_control/frames/boxes.json`: {"frame": [w, h], "boxes": [{"id", "rect"}]}, Adobe track) they are
 checked too. Every element counts as text (P1). `reel qc` treats an intrusion as a hard failure only behind its K1
-switch (off until the Gate 4 tag) and only when a platform was chosen, like Task 27's QC lines. Reads only."""
+switch (off until the Gate 4 tag) and only when a platform was chosen, like Task 27's QC lines; with the switch on
+and no platform chosen it warns that the safe zones are not enforced. Every result names what it checked (graphic and
+caption stills, Premiere frames recorded or not). Reads only."""
 from __future__ import annotations
 
 import json
@@ -196,7 +198,8 @@ def _check(paths, platforms, ctx, rtl, res) -> dict:
     res.update(platforms=plats or ["(default)"], rtl=bool(rtl), notes=notes)
     if not bxs or not frame:
         res["message"] = ("مفيش صور جرافيك أو كابشن لسه، فمفيش حاجة تتفحص / no graphic or caption stills yet: run "
-                          "`reel previews` first")
+                          "`reel previews` first — " + _what(paths, bxs)
+                          + (" — " + "؛ ".join(notes) if notes else ""))
         res["nothing"] = True
         return res
     prof = S.union(plats, frame=frame, rtl=rtl) if plats else S.load(None, frame=frame, rtl=rtl)
@@ -222,9 +225,35 @@ def _check(paths, platforms, ctx, rtl, res) -> dict:
     if partial:
         res["message"] += (f"؛ ومنصة ماتفحصتش: {', '.join(map(str, partial))} / and a platform was not checked: "
                            f"{', '.join(map(str, partial))}")
+    res["message"] += " — " + _what(paths, bxs)
     if notes:
         res["message"] += " — " + "؛ ".join(notes)
     return res
+
+
+def _ar_n(n: int) -> str:
+    return str(n).translate(str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩"))
+
+
+def _what(paths, bxs) -> str:
+    """What the check looked at, Arabic first: our graphic and caption stills, and the Premiere frames' boxes only
+    when the frames step recorded them (else the line says they were not)."""
+    n = {k: sum(1 for b in bxs if b.get("source") == k) for k in ("graphic", "caption", "premiere")}
+    fb = _read(paths.p("08_quality_control/frames/boxes.json"))
+    listed = fb.get("boxes") if isinstance(fb, dict) and isinstance(fb.get("boxes"), list) else []
+    skipped = sum(1 for b in listed if not (isinstance(b, dict) and b.get("id") and isinstance(b.get("rect"), list)
+                                            and len(b["rect"]) == 4))
+    if fb is None:
+        pp_ar, pp_en = "مش متسجلة", "not recorded"
+    elif not n["premiere"]:
+        pp_ar, pp_en = "متسجلة بس فاضية", "recorded but empty"
+    else:
+        pp_ar, pp_en = f"{_ar_n(n['premiere'])} صندوق", f"{n['premiere']} box(es)"
+    if skipped:
+        pp_ar += f" ({_ar_n(skipped)} مش مقروء)"
+        pp_en += f" ({skipped} unreadable, skipped)"
+    return (f"اتفحص: {_ar_n(n['graphic'])} صورة جرافيك و{_ar_n(n['caption'])} صورة كابشن؛ فريمات بريمير: {pp_ar} / "
+            f"checked: {n['graphic']} graphic still(s), {n['caption']} caption still(s); Premiere frames: {pp_en}")
 
 
 def _boxes_scaled(paths) -> tuple:
@@ -241,19 +270,23 @@ def _boxes_scaled(paths) -> tuple:
 
 
 def qc_item(paths, ctx=None) -> dict | None:
-    """The `reel qc` line: None while the K-T4 switch is off, or when no platform was chosen for the reel (QC then
-    stays as it is, like Task 27's own lines); else a mandatory item that fails on an intrusion or when the check
-    could not run, and passes with a plain note when there is nothing to check."""
+    """The `reel qc` line: None while the K-T4 switch is off (QC stays as it is). With the switch on: no platform
+    chosen for the reel is a warning (not mandatory) that says the safe zones are not enforced and how to choose one;
+    else a mandatory item that fails on an intrusion or when the check could not run, and passes with a plain note
+    when there is nothing to check. The note names what was checked."""
     from . import switches
     if not switches.enabled(switches.QC_SAFEZONE_HARD_FAIL, ctx):
         return None
     try:
-        chosen = _platforms(paths, ctx, None)
+        chosen = _platforms(paths, ctx, _reel_frame(paths))         # a 4:5 reel gets feed_4x5 (the default)
     except _CannotCheck as e:
         return {"name": "safe_zone_gate", "ok": False, "mandatory": True, "detail": str(e), "ids": [],
                 "exit_code": EXIT_ERROR}
     if not chosen:
-        return None
+        return {"name": "safe_zone_gate", "ok": False, "mandatory": False, "ids": [], "exit_code": EXIT_ERROR,
+                "detail": "مناطق المنصة مااتفحصتش: مفيش منصة متحددة للفيديو ده / safe zones not enforced: no platform "
+                          "set (choose one in edit-decisions.json global.platforms, or style.json platforms, then run "
+                          "`reel qc` again)"}
     res = check(paths, chosen, ctx=ctx)
     ok = res["exit_code"] == EXIT_OK or bool(res.get("nothing"))
     return {"name": "safe_zone_gate", "ok": ok, "mandatory": True, "detail": res["message"], "ids": res["ids"],

@@ -192,7 +192,9 @@ class TestReviewRound1(Project):
     def test_i5_qc_passes_with_nothing_to_check_and_needs_a_chosen_platform(self):
         write_json(self.root / common.CLIENT_PROFILE_REL / "safety.json",
                    {"switches": {switches.QC_SAFEZONE_HARD_FAIL: True}})
-        self.assertIsNone(G.qc_item(self.p))                            # no platform chosen: like Task 27, no line
+        item = G.qc_item(self.p)                     # no platform chosen: a warning, never silence (pre-mortem 2026-10-18)
+        self.assertEqual((item["ok"], item["mandatory"]), (False, False))
+        self.assertIn("safe zones not enforced: no platform set", item["detail"])
         write_json(self.p.p("01_analysis/edit-decisions.json"), {"global": {"platforms": ["ig_reels_organic"]}})
         item = G.qc_item(self.p)                                        # a talking head with no stills
         self.assertTrue(item["ok"])

@@ -266,14 +266,20 @@ def readback_units(readback) -> dict:
 
 
 def check_readback(readback) -> list:
-    """QC fails on a character-based text animator, or a font After Effects substituted, for any layer with Arabic."""
-    out = []
+    """QC fails on a character-based text animator, or a font After Effects substituted, for any layer with Arabic. An
+    Arabic layer the read-back gives no `animators` field for is a warning: its unit is "Not verified"."""
+    out, unread = [], []
     units = readback_units(readback)
     for sc in (readback or {}).get("scenes") or [] if isinstance(readback, dict) else []:
         for ly in (sc.get("layers") or []) if isinstance(sc, dict) else []:
-            if not isinstance(ly, dict) or ly.get("kind") != "text" or not ARABIC.search(str(ly.get("text") or "")):
+            if not isinstance(ly, dict) or ly.get("kind") != "text":
                 continue
-            name = str(ly.get("name"))
+            name = str(ly.get("name") or "(no name)")
+            if not isinstance(ly.get("text"), str):          # the text was not read back: Arabic or not is unknown
+                unread.append(name)
+                continue
+            if not ARABIC.search(ly["text"]):
+                continue
             if "characters" in units.get(name, []):
                 out.append(_f("readback_unit",
                               f"المشهد {sc.get('id')}: طبقة {name} في After Effects متحركة بالحرف؛ لازم بالكلمة أو بالسطر",
@@ -284,6 +290,17 @@ def check_readback(readback) -> list:
                               f"المشهد {sc.get('id')}: After Effects بدّل خط طبقة {name} بخط تاني، والعربي ممكن يظهر غلط",
                               f"scene {sc.get('id')}: After Effects substituted the font of layer {name}; the Arabic "
                               "may show wrong", scene=sc.get("id"), layer=name))
+            anims = ly.get("animators")
+            # read only when every animator gives a unit we know; absent, null or unreadable is "Not verified"
+            if not isinstance(anims, list) or not all(isinstance(a, dict) and _unit(a.get("based_on")) for a in anims):
+                unread.append(name)
+    if unread:          # the AE library does not report the field yet: said, never passed as checked
+        shown = ", ".join(unread[:5]) + (f" (+{len(unread) - 5})" if len(unread) > 5 else "")
+        out.append(_f("readback_unit_unread",
+                      f"وحدة حركة النص العربي ماترجعتش من After Effects ({shown})، فمش متأكدين إنها بالكلمة أو بالسطر: "
+                      "Not verified",
+                      f"the text animator unit was not read back from After Effects ({shown}): unit not read back: "
+                      "Not verified", level="warning", layers=unread))
     return out
 
 

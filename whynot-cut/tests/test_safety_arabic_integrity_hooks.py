@@ -64,7 +64,7 @@ class TestMotionQc(unittest.TestCase):
         res = self.qc()
         check = [c for c in res.get("checks", []) if (c.get("name") or c.get("check") or c.get("id"))
                  == "arabic_integrity"][0]
-        self.assertFalse(check.get("ok", check.get("pass")))
+        self.assertEqual(check["result"], "FAIL")
         self.assertIn("S03", str(check))
 
 
