@@ -111,7 +111,7 @@ reads every line: a hint is a pointer, never a filter.
   rules recorded with a basis and a date like Task 27's safe zones). A clearly illustrative non-realistic asset (an icon,
   a vector) needs the manifest record only. No AI voice of the client is ever produced (T5.5 already denies TTS of client
   content).
-- `medical-accuracy.md` and `religious-content.md`: unchanged, plus K-T1 (risk words) and K-T8 (two-source verses).
+- `medical-accuracy.md` and `religious-content.md`: unchanged, plus K-T1 (risk words). ~~K-T8 (two-source verses)~~ CANCELLED (owner 2026-10-18): verses are added by the editor by hand; the plugin never writes Quran text on screen (manual verse slot, executor, Gate 4).
 
 **Agents.** `medical-reviewer` keeps its name (renaming breaks hooks, evals and saved approvals) and becomes the content
 reviewer for every active domain: one table, a `flag` per row from the registry, verdicts from that domain's list, and

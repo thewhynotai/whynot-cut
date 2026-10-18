@@ -43,7 +43,7 @@
    suite through heavy.sh; Mac parity tests on CI macOS; the live checks listed per task; a "Simplicity" line (G10:
    does it add a way to fail?).
 
-## K1. Doctor safety and QC (items 1–8, all size S unless noted)
+## K1. Doctor safety and QC (items 1–8, all size S unless noted; item 8 = K-T8 is CANCELLED, owner 2026-10-18, so K1 = K-T1…K-T7)
 
 **Track.** A new parallel side session, the **safety track** (`wnc-safety`), started after the plan session accepts this
 addendum. It reports to the executor like the tools track:
@@ -209,7 +209,21 @@ addendum. It reports to the executor like the tools track:
 - **Phase:** 4 (parallel, after Task 25). **Size:** S–M. **Owner:** safety track; looks & motion track reviews (owner of
   Task 25).
 
-### K-T8 Quran text checked against two sources (item 8)
+### K-T8 Quran text checked against two sources (item 8) (CANCELLED)
+> **CANCELLED (owner 2026-10-18: verses are added by the editor by hand; see the manual verse slot).** Do not build K-T8.
+> There is no Tanzil file, no two-source match, no per-client spelling and no `test_safety_quran.py`. The text below is
+> kept as history only.
+>
+> **Replacement: the manual verse slot** (owned by the executor, done at Gate 4, before the tag):
+> - The plugin never writes Quran text on screen, neither as a graphic nor as a caption.
+> - Where a verse is recited, the plan marks a `manual_verse` span. The captions in that span are left empty.
+> - A Premiere marker reads «آية: يضيفها المونتير يدويًا».
+> - A NEEDS-YOU line goes in the status and the review.
+>
+> The general religious review stays as it is: `religious-content.md`, the medical-reviewer, the `religious` review flag,
+> and "religious approvals never automatic". The protective helpers stay too (the verse zone in `review_domains`, ﴿﴾ as a
+> quote in `publish_rules`, `marks_lost` in `arabic_integrity`, «آية» is never a filler).
+
 - **Behaviour.** For `religious` clients (and any line M1 detects as a verse), a verse is shown only when its text and
   reference match **two independent, offline, pinned Quran text sources in the same orthography**.
   1. **Step 1 (before any code):**
@@ -469,7 +483,7 @@ addendum. It reports to the executor like the tools track:
 | K-T5 | Arabic integrity QC | 4 ∥ | safety (+ looks track read-back field) | S | — |
 | K-T6 | hook rules | 4 ∥ | safety | S | — |
 | K-T7 | repeated takes keep/drop/undo | 4 ∥ | safety | S–M | Task 25 |
-| K-T8 | Quran two sources | 4 ∥ | safety | S | licence step |
+| K-T8 | ~~Quran two sources~~ CANCELLED (owner 2026-10-18: verses are added by the editor by hand; see the manual verse slot) | ~~4 ∥~~ | ~~safety~~ | ~~S~~ | ~~licence step~~ |
 | K-T9 | signed decision log | 6 | executor (+ Adobe view) | M | Task 12 (lock) |
 | K-T10 | preset gallery (extends `looks_captions.render/pick`) + true-size preview | 6 | Adobe + looks & motion | M | Task 23 (with T4.16), R-6.1, Task 27 |
 | K-T11 | topic search | 6 | executor | M | Task 12 (model pin) |
@@ -512,7 +526,7 @@ parallel with Phase 4; K2 ≈ 12–16 days spread over three tracks in Phases 6�
     is fixed in the track without holding the gate.
 - **First Phase 6 commit:** the executor turns the K1 switches on. The suite and the evals run green with them on before
   any other Phase 6 work.
-- **Gate 6:** every K1 task Verified (tests + live checks) or the gate fails. K-T9 to K-T14 and K-T20 pass their
+- **Gate 6:** every K1 task (K1 = K-T1…K-T7; K-T8 is cancelled) Verified (tests + live checks) or the gate fails. K-T9 to K-T14 and K-T20 pass their
   acceptance; the Gate 6 Premium bar adds: seam-check false findings 0 on 50 clean cuts; topic search recall@10 ≥ 0.9;
   true-size preview ±3 %.
 - **Gate 7:** K-T15, K-T16, K-T17 pass.
@@ -533,7 +547,7 @@ Each counted case ≥ 2/3 runs, like Gate 3.
 |---|---|
 | A clean-room breach (a copied string, preset or table) | K0 rules; identity scan with K-T0 hashes; the reviewer of each K task checks for copied material |
 | Seam check false alarms annoy editors | Thresholds measured on clean cuts; the 0-false-findings bar on 50 cuts is a gate item |
-| Quran text sources with unclear licences | K-T8 step 1 before code; fallback is today's content-owner approval |
+| ~~Quran text sources with unclear licences~~ | CANCELLED (owner 2026-10-18): K-T8 is not built; the plugin never writes Quran text on screen (manual verse slot) |
 | Embedding models too heavy for 8 GB GPUs (G13) | Measured footprint per model; on-demand load and release (T4.11); CPU fallback |
 | Resolve import untestable without installing it | Offline rule checks; live import only with Yunus's OK (K9) |
 | Sub-frame audio fades not settable through CEP/QE | K-T3 spike first; 1-frame crossfade fallback measured the same way |
@@ -555,8 +569,8 @@ binding. The human items HK-1 and HK-2 stay open and optional.
 |---|---|---|
 | K1 runs on a new parallel safety track and blocks Gate 6, not Gate 4 | On | K1 moves into the executor's Phase 4 queue and Gate 4 waits for it |
 | The K1 hooks into `plan`, `qc` and the builder stay switched off until the Gate 4 tag | On | They switch on as each one merges (Gate 4's live runs then include them) |
-| A verse with only one licence-clear source still needs the content owner's approval | On | Single-source verses may show after the automatic check |
-| Quran display orthography per client, default Uthmani | Uthmani | Simplified imla'i spelling as the default |
+| ~~A verse with only one licence-clear source still needs the content owner's approval~~ | CANCELLED (owner 2026-10-18, with K-T8) | The plugin never writes a verse on screen (manual verse slot) |
+| ~~Quran display orthography per client, default Uthmani~~ | CANCELLED (owner 2026-10-18, with K-T8) | The plugin never writes a verse on screen (manual verse slot) |
 | Short audio fades at every cut are a build default | On | Off by default; a per-client setting |
 
 | ID | What only Yunus can do | Needed by | If not done |

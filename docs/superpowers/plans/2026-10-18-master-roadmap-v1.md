@@ -116,7 +116,7 @@ At the budget switch the API lanes pause for about 13 days. Gate 4 keeps moving 
 - **Default assignment** (the executor may change it):
   - **Builder A = the Addenda K + M session:** lane 4's queue (Tasks 53, 55–60, then the Task 52 / 54 follow-ups). These items come from its own Addendum M.
   - **Builder B = the Addendum L session:** BL-15 (its own Addendum L, on the Gate 4 security line), then BL-01.
-  - **Executor:** acceptance; BL-02 (licence files and the §7 text, gate items); then lane 2's remaining items (Task 25 round 4, K-T3, K-T6, K-T8 code) or lane 1's (Task 26 close-out, BL-04, BL-14), in Gate 4 order, as its pool allows.
+  - **Executor:** acceptance; BL-02 (licence files and the §7 text, gate items); then the **manual verse slot** (replaces the cancelled K-T8: owner 2026-10-18, verses are added by the editor by hand; the plugin never writes Quran text on screen; Gate 4, before the tag), then lane 2's remaining items (Task 25 round 4, K-T3, K-T6; K-T8 is CANCELLED, no Tanzil, no verse cases, no Quran reviewer) or lane 1's (Task 26 close-out, BL-04, BL-14), in Gate 4 order, as its pool allows.
   - **Adobe:** T4.1 / T4.6 as now.
 - **Prerequisites.**
   - Lane 5's `API-PAUSE-HANDOFF.md` exists before any builder starts.
@@ -127,7 +127,7 @@ At the budget switch the API lanes pause for about 13 days. Gate 4 keeps moving 
   - the executor marks each lane's done items CLOSED in its ASSIGNMENT;
   - the executor gives the files back in LOCKED-AREAS;
   - the executor rewrites the handoff's "Resume on the 1st" list.
-- **Gate exit in the window (plan ruling 2026-10-18):** Gate 4 closes fully in the pause window, tag included. The evals run on the subscription CLI (same runner and judge as Gate 3), at the end after code freeze, with the bundled CLI re-authed first; Task 53's verse cases stay pending until K-T8 and do not block the tag. Everything else on the exit list (suite, `validate --strict`, macOS CI, live PODCAST-TEST, security line, T4.14 budgets) also runs in the window.
+- **Gate exit in the window (plan ruling 2026-10-18):** Gate 4 closes fully in the pause window, tag included. The evals run on the subscription CLI (same runner and judge as Gate 3), at the end after code freeze, with the bundled CLI re-authed first; Task 53's verse cases are cancelled (owner); non-verse religious cases replace them. Everything else on the exit list (suite, `validate --strict`, macOS CI, live PODCAST-TEST, security line, T4.14 budgets) also runs in the window.
 
 **Deliverable to Yunus:** the Gate 4 tag report; the release cut after it is made in the attended sessions, one at a time (owner 2026-10-18).
 
