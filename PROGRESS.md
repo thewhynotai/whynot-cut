@@ -47,7 +47,7 @@ security line. Each row is OPEN until it is accepted and pushed.
 | T4.3 learning loop | lane 2 | committed b399ed2 (rules_loop + 77 tests; hooks in lane2\hooks\T43); Opus review requested by the executor against the 7-point OWNER UPGRADE |
 | T4.5 part B (relative paths, client-move/clone, guard ratchet) | API backlog BL-14 → the first free subscription builder | swaps done (87b2228, cf31580); part B open, UNBLOCKED. **Owner decision 2026-10-18 18:30:** the take-a-copy carries ONLY the client folder (no dev project, no engine home); every path inside it is relative to the client root; bring-it-back acts on that client folder only |
 | T4.6 music in motion videos | Adobe | in progress (hunks in the tree) |
-| T4.8 early warnings | lane 1 → executor | fix 1 committed 8c12875 (mutants 28/28); fresh Opus review running; then the hook patch (`work\t48-fix1\patch`) |
+| T4.8 early warnings | lane 1 → executor | **CLOSED 2026-10-18**: fix 1 8c12875, review PASS-WITH-MINORS (0 P1/P2, 7 P3 accepted; reviews\8c12875.md); hooks applied **a2554ae** (`reel inbox` returns warnings[], the session line, skills; an unfinished check is never "no warnings"); focused tests green on a snapshot |
 | T4.15 `reel clean` | lane 1 → executor | committed 36cd6ad; fix round building (`work\t415-fix1`) on the Q1–Q5 rulings |
 | Task 18 licence files + SPDX headers | BL-02 (files + tool); executor applies headers at the gate | open |
 | Task 22 GPL / trademark notices | BL-03 | open |
