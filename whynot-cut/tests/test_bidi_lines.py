@@ -925,7 +925,7 @@ class TestExecutorRuling(unittest.TestCase):
 
     def test_the_egyptian_mobile_shape_is_a_cue_alone(self):
         for t in ("010 1234 5678", "0100 123 4567", "011 2345 6789", "012 3456 7890", "015 5555 0000", "0101 234 5678",
-                  "٠١٠ ١٢٣٤ ٥٦٧٨", "۰۱۰ ۱۲۳۴ ۵۶۷۸", "010 1234 5678", "010-1234-5678", "015 555 50000"):
+                  "٠١٠ ١٢٣٤ ٥٦٧٨", "۰۱۰ ۱۲۳۴ ۵۶۷۸", "010\u00a01234\u00a05678", "010-1234-5678", "015 555 50000"):
             with self.subTest(ascii(t)):
                 self.assertEqual(ph("الجديد " + t), [t])
         for t in ("013 1234 5678", "014 1234 5678", "016 1234 5678", "01 250 500 750", "010 1234 567",
@@ -1264,6 +1264,47 @@ class TestExecutorRuling(unittest.TestCase):
         for label, fn, n in cases:
             with self.subTest(label):
                 assert_linear(self, fn, n, 4 * n, label)
+
+
+class TestVisualShape(unittest.TestCase):
+    """visual(shape=): the last-resort PIL path (previews) reshapes each run's LOGICAL text (arabic_reshaper's
+    presentation forms) before the run is reversed, on the levels of the whole block (rewire review P2-3)."""
+
+    def test_no_shape_is_the_same_output(self):
+        for e in LINES:
+            par = bl.paragraph(e["text"])
+            self.assertEqual(bl.visual(par, shape=None), bl.visual(par), e["id"])
+
+    def test_shape_gets_each_run_in_logical_order_before_the_reversal(self):
+        seen = []
+        par = bl.paragraph("العلاج (insulin) مهم")
+        out = bl.visual(par, shape=lambda s: seen.append(s) or s.upper())
+        self.assertEqual(out, "مهم"[::-1] + " (" + "INSULIN" + ") " + "العلاج"[::-1])
+        self.assertEqual(sorted(seen), sorted(r.text for r in bl.line_runs(par)))
+        self.assertIn("العلاج (", seen)                       # logical, not reversed
+
+    def test_a_shape_that_changes_the_length_keeps_the_order(self):
+        par = bl.paragraph("لا شيء 50 mg")
+        self.assertEqual(bl.visual(par, shape=lambda s: s.replace("لا", "ﻻ")),
+                         "mg 50 " + "ءيش " + "ﻻ")       # the number is read first (UAX #9)
+
+    def test_a_wrapped_line_uses_the_block_levels(self):
+        lines = bl.lay_out("الدكتور طلب مني أعمل complete blood count test.", 26)
+        ln = lines[1]
+        self.assertEqual(ln.text, "complete blood count test.")
+        self.assertEqual(bl.visual(ln.par, ln.par_start, ln.par_end, shape=str.upper), ".COMPLETE BLOOD COUNT TEST")
+        self.assertEqual(bl.visual(bl.paragraph(ln.text), shape=str.upper), "COMPLETE BLOOD COUNT TEST.")
+
+    def test_a_wrong_shape_is_refused(self):
+        par = bl.paragraph("نص")
+        with self.assertRaisesRegex(TypeError, "shape must be callable"):
+            bl.visual(par, shape="upper")
+        with self.assertRaisesRegex(TypeError, "shape must return a str, not NoneType"):
+            bl.visual(par, shape=lambda s: None)
+        with self.assertRaisesRegex(TypeError, "shape must return a str, not bytes"):
+            bl.visual(par, shape=lambda s: s.encode())
+        with self.assertRaisesRegex(TypeError, "shape must be callable"):
+            bl.visual(bl.paragraph(""), shape=42)               # refused even when there is no run to shape
 
 
 if __name__ == "__main__":

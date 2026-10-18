@@ -876,12 +876,22 @@ def host_text(source, base: int | None = None, start: int = 0, end: int | None =
     return "".join(out)
 
 
-def visual(par: Paragraph, start: int = 0, end: int | None = None, mirror: bool = True) -> str:
+def visual(par: Paragraph, start: int = 0, end: int | None = None, mirror: bool = True, shape=None) -> str:
     """The line as one string in visual order (L4 when `mirror`: the paired brackets and «» ‹› <> ≤≥ of
-    right-to-left runs; the shapers mirror every Bidi_Mirrored character themselves)."""
+    right-to-left runs; the shapers mirror every Bidi_Mirrored character themselves). `shape`, when given, is called
+    on each run's text in LOGICAL order before the run is reversed and must return a str: a renderer without its own
+    shaper (the PIL last resort: arabic_reshaper's presentation forms) shapes per run, so a ligature that changes the
+    length («لا» -> one glyph) never shifts a line range, and a wrapped line keeps its block's levels."""
+    if shape is not None and not callable(shape):
+        raise TypeError(f"shape must be callable, not {type(shape).__name__}")
     out = []
     for r in line_runs(par, start, end):
-        s = r.text[::-1] if r.rtl else r.text
+        s = r.text
+        if shape is not None:
+            s = shape(s)
+            if not isinstance(s, str):
+                raise TypeError(f"shape must return a str, not {type(s).__name__}")
+        s = s[::-1] if r.rtl else s
         if r.rtl and mirror:
             s = "".join(_MIRROR.get(c, c) for c in s)
         out.append(s)
