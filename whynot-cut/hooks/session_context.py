@@ -411,6 +411,18 @@ def reference_style_line(root: Path, has_profile: bool) -> str:
     return ""
 
 
+def intake_line(root: Path) -> str:
+    """T4.8: the warnings of the last `reel inbox`, counted per kind, READ from output/discovery/intake-warnings.json
+    (no discovery, no probe at session start). The session never fails on it: a failure is one stderr line."""
+    try:
+        sys.path.insert(0, str(PLUGIN / "engine" / "reel"))
+        from lib import intake_warnings
+        return intake_warnings.session_line(root)
+    except Exception as e:
+        print(f"WhyNot Cut: intake warnings line skipped ({type(e).__name__})", file=sys.stderr)
+        return ""
+
+
 def _when(at) -> str:
     """ISO time -> "14:02" today, else "2026-10-12 14:02"."""
     at = str(at or "")
@@ -793,6 +805,7 @@ def speak(cwd: Path, st: dict, home: Path, env_ok: bool, data: dict):
                 f"animated motion videos from a window's audio, built in After Effects: /whynot-cut:motion; "
                 f"`reel episodes` shows their state). " if eps else "")
              + panel_line(root)
+             + intake_line(root)
              + reference_style_line(root, bool(prof))
              + updates_line(home)
              + f"{prefs_line(st)} "

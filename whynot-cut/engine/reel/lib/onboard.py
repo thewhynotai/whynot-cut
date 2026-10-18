@@ -552,7 +552,15 @@ def inbox(root: Path, refresh: bool = True) -> dict:
             pass
     if seen != cache:
         write_json(cache_f, seen)
+    # T4.8: ONE list of what is wrong with the material, said now and not at build time (after discovery and the Raw
+    # probe above, which it reads); also written to output/discovery/intake-warnings.json for the session line
+    try:
+        from .intake_warnings import refresh as intake_warnings
+        early = intake_warnings(p.root)
+    except Exception as e:  # noqa: BLE001 — the early warnings never stop intake (refresh itself never raises)
+        early = {"warnings": [], "unread": [{"source": "intake_warnings", "why": f"not built: {type(e).__name__}"}]}
     return {"root": str(p.root), "profile": read_json(p.output / "client_database/reel-profile/profile.json", {}).get("id"),
+            "warnings": early["warnings"], **({"warnings_unread": early["unread"]} if early["unread"] else {}),
             "episodes": episodes, "episode_hints": hints,
             "clips": clips, "new": [c["video_id"] for c in clips if c["state"] == "new"],
             "in_progress": [c["video_id"] for c in clips if c["state"] == "in progress"],

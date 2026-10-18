@@ -9,7 +9,9 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 
 1. Confirm the folder has `assets/` (brand: logo, fonts, photos, brief) and `data/` (footage, reference edits).
    No folder yet? Create a ready-to-fill one: `reel scaffold --root "<CLIENTS_FOLDER>/<Client Name>" --name "<Client Name>"`,
-   show the editor `START_HERE.md`, and continue once their files are in (`reel inbox` confirms).
+   show the editor `START_HERE.md`, and continue once their files are in (`reel inbox` confirms). Say every item of
+   its `warnings[]` to the editor in their language (`text_ar` + `why_ar`) before going on: misplaced or unread files
+   and missing brand material are cheapest to fix now; the editor moves or adds the files, never you.
 2. Choose a kebab-case profile id (e.g. `dr-sherif`) and a 2–3 letter file prefix (e.g. `SH` → `C0001_SH_EDIT.prproj`).
    If the editor hasn't named them, derive them from the folder name and tell them.
 3. `reel client-init --root "<CLIENT_FOLDER>" --id <id> --prefix <XX>` creates `output/client_database/reel-profile/` from the blank template.
