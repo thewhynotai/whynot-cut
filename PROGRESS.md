@@ -40,30 +40,33 @@ are deferred to a later version. Addendum L's lane-3 items move to Stage 8, exce
 security line. Each row is OPEN until it is accepted and pushed.
 
 **Tasks**
-| Item | Owner | State 2026-10-18 01:30 |
+| Item | Owner | State 2026-10-18 10:30 |
 |---|---|---|
 | T4.1 smooth zoom + fades | Adobe (+ executor applies the plan.py/style.json patches) | in progress |
 | T4.2 minors (AE width raw line, hand-edit warnings, edge tests) | executor | **CLOSED 2026-10-18**: d5454f1, 70c6635, 72731dc, 7bd1c45; scoped reviews ending in a clean PASS (review-7bd1c45) |
-| T4.3 learning loop | lane 2 | queued (unblocked by T4.2) |
-| T4.5 part B (relative paths, client-move/clone, guard ratchet) | API backlog BL-14 | swaps done (87b2228 + the plan.py ×2 still to apply) |
+| T4.3 learning loop | lane 2 | committed b399ed2 (rules_loop + 77 tests; hooks in lane2\hooks\T43); Opus review requested by the executor against the 7-point OWNER UPGRADE |
+| T4.5 part B (relative paths, client-move/clone, guard ratchet) | API backlog BL-14 | swaps done (87b2228, cf31580); part B open |
 | T4.6 music in motion videos | Adobe | in progress (hunks in the tree) |
-| T4.8 early warnings, then T4.15 `reel clean` on linksafe | lane 1 | queued; T4.15 unblocked (7ab97e1) |
+| T4.8 early warnings | lane 1 | committed fca6d25; review PASS-WITH-MINORS (round 1): minors back to lane 1 |
+| T4.15 `reel clean` | lane 1 | committed 36cd6ad; review pending; executor rulings on Q1–Q5 posted |
 | Task 18 licence files + SPDX headers | BL-02 (files + tool); executor applies headers at the gate | open |
 | Task 22 GPL / trademark notices | BL-03 | open |
-| Task 25 cut proposals + K-T7 (round 2, one negation reader) | lane 2 | committed 62efd2d; lane-5 review pending |
-| Task 26 fix (two cameras' C0001.MP4) | lane 1 | 19049fe review PASS-WITH-MINORS; P3-1/2/3/6 being fixed |
+| Task 25 cut proposals + K-T7 | lane 2 | b563d74 review FAIL (round 3) → ESCALATED; executor ruling 10:25: one final bounded round 4 on the parked patch (narrow cut-off exemption; `domain: null` fails closed; default stays in code) |
+| K1 follow-ups (K-T2 sheet, K-T4 qc line, K-T5 unit) | lane 2 | committed 008257b; review PASS-WITH-MINORS: minors back to lane 2 |
+| Task 26 fix (two cameras' C0001.MP4) | lane 1 | 0cd67d7 review PASS-WITH-MINORS (round 3) → ESCALATED; executor ruling 10:25: one final bounded round (failure-path deletes through linksafe, race → `changed`, N15 test); then P3 minors accepted |
 | Task 29 emphasis + endings | lane 2 | waits for T4.1 |
-| Tasks 50–60 (Addendum M Gate 4 list) | lane 4 | 50/51 accepted with follow-ups (e4d68dc: review P2s open); 52 patch set v2 owed; 53, 55–60 queued; 54 fixes 29d31c5/ad85d58 in review |
-| K-T2 / K-T7 hooks, K-T1 guard test | executor (apply) | wait for the Task 25 round-2 acceptance and the guard |
-| Task 23 / Task 28 hooks, T4.5 plan.py swaps | executor (apply) | after the T4.2 minors commit |
+| Tasks 50–60 (Addendum M Gate 4 list) | lane 4 | 50: 4babf5e PWM (round 3) → ESCALATED; ruling: one final bounded round (bare prices mid-sentence, «عرض … ٪», zone floor, mutants), then P3 minors accepted. 51 accepted with follow-ups. 52 patch set v2 owed. 54: bdbfe06 in review; design ruling = structural rule A + unit list B. 53, 55–60 queued |
+| K-T2 / K-T7 hooks, K-T1 guard test | executor (apply) | K-T2 `cli.py` hunk next (accel.py.patch dropped, SITE_LANES stays cpu); K-T7 hooks wait for the Task 25 close |
+| Task 23 / Task 28 hooks, T4.5 plan.py swaps | executor (apply) | Task 23 47a8b41 and swaps cf31580 committed; Task 28 hooks being applied |
 | BL-01 read-once hook, BL-04 run-state/resume | API backlog | open |
 | **BL-15 lead-step approval token** (engine refuses a lead-only step unless the guard saw that exact plain lead call: the real fix for the subagent guard hole; guard commits 42a675b + a2dcf71 = review FAIL, improvement, not counted) | API backlog (design by executor) | open |
 | L-T8 engine write gate (client sources; ~190 call sites) | executor | spec says Gate 5 (Addendum L table); not on the Gate 4 line |
+| L-T10 parser fuzzing | lane 3 (paused to Stage 8) | cfc5576 review FAIL; the red test (P1-1) fixed by the executor in 834d609; the rest waits for Stage 8 |
 
-**Full-suite failures to clear (last batch suite, 7ab97e1):**
-- test_installer r5_1 ×12: installer track (precise engine-home scan), plus tools (`user_home` in kalam/platform.py). Both tracks are paused, so the executor takes it over if they are not woken before the gate.
-- serve security ×3: fixed by Adobe a64605f.
-- Three test bugs: fixed in 79bfde2.
+**Last batch suite (c463376, 2026-10-18 02:30–03:35): 6727 tests, 0 failures, 0 errors.** Pushed: origin/release/3.0 = c463376.
+- 3 unexpected successes (serve-findings OPEN): fixed by ae726b4.
+- 1 unclosed SSL socket (TLS loopback test): fixed in 8461da4.
+- The lanes' later suites showed test_security_scan_fuzz_install red (cfc5576): fixed in 834d609.
 
 **Gate 4 exit, as in the phase plan:**
 - [ ] independent review, 0 Critical / 0 Important
