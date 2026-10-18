@@ -470,6 +470,9 @@ def cmd_caption_looks(a):
     p = P(a)
     if a.pick:
         r = looks_captions.pick(p, a.pick, yes=a.yes, emphasis=a.emphasis)
+        if r.get("written") and r.get("look") and p.video_id:   # Task 28: the editor's swap, in this reel's history
+            from lib.looks_recommend import record_choice
+            record_choice(p, "caption", r["look"], "editor")
         out({"ok": True, "look": r.get("look"), "diff": r.get("diff", []), "written": bool(r.get("written")),
              "file": str(r["file"]) if r.get("file") else None,
              **({} if a.yes or not r.get("diff") else {"how": "run it again with --yes to save this caption look"})})
@@ -477,6 +480,24 @@ def cmd_caption_looks(a):
     r = looks_captions.render(p, looks_=items(a.look) or None, emphasis=a.emphasis)
     out({"ok": True, "sheet": r["sheet"], "elapsed_s": r["elapsed_s"], "warnings": r["warnings"], "dir": r["dir"],
          "looks": [{"name": x["name"], "label": x["label"], "png": x["png"]} for x in r["looks"]]})
+
+
+def cmd_looks(a):
+    """Task 28 (R-4.6): `reel looks recommend`: the look this reel would suit (caption looks now, motion looks with
+    Phase 6), one reason line and the top three with their gallery stills. It only suggests: nothing in the reel or
+    the client's profile changes (the pick is `reel caption-looks --pick NAME --yes`)."""
+    from lib import looks
+    r = looks.recommend(P(a), kind=a.kind, stills=not a.no_stills, lang=a.lang)
+    if a.json:
+        out(r)
+        return
+    lines = [r.get("reason") or ""]
+    for i, t in enumerate(r.get("top") or [], 1):
+        lines.append(f"{i}. {t.get('display') or t.get('look')}" + (f"  {t['still']}" if t.get("still") else ""))
+    lines += list(r.get("notes") or [])
+    if r.get("pick") and r.get("kind") == "caption" and r.get("source") == "recommender":
+        lines.append(f"reel caption-looks --pick {r['pick']} --yes")
+    print("\n".join(lines))
 
 
 def cmd_sfx(a):
@@ -988,6 +1009,8 @@ WRITES_IF = {
     "ref-style": lambda a: bool(a.record or a.apply or (getattr(a, "adopt", None) and getattr(a, "yes", False))),
     # Task 23: the gallery writes its stills under 08_quality_control/; --pick without --yes only shows the diff
     "caption-looks": lambda a: not getattr(a, "pick", None) or bool(getattr(a, "yes", False)),
+    # Task 28: the recommender's stills go under 08_quality_control/previews/caption-looks/ (caption looks only)
+    "looks": lambda a: getattr(a, "kind", "caption") == "caption" and not getattr(a, "no_stills", False),
 }
 
 
@@ -1535,6 +1558,8 @@ CORE_COMMANDS: dict[str, str] = {
     "previews": "render PNG previews of the graphics and captions, with QC composites",
     "caption-looks": "the caption-look gallery on two frames of this clip (--look, --emphasis), or --pick NAME: "
                      "make one look the client's caption choice (the diff first; saved only with --yes)",
+    "looks": "reel looks recommend: the look this reel would suit (--kind caption|motion), one reason line and the "
+             "top three with their stills; it changes nothing",
     "sfx": "prepare the sound effects the plan needs: the client's mapped library files (06_audio/sfx-map.json) "
            "converted to wav, built-in synthesized sounds for the rest",
     "preview-video": "render a watchable MP4 of the planned edit (no Premiere needed)",
@@ -1733,6 +1758,14 @@ def main(argv: list[str] | None = None):
                                  "reel-profile/style.json; writes only with --yes")
             sp.add_argument("--yes", action="store_true", help="with --pick: save the caption look")
             sp.add_argument("--json", action="store_true", help="accepted for scripts; the output is always one JSON document")
+        if name == "looks":
+            sp.add_argument("verb", choices=["recommend"], help="recommend: the look this reel would suit")
+            sp.add_argument("--kind", choices=["caption", "motion"], default="caption")
+            sp.add_argument("--no-stills", action="store_true",
+                            help="no gallery stills for the top three (caption looks; nothing is written)")
+            sp.add_argument("--lang", choices=("ar", "en"), help="the reason line's language (default: the editor's "
+                            "`language` setting)")
+            sp.add_argument("--json", action="store_true", help="print the whole JSON document instead of the lines")
         if name == "handoff":
             sp.add_argument("--delivered", action="store_true",
                             help="record that the finished video went to the client (status DELIVERED; only after "

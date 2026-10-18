@@ -966,21 +966,55 @@ def caption_hidden_ms(spec: dict, g: dict) -> list:
     return hidden
 
 
-def _caption_look_notices(paths: Paths, spec: dict, g: dict) -> list[str]:
-    """Task 23 (R-4.1 fit-or-fail): with a caption look (the client's saved one, or this reel's global.caption_look),
-    the notices of the clip's captions in that look (hidden, shrunk or split captions, characters no font has; or that
-    today's captions are used when this computer has no text engine or caption font). [] with no look: the words are
-    not even read."""
+def _caption_look(paths: Paths, spec: dict, g: dict) -> tuple[dict, list[str]]:
+    """Task 23 (R-4.1 fit-or-fail): the reel's caption look (looks.resolve: the client's saved one, or this reel's
+    global.caption_look) and, with a look, the notices of the clip's captions in it (hidden, shrunk or split captions,
+    characters no font has; or that today's captions are used when this computer has no text engine or caption font).
+    No look: (look None, []), and the words are not even read."""
     from . import looks
     override = g.get("caption_look")
     style = load_config("style.json")
     style = style if isinstance(style, dict) else {}    # T4.2: a style.json that is not an object warns elsewhere
     res = looks.resolve(override=override, style=style)
     if not res["look"]:
-        return []
+        return res, []
     from . import looks_captions
     res = looks.resolve(words=looks_captions.seq_words(paths, spec), override=override, style=style)
-    return looks_captions.plan_check(paths, spec, res, caption_hidden_ms(spec, g))
+    return res, looks_captions.plan_check(paths, spec, res, caption_hidden_ms(spec, g))
+
+
+def _record_caption_look(paths: Paths, res: dict) -> None:
+    """Task 28 (R-4.6): keep the caption look this reel uses in 01_analysis/look-choice.json (the recommender's
+    history), once per decision: only when it differs from the look already recorded there, so a re-plan with the same
+    look (or an editor's swap, recorded as `editor`) keeps its date and source. Nothing with no look (today's
+    captions). Source: `reel` for this reel's override, else `client`."""
+    look = (res or {}).get("look")
+    if not look:
+        return
+    from . import looks_recommend
+    try:
+        cur = read_json(paths.p(looks_recommend.CHOICE_REL), {}) or {}
+    except ValueError:                                  # a garbled file: record_choice replaces it
+        cur = {}
+    entry = cur.get("caption") if isinstance(cur, dict) else None
+    if isinstance(entry, dict) and entry.get("look") == look:
+        return
+    looks_recommend.record_choice(paths, "caption", look, "reel" if res.get("source") == "reel" else "client")
+
+
+def _caption_look_suggestion(paths: Paths) -> dict | None:
+    """Task 28 (R-4.6): for a client with no caption look, the look the recommender would suggest, as one line for
+    the editor and the command that shows it; never applied. None when it has no pick, or cannot say (a suggestion
+    never fails a plan)."""
+    try:
+        from . import looks
+        r = looks.recommend(paths, "caption", stills=False)
+    except Exception:  # noqa: BLE001  the recommender is advice only
+        return None
+    if not r.get("pick"):
+        return None
+    return {"look": r["pick"], "reason": r.get("reason"),
+            "how": f"reel caption-looks --pick {r['pick']} (shows what changes; --yes saves it)"}
 
 
 def write_outputs(paths: Paths, plan: dict) -> dict:
@@ -1016,7 +1050,8 @@ def _write_outputs(paths: Paths, plan: dict) -> dict:
             write_json(sw, {"words": plan["seq_words"]})
         elif sw.exists():
             sw.unlink()
-        warnings += [w for w in _caption_look_notices(paths, spec, plan.get("global") or {}) if w not in warnings]
+        look_res, notices = _caption_look(paths, spec, plan.get("global") or {})
+        warnings += [w for w in notices if w not in warnings]
     write_json(paths.p("01_analysis/plan-validation.json"), {"generated": now_iso(), "ok": ok,
                "errors": errors, "warnings": warnings, "decisions": plan["decisions"],
                "events": len(events), "cues": len(cues), "main_segments": len(merged)})
@@ -1036,6 +1071,11 @@ def _write_outputs(paths: Paths, plan: dict) -> dict:
            "main_segments": len(merged)}
     if ok:
         res["edit_plan"] = str(write_edit_plan(paths))
+        _record_caption_look(paths, look_res)          # Task 28: the look this reel uses, once per decision
+        if not look_res["look"]:
+            sug = _caption_look_suggestion(paths)
+            if sug:
+                res["caption_look_suggestion"] = sug
         # a changed plan invalidates any earlier approval
         appr = read_json(paths.p("01_analysis/plan-approval.json"))
         if appr and appr.get("plan_fingerprint") != plan_fingerprint(paths):

@@ -5,11 +5,17 @@
 with a caption look, adds the looks' fit-or-fail notices; previews.render_captions hands a look to looks_captions
 ([] passes through as "no captions", None falls back to today's captions). No look = today's output (the golden plan in
 test_long_lived stays byte-identical).
+Task 28 (R-4.6) hooks: `reel plan` records the reel's caption look once per decision (01_analysis/look-choice.json) and,
+with no look, offers the recommender's suggestion without applying it; `reel caption-looks --pick NAME --yes` records
+an editor swap; `reel looks recommend` prints the reason line and the top three.
 Run:  bash tools/test.sh -k test_plan_look_hooks
 """
 import sys as _sys
 _sys.dont_write_bytecode = True
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
+import contextlib
+import io
+import json
 import shutil
 import sys
 import tempfile
@@ -146,6 +152,86 @@ class TestPreviewsDelegation(PlanHookCase):
         with mock.patch("lib.looks_captions.render_captions", side_effect=AssertionError("called")), \
                 mock.patch("lib.looks_captions.seq_words", side_effect=AssertionError("called")):
             self.assertTrue(previews.render_captions(self.p, [], avoid=[], warnings=[]))
+
+
+CHOICE = "01_analysis/look-choice.json"
+
+
+class TestLookChoice(PlanHookCase):
+    def test_a_decided_look_is_recorded_once(self):
+        self.compile(caption_look="line-clean")
+        first = read_json(self.p.p(CHOICE))["caption"]
+        self.assertEqual((first["look"], first["source"]), ("line-clean", "reel"))
+        self.compile()                                                 # the same look again: same decision
+        self.assertEqual(read_json(self.p.p(CHOICE))["caption"], first)
+        write_json(self.p.p(CHOICE), {"caption": dict(first, source="editor")})
+        self.compile()
+        self.assertEqual(read_json(self.p.p(CHOICE))["caption"]["source"], "editor")   # an editor swap is kept
+        self.compile(caption_look="phrase-boxed")
+        self.assertEqual(read_json(self.p.p(CHOICE))["caption"]["look"], "phrase-boxed")
+
+    def test_a_client_look_is_recorded_as_the_clients(self):
+        write_json(self.root / common.CLIENT_PROFILE_REL / "style.json",
+                   {"captions": {"grouping": "line", "presentation": "clean"}})
+        self.compile()
+        self.assertEqual(read_json(self.p.p(CHOICE))["caption"]["source"], "client")
+
+    def test_no_look_records_nothing_and_only_suggests(self):
+        res = self.compile()
+        self.assertFalse(self.p.p(CHOICE).exists())
+        sug = res.get("caption_look_suggestion")
+        self.assertTrue(sug and sug["look"] and sug["reason"])
+        self.assertIn(f"reel caption-looks --pick {sug['look']}", sug["how"])
+        self.assertFalse((self.root / common.CLIENT_PROFILE_REL / "style.json").exists())   # never applied
+        self.assertNotIn(sug["reason"], res["warnings"])                 # not a warning: the golden plan stays
+
+    def test_a_failing_recommender_never_fails_the_plan(self):
+        with mock.patch("lib.looks.recommend", side_effect=RuntimeError("boom")):
+            res = self.compile()
+        self.assertNotIn("caption_look_suggestion", res)
+
+    def test_a_reel_look_gets_no_suggestion(self):
+        with mock.patch("lib.looks.recommend", side_effect=AssertionError("called")):
+            res = self.compile(caption_look="line-clean")
+        self.assertNotIn("caption_look_suggestion", res)
+
+
+class TestLookVerbs(PlanHookCase):
+    def reel(self, *argv):
+        import cli
+        so, se = io.StringIO(), io.StringIO()
+        code = 0
+        with contextlib.redirect_stdout(so), contextlib.redirect_stderr(se):
+            try:
+                cli.main(["--root", str(self.root), "--video-id", "CLIP1", *argv])
+            except SystemExit as e:
+                code = e.code if isinstance(e.code, int) else 1
+        return code, so.getvalue(), se.getvalue()
+
+    def test_pick_with_yes_records_an_editor_swap(self):
+        code, out, err = self.reel("caption-looks", "--pick", "line-clean")
+        self.assertEqual(code, 0, (out, err))
+        self.assertTrue(json.loads(out)["diff"])
+        self.assertFalse(self.p.p(CHOICE).exists())                    # a diff only
+        code, out, err = self.reel("caption-looks", "--pick", "line-clean", "--yes")
+        self.assertEqual(code, 0, (out, err))
+        self.assertTrue(json.loads(out)["written"])
+        ch = read_json(self.p.p(CHOICE))["caption"]
+        self.assertEqual((ch["look"], ch["source"]), ("line-clean", "editor"))
+
+    def test_recommend_prints_the_reason_and_the_top_three(self):
+        code, out, err = self.reel("looks", "recommend", "--no-stills", "--lang", "en")
+        self.assertEqual(code, 0, (out, err))
+        lines = out.strip().splitlines()
+        self.assertTrue(lines[0].strip())
+        self.assertEqual([ln[:3] for ln in lines[1:4]], ["1. ", "2. ", "3. "])
+        self.assertIn("reel caption-looks --pick", lines[-1])
+        code, out, err = self.reel("looks", "recommend", "--no-stills", "--json")
+        self.assertEqual(code, 0, (out, err))
+        doc = json.loads(out)
+        self.assertEqual(doc["kind"], "caption")
+        self.assertEqual(len(doc["top"]), 3)
+        self.assertFalse(self.p.p(CHOICE).exists())                    # it only suggests
 
 
 if __name__ == "__main__":
