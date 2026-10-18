@@ -144,9 +144,9 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
       `tests/test_safety_meaning_round3b.py`, `tests/fixtures/safety/kt7/**`).
     - **UI track (new subscription session, 2026-10-18, owner "design + panel in parallel"):**
       - **Granted now:** `docs/superpowers/specs/ui-coverage-map.md`.
-      - **Granted once the Adobe track lists the files it holds:** `adobe/panel-ui/**` and `adobe/premiere-uxp/**`.
+      - **Granted 2026-10-18 (the Adobe track holds nothing else there):** `adobe/panel-ui/**` (including `design/**` and the gallery publishes) and `adobe/premiere-uxp/**`.
       - **Excluded:**
-        - `adobe/panel-ui/src/contract.ts`;
+        - `adobe/panel-ui/src/contract.ts` and `adobe/panel-ui/src/mock.test.ts` (until T4.1 lands);
         - `adobe/package.json`, `adobe/package-lock.json`, `adobe/tsconfig.base.json`, `adobe/node_modules/**`;
         - `adobe/premiere-uxp/spike/**`;
         - every path the Adobe track names for T4.1, T4.6 and their live checks.
