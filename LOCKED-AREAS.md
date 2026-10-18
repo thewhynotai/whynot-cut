@@ -152,7 +152,7 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
         - every path the Adobe track names for T4.1, T4.6 and their live checks.
 
         Those stay the Adobe track's. Contract and dependency changes arrive there as patches.
-    - **Release / live-preview track (who=release, 2026-10-18):** `tools/release.py`, `tools/handoff/**` and `tests/test_release*`. It holds them so no one else changes them, and it edits them only through patches to the executor. It builds the owner's copy folders from origin/release/3.0 in a clean clone outside the repo. `installer/**` stays the installer track's; changes arrive as patches.
+    - **Release / live-preview track: RELEASED 2026-10-19 (REL-PREVIEW ended).** `tools/release.py`, `tools/handoff/**` and `tests/test_release*` are back with the executor. The copy folders keep refreshing through lane-watch plus `D:\ClaudeData\release-preview\refresh.py`, outside the repo. `installer/**`: the installer track is archived, so the executor holds it (BL-18 wording only) until Stage 3's INSTALL-S3.
     - **BL-16** (safe ASCII engine home): `lib/portability.py`, new `lib/home_acl.py`, `tests/test_home_acl*.py`,
       `tests/test_portability.py`, `skills/setup/references/platform-setup.md`; setup_env, runtime and ae_render arrive as
       patches.
