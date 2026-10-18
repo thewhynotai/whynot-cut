@@ -75,13 +75,16 @@ class LongProfileRunner(unittest.TestCase):
 
     def test_count_lines_parse_and_a_short_count_is_below_target_unless_the_space_is_exhausted(self):
         import fuzz_long as fl
-        m = fl.COUNT_RE.match("FUZZ-COUNT test_x.A.test_y 2302 cap 1500 space 2302")
-        self.assertEqual(m.groups(), ("test_x.A.test_y", "2302", "1500", "2302"))
-        counts = [{"test": "a", "count": 10000, "cap": 10000, "space": None},      # reached
-                  {"test": "b", "count": 9000, "cap": 10000, "space": None},       # short: listed
-                  {"test": "c", "count": 25, "cap": 10000, "space": 25},           # tiny space, exhausted: fine
-                  {"test": "d", "count": 1500, "cap": 1500, "space": None}]        # heavy test at its own cap
-        self.assertEqual([c["test"] for c in fl.below_target(counts, 10000)], ["b"])
+        m = fl.COUNT_RE.match("FUZZ-COUNT test_x.A.test_y 2302 cap 1500 space None heavy 250000")
+        self.assertEqual(m.groups(), ("test_x.A.test_y", "2302", "1500", "None", "250000"))
+        self.assertEqual(fl.parse_counts("noise\nFUZZ-COUNT t 25 cap 10000 space 25 heavy None\n"),
+                         [{"test": "t", "count": 25, "cap": 10000, "space": 25, "heavy": None}])
+        counts = [{"test": "a", "count": 10000, "cap": 10000, "space": None, "heavy": None},    # reached
+                  {"test": "b", "count": 9000, "cap": 10000, "space": None, "heavy": None},     # short: listed
+                  {"test": "c", "count": 25, "cap": 10000, "space": 25, "heavy": None},         # tiny space, exhausted: fine
+                  {"test": "d", "count": 1500, "cap": 1500, "space": None, "heavy": 250000},    # heavy target at its own floor
+                  {"test": "e", "count": 1500, "cap": 1500, "space": None, "heavy": 900}]       # heavy waiver for a tiny example
+        self.assertEqual([c["test"] for c in fl.check_counts(counts)], ["b", "e"])
 
     def test_the_runner_lists_every_fuzz_test_file_of_the_suite(self):
         import fuzz_long as fl
