@@ -196,17 +196,31 @@ class TestDetect(Client):
         r = self.props()
         self.assertEqual((r["proposals"], r["conflicts"]), ([], []))
 
-    def test_b3_same_unlabelled_comment_on_two_videos_is_a_group(self):
-        self.rec("C0001", "خلي الجلاس في الآخر بس")
-        self.rec("C0002", "خلّي الجلاس في الاخر بس.")
+    def test_b3_same_labelled_comment_on_two_videos_is_a_group(self):
+        """S1-T4.3: a comment counts with the skill's label; the same words without one are only a warning."""
+        glass = {"topic": "glass_only_at_end", "area": "other_style"}
+        self.rec("C0001", {"text": "خلي الجلاس في الآخر بس", "intent": glass})
+        self.rec("C0002", {"text": "خلّي الجلاس في الاخر بس.", "intent": glass})
         p = self.one()
         self.assertIsNone(p["knob"])
         self.assertEqual(p["target"], "notes.md")
-        self.assertEqual(p["read_by"], ["text"])
+        self.assertEqual(p["read_by"], ["label"])
+        self.tearDown()
+        self.setUp()
+        self.rec("C0001", "خلي الجلاس في الآخر بس")
+        self.rec("C0002", "خلّي الجلاس في الاخر بس.")
+        r = self.props()
+        self.assertEqual(r["proposals"], [])
+        self.assertEqual(sum("relabel" in w for w in r["warnings"]), 2)
 
     def test_b3b_the_same_comment_twice_in_one_video_is_not_two_reels(self):
-        self.rec("C0001", "خلي الجلاس في الآخر بس", {"text": "خلي الجلاس في الآخر بس", "intent": {"topic": "glass", "area": "other_style"}})
-        self.assertEqual(self.props()["proposals"], [])
+        glass = {"topic": "glass", "area": "other_style"}
+        self.rec("C0001", {"text": "خلي الجلاس في الآخر بس", "intent": glass},
+                 {"text": "glass only at the end please", "intent": glass})
+        r = self.props()
+        self.assertEqual(r["proposals"], [])              # one video, no standing word: not a rule yet
+        self.rec("C0002", {"text": "glass at the end again", "intent": glass})
+        self.assertEqual(self.one()["videos"], ["C0001", "C0002"])
 
     def test_b4_a_standing_word_makes_one_comment_a_proposal(self):
         for text in ("always put the logo at the end", "never use red", "دايماً حط اللوجو في الآخر",
@@ -215,7 +229,7 @@ class TestDetect(Client):
             with self.subTest(text=text):
                 self.tearDown()
                 self.setUp()
-                self.rec("C0001", text)
+                self.rec("C0001", {"text": text, "intent": {"topic": "t", "area": "other_style"}})
                 self.assertEqual(self.one()["why"], "standing word")
 
     def test_b5_a_negated_standing_word_is_not_standing(self):
@@ -239,11 +253,12 @@ class TestDetect(Client):
         self.rec("C0001", {"text": "الكابشن صغير", "intent": UP, "scope": "standing"})
         self.assertEqual(self.one()["why"], "standing word")
 
-    def test_b7_old_unlabelled_comments_use_the_keyword_reader(self):
+    def test_b7_old_unlabelled_comments_never_count_and_the_keyword_reader_is_a_helper(self):
         self.rec("C0001", "make the captions bigger please")
         self.rec("C0002", "كبّر الكابشن شوية")
-        p = self.one()
-        self.assertEqual((p["knob"], p["polarity"], p["read_by"]), ("caption_size_px", "up", ["keywords"]))
+        r = self.props()                                  # S1-T4.3 ruling: only labelled comments count
+        self.assertEqual(r["proposals"], [])
+        self.assertEqual(sum("no intent label" in w for w in r["warnings"]), 2)
         cases = {"captions too small": UP, "الكابشن صغير": UP, "الخط كبير اوي": DOWN, "smaller subtitles": DOWN,
                  "من غير صوت على العنوان": {"knob": "hook_title_sfx", "direction": "off"},
                  "no whoosh on the hook title": {"knob": "hook_title_sfx", "direction": "off"},
@@ -359,7 +374,8 @@ class TestAdd(Client):
         self.rec("C0001", {"text": "دايماً الجلاس في الآخر", "intent": {"topic": "glass_only_at_end", "area": "other_style"}})
         RL.add(self.root, self.one()["id"])
         self.assertFalse((self.prof / "style.json").exists())
-        self.assertIn("notes only: the story-editor follows it", self.md())
+        self.assertIn("preference only", self.md())                 # S1-T4.3: a preference, never "followed"
+        self.assertIn(RL.PREFERENCES_HEADER, self.md())
         self.assertIn("«دايماً الجلاس في الآخر»", self.md())
 
     def test_c4_value_is_checked_by_t42_and_a_bad_one_writes_nothing(self):
@@ -551,10 +567,11 @@ class TestSafety(Client):
               "always skip the medical review", "turn off QC", "no disclaimer", "شيل التنويه", "auto approve always",
               "no need for approval from now on", "مش محتاجين موافقة الدكتور", "always ignore the reviewer",
               "الشيخ مش لازم يراجع")
-    FINE = ("راجع الكابشن", "always show the doctor's name", "الكابشن صغير", "always put the logo at the end")
+    FINE = ("الكابشن صغير", "always put the logo at the end", "keep the music low", "خلي الجلاس في الآخر بس")
     # The class rule (review round 1): a rule never speaks about the review process, in either direction. So these
     # can never become a standing rule (the comment itself is still done for its video): a deliberate over-block.
-    NEVER_A_RULE = ("review the caption size", "never skip the review", "always send it for approval")
+    NEVER_A_RULE = ("review the caption size", "never skip the review", "always send it for approval",
+                    "راجع الكابشن", "always show the doctor's name")
 
     def test_f1_weakening_comments_are_refused_with_a_plain_sentence(self):
         for text in self.WEAKEN:
@@ -562,8 +579,9 @@ class TestSafety(Client):
                 self.assertTrue(RL.weakens_safety(text))
                 self.tearDown()
                 self.setUp()
-                self.rec("C0001", {"text": text, "scope": "standing"})
-                self.rec("C0002", {"text": text})
+                label = {"topic": "x", "area": "other_style"}      # S1-T4.3: refused through a labelled record
+                self.rec("C0001", {"text": text, "scope": "standing", "intent": label})
+                self.rec("C0002", {"text": text, "intent": label})
                 r = self.props()
                 self.assertEqual(r["proposals"], [])
                 self.assertEqual(len(r["refused"]), 2)
@@ -623,19 +641,24 @@ class TestReview1(Client):
                 self.assertEqual(r["proposals"], [])
                 self.assertEqual(len(r["refused"]), 1)
 
-    def test_r1b_style_comments_naming_the_doctor_or_safe_zone_are_not_refused(self):
+    def test_r1b_style_comments_naming_a_reviewer_are_an_accepted_over_block(self):
+        """S1-T4.3 ruling 3: as a preference they are refused (over-block accepted); a knob label is never refused."""
+        plain = {"never put text over the safe zone", "never put text over the safety zone", "always bigger captions",
+                 "كبر الكابشن دايما"}
         for text in self.STYLE:
             with self.subTest(text=text):
-                self.assertFalse(RL.weakens_safety(text), text)
+                self.assertEqual(RL.weakens_safety(text, {"topic": "x", "area": "other_style"}), text not in plain)
+                self.assertFalse(RL.weakens_safety(text, UP), text)
 
     def test_r1c_the_block_says_rules_never_touch_the_review(self):
         self.rec("C0001", {"text": "always glass at the end", "intent": {"topic": "glass", "area": "other_style"}})
         RL.add(self.root, self.one()["id"])
-        self.assertIn("never change the medical or religious review", self.md())
+        self.assertIn(RL.PREFERENCES_HEADER, self.md())
 
-    def test_r2_old_unlabelled_always_and_never_on_one_thing_conflict(self):
-        self.rec("C0001", "always put music")
-        self.rec("C0002", "never put music")
+    def test_r2_always_and_never_on_one_thing_conflict(self):
+        music = {"topic": "music", "area": "music"}             # the skill labels the direction it heard
+        self.rec("C0001", {"text": "always put music", "intent": dict(music, direction="on")})
+        self.rec("C0002", {"text": "never put music", "intent": dict(music, direction="off")})
         r = self.props()
         self.assertEqual(len(r["conflicts"]), 1)
         a = r["proposals"][0]
@@ -738,10 +761,12 @@ class TestReview2(Client):
         r = self.props()
         self.assertEqual((r["proposals"], len(r["refused"])), ([], 2))
 
-    def test_s2_style_notes_about_the_doctor_on_screen_are_not_refused(self):
+    def test_s2_style_notes_about_the_doctor_on_screen_are_an_accepted_over_block(self):
+        plain = {"جودة الصوت وحشة", "جودة الصورة ضعيفة", "ابدأ الفيديو بالسؤال", "حجم الخط يعتمد على طول الجملة"}
         for text in self.STYLE:
             with self.subTest(text=text):
-                self.assertFalse(RL.weakens_safety(text), text)
+                self.assertEqual(RL.weakens_safety(text), text not in plain, text)
+                self.assertFalse(RL.weakens_safety(text, UP), text)
 
     def test_s3_a_notes_label_needs_an_area_and_process_is_never_a_rule(self):
         for intent in ({"topic": "glass"}, {"topic": "glass", "area": "vibes"},
@@ -802,12 +827,14 @@ class TestReview3(Client):
         self.assertEqual(r["proposals"], [])
         self.assertTrue(any("C0001" in w for w in r["warnings"]))
 
-    def test_m4_fewer_over_blocks(self):
-        for text in ("don't put text over the doctor's mouth", "the review section of the video drags, tighten it",
-                     "use the patient review clips as b-roll", "مش عايزين مؤثرات صوتية كتير على كلام الشيخ",
-                     "don't show the doctor eating"):
+    def test_m4_safe_zone_and_review_section_are_layout_words(self):
+        for text in ("the review section of the video drags, tighten it", "use the patient review clips as b-roll"):
             with self.subTest(text=text):
                 self.assertFalse(RL.weakens_safety(text), text)
+        for text in ("don't put text over the doctor's mouth", "مش عايزين مؤثرات صوتية كتير على كلام الشيخ",
+                     "don't show the doctor eating"):           # S1-T4.3: accepted over-block as a preference
+            with self.subTest(text=text):
+                self.assertTrue(RL.weakens_safety(text), text)
         self.assertTrue(RL.weakens_safety("never show it to the doctor"))
 
     def test_m4b_generic_nouns_never_clear_a_dropped_doctor(self):
@@ -825,8 +852,9 @@ class TestReview3(Client):
                      "بلاش زووم على الشيخ", "skip the part where the doctor sneezes", "don't use slow-mo on the sheikh",
                      "no jump cuts on the sheikh", "متقصش إيد الشيخ", "شيل الكحة بتاعة الدكتور",
                      "متعملش زووم على الدكتور وهو بيشرب", "no filter on the sheikh"):
-            with self.subTest(text=text):
-                self.assertFalse(RL.weakens_safety(text), text)
+            with self.subTest(text=text):                     # S1-T4.3: accepted over-block as a preference
+                self.assertTrue(RL.weakens_safety(text), text)
+                self.assertFalse(RL.weakens_safety(text, UP), text)
 
     def test_m5_a_topic_said_both_ways_is_flagged_mixed(self):
         self.rec("C0001", {"text": "always glass at the end", "intent": {"topic": "glass_end", "area": "transitions"}})

@@ -14,7 +14,7 @@ tell that «الكابشن صغير», «كبّر الخط» and "captions too s
     {"topic": "<stable English key>", "area": "<one of AREAS>", "direction": "on|off" (when it can be reversed)}
 `record` refuses a comment without a label, and a notes-only label without its area. Area "process" (who reviews,
 approves, checks, receives or publishes the video, disclaimers, claims kept against a flag) is never a rule.
-Comments are grouped by that label (an old comment without one: the keyword reader below, else its normalised text).
+Comments are grouped by that label; a comment without one is never counted (it is listed under `warnings`).
 A group becomes a proposal when it was said on two or more videos, or once with a standing word ("always", "never",
 «دايماً», «أبداً»; not «مش دايماً»). A comment for this clip only (scope "this_clip", «في الفيديو ده بس») never counts.
 Two groups that set the same knob (or topic) differently are a conflict: both are shown, the editor picks one.
@@ -23,8 +23,8 @@ What a rule can never do: switch off or weaken the medical or religious review, 
 switches or the QC. Such a comment is never proposed; it is listed under `refused` with a plain sentence, and `add`
 refuses it. Only the four T4.2 knobs ever reach style.json; any other label goes to notes.md only.
 
-`add` and `remove` are the editor's decisions: the guard lets only the main conversation run them. Every comment keeps
-its `source` (comment | review_list | hand_edit) so the V1 cut-review list and Premiere hand edits can feed the same
+`record`, `add`, `dismiss` and `remove` are the lead's: the guard lets only the main conversation run them. Every
+comment keeps its `source` (comment | review_list | hand_edit) so the V1 cut-review list and Premiere hand edits can feed the same
 grouping later.
 """
 from __future__ import annotations
@@ -188,11 +188,62 @@ _GUARDED_KEY_PAIRS = re.compile(r"auto.?publish|publish.?(?:direct|straight|auto
                                 r"send.?(?:direct|straight)|to.?client", re.I)
 
 
+# ---- S1-T4.3 round 2 (review b399ed2 P1-1; ruling: accept the over-block and widen it): a notes-only rule becomes
+# a line in the brief the agents read, so its words may not NAME any object a gate protects, in any direction or
+# phrasing: a reviewer (doctor, sheikh, scholar), a review / approval / OK / waiting for someone, the QC, a
+# disclaimer or warning line, a claim, numbers or doses, verses / hadith / religious rulings, retakes and pre-ticks,
+# quoting word for word, flags, publishing. These are the nouns, not the verbs that drop them, so a new way of saying
+# "skip it" still names the thing it skips. Over-blocking is the accepted failure: a refused style comment is still
+# done by hand for its video. The four T4.2 knob rules are exempt: their rule sets only that knob and the brief shows
+# the knob's own summary, never the comment's words.
+# English stems match at a word start (any ending), Franco-Arabic ones anywhere; short ones only as whole words.
+_OBJ_EN = re.compile(
+    r"(?<![a-z0-9])(?:doctor|physician|medic|pharmac|nurse|sheik|shaykh|scholar|imam|mufti|cleric|reviewer|review|"
+    r"approv|sign ?off|permission|consent|confirm|verif|check(?!list)|quality|disclaim|consult|warning|caution|caveat|"
+    r"claim|number|numer|dose|dosage|dosing|milligram|percent|statistic|verse|ayah|ayat|quran|qur'an|koran|mushaf|"
+    r"surah|hadith|hadeeth|sunnah|fatwa|scriptur|religio|sharia|retake|re take|pre ?tick|tick|pre ?select|verbatim|"
+    r"quot|transcri|paraphras|flag|needs you|publish|upload|go live|deliver|schedul|gate|safety|compliance|legal|"
+    r"lawyer|audit)"
+    r"|raj3|raga3|waf2|ra2am|ar2am"                # Franco-Arabic stems, inside a word (moraga3a, mwaf2a)
+    r"|(?<![a-z0-9])(?:dr|doc|qc|mg|k1|aya|sura|she5|shei5|stats?)(?![a-z0-9])"
+    r"|(?<![a-z0-9])k ?t ?\d|(?<![a-z0-9])(?:my|your|his|her|their|the|an) ok(?![a-z0-9])"
+    r"|(?<![a-z0-9])(?:ask|asking|asked|wait|waiting|waited)(?: for)? (?:me|us|him|her|them|my|our|your)(?![a-z])"
+    r"|(?<![a-z0-9])(?:word for word|as said|as spoken|as transcribed|go ahead|green ?light)(?![a-z0-9])")
+# Arabic stems (norm() form) match anywhere inside a word, so a glued prefix or suffix never hides them
+# («لمراجعتي», «موافقتي», «اعتمدها», «متعلمش»); words that are also ordinary style words match whole only.
+_OBJ_AR_IN = ("دكتور", "دكاتره", "طبيب", "اطباء", "صيدل", "ممرض", "شيخ", "مشايخ", "مفتي", "راجع", "مراجع", "وافق",
+              "اعتمد", "اعتماد", "استاذن", "اذن", "سالني", "تسال", "سالك", "رايي", "رايك", "ستني", "ستنا", "كيو سي",
+              "كيوسي", "كواليتي", "فحص", "تشيك", "تدقيق", "تحقق", "تاكد", "تنويه", "تنبيه", "تحذير", "اخلاء", "مسؤوليه",
+              "مسئوليه", "استشر", "استشير", "استشار", "ادعاء", "رقم", "ارقام", "جرعه", "جرعات", "مليجرام", "ملجم",
+              "مئوي", "في الميه", "احصائ", "ايات", "الايه", "قران", "قرءان", "مصحف", "سوره", "احاديث", "فتوي", "فتاوي",
+              "شرعي", "شريعه", "تفسير", "تلاوه", "تجويد", "النبي", "الرسول", "صلي الله", "اعاده", "اعادات", "ريتيك",
+              "علم", "علامه", "اقتباس", "حرفي", "اتقال", "طابق", "فلاج", "نشر", "منشور", "بوابه", "قانون", "محامي")
+_OBJ_AR_WORD = ("د", "الحديث", "حديث شريف", "حديث نبوي", "طبي", "طبيه", "ديني", "دينيه", "صح", "تيك", "شيك", "سنه النبي", "على طول من غير")
+
+
+def names_a_safety_object(text: str) -> bool:
+    """Whether a comment names anything a gate protects (see above). On norm() text; the safe-zone layout words
+    are removed first."""
+    s = _ALONG.sub("طول ", norm(text))
+    for phrase in _SAFE_PHRASES:
+        s = re.sub(r"(?<!\w)" + re.escape(norm(phrase)) + r"(?!\w)", " ", s)
+    s = re.sub(r"(?<!\w)تيك توك(?!\w)|tik ?tok", " ", s)       # the platform, not a tick
+    if _OBJ_EN.search(s):
+        return True
+    if any(norm(w) in s for w in _OBJ_AR_IN):
+        return True
+    return _has(s, [norm(w) for w in _OBJ_AR_WORD])
+
+
 def weakens_safety(text: str = "", intent: dict | None = None) -> bool:
     """Whether a comment or its label touches the review, an approval gate, the QC, a disclaimer or a K1 switch
     (any direction), drops the doctor / sheikh, or publishes without them («من غير مراجعة الدكتور», "skip the doctor",
-    "always auto-publish", topic auto_approve, knob k_t5_...). Such a comment never becomes a rule."""
+    "always auto-publish", topic auto_approve, knob k_t5_...). Such a comment never becomes a rule. Unless the label
+    is one of the four allowlisted knobs, naming any gate's object at all is enough (names_a_safety_object)."""
     intent = intent if isinstance(intent, dict) else {}
+    if not _knob(intent.get("knob")) and (names_a_safety_object(text) or names_a_safety_object(
+            " ".join(str(intent.get(k) or "") for k in ("topic", "knob")))):
+        return True
     if intent.get("area") == PROCESS_AREA:
         return True
     for key in (intent.get("knob"), intent.get("topic")):
@@ -217,13 +268,16 @@ def weakens_safety(text: str = "", intent: dict | None = None) -> bool:
     return w(_PUBLISH) and (w(_AUTO) or dropped)
 
 
-REFUSED_AR = ("الملاحظة دي بتلمس مراجعة الدكتور أو الشيخ أو الموافقة أو الفحص، ودي مش حاجة تتعلّم كقاعدة: المراجعة "
-              "الطبية والدينية وبوابات الموافقة والـ QC بتفضل شغالة زي ما هي دايماً.")
-REFUSED_EN = ("This touches the doctor's or sheikh's review, an approval or the QC, and that can never become a rule: "
-              "the medical and religious review, the approvals and the QC always run as they are.")
+REFUSED_AR = ("الملاحظة دي بتلمس حاجة المراجعة بتحميها (الدكتور أو الشيخ، الموافقة، الـ QC، التنبيهات، الأرقام، الآيات، "
+              "الإعادات، الاقتباس الحرفي أو النشر)، فمش هتبقى قاعدة ثابتة: المراجعة الطبية والدينية وبوابات الموافقة "
+              "والـ QC بتفضل شغالة زي ما هي دايماً. لو هي طلب شكل بس، اتعمل في الفيديو ده بإيدك.")
+REFUSED_EN = ("This touches something the review protects (the doctor or sheikh, an approval, the QC, a disclaimer, "
+              "numbers, verses, retakes, quoting word for word or publishing), so it can never become a standing rule: "
+              "the medical and religious review, the approvals and the QC always run as they are. If it is only a "
+              "style request, it is done by hand in this video.")
 
 
-# ---- the keyword reader: old comments with no label (the skill labels every new one)
+# ---- the keyword reader: a label read from the words (a helper; history() never counts an unlabelled comment)
 _CAPTION = ("caption", "captions", "subtitle", "subtitles", "font", "text size", "الكابشن", "كابشن", "الكابشنز",
             "الخط", "خط", "الترجمه", "الكلام اللي على الشاشه")
 _BIGGER = ("bigger", "larger", "increase", "too small", "is small", "are small", "so small", "very small",
@@ -392,6 +446,28 @@ def _bytes(doc) -> bytes:
     return (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
+def seal_of(rules: list, dismissed: list | None = None) -> str:
+    """sha256 of the canonical rule rows (and, once the editor dismissed a proposal, of the dismissals too): `reel
+    rules` stores it in rules.json, and every read checks it, so a row added, removed, changed or re-activated by hand
+    is caught (not a secret: it catches edits, it is no signature)."""
+    body = {"rules": rules, "dismissed": dismissed} if dismissed else rules
+    return hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False,
+                                     separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _registry_bytes(reg: dict) -> bytes:
+    out = {k: v for k, v in reg.items() if k != "seal"}
+    out["schema"] = SCHEMA
+    if not out.get("dismissed"):
+        out.pop("dismissed", None)
+    out["seal"] = seal_of(out["rules"], out.get("dismissed"))
+    return _bytes(out)
+
+
+TAMPERED_AR = ("ملف قواعد العميل اتغيّر بإيد مش من `reel rules`، فمش هيتقري ولا هيتطبّق منه حاجة لحد ما يتصلّح. "
+               "الموافقات والمراجعة والـ QC شغالين زي ما هم.")
+
+
 def _damaged(path, e) -> Guidance:
     return Guidance(f"{path} cannot be read: {e}", "fix or remove that file by hand (nothing was written)",
                     where=str(path))
@@ -517,6 +593,10 @@ def history(root) -> tuple[list[dict], list[str]]:
                 warnings.append(f"{f} {n.get('id', '?')}: {g.error}: this comment is not counted (relabel it with "
                                 "`reel rules --record`)")
                 continue
+            if intent is None:                    # S1-T4.3 ruling: only the skill's labelled comments ever count
+                warnings.append(f"{f} {n.get('id', '?')}: no intent label: this comment is not counted (relabel it "
+                                "with `reel rules --record`)")
+                continue
             out.append({"video_id": d.name, "id": n.get("id"), "at": str(n.get("at") or ""), "text": n["text"],
                         "intent": intent, "scope": n.get("scope") if n.get("scope") in SCOPES else None,
                         "source": n.get("source") if n.get("source") in SOURCES else "comment"})
@@ -531,11 +611,8 @@ def _num(nid) -> tuple:
 
 # ---------------------------------------------------------------------------------------------------- grouping
 def _label(n: dict) -> tuple[dict | None, str]:
-    """(label, how): the skill's label, else the keyword reader's, else None (the text itself groups)."""
-    if n.get("intent"):
-        return n["intent"], "label"
-    guess = read_intent(n["text"])
-    return (guess, "keywords") if guess else (None, "text")
+    """(label, how): the skill's label. history() never returns an unlabelled comment (S1-T4.3 ruling)."""
+    return (n.get("intent") or None), "label"
 
 
 def _target(label: dict | None, text: str) -> tuple[str, str, object]:
@@ -596,14 +673,50 @@ class _State:
         return self._ctx
 
     def registry(self) -> dict:
+        """rules.json as `reel rules` wrote it, checked on every read, never trusted as found: the schema, the seal
+        over the rule rows, and each knob rule's knob and value through the T4.2 allowlist parsers. Anything else is
+        refused with one plain line (nothing is shown as a rule or applied from it). No file = no rules."""
         p = self.prof / RULES_FILE
         try:
-            doc = _read_doc(p, self.root, CLIENT_PROFILE_REL, {"schema": SCHEMA, "rules": []})
+            doc = _read_doc(p, self.root, CLIENT_PROFILE_REL, None)
         except FileFormatError as e:
             raise _damaged(p, e) from None
-        if not isinstance(doc.get("rules"), list):
-            raise _damaged(p, "`rules` is not a list")
+        if doc is None:
+            return {"schema": SCHEMA, "rules": []}
+        problem = self._problem(doc)
+        if problem:
+            raise Guidance(f"{p}: the client rules file was not written by `reel rules` ({problem}), so no rule is "
+                           f"read from it. {TAMPERED_AR}",
+                           f"put back the copy `reel rules` wrote, or delete {RULES_FILE} (the rules start over; the "
+                           "values already in style.json stay), then run `reel rules --list`; nothing was written",
+                           where=str(p))
         return doc
+
+    def _problem(self, doc) -> str | None:
+        rules = doc.get("rules")
+        if doc.get("schema") != SCHEMA or not isinstance(rules, list):
+            return "unknown layout"
+        dismissed = doc.get("dismissed")
+        if dismissed is not None and (not isinstance(dismissed, list) or not all(
+                isinstance(d, dict) and isinstance(d.get("proposal"), str) and isinstance(d.get("from"), list)
+                for d in dismissed)):
+            return "its dismissed list is not one `reel rules` writes"
+        if doc.get("seal") != seal_of(rules, dismissed):
+            return "its seal does not match its rules" if "seal" in doc else "it has no seal"
+        for r in rules:
+            if not isinstance(r, dict) or r.get("status") not in ("active", "replaced", "removed") \
+                    or not isinstance(r.get("id"), str):
+                return "a rule row is not one `reel rules` writes"
+            knob = r.get("knob")
+            if knob is None:
+                continue
+            if knob not in _ALLOWED:
+                return f"rule {r['id']} names {knob!r}, which is not a style knob"
+            try:
+                _parse(knob, r.get("value"), self.frame_w())
+            except ValueError as e:
+                return f"rule {r['id']}: {knob} {r.get('value')!r} {e}"
+        return None
 
     def frame_w(self) -> int:
         try:
@@ -691,6 +804,10 @@ def propose(root) -> dict:
     reg = st.registry()
     active = [r for r in reg["rules"] if isinstance(r, dict) and r.get("status") == "active"]
     used = _used(reg["rules"])
+    dismissed: dict = {}
+    for d in reg.get("dismissed") or []:
+        dismissed.setdefault(d["proposal"], set()).update(tuple(x) for x in d["from"] if isinstance(x, list)
+                                                          and len(x) == 2)
     groups: dict = {}
     refused = []
     live = [n for n in notes if not (n["scope"] == "this_clip" or this_clip_only(n["text"])
@@ -746,6 +863,9 @@ def propose(root) -> dict:
             p["en"] = f"the comments point both ways, ask the editor before adding it: {said}"
         if _find(active, "same", subject, polarity, knob, value, p["tone"]):
             continue                                       # already a rule
+        said_no = dismissed.get(p["id"])
+        if said_no is not None and {(c["video_id"], c["note"]) for c in p["comments"]} <= said_no:
+            continue                                       # the editor said no; a NEW comment brings it back
         clash = _find(active, "conflict", subject, polarity, knob, value, p["tone"])
         if clash:
             p["conflicts_with_rule"] = clash["id"]
@@ -780,6 +900,9 @@ def _public(r: dict) -> dict:
     out = {k: r.get(k) for k in ("id", "status", "knob", "value", "text", "added", "replaced", "replaced_by",
                                  "removed", "proposal", "videos") if r.get(k) is not None}
     out["ar"], out["en"] = _summary(r)
+    if r.get("status") == "active" and _refused_now(r):
+        out["refused"] = True
+        out["ar"], out["en"] = "مرفوضة ومش متطبّقة: " + out["ar"], "refused, ignored: " + out["en"]
     out["target"] = "style.json + notes.md" if r.get("knob") else "notes.md"
     return out
 
@@ -796,18 +919,37 @@ def _md_safe(text, limit: int = 300) -> str:
     return s if len(s) <= limit else s[:limit - 1] + "…"
 
 
+# Printed above the rules wherever they are read (the brief = this block in notes.md; the skills and agents say the same)
+PREFERENCES_HEADER = ("تفضيلات العميل: مش بتلغي أي موافقة أو مراجعة أو QC أو تنبيه / client preferences: never override "
+                      "approvals, review, QC or disclaimers")
+PREFERENCES_K1 = ("ولا بتغيّر مراجعة الأرقام أو الآيات ولا اختيار الإعادات ولا اقتباس الهوك الحرفي (مفاتيح K1) / nor the "
+                  "number, verse, retake or verbatim hook-quote checks (the K1 switches)")
+
+
+def _refused_now(r: dict) -> bool:
+    """A notes-only rule whose words the safety class refuses today (one added by hand, or before the class grew):
+    shown as refused and ignored, never as a rule (review b399ed2 P2-2)."""
+    if r.get("knob"):
+        return False
+    subject = str(r.get("subject") or "")
+    topic = subject.split(":", 1)[1] if subject.startswith(("topic:", "other:")) else ""
+    return weakens_safety(str(r.get("text") or ""), {"topic": topic or "x", "area": "other_style"})
+
+
 def _render_block(rules: list) -> str:
     active = [r for r in rules if r.get("status") == "active"]
     old = [r for r in rules if r.get("status") in ("replaced", "removed")]
-    lines = [BLOCK_START, "## Client rules (learned from the editor's feedback)", "",
-             "These are style and content choices only: they never change the medical or religious review, the "
-             "approvals or the QC, which always run as they are. / دي اختيارات شكل ومحتوى بس: عمرها ما بتغيّر "
-             "المراجعة الطبية أو الدينية أو الموافقات أو الـ QC.", ""]
+    lines = [BLOCK_START, "## Client rules (learned from the editor's feedback)", "", PREFERENCES_HEADER,
+             PREFERENCES_K1, ""]
     if not active:
         lines.append("- (no active rule)")
     for r in active:
+        if _refused_now(r):
+            lines.append(f"- {r['added']} · {r['id']} · refused, ignored (it names something the review protects) / "
+                         "مرفوضة ومش متطبّقة")
+            continue
         ar, en = _summary(r)
-        where = "style.json" if r.get("knob") else "notes only: the story-editor follows it"
+        where = "style.json" if r.get("knob") else "preference only"
         said = "" if r.get("knob") else f". Said: «{_md_safe(r.get('text'))}»"
         lines.append(f"- {r['added']} · {r['id']} · {en} / {ar} ({where}){said}")
     if old:
@@ -977,7 +1119,7 @@ def add(root, proposal_id: str, value=None, replace: str | None = None) -> dict:
         md_path = st.prof / NOTES_MD
         writes.append((md_path, _new_notes(_read_text(md_path, st.root), _render_block(new_reg["rules"]),
                                            md_path).encode("utf-8")))
-        writes.append((rules_path, _bytes(new_reg)))
+        writes.append((rules_path, _registry_bytes(new_reg)))
         _commit(st, writes)
     return {"ok": True, "rule": _public(rule), "replaced": clash["id"] if clash else None, "note": note,
             "files": [str(w[0]) for w in writes],
@@ -991,6 +1133,28 @@ def list_rules(root) -> dict:
     rules = [r for r in reg["rules"] if isinstance(r, dict)]
     return {"ok": True, "active": [_public(r) for r in rules if r.get("status") == "active"],
             "history": [_public(r) for r in rules if r.get("status") != "active"]}
+
+
+def dismiss(root, proposal_id: str) -> dict:
+    """The editor said no to proposal `proposal_id`: remember that (rules.json `dismissed`: the proposal, the comments
+    it covered, the date), so it is not shown again at every edit. It comes back only when a new comment joins it.
+    Nothing else changes; the lead runs it (the guard)."""
+    st = _State(root)
+    rules_path = st.prof / RULES_FILE
+    linksafe.makedirs(st.prof, st.root, CLIENT_PROFILE_REL)
+    with file_locked(rules_path):
+        reg = st.registry()
+        p = next((x for x in propose(st.root)["proposals"] if x["id"] == proposal_id), None)
+        if p is None:
+            raise Guidance(f"no open proposal {proposal_id!r}",
+                           "run `reel rules --propose` and use an id it lists; nothing was written")
+        new_reg = copy.deepcopy(reg)
+        new_reg.setdefault("dismissed", []).append(
+            {"proposal": proposal_id, "from": [[c["video_id"], c["note"]] for c in p["comments"]],
+             "date": _today(), "text": p["text"]})
+        _commit(st, [(rules_path, _registry_bytes(new_reg))])
+    return {"ok": True, "dismissed": proposal_id, "comments": len(p["comments"]),
+            "next": "it is not proposed again unless the editor says it on another video"}
 
 
 def remove(root, rule_id: str) -> dict:
@@ -1030,7 +1194,7 @@ def remove(root, rule_id: str) -> dict:
         md_path = st.prof / NOTES_MD
         writes.append((md_path, _new_notes(_read_text(md_path, st.root), _render_block(new_reg["rules"]),
                                            md_path).encode("utf-8")))
-        writes.append((rules_path, _bytes(new_reg)))
+        writes.append((rules_path, _registry_bytes(new_reg)))
         _commit(st, writes)
     return {"ok": True, "removed": rule_id, "warnings": warnings,
             "next": "run `reel plan` again: builds follow the compiled plan" if knob else
@@ -1058,7 +1222,7 @@ def applied(root, spec: dict | None) -> list[dict]:
         e = {"id": r["id"], "ar": ar, "en": en}
         k, v = r.get("knob"), r.get("value")
         if not k:
-            e["applied"] = "brief"
+            e["applied"] = "refused" if _refused_now(r) else "brief"
         elif sources.get(k) == "reel":
             e["applied"] = "overridden by this reel"
         elif k == "caption_size_px":
