@@ -32,13 +32,16 @@ the Egyptian verb prefixes بـ هـ and ا ي ت ن).
 
 A lexicon's `zones` count for that lexicon's domain. Only a CLOSED bracket zone (a verse between ﴿ ﴾) hides anything,
 and only other domains' plain WORDS: a `terms` rule (unless it says `zone_hideable: false`, as the spelled 100 % and
-rank rules do) or a pattern rule that says `zone_hideable: true`. A hit holding a digit, % or a currency sign (an amount,
-«١٠٠٪», «بس بـ ٩٩», «#1») is never hidden, whatever the lexicon says: a "verse" holding one hides nothing at all.
+rank rules do) or a pattern rule that says `zone_hideable: true`. A zone holding a digit, %, Latin letters or any
+currency sign (an amount, «١٠٠٪», «بس بـ ٩٩», «#1», «﷼», English words) hides nothing, whatever the lexicon says
+(no verse is written that way). «﷼» stays a currency sign in the matching form; a further reading spells it «ريال».
 The same words are hidden in the speech's recitation of the verse (RECITED words in a row). An unclosed verse hides
 nothing, and a quotation after a citation («قال تعالى «…»», «ربنا قال “…”») counts as religious but hides nothing:
 «ربنا قال» is everyday speech, so a claim put in scripture's mouth reaches the business reviewer too. Verses quoted with
 no brackets are found only from the religious lexicon's list of common verse phrases (a hint; anything else is a known
-limit) and hide nothing. `reel review-scan` prints `scan()`; nothing here writes.
+limit) and hide nothing. A text longer than WINDOW characters (after NFKC) is read in overlapping windows, so hostile
+input costs linear time; a domain found in any window also gets its supporting rows from every window.
+`reel review-scan` prints `scan()`; nothing here writes.
 """
 from __future__ import annotations
 
@@ -81,28 +84,62 @@ _PREFIXES = ("و", "ف", "ب", "ل", "ك", "ا", "ي", "ت", "ن", "ه", "ال",
              "فب", "فل", "هي", "هت", "هن", "بي", "بت", "بن", "وهي", "وهت", "وهن", "وبي", "وبت", "وبن")
 _WORD = re.compile(r"\w+")
 _GAPS = re.compile("[" + chr(0x200b) + chr(0x2060) + "]")        # zero-width space, word joiner: also read as a gap
-_NEVER_HIDDEN = re.compile(r"[0-9%$€£]")                            # an amount, a percent or a currency sign
+_NEVER_HIDDEN = re.compile(r"[0-9%A-Za-z]")       # an amount, a percent or Latin text (no verse is written in it)
+_RIAL = "\ufdfc"                                   # ﷼: NFKC would spell it as the plain word «ریال»; it stays a sign
+WINDOW = 1000                                      # a longer text is read in overlapping windows of this many chars
+_OVERLAP = 200                                     # chars two windows share, so no claim is lost at a cut
+_SLACK = 50                                        # how far a cut may move to fall on a space
 _SCRIPTS = re.compile(r"(?<=[ء-ي])(?=[A-Za-z])|(?<=[A-Za-z])(?=[ء-ي])")    # «الـAI» → «ال AI»
+
+
+def _nfkc(text: str) -> str:
+    return _RIAL.join(unicodedata.normalize("NFKC", part) for part in str(text).split(_RIAL))
 
 
 def normalize(text: str) -> str:
     """The matching form of a text (lexicon terms and plan words alike); Latin case is kept (case rules need it)."""
-    return _SCRIPTS.sub(" ", _DROP.sub("", unicodedata.normalize("NFKC", str(text))).translate(_MAP))
+    return _SCRIPTS.sub(" ", _DROP.sub("", _nfkc(text)).translate(_MAP))
+
+
+def _never_hidden(text: str) -> bool:
+    """The code floor: a zone holding a digit, a percent, Latin letters or any currency sign (Unicode Sc) hides
+    nothing, whatever the lexicon says."""
+    return bool(_NEVER_HIDDEN.search(text)) or any(unicodedata.category(ch) == "Sc" for ch in text)
+
+
+def _windows(text: str) -> list:
+    """The text itself, or (longer than WINDOW) overlapping windows of it, cut on a space where one is near: the
+    matching cost stays linear on hostile input and nothing past a cut is ever dropped."""
+    if len(text) <= WINDOW:
+        return [text]
+    out, i = [], 0
+    while True:
+        end = i + WINDOW
+        if end >= len(text):
+            out.append(text[i:])
+            return out
+        sp = max(text.rfind(c, end - _SLACK, end) for c in " \t\n")
+        end = sp if sp > i else end
+        out.append(text[i:end])
+        i = end - _OVERLAP
+        sp = min((x for x in (text.find(c, i, i + _SLACK) for c in " \t\n") if x >= 0), default=-1)
+        i = sp + 1 if sp >= 0 else i
 
 
 def _dagger_as_alef(raw: str) -> str:
     """Quran-app spelling: the dagger alef read as an alef (رَٰجِعُونَ → راجعون), except in the name of God (لِلَّٰهِ)."""
-    s = _MARKS.sub("", unicodedata.normalize("NFKC", raw))
+    s = _MARKS.sub("", _nfkc(raw))
     return s.replace("لل" + _DAGGER + "ه", "لله").replace(_DAGGER, "ا")
 
 
 def _readings(text: str) -> list:
     """The matching forms of one text: normalised first; then, only when they differ, the text with a zero-width space
-    or word joiner read as a word gap («AI» + U+200B + «tools») and with the dagger alef read as an alef. A later
-    reading adds only the domains the earlier ones did not find (so a split amount never yields a second, partial row)."""
+    or word joiner read as a word gap («AI» + U+200B + «tools»), with the dagger alef read as an alef, and with «﷼»
+    spelled «ريال» (the sign stays beside it, so a zone holding it still hides nothing). A later reading adds only the
+    domains the earlier ones did not find (so a split amount never yields a second, partial row)."""
     raw = str(text)
     out = [normalize(raw)]
-    for alt in (_GAPS.sub(" ", raw), _dagger_as_alef(raw)):
+    for alt in (_GAPS.sub(" ", raw), _dagger_as_alef(raw), raw.replace(_RIAL, " ريال " + _RIAL + " ")):
         n = normalize(alt)
         if n not in out:
             out.append(n)
@@ -380,25 +417,45 @@ def matchers() -> list:
     return out
 
 
-def _word_ok(tok: str, word: str, stem: bool, ar: bool, case: bool) -> bool:
+def _word_ok(form: tuple, word: str, stem: bool, ar: bool, case: bool) -> bool:
+    """`form` = (token, its candidates, its case-folded form), worked out once per token."""
+    tok, cands, folded = form
     if ar:
-        return any(c == word or (stem and c.startswith(word)) for c in _candidates(tok))
-    t = tok if case else tok.casefold()
+        return any(c.startswith(word) for c in cands) if stem else word in cands
+    t = tok if case else folded
     return t == word or (stem and t.startswith(word))
+
+
+def _token_forms(tokens: list):
+    """(forms, index): each token's form for _word_ok, and where each exact word can start a term (an Arabic word by
+    any candidate, a Latin one as written and case-folded), so a term is tried only where its first word fits."""
+    forms, index = [], {}
+    for i, (tok, _a, _b) in enumerate(tokens):
+        form = (tok, _candidates(tok), tok.casefold())
+        forms.append(form)
+        for key in {("ar", c) for c in form[1]} | {("case", tok), ("fold", form[2])}:
+            index.setdefault(key, []).append(i)
+    return forms, index
 
 
 def _rule_hits(norm: str, tokens: list, rules: list) -> list:
     """[(start, end, rule, hideable)]."""
     hits = []
+    forms = index = None
     for rid, pat, terms, case, hideable in rules:
         if pat is not None:
             spans = [(m.start(), m.end()) for m in pat.finditer(norm) if m.group(0).strip()]
         else:
+            if forms is None:
+                forms, index = _token_forms(tokens)
             spans = []
             for words in terms:
                 n = len(words)
-                for i in range(len(tokens) - n + 1):
-                    if all(_word_ok(tokens[i + k][0], *words[k], case) for k in range(n)):
+                word, stem, ar = words[0]
+                starts = (range(len(tokens)) if stem else
+                          index.get(("ar" if ar else "case" if case else "fold", word), ()))
+                for i in starts:
+                    if i + n <= len(tokens) and all(_word_ok(forms[i + k], *words[k], case) for k in range(n)):
                         spans.append((tokens[i][1], tokens[i + n - 1][2]))
         hits += [(a, b, rid, hideable) for a, b in spans]
     return hits
@@ -423,22 +480,43 @@ def _recited(tokens: list, words: dict) -> list:
 def _detect(text: str, ms: list, recited_words: dict | None = None):
     """{domain: [(start, end, rule, words)]} and the hiding-zone words per owning domain, over every reading of the
     text (a later reading adds only new domains). `recited_words` (owner -> words, from the screen's hiding
-    zones) hides another domain's hideable hit inside the speech's recitation of that zone."""
+    zones) hides another domain's hideable hit inside the speech's recitation of that zone. A text longer than WINDOW
+    is read window by window and the rows are merged (a row seen in two windows counts once); a second pass then adds
+    the supporting rows of every domain found, from every window."""
     out: dict = {}
     zone_words: dict = {}
-    for norm in _readings(text):
-        found = _detect_one(norm, ms, recited_words or {}, zone_words)
+    recited_words = recited_words or {}
+
+    def merge(did, rows):
+        have = out.setdefault(did, [])
+        seen = {(r[2], r[3]) for r in have}
+        have += [r for r in rows if (r[2], r[3]) not in seen]
+
+    parts = _windows(_nfkc(text))
+    for part in parts:
+        found: dict = {}
+        for norm in _readings(part):
+            for did, rows in _detect_one(norm, ms, recited_words, zone_words).items():
+                found.setdefault(did, rows)
         for did, rows in found.items():
-            out.setdefault(did, rows)
+            merge(did, rows)
+    support = frozenset(did for did, _r, sup, _f in ms if did in out and sup)
+    if len(parts) > 1 and support:
+        for part in parts:
+            for norm in _readings(part):
+                for did, rows in _detect_one(norm, ms, recited_words, zone_words, support).items():
+                    merge(did, rows)
     return {d: out[d] for d in sorted(out)}, zone_words
 
 
-def _detect_one(norm: str, ms: list, recited_words: dict, zone_words: dict) -> dict:
+def _detect_one(norm: str, ms: list, recited_words: dict, zone_words: dict, support_only: frozenset | None = None):
+    """{domain: rows} for one reading. With `support_only` (domains found elsewhere in the text), only those domains'
+    supporting rules are matched."""
     tokens = [(m.group(0), m.start(), m.end()) for m in _WORD.finditer(norm)]
     zones = []
     for did, _r, _s, find in ms:
         for a, b, zid, hides in find(norm):
-            hides = hides and not _NEVER_HIDDEN.search(norm[a:b])     # a "verse" with an amount: a code floor
+            hides = hides and not _never_hidden(norm[a:b])           # a "verse" with an amount: a code floor
             zones.append((a, b, did, zid, hides))
             if hides:
                 zone_words.setdefault(did, set()).update(_WORD.findall(norm[a:b]))
@@ -447,10 +525,14 @@ def _detect_one(norm: str, ms: list, recited_words: dict, zone_words: dict) -> d
     for did, rules, supporting, _f in ms:
         def keep(h):
             return not (h[3] and any(za <= h[0] and h[1] <= zb for za, zb, owner in hide if owner != did))
-        hits = [h for h in _rule_hits(norm, tokens, rules) if keep(h)]
-        hits += [(a, b, zid, False) for a, b, owner, zid, _h in zones if owner == did]
+        if support_only is not None:
+            hits = [h for h in _rule_hits(norm, tokens, supporting) if keep(h)] if did in support_only else []
+        else:
+            hits = [h for h in _rule_hits(norm, tokens, rules) if keep(h)]
+            hits += [(a, b, zid, False) for a, b, owner, zid, _h in zones if owner == did]
+            if hits:
+                hits += [h for h in _rule_hits(norm, tokens, supporting) if keep(h)]
         if hits:
-            hits += [h for h in _rule_hits(norm, tokens, supporting) if keep(h)]
             seen, rows = set(), []
             for a, b, rid, _h in sorted(hits, key=lambda h: (h[0], h[1], h[2])):
                 words = norm[a:b].strip()

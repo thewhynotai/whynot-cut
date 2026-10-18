@@ -1,0 +1,78 @@
+# Reported detection misses and false alarms, one per line: text<TAB>expectations (+domain must be detected,
+# -domain must not). Add a line for every new report; test_review_domains.TestPhrases reads this file.
+﴿ خصم للمشتركين	+business	+religious
+﴿ خصم للمشتركين ﴾	-business	+religious
+الكورس ب ١٩٩٩	+business
+الباقة ب ٢٠٢٥	+business
+the package is only 1999	+business
+الكشف ٢٠٢٤	-business
+the visit is 2023	-business
+فيزيتا ٣٠٠	+business
+الفيزيتا ب ٣٠٠	+business
+كشفية ٣٠٠	+business
+كشفيتي ٣٠٠	+business
+بنضمنلك النتيجة	+business
+نضمنلك	+business
+﴿ guaranteed results ﴾	+business	+religious
+﴿ خصم ¥ ﴾	+business	+religious
+﴿ خصم ﷼ ﴾	+business	+religious
+three hundred dollars	+business
+99 pounds only	+business
+first session free	+business
+the first visit is free	+business
+ادفع ٥٠٠	+business
+قسط ٥٠٠ في الشهر	+business
+مقدم ١٠ آلاف	+business
+عربون ٥٠٠	+business
+وفر ٢٠٠	+business
+وفر ٤٠٪	+business
+على ١٢ قسط	+business
+بمليون	+business
+عرض ١+١	+business
+you can make five thousand a month	+business
+الليزر ١٠٦٤	-business
+the session is 1064 nm	-business
+I lost 100 percent of my hearing	-business
+cashback	+business
+خمسين ﷼ بس	+business
+ادفع ١٥ تكرار	-business
+هتوفري ٣٠٠ سعرة حرارية	-business
+مقدم ٢٠ حلقة	-business
+pay only five hundred	+business
+300 pounds for the session	+business
+lost twenty pounds	-business
+بألف خير	-business
+﴿ ﷼ ﴾	+business
+التطعيم بيوفر ٩٠٪ حماية	-business
+scan the 2 QR codes	-business
+lose 10 pounds a month	-business
+SR 500	+business
+2 for 3 reps	-business
+first visit free of pain	-business
+dilute 1 for 1	-business
+ratio 2 for 1	-business
+rated 4 for 5	-business
+20 KD patients	-business
+the 50 KD band	-business
+grade 10 SR	-business
+Room 12 SR	-business
+بتوفر ٣٠٪ على الباقة	+business
+بنوفرلك ٣٠٪	+business
+buy 2 for 1 at the clinic	+business
+get 2 sessions for 1	+business
+get 2 visits for 1 week	-business
+buy 2 boxes for 3 months	-business
+buy 1 bottle for 2 weeks.	-business
+بنوفرلك ٣٠٪ من وقتك	-business
+هنوفرلكم ٥٠٪	+business
+buy 2 sessions for 1	+business
+10 QR codes	-business
+70 kd	-business
+20 sr	-business
+the baby puts on 2 pounds a month	-business
+الكمامة هتوفر ٩٥٪ حماية	-business
+هتوفر ٢٠٪ من مجهودك	-business
+take 2 SR tablets	-business
+take 20 SR tablets	-business
+give 3 SR doses	-business
+1 for 1	-business

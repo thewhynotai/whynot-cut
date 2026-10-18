@@ -588,6 +588,181 @@ class TestRecallFollowUp(unittest.TestCase):
                 with self.assertRaises(Guidance, msg=name) as cm:
                     RD.lexicon(name)
                 self.assertIn("false", str(cm.exception))
+    # ---- review e4d68dc (round 2)
+    def test_only_a_closed_verse_hides_a_plain_word(self):
+        """P2-1: word-only cases (no digit, no currency) so the digit floor cannot hide the guard."""
+        hit = RD.detect("﴿ خصم للمشتركين")                                     # never closed
+        self.assertIn("religious", hit)
+        self.assertEqual([m["match"] for m in hit["business"]], ["خصم"])
+        hit = RD.detect("﴿ خصم ﴿ ربح ﴾")                                       # opened again before it closed
+        self.assertEqual([m["match"] for m in hit["business"]], ["خصم"])       # ربح sits in the closed zone
+        self.assertNotIn("business", domains("﴿ خصم للمشتركين ﴾"))
+
+    def test_a_year_shaped_price_after_bi_or_a_price_cue(self):
+        """P2-2: after «ب» or only/just/costs the number is a price even when it looks like a year."""
+        self.assert_hits("business", ("الكورس ب ١٩٩٩", "الباقة ب ٢٠٢٥", "الكشف بـ 1999", "the package is only 1999",
+                                      "the course costs 2025", "consultation for only 2020", "the session is just 1999"))
+        for t in ("الكورس ب ١٩٩٩", "الباقة ب ٢٠٢٥", "the package is only 1999", "the course costs 2025"):
+            self.assertIn(RD.detect(t)["business"][0]["rule"], ("priced-amount", "priced-amount-en"), t)
+        self.assert_clean("business", ("الكشف ٢٠٢٤", "the visit is 2023", "the course for 2025", "the package in 2024",
+                                       "the session is 1999"))
+        for t in ("احجز ب 01001234567", "الحجز ب ٠١٠١٢٣٤٥٦٧٨", "الكشف ب ٠٥٠٠"):   # a leading 0 is a phone, not a price
+            self.assertNotIn("priced-amount", [m["rule"] for m in RD.detect(t).get("business", [])], t)
+
+    def test_egyptian_clinic_fee_and_guarantee_words(self):
+        """P2-3."""
+        self.assert_hits("business", ("فيزيتا ٣٠٠", "الفيزيتا ب ٣٠٠", "كشفية ٣٠٠", "الفيزيتا ٥٠٠ بس", "والكشفية ب ٤٠٠"))
+        for t in ("بنضمنلك النتيجة", "نضمنلك", "هنضمنلك ده", "أضمنلك النتيجة", "بنضمنها"):
+            self.assertIn("guarantee", [m["rule"] for m in RD.detect(t).get("business", [])], t)
+        self.assert_clean("business", ("الفيزيتا كانت طويلة", "ضمن الخطة العلاج بالأكل", "الفيزيتا ٣٠ دقيقة"))
+
+    def test_a_zone_with_latin_letters_or_any_currency_sign_hides_nothing(self):
+        """P3-1, P3-4: the code floor covers %, every currency sign (Unicode Sc) and Latin letters."""
+        for t in ("﴿ guaranteed results ﴾", "﴿ خصم ¥ ﴾", "﴿ خصم ₤ ﴾", "﴿ خصم ﷼ ﴾", "﴿ خصم ₺ ﴾", "﴿ خصم % ﴾",
+                  "﴿ خصم € ﴾", "﴿ خصم £ ﴾", "﴿ خصم $ ﴾", "﴿ خصم ٪ ﴾", "﴿ خصم EGP ﴾"):
+            hit = RD.detect(t)
+            self.assertIn("religious", hit, t)
+            self.assertIn("business", hit, t)
+        self.assertNotIn("business", domains("﴿وَشَرَوْهُ بِثَمَنٍ بَخْسٍ دَرَاهِمَ مَعْدُودَةٍ﴾"))
+        self.assertNotIn("business", domains("﴿ وَمِنْهُم مَّنْ إِن تَأْمَنْهُ بِدِينَارٍ لَّا يُؤَدِّهِ إِلَيْكَ ﴾"))
+        for t in ("٥٠٠ ﷼", "﷼ ٥٠٠", "¥500", "₤ 300"):
+            self.assertIn("currency-amount", [m["rule"] for m in RD.detect(t).get("business", [])], t)
+
+    def test_more_recall_words(self):
+        """P3-2."""
+        self.assert_hits("business", (
+            "three hundred dollars", "five hundred pounds only", "only five hundred pounds", "two thousand euros",
+            "fifty bucks", "twenty five dollars", "99 pounds only", "first session free", "the first visit is free",
+            "a free session", "ادفع ٥٠٠", "هتدفع ٣٠٠ بس", "قسط ٥٠٠ في الشهر", "القسط ب ٧٠٠", "مقدم ١٠ آلاف", "عربون ٥٠٠",
+            "وفر ٢٠٠", "هتوفر ٢٠٠٠", "الشقة بمليون.", "بمليون", "الجهاز بألفين بس", "عرض ١+١", "offer 1+1",
+            "buy one get one free", "you can make five thousand a month", "earn two thousand dollars a week"))
+        self.assert_clean("business", (
+            "lost twenty pounds", "I gained five pounds", "ادفع ٣ مرات", "وفر ١٠ دقايق", "هتوفر ٣٠ دقيقة",
+            "الدفعة ٢٠٢٠", "مقدم البرنامج", "خد قسط من الراحة", "بألف خير", "بمليون طريقة", "بالفعل", "١+١=٢",
+            "make five friends a month", "five hundred people"))
+
+    def test_wavelengths_and_percent_of_are_not_claims(self):
+        """P3-3."""
+        self.assert_clean("business", ("الليزر ١٠٦٤", "ليزر ٧٥٥", "the session is 1064 nm", "الليزر ١٠٦٤ نانو",
+                                       "I lost 100 percent of my hearing", "100 percent of patients recover"))
+        self.assert_hits("business", ("الليزر ب ١٠٠٠", "جلسة الليزر ب ٥٠٠", "100 percent guaranteed", "١٠٠٪",
+                                      "results are 100 percent", "الليزر ٣٠٠٠ بس"))
+
+    def test_cashback_spellings(self):
+        """P3-5: each spelling on its own."""
+        for t in ("cashback", "cash back", "كاش باك"):
+            self.assertEqual([m["rule"] for m in RD.detect(t)["business"]], ["pricing"], t)
+
+    def test_hostile_long_lines_stay_fast_and_lose_nothing(self):
+        """P3-6: a long line is scanned in overlapping windows (never cut short), so cost stays linear."""
+        import time
+        for t in ("1" * 50_000, "1 " * 10_000, "١٠٠٪" * 5_000, "ب " * 20_000, "الكشف " * 8_000):
+            t0 = time.monotonic()
+            RD.detect(t)
+            self.assertLess(time.monotonic() - t0, 10.0, t[:12])
+        filler = "كلام عادي جدا " * 2_000
+        for claim in ("الكشف ب ٥٠٠ جنيه", "نتيجة مضمونة", "AI generated"):
+            hit = RD.detect(filler + claim)
+            self.assertTrue(hit.get("business") or hit.get("ai"), claim)
+        for pad in range(RD.WINDOW - 60, RD.WINDOW + 20, 7):                    # a claim across every window cut
+            t = "س" * pad + " الكشف ب ٥٠٠ جنيه " + "ص" * 30
+            rules = [m["rule"] for m in RD.detect(t).get("business", [])]
+            self.assertEqual(rules.count("currency-amount"), 1, pad)              # seen in two windows, one row
+        self.assertEqual(len(RD._windows("كلام " * 1_000)), 6)                    # 5,000 chars: 1,000 a window, 200 shared
+        self.assertTrue(all(len(w) <= RD.WINDOW for w in RD._windows("كلام " * 1_000 + "س" * 3_000)))
+        short = "الكورس ب ١٥٠٠ جنيه ونتيجة مضمونة ﴿ فما ربحت تجارتهم ﴾"
+        self.assertEqual(RD.detect(short), RD.detect(short + " "))
+
+    def test_rial_sign_is_a_sign_and_still_reads_as_rial(self):
+        """Self-review r1 P1-1: ﷼ stays a currency sign (the zone floor sees it) and a further reading spells it
+        «ريال», so every rule that knew the word still hits."""
+        for t in ("خمسين ﷼ بس", "عشرة ﷼", "الكشف ب ﷼", "﷼", "﴿وَشَرَوْهُ بِثَمَنٍ بَخْسٍ دَرَاهِمَ﴾ ﷼", "fifty ﷼"):
+            self.assertIn("business", domains(t), t)
+        self.assertIn("currency-amount-words", [m["rule"] for m in RD.detect("خمسين ﷼ بس")["business"]])
+        self.assertEqual(RD.normalize("٥٠٠ ﷼"), "500 ﷼")
+
+    def test_pay_save_and_instalment_words(self):
+        """Self-review r1 P2-1, P2-2: counts of exercise, diet and media are not money; a saving in % is."""
+        self.assert_clean("business", ("ادفع ١٥ تكرار", "ادفعي الحيطة ١٠ تكرارات", "ادفع ٢٠ عدة", "ادفع ١٠ ضغطات",
+                                       "ادفع ٢٠ نفس", "ادفع ١٠ كجم", "هتوفري ٣٠٠ سعرة حرارية", "وفر ٥٠٠ كالوري في اليوم",
+                                       "وفر ٢٠ لتر", "مقدم ٢٠ حلقة", "مقدم ١٠٠ فيديو"))
+        self.assert_hits("business", ("وفر ٤٠٪", "هتوفر ٥٠٪", "على ١٢ قسط", "ب ٦ اقساط"))
+
+    def test_more_recall_forms_round_two(self):
+        """Self-review r1 P3-3, P3-6."""
+        self.assert_hits("business", ("first visit free", "free first visit", "the consultation is free", "2 for 1",
+                                      "two for one", "كشفيتي ٣٠٠", "pay only five hundred", "the course is 1999 pounds",
+                                      "consultation 500 pounds", "300 pounds for the session", "500 ₪", "500 ₽", "฿500",
+                                      "٥٠٠ ر.ق", "٥٠٠ د.ك", "500 SR", "نضمن ان المريض يخف"))
+        self.assert_clean("business", ("take 2 for 3 days", "خد ٢ كل ٨ ساعات", "pay five visits", "the course is 10 days",
+                                       "I weighed 300 pounds", "كشفيتي كانت طويلة"))
+
+    def test_supporting_rows_reach_every_window(self):
+        """Self-review r1 P3-1: on a long text, a domain found in one window gets its supporting rows from all."""
+        t = "خصم " + "كلام عادي جدا " * 150 + "استثمار"
+        self.assertGreater(len(t), RD.WINDOW)
+        rules = [m["rule"] for m in RD.detect(t)["business"]]
+        self.assertIn("pricing", rules)
+        self.assertIn("earnings-word", rules)
+        self.assertNotIn("business", domains("كلام عادي جدا " * 150 + "استثمار"))     # supporting alone flags nothing
+
+    def test_windows_count_the_nfkc_form(self):
+        """Self-review r1 P3-2: ﷺ is one char that NFKC spells out in 18, so windows are cut after NFKC."""
+        import time
+        t0 = time.monotonic()
+        RD.detect("ﷺ" * 5_000)                                      # 90,000 chars after NFKC
+        self.assertLess(time.monotonic() - t0, 10.0)
+        self.assertEqual(RD.detect("ﷺ " * 10 + "الكشف ب ٥٠٠ جنيه"), RD.detect(RD._nfkc("ﷺ " * 10) + "الكشف ب ٥٠٠ جنيه"))
+        seen = []
+        real = RD._windows
+        with mock.patch.object(RD, "_windows", side_effect=lambda t: seen.extend(real(t)) or real(t)):
+            RD.detect("ﷺ" * 3_000)
+        self.assertTrue(seen and all(len(RD._nfkc(p)) <= RD.WINDOW for p in seen), max(map(len, seen)))
+
+    def test_a_zone_holding_the_rial_sign_hides_nothing_in_any_reading(self):
+        """Self-review r2 P1-1: the spelled reading keeps the sign, so the zone floor holds and its words never reach
+        the recitation list."""
+        self.assertIn("business", domains("﴿ ﷼ ﴾"))
+        ms = RD.matchers()
+        for screen in ("﴿ ﷼ خصم ﴾", "﴿ خصم ﷼ ﴾"):
+            _found, zone_words = RD._detect(screen, ms)
+            self.assertEqual(zone_words, {}, screen)
+            for speech in ("خصم ريال", "خصم"):
+                self.assertIn("business", RD._detect(speech, ms, zone_words)[0], (screen, speech))
+
+    def test_weight_efficacy_and_code_words_are_not_prices(self):
+        """Self-review r2 P2-1, P2-2, P2-3, P3-1, P3-2, P3-3, P3-5."""
+        self.assert_clean("business", (
+            "lose 10 pounds a month", "you can lose 5 pounds a week", "I lost 20 pounds a month", "drop 4 pounds a month",
+            "baby gains 2 pounds a month", "losing 3 pounds per session", "the course is 10 pounds of weight loss",
+            "session 2 pounds", "visit 5 pounds down", "التطعيم بيوفر ٩٠٪ حماية", "الدوا ده بيوفر ٥٠٪ حماية",
+            "وفر ٤٠٪ من وقتك", "هتوفري ٣٠٪ من السعرات", "scan the 2 QR codes", "scan 1 QR code below", "a 70 kD protein",
+            "10 kd protein", "stage 3 KD", "patient 3 SR negative", "2 for 3 reps", "do 3 for 5 sets", "1 for 2 tablets",
+            "take 1 for 2 nights", "3 for 2 cycles", "it costs five hundred calories", "paid a thousand visits",
+            "you pay two hundred times more attention", "two for one reason", "first visit free of pain",
+            "ب ٣ اقساط من النوم", "الدوا ده بيوفر ٥٠٠", "الجهاز بيوفر ٣٠٪ من الكهربا", "I lost 20 pounds only"))
+        self.assert_hits("business", ("SR 500", "QR 500", "KD 500", "ر.س ٥٠٠", "500 SR", "250 QR", "وفر ٤٠٪", "وفري ٢٠٪",
+                                      "هتوفر ٥٠٪", "2 for 1", "2 for 1 offer", "two for one", "the visit is free",
+                                      "consultations are free", "free of charge", "first session free",
+                                      "300 pounds for the session", "consultation 500 pounds", "pay only five hundred"))
+
+
+class TestPhrases(unittest.TestCase):
+    """Pre-mortem T50 item 2: every reported miss or false alarm is one line of fixtures/review_domains/phrases.tsv."""
+
+    def test_phrases_table(self):
+        rows = []
+        for n, line in enumerate((FIXTURES / "phrases.tsv").read_text(encoding="utf-8").splitlines(), 1):
+            if not line.strip() or line.startswith("#"):
+                continue
+            text, *wants = line.split("\t")
+            self.assertTrue(wants and all(w[:1] in "+-" and w[1:] in SHIPPED for w in wants), (n, line))
+            rows.append((n, text, wants))
+        self.assertGreaterEqual(len(rows), 40)
+        for n, text, wants in rows:
+            found = domains(text)
+            for w in wants:
+                self.assertEqual(w[1:] in found, w[0] == "+", (n, text, w, RD.detect(text)))
 
 
 _REAL_LEXICON = RD.lexicon
