@@ -437,16 +437,27 @@ def _runner_for(limit: float):
     return run
 
 
-def _drop(p: Path) -> bool:
-    """Remove a file, retrying briefly (a just-killed encode or a virus scanner can hold it for a moment). Never
-    raises; False when it is still there."""
+def _drop(tmp: Path, anchor: str, within: str | None) -> str:
+    """Remove our partial copy as a name: never someone's real folder under that name (checked first, `_real_dir`),
+    and never through a link on the way (linksafe refuses one: the output folder swapped for a junction during the
+    encode). A held file (a just-killed encode, a virus scanner) is retried briefly; a refusal is not. Never raises:
+    '' when it is gone, else why it stays."""
+    last = None
     for i in range(5):
         try:
-            p.unlink(missing_ok=True)
-            return True
-        except OSError:
-            time.sleep(0.2 * (i + 1))
-    return False
+            if not os.path.lexists(tmp):
+                return ""                                  # nothing under that name (FFmpeg wrote nothing)
+            if _real_dir(tmp):
+                return f"{tmp.name} is a folder now and was left as it is"
+            linksafe.remove(tmp, anchor, within)
+            return ""
+        except linksafe.RemoveIncomplete as e:            # held for a moment: try again
+            last = e
+            if i < 4:
+                time.sleep(0.2 * (i + 1))
+        except (Guidance, OSError) as e:                   # a link on the path, or the OS can't say: left alone
+            return f"{tmp.name} was left in place ({e})"
+    return f"{tmp.name} could not be removed yet ({last})"
 
 
 def _is_link(p) -> bool:
@@ -595,8 +606,8 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
     and checked again after the source is hashed, before each encode and after it, with the finished partial). Named
     <stem (60 chars at most)>.<source tag>.conform[.r<from>-<to>].mp4. A sidecar exists only while it describes the
     .mp4 beside it: the old one is set aside before a new copy takes the name, and the new one is written atomically
-    (linksafe). Nothing is written through a link: a link or hard link under one of our names is removed or replaced
-    as a name. Returns {ok, path, parts, sidecar, lane, reused, fps, skipped, reason, lines}. `skipped` names why no
+    (linksafe). Nothing is written or removed through a link: a link or hard link under one of our names is removed
+    or replaced as a name, on every path, failures included (`_drop`). Returns {ok, path, parts, sidecar, lane, reused, fps, skipped, reason, lines}. `skipped` names why no
     copy is used ("not output", "no ffmpeg", "disk", "timeout", "in use", "changed"; None with ok=False when FFmpeg
     failed). With ok=True, `lines` may hold notes beside copies that are used: a part whose record could not be saved
     has `sidecar` None in `parts` (the parts are the truth; `sidecar` is the first part's) and is made again next
@@ -727,40 +738,36 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
                     r, used = accel.run_ff(build, lane, runner=runner or _runner_for(
                         timeout_s(b - a, bool(decision.get("tonemap")), px_rate)))
                 except subprocess.TimeoutExpired:
-                    gone = _drop(tmp)
+                    left = _drop(tmp, anchor, within)          # every removal of the partial: linksafe, never a
                     res.update(ok=False, skipped="timeout", reason=why("the encode took too long and was stopped"
-                               + ("" if gone else f"; {tmp.name} could not be removed yet")))
+                               + (f"; {left}" if left else "")))   # folder, never through a link
                     fail("timeout")
                     return res
                 except BaseException:
-                    _drop(tmp)                                 # no half-written copy is ever left behind
+                    left = _drop(tmp, anchor, within)          # no half-written copy is ever left behind
+                    if left:
+                        res["reason"] = why(left)              # kept by the handler below; the error is raised on
                     raise
                 res["lane"] = used
                 if getattr(r, "returncode", 1) != 0 or not os.path.lexists(tmp):
                     err = r.stderr.decode("utf-8", "replace") if isinstance(r.stderr, bytes) else str(r.stderr or "")
-                    res.update(ok=False, reason=why(f"ffmpeg failed: {err.strip()[-300:]}"))
+                    left = _drop(tmp, anchor, within)
+                    res.update(ok=False, reason=why(f"ffmpeg failed: {err.strip()[-300:]}"
+                                                    + (f"; {left}" if left else "")))
                     fail("failed")
-                    _drop(tmp)
                     return res
                 if client_output(given, client_root) != out_dir or not _plain_file(tmp):
                     # A link planted at the partial's name, or the folder swapped for a link, during the encode:
                     # never handed back as our copy. Removed only as a name, and never through a link (linksafe
                     # refuses one on the way). The gap between this check and the rename below stays, as in linksafe.
-                    try:
-                        if _real_dir(tmp):
-                            left = f"{tmp.name} is a folder now and was left as it is"
-                        else:
-                            linksafe.remove(tmp, anchor, within)
-                            left = ""
-                    except (Guidance, OSError) as e:
-                        left = f"{tmp.name} was left in place ({e})"
+                    left = _drop(tmp, anchor, within)
                     return changed("the output folder or the partial copy changed during the encode (a link or a "
                                    "folder appeared): the copy is not used" + (f"; {left}" if left else ""))
 
                 def in_use(what):
-                    gone = _drop(tmp)
+                    left = _drop(tmp, anchor, within)
                     res.update(ok=False, skipped="in use", reason=why(f"{what} is in use and could not be replaced"
-                               + ("" if gone else f"; {tmp.name} could not be removed yet")))
+                               + (f"; {left}" if left else "")))
                     fail("in_use")
                     return res
                 try:
@@ -785,11 +792,17 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
                         want, reason=decision.get("actions"), encoder="libx264", lane=used), indent=1).encode("utf-8"),
                         within)
                 except (Guidance, OSError) as e:               # locked folder, a virus scan, a full disk: the copy
+                    if client_output(given, client_root) != out_dir:   # is right; without a record never reused.
+                        # Unless the folder was swapped for a link in the gap before the rename: the copy went
+                        # through the link, so it is not ours to use, and never removed through it either.
+                        return changed(f"the output folder changed after the encode (a link appeared): the copy "
+                                       f"{out.name} is not used and was left where the link points ({e})")
                     res["reason"] = why(f"the record {side.name} could not be saved ({e}): that copy has no record "
-                                        "and is made again next time")   # is right; without a record never reused
+                                        "and is made again next time")
                     note("no_record")
                     record = None
-                clear_held(held, anchor, within)
+                if os.path.lexists(held):
+                    clear_held(held, anchor, within)
             res["parts"].append({"path": str(out), "sidecar": record and str(record), "from_s": a, "to_s": b})
         res["path"], res["sidecar"] = res["parts"][0]["path"], res["parts"][0]["sidecar"]
         return res

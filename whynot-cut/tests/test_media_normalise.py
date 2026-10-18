@@ -804,26 +804,26 @@ class TestBatchBTimeout(_Out):
         def slow(cmd):
             Path(cmd[-1]).write_bytes(b"half")
             raise subprocess.TimeoutExpired(cmd, 1)
-        real_unlink = Path.unlink
+        real_remove = MN.linksafe.remove
 
         def held_for(n):                     # the .partial.mp4 is held for the first n tries (a scanner, a dying child)
-            calls = []
+            calls = []                       # (removed only through linksafe: review 0cd67d7 P2-1)
 
-            def unlink(self_, missing_ok=False):
-                if self_.name.endswith(".partial.mp4"):
-                    calls.append(self_)
+            def remove(path, root, within=None):
+                if str(path).endswith(".partial.mp4") and os.path.lexists(path):
+                    calls.append(path)
                     if len(calls) <= n:
-                        raise PermissionError("held by a scanner")
-                return real_unlink(self_, missing_ok=missing_ok)
-            return unlink, calls
+                        raise MN.linksafe.RemoveIncomplete(0, [(str(path), "held by a scanner")])
+                return real_remove(path, root, within)
+            return remove, calls
         unlink, calls = held_for(2)
-        with mock.patch.object(Path, "unlink", unlink), mock.patch.object(MN.time, "sleep"):
+        with mock.patch.object(MN.linksafe, "remove", unlink), mock.patch.object(MN.time, "sleep"):
             m, r = self.conform("tag60_real30", runner=slow)
         self.assertEqual(r["skipped"], "timeout")
         self.assertEqual(len(calls), 3)
         self.assertEqual(list(self.out.iterdir()), [])
         unlink, calls = held_for(99)
-        with mock.patch.object(Path, "unlink", unlink), mock.patch.object(MN.time, "sleep"):
+        with mock.patch.object(MN.linksafe, "remove", unlink), mock.patch.object(MN.time, "sleep"):
             m, r = self.conform("tag60_real30", runner=slow)
         self.assertEqual(r["skipped"], "timeout")                                 # still a timeout, never "failed"
         self.assertIn("could not be removed", r["reason"])
@@ -1340,6 +1340,225 @@ class TestBatchBLongSync(_Out):
         for t in (10, 300, 310, 590):                                              # before and after the gap, the end
             self.assertLessEqual(abs(pairs[t]), 1 / fps, (t, pairs[t], fps))
         self.assertLessEqual(max(abs(v) for t, v in pairs.items() if t), 1 / fps, pairs)   # t=0: no audio yet
+
+
+class TestT26Final(_Out):
+    """Review 0cd67d7, executor rulings 2026-10-18 (2): our partial is never removed through a swapped folder or as
+    someone's folder on any failure path (P2-1); a link refusal after the rename is "changed", never ok (P3-1); a
+    folder link at one of our names is removed as a link, never kept as a folder (P3-2). Case list: the lane's
+    work/t26-final/cases.md."""
+    names = TestBatchBTimeout.names                                                 # our partial, record, copy
+
+    def fresh(self):
+        """A new client folder per sub-case (the swap moves output/intermediates away)."""
+        self.tmp = Path(tempfile.mkdtemp(prefix="whynot-t26f-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        (self.tmp / "assets").mkdir()
+        (self.tmp / "data").mkdir()
+        self.out = self.tmp / "output" / "intermediates"
+        out = self.out                                                             # the link only, before the tree
+        self.addCleanup(lambda: _unlink_dir(out) if MN.linksafe.is_link(out) else None)
+
+    def swap(self, tmp):
+        """output/intermediates moved away and replaced by a link into assets/, where a client file carries our
+        partial's name: what the folder path now shows."""
+        os.replace(self.out, self.tmp / "output" / "moved")
+        _junction(self.out, self.tmp / "assets")
+        decoy = self.tmp / "assets" / tmp.name
+        decoy.write_bytes(b"CLIENT FOOTAGE")
+        return decoy
+
+    def folder(self, tmp):
+        """Someone's real folder under our partial's name."""
+        tmp.unlink()
+        tmp.mkdir()
+        keep = tmp / "keep.txt"
+        keep.write_bytes(b"CLIENT FOOTAGE")
+        return keep
+
+    def failing(self, plant, finish):
+        """A runner that writes the partial, plants (swap / folder), then ends as `finish` says."""
+        seen = {}
+
+        def runner(cmd):
+            Path(cmd[-1]).write_bytes(b"half")
+            seen["kept"] = plant(Path(cmd[-1]))
+            return finish(cmd)
+        return runner, seen
+
+    def each_plant(self, finish, check):
+        for kind in ("swap", "folder"):
+            with self.subTest(kind):
+                self.fresh()
+                runner, seen = self.failing(getattr(self, kind), finish)
+                with mock.patch.object(MN.time, "sleep"):
+                    m, r = self.conform("tag60_real30", runner=runner)
+                self.assertFalse(r["ok"], r)
+                check(r)
+                self.assertEqual(seen["kept"].read_bytes(), b"CLIENT FOOTAGE")       # never deleted
+                if kind == "swap":
+                    self.assertEqual(sorted(p.name for p in (self.tmp / "assets").iterdir()), [seen["kept"].name])
+                    self.assertIn("left in place", r["reason"])
+                    self.assertIn("link", r["reason"])
+                else:
+                    self.assertIn("is a folder", r["reason"])
+
+    def test_p2_1_ffmpeg_failed_never_deletes_through_a_swapped_folder(self):
+        def check(r):
+            self.assertIsNone(r["skipped"])
+            self.assertIn("ffmpeg failed", r["reason"])
+            self.assertEqual(r["lines"]["en"], [MN.LINES["failed"][0]])
+        self.each_plant(lambda cmd: subprocess.CompletedProcess(cmd, 1, b"", b"boom"), check)
+        with self.subTest("swap, nothing written"):                                # nothing to remove: nothing is
+            self.fresh()                                                           # said to be left behind
+
+            def runner(cmd):
+                os.replace(self.out, self.tmp / "output" / "moved")
+                _junction(self.out, self.tmp / "assets")
+                return subprocess.CompletedProcess(cmd, 1, b"", b"boom")
+            m, r = self.conform("tag60_real30", runner=runner)
+            self.assertFalse(r["ok"], r)
+            self.assertEqual(r["reason"], "ffmpeg failed: boom")
+            self.assertEqual(list((self.tmp / "assets").iterdir()), [])
+
+    def test_p2_1_a_timeout_never_deletes_through_a_swapped_folder(self):
+        def finish(cmd):
+            raise subprocess.TimeoutExpired(cmd, 1)
+
+        def check(r):
+            self.assertEqual(r["skipped"], "timeout")
+            self.assertEqual(r["lines"]["en"], [MN.LINES["timeout"][0]])
+        self.each_plant(finish, check)
+
+    def test_p2_1_a_runner_error_never_deletes_through_a_swapped_folder(self):
+        def finish(cmd):
+            raise OSError("disk gone")
+
+        def check(r):
+            self.assertIn("OSError: disk gone", r["reason"])
+            self.assertEqual(r["lines"]["en"], [MN.LINES["failed"][0]])
+        self.each_plant(finish, check)
+        for kind in ("swap", "folder"):                                            # a real BaseException: raised on,
+            with self.subTest("interrupt " + kind):                               # and still nothing deleted
+                self.fresh()
+
+                def stop(cmd):
+                    raise KeyboardInterrupt
+                runner, seen = self.failing(getattr(self, kind), stop)
+                with self.assertRaises(KeyboardInterrupt), mock.patch.object(MN.time, "sleep"):
+                    self.conform("tag60_real30", runner=runner)
+                self.assertEqual(seen["kept"].read_bytes(), b"CLIENT FOOTAGE")
+
+    def gap_swap(self):
+        """_plain_file wrapped: right after the post-encode check passed on the partial, the folder is swapped for a
+        link into assets/ that shows a copy of the partial under its name (the documented gap)."""
+        real, decoys = MN._plain_file, []
+
+        def pf(p):
+            v = real(p)
+            if str(p).endswith(".partial.mp4") and v and not decoys:
+                moved = self.tmp / "output" / "moved"
+                os.replace(self.out, moved)
+                _junction(self.out, self.tmp / "assets")
+                decoys.append(self.tmp / "assets" / Path(p).name)
+                shutil.copyfile(moved / Path(p).name, decoys[0])
+            return v
+        return mock.patch.object(MN, "_plain_file", pf), decoys
+
+    def fake(self, cmd):
+        Path(cmd[-1]).write_bytes(b"a finished encode")
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    def test_an_open_copy_after_a_swap_never_deletes_through_it(self):
+        """The P2-1 class on the in_use path: the folder swapped in the gap, then the rename to the final name fails
+        (the old copy open in Premiere): the partial is not removed through the link."""
+        self.fresh()
+        patch, decoys = self.gap_swap()
+        real_replace = Path.replace
+
+        def replace(self_, target):
+            if self_.name.endswith(".partial.mp4"):
+                raise PermissionError(13, "in use by Premiere", str(target))
+            return real_replace(self_, target)
+        with patch, mock.patch.object(Path, "replace", replace), mock.patch.object(MN.time, "sleep"):
+            m, r = self.conform("tag60_real30", runner=self.fake)
+        self.assertFalse(r["ok"], r)
+        self.assertEqual(r["skipped"], "in use")
+        self.assertEqual(decoys[0].read_bytes(), b"a finished encode")              # what the link showed: kept
+        self.assertIn("left in place", r["reason"])
+        self.assertEqual(sorted(p.name for p in (self.tmp / "assets").iterdir()), [decoys[0].name])
+
+    def test_p3_1_a_link_refusal_after_the_rename_is_changed_never_ok(self):
+        self.fresh()
+        patch, decoys = self.gap_swap()
+        with patch:
+            m, r = self.conform("tag60_real30", runner=self.fake)
+        self.assertFalse(r["ok"], r)
+        self.assertEqual(r["skipped"], "changed")
+        self.assertIsNone(r["path"])
+        self.assertEqual(r["parts"], [])
+        self.assertEqual(r["lines"], {"en": [MN.LINES["changed"][0]], "ar": [MN.LINES["changed"][1]]})
+        copy = self.names()[2].name
+        self.assertIn(copy, r["reason"])                                           # named, so it can be found
+        self.assertEqual(sorted(p.name for p in (self.tmp / "assets").iterdir()), [copy])   # nothing else written
+        self.assertEqual([p.name for p in (self.tmp / "output" / "moved").iterdir()],      # and nothing removed
+                         [self.names()[0].name])                                           # on the real side
+        m, r2 = self.conform("tag60_real30", runner=self.fake)                     # still swapped: refused, never
+        self.assertFalse(r2["ok"])                                                 # written through
+        self.assertEqual(r2["skipped"], "not output")
+
+    def test_p3_1_clear_held_runs_only_when_a_held_record_exists(self):
+        self.fresh()
+        real, ran = MN.linksafe.remove, []
+
+        def remove(path, root, within=None):
+            if ran and str(path).endswith(".held.json"):
+                raise MN.Guidance("a link (junction or symlink) is on that path", "x")   # if it were ever tried
+            return real(path, root, within)
+
+        def runner(cmd):
+            ran.append(cmd)
+            return self.fake(cmd)
+        with mock.patch.object(MN.linksafe, "remove", remove):
+            m, r = self.conform("tag60_real30", runner=runner)
+        self.assertTrue(r["ok"], r)
+        self.assertIsNone(r["reason"])
+        self.assertEqual(r["lines"], {"en": [], "ar": []})                         # no false "could not be removed"
+
+    def test_p3_2_a_folder_link_at_each_of_our_names_is_removed_as_a_link(self):
+        """Kills mutant N15 (`_real_dir` following the link): a link to a folder is a name, never someone's folder."""
+        kinds = [("junction", _junction)]
+        if _can_symlink():
+            kinds.append(("dir symlink", lambda link, target: os.symlink(target, link, target_is_directory=True)))
+        for kind, make in kinds:
+            for which in ("partial", "held", "record", "copy"):
+                with self.subTest(kind=kind, name=which):
+                    self.fresh()
+                    partial, side, out = self.names()
+                    held = side.with_name(side.stem + ".held.json")
+                    at = {"partial": partial, "held": held, "record": side, "copy": out}[which]
+                    target = self.tmp / "assets" / "linked"
+                    target.mkdir()
+                    (target / "keep.txt").write_bytes(b"CLIENT FOOTAGE")
+                    self.out.mkdir(parents=True)
+                    make(at, target)
+                    names = (partial, held, side, out)
+                    self.addCleanup(lambda ns=names: [_unlink_dir(p) for p in ns if MN.linksafe.is_link(p)])
+                    m, r = self.conform("tag60_real30", runner=self.fake)
+                    self.assertEqual([p.name for p in target.iterdir()], ["keep.txt"])
+                    self.assertEqual((target / "keep.txt").read_bytes(), b"CLIENT FOOTAGE")
+                    self.assertNotIn("is a folder", r["reason"] or "")
+                    if which != "copy":
+                        self.assertTrue(r["ok"], r)
+                        self.assertFalse(MN.linksafe.is_link(at))                  # removed (or replaced) as a name
+                        self.assertTrue(MN._plain_file(out))
+                    elif os.name == "nt":                                          # Windows: a file can't be renamed
+                        self.assertFalse(r["ok"], r)                               # over a link to a folder: the
+                        self.assertEqual(r["skipped"], "in use")                   # link and its target stay
+                        self.assertTrue(MN.linksafe.is_link(out))
+                    else:                                                          # POSIX: rename replaces the link
+                        self.assertTrue(r["ok"], r)                                # itself, never its target
+                        self.assertTrue(MN._plain_file(out))
 
 
 if __name__ == "__main__":
