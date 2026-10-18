@@ -142,6 +142,16 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
       or `<BL-id>.claim`. The executor holds S1-T4.8 (`lib/intake_warnings.py`, `tests/test_t48_intake_warnings.py`) and
       S1-Task25 (`lib/cut_proposals.py`, `lib/safety/takes.py`, `tests/test_safety_takes.py`,
       `tests/test_safety_meaning_round3b.py`, `tests/fixtures/safety/kt7/**`).
+    - **UI track (new subscription session, 2026-10-18, owner "design + panel in parallel"):**
+      - **Granted now:** `docs/superpowers/specs/ui-coverage-map.md`.
+      - **Granted once the Adobe track lists the files it holds:** `adobe/panel-ui/**` and `adobe/premiere-uxp/**`.
+      - **Excluded:**
+        - `adobe/panel-ui/src/contract.ts`;
+        - `adobe/package.json`, `adobe/package-lock.json`, `adobe/tsconfig.base.json`, `adobe/node_modules/**`;
+        - `adobe/premiere-uxp/spike/**`;
+        - every path the Adobe track names for T4.1, T4.6 and their live checks.
+
+        Those stay the Adobe track's. Contract and dependency changes arrive there as patches.
     - **BL-16** (safe ASCII engine home): `lib/portability.py`, new `lib/home_acl.py`, `tests/test_home_acl*.py`,
       `tests/test_portability.py`, `skills/setup/references/platform-setup.md`; setup_env, runtime and ae_render arrive as
       patches.
