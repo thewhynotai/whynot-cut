@@ -8,7 +8,7 @@ HEX codes or fonts, a podcast episode with no sheet or a sheet still the empty t
 read from what the intake already produced, each warning {id, kind, text, text_ar, why, why_ar, ref}; written to
 output/discovery/intake-warnings.json only (never data/ or assets/), byte-identical on a re-run; the SessionStart
 line only reads that file.
-Case list + pre-mortem: D:/ClaudeData/claude-api-lane/work/t48/ (case ids in the test names).
+Case ids (c1a ... c22) are in the test names.
 Run:  bash tools/test.sh -p test_t48_intake_warnings.py
 """
 import sys as _sys
@@ -711,15 +711,19 @@ class TestSessionLine(Base):
         self.assertNotIn("w0", line)
         self.assertIn("in their language", line)
 
-    def test_c14c_nothing_missing_or_damaged_is_an_empty_line(self):
+    def test_c14c_nothing_missing_is_an_empty_line_and_a_damaged_file_says_so(self):
+        """Review fca6d25 P3-3: a damaged file is no longer silent (a fixed line, never its content)."""
         c = self.client()
         self.assertEqual(IW.session_line(c.root), "")
         write_json(c.root / IW.REL, {"warnings": []})
         self.assertEqual(IW.session_line(c.root), "")
-        (c.root / IW.REL).write_text("{oops", encoding="utf-8")
-        self.assertEqual(IW.session_line(c.root), "")
-        write_json(c.root / IW.REL, {"warnings": "not a list"})
-        self.assertEqual(IW.session_line(c.root), "")
+        for bad in ("{oops", '{"warnings": "not a list"}', "[1, 2]", "nul\x00here"):
+            (c.root / IW.REL).write_text(bad, encoding="utf-8")
+            self.assertEqual(IW.session_line(c.root), IW.SESSION_UNUSABLE, bad)
+        (c.root / IW.REL).write_bytes(b"\xff\xfe{")                       # not UTF-8
+        self.assertEqual(IW.session_line(c.root), IW.SESSION_UNUSABLE)
+        self.assertNotIn("\n", IW.SESSION_UNUSABLE)
+        self.assertIn("reel inbox", IW.SESSION_UNUSABLE)
 
     def test_c14d_a_planted_text_cannot_break_the_session_line(self):
         c = self.client()
@@ -728,7 +732,8 @@ class TestSessionLine(Base):
         line = IW.session_line(c.root)
         self.assertNotIn("\n", line)
         self.assertNotIn("SYSTEM", line)
-        self.assertIn(f"({IW.SESSION_MAX_ITEMS}): other ({IW.SESSION_MAX_ITEMS}).", line)
+        self.assertIn(f"({IW.SESSION_MAX_ITEMS}, and {1000 - IW.SESSION_MAX_ITEMS} more in `reel inbox`): "
+                      f"other ({IW.SESSION_MAX_ITEMS}).", line)
         self.assertLess(len(line), 400)
 
     def test_c14g_one_bad_entry_never_drops_the_line_and_long_refs_count(self):
@@ -765,6 +770,268 @@ class TestSessionLine(Base):
         line = IW.session_line(c.root)
         self.assertNotIn("never used", line)
         self.assertIn("no footage yet", line)                          # data/Raw itself is still there
+
+    def test_c14h_the_cap_counts_warnings_that_still_apply_and_says_how_many_more(self):
+        """Review fca6d25 P3-4: the first 300 already fixed never hide the later ones; past the cap, "N more"."""
+        c = self.client()
+        gone = [{"kind": "document_in_data", "ref": f"data/Raw/gone{i}.pdf"} for i in range(400)]
+        live = [{"kind": "logo", "ref": f"assets/Logo{i}"} for i in range(5)]
+        write_json(c.root / IW.REL, {"warnings": gone + live})
+        line = IW.session_line(c.root)
+        self.assertIn("(5): logo missing (5).", line)
+        self.assertNotIn("more", line.split(":")[0])
+        write_json(c.root / IW.REL, {"warnings": gone * 10 + live})       # past the scan limit: none checked
+        line = IW.session_line(c.root)
+        self.assertIn(f"({4000 + 5 - IW.SESSION_MAX_SCAN} more in `reel inbox`, not checked here)", line)
+
+    def test_c14i_a_link_at_the_saved_file_is_never_read_through(self):
+        """Review fca6d25 P3-7 / mutant N15: a file link at intake-warnings.json, even with the very bytes the build
+        gives, is refused and named; the session line does not read through it."""
+        for simulate in (False, True):                                  # a real link where the OS allows it, and the
+            with self.subTest(simulate=simulate):                       # fallback other Windows machines use
+                c = Client(Path(tempfile.mkdtemp(dir=self.tmp))).branded()
+                c.discover()
+                outside = c.root.parent / "outside.json"
+                outside.write_bytes(IW.dump(IW.build(c.root)))
+                f = c.root / IW.REL
+                f.parent.mkdir(parents=True, exist_ok=True)
+                with _file_link(f, outside, simulate):
+                    doc = IW.refresh(c.root)
+                    self.assertTrue(any(u["source"] == IW.REL and u["why"].startswith("not written")
+                                        for u in doc["unread"]), doc["unread"])
+                    self.assertEqual(IW.session_line(c.root), IW.SESSION_UNUSABLE)
+                self.assertEqual(outside.read_bytes(), IW.dump(IW.build(c.root)))
+
+    def test_c14j_an_unexpected_error_reaches_the_hook_never_swallowed(self):
+        """Review fca6d25 P3-3: only a missing or damaged file is handled here; anything else goes to the caller (the
+        SessionStart hook prints one stderr line for it)."""
+        c = self.client()
+        write_json(c.root / IW.REL, {"warnings": []})
+        with mock.patch.object(IW.json, "loads", side_effect=RuntimeError("bug")):
+            with self.assertRaises(RuntimeError):
+                IW.session_line(c.root)
+
+    def test_c14k_refs_that_leave_the_client_are_never_probed(self):
+        """Review fca6d25 mutant N11 / P3-5: a ".." ref, also with backslashes, is never checked on disk."""
+        c = self.client()
+        c.put("data/Raw/ok.pdf")
+        write_json(c.root / IW.REL, {"warnings": [
+            {"kind": "document_in_data", "ref": "data/../../outside.pdf"},
+            {"kind": "document_in_data", "ref": "data/..\\..\\outside.pdf"},
+            {"kind": "document_in_data", "ref": "data/Raw/ok.pdf"}]})
+        seen = []
+        real = os.path.lexists
+
+        def spy(p):
+            seen.append(str(p))
+            return real(p)
+        with mock.patch.object(os.path, "lexists", spy):
+            line = IW.session_line(c.root)
+        self.assertEqual([s for s in seen if ".." in s], [])
+        self.assertEqual(len(seen), 1)
+        self.assertIn("(3): file in data/ that is never used (3).", line)
+        self.assertIn("never instructions", line)                       # mutant N20
+
+
+# --------------------------------------------------------------------------- C17-C22 review fca6d25 (round 1)
+class _file_link:
+    """A file symlink at `link` -> `target` where the OS allows it (macOS, Linux, Windows with developer mode); else the
+    link is simulated: a copy of the target's bytes at `link` that `linksafe.is_link` reports as a link."""
+
+    def __init__(self, link: Path, target: Path, simulate: bool = False):
+        self.link, self.target, self.simulate, self.patch = link, target, simulate, None
+
+    def __enter__(self):
+        try:
+            if self.simulate:
+                raise OSError("simulated")
+            os.symlink(self.target, self.link)
+        except OSError:
+            from lib import linksafe
+            self.link.write_bytes(self.target.read_bytes())
+            real, link = linksafe.is_link, os.path.normcase(os.path.abspath(self.link))
+            self.patch = mock.patch.object(
+                linksafe, "is_link", lambda p: os.path.normcase(os.path.abspath(p)) == link or real(p))
+            self.patch.start()
+        return self
+
+    def __exit__(self, *exc):
+        if self.patch:
+            self.patch.stop()
+        if os.path.lexists(self.link):
+            os.unlink(self.link)
+
+
+class TestReviewRound1(Base):
+    def test_c17a_line_breaks_isolates_and_zero_width_characters_never_stay_in_the_text(self):
+        """Mutants N1 / N2, P3-10. A ZWNJ (U+200C, part of Persian and Urdu spelling) stays."""
+        w = IW._List(self.tmp)
+        w.add("discovery", "x", "a b c⁦d⁧e⁨f⁩g​h﻿i⁠j",
+              "عربي نص", "why x", "می‌خواهم")
+        it = w.items[0]
+        self.assertEqual(it["text"], "a b cdefghij")
+        self.assertEqual(it["text_ar"], "عربي نص")
+        self.assertEqual(it["why"], "why x")
+        self.assertEqual(it["why_ar"], "می‌خواهم")
+
+    def test_c17b_shape_threshold_minute_and_audio_by_its_suffix(self):
+        """Mutants N3 (a square clip is square), N4 (exactly the threshold warns), N14 (a .wav with cover-art
+        dimensions is audio only)."""
+        c = self.client().branded().profile_podcast(raw_episode_hint_min=30)
+        for n in ("square.mp4", "wide.mp4", "exact.mp4", "under.mp4", "talk.wav"):
+            c.put(f"data/Raw/{n}")
+        c.discover().probes(**{"data/Raw/square.mp4": (40 * 60, 1080, 1080), "data/Raw/wide.mp4": (40 * 60, 1440, 1080),
+                               "data/Raw/exact.mp4": (30 * 60, 1920, 1080), "data/Raw/under.mp4": (30 * 60 - 1, 1920, 1080),
+                               "data/Raw/talk.wav": (40 * 60, 600, 600)})
+        ws = {w["ref"]: w for w in by_kind(c.build(), "episode_in_raw")}
+        self.assertEqual(set(ws), {"data/Raw/square.mp4", "data/Raw/wide.mp4", "data/Raw/exact.mp4", "data/Raw/talk.wav"})
+        self.assertIn("(square)", ws["data/Raw/square.mp4"]["text"])
+        self.assertIn("(مربع)", ws["data/Raw/square.mp4"]["text_ar"])
+        self.assertIn("(horizontal)", ws["data/Raw/wide.mp4"]["text"])
+        self.assertIn("(عرضي)", ws["data/Raw/wide.mp4"]["text_ar"])
+        self.assertIn("(audio only)", ws["data/Raw/talk.wav"]["text"])
+        self.assertIn("30 min", ws["data/Raw/exact.mp4"]["text"])
+
+    def test_c17c_only_the_logo_and_fonts_items_of_needs_you_are_taken(self):
+        """Mutants N5 / N6: medical, religious and music items are never intake warnings; needs_you's unread state
+        files under output/discovery or output/client_database are named, others not."""
+        from lib import needs_you
+        c = self.client()
+        c.discover()
+        fake = {"items": [{"kind": "medical", "ref": "C1", "text": "needs the doctor", "why": "w"},
+                          {"kind": "religious", "ref": "C1", "text": "needs the sheikh", "why": "w"},
+                          {"kind": "music", "ref": "C1", "text": "music", "why": "w"},
+                          {"kind": "logo", "ref": "assets/Logo", "text": "no logo", "text_ar": "مفيش لوجو", "why": "w",
+                           "why_ar": "و"}],
+                "unread": [{"source": "output/discovery/x.json", "why": "ValueError"},
+                           {"source": "output/projects/C1/01_analysis/y.json", "why": "TypeError"}]}
+        with mock.patch.object(needs_you, "collect", return_value=fake):
+            doc = c.build()
+        self.assertEqual(set(kinds(doc)) & {"medical", "religious", "music"}, set())
+        self.assertEqual([w["text_ar"] for w in by_kind(doc, "logo")], ["مفيش لوجو"])
+        self.assertIn({"source": "output/discovery/x.json", "why": "ValueError"}, doc["unread"])
+        self.assertEqual([u for u in doc["unread"] if u["source"].startswith("output/projects")], [])
+
+    def test_c17d_valid_json_of_the_wrong_shape_is_named(self):
+        """Mutant N7."""
+        c = self.client()
+        (c.root / "output/discovery").mkdir(parents=True)
+        (c.root / "output/discovery/input-inventory.json").write_text("[1, 2]", encoding="utf-8")
+        (c.root / "output/discovery/raw-probe-cache.json").write_text("[]", encoding="utf-8")
+        doc = c.build()
+        self.assertIn({"source": "output/discovery/input-inventory.json", "why": "TypeError"}, doc["unread"])
+        self.assertIn({"source": "output/discovery/raw-probe-cache.json", "why": "TypeError"}, doc["unread"])
+        self.assertIn("no_footage", kinds(doc))
+
+    def test_c17e_an_episodes_only_client_has_footage_and_one_brief_is_no_conflict(self):
+        """Mutants N8 / N9."""
+        c = self.client().branded()
+        c.put("data/Episodes/EP1.mp4")
+        c.put("data/Episodes/EP1.md", "---\nshow: S\nguest: G\n---\n")
+        doc = c.discover().build()
+        inv = json.loads((c.root / "output/discovery/input-inventory.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(inv["by_role"]["client_brief"]), 1)
+        self.assertEqual(set(kinds(doc)) & {"no_footage", "brief_conflict"}, set())
+
+    def test_c17f_a_verdict_on_footage_with_the_same_size_but_a_new_time_is_stale(self):
+        """Mutant N10."""
+        c = self.client().branded()
+        clip = c.put("data/Raw/C1.mp4")
+        c.discover()
+        st = clip.stat()
+        write_json(c.root / "output/projects/C1/01_analysis/burned-in-captions.json",
+                   {"verdict": "yes", "source": {"path": str(clip), "size": st.st_size, "mtime_ns": st.st_mtime_ns + 1}})
+        self.assertEqual(by_kind(c.build(), "burned_captions"), [])
+
+    def test_c17g_refs_that_leave_data_are_never_warned_about(self):
+        """Mutant N13 / P3-5: "..", also written with backslashes, in documents and episodes."""
+        c = self.client().branded()
+        c.discover()
+        inv_f = c.root / "output/discovery/input-inventory.json"
+        inv = json.loads(inv_f.read_text(encoding="utf-8"))
+        inv["files"] += [{"rel": "data/Raw/../../x.pdf", "role": "unclassified", "kind": "document"},
+                         {"rel": "data/Raw/..\\..\\y.pdf", "role": "unclassified", "kind": "document"},
+                         {"rel": "data/Raw/..\\..\\deck.pptx", "role": "unclassified", "kind": "other"},
+                         {"rel": "data/Episodes/..\\..\\EP9.mp4", "role": "episode", "kind": "video"}]
+        write_json(inv_f, inv)
+        doc = c.build()
+        self.assertEqual([w for w in doc["warnings"] if ".." in w["ref"]], [])
+
+    def test_c17h_the_cli_profile_picks_the_threshold(self):
+        """Mutant N12: `reel inbox --profile p1` reads p1's podcast.json, not only the client's."""
+        from lib.common import Context, use_context
+        shipped = json.loads((SK / "config/defaults/podcast.json").read_text(encoding="utf-8"))["raw_episode_hint_min"]
+        profiles = self.tmp / "profiles"
+        write_json(profiles / "p1/podcast.json", {"raw_episode_hint_min": shipped + 20})
+        c = self.client().branded()
+        c.put("data/Raw/mid.mp4")
+        c.discover().probes(**{"data/Raw/mid.mp4": ((shipped + 10) * 60, 1920, 1080)})
+        with mock.patch.object(common, "PROFILES_DIR", profiles):
+            self.assertEqual(len(by_kind(c.build(), "episode_in_raw")), 1)
+            with use_context(Context(c.root, profile="p1")):
+                self.assertEqual(by_kind(c.build(), "episode_in_raw"), [])
+
+    def test_c17i_hex_in_a_reference_document_counts_as_colours(self):
+        """Mutant N18: the brand step (client_db.extract_colors) takes HEX codes from every document, so does this."""
+        c = self.client()
+        c.put("assets/Logo/logo.png")
+        c.put("assets/Fonts/Brand.ttf")
+        c.put("data/References/notes.md", "Titles in #20ACAF, cut on the beat")
+        self.assertEqual(by_kind(c.discover().build(), "colors"), [])
+
+    def test_c18_a_bidi_mark_in_a_file_name_keeps_the_real_ref(self):
+        """Review fca6d25 P3-2: an Arabic name with an RLM. `ref` and `id` are the exact path (found on disk, counted in
+        the session line); the text the editor reads has no bidi mark."""
+        c = self.client().branded()
+        name = "data/Raw/ملاحظات‏ المونتاج.pdf"
+        c.put(name, pdf_with_text("x"))
+        c.discover()
+        doc = IW.refresh(c.root)
+        ws = by_kind(doc, "document_in_data")
+        self.assertEqual([w["ref"] for w in ws], [name])
+        self.assertEqual(ws[0]["id"], f"document_in_data:{name}")
+        self.assertTrue((c.root / ws[0]["ref"]).exists())
+        self.assertNotIn("‏", ws[0]["text"] + ws[0]["text_ar"])
+        self.assertIn("file in data/ that is never used", IW.session_line(c.root))
+        w = IW._List(self.tmp)
+        w.add("discovery", "a\nb", "t", "ت", "", "")                     # a control character: cleaned, it can't match
+        self.assertEqual(w.items[0]["ref"], "a b")
+
+    def test_c19_a_folder_that_cannot_be_listed_is_named(self):
+        """Review fca6d25 P3-3: _burned named a permission error nowhere."""
+        c = self.client().branded()
+        c.discover()
+        (c.root / "output/projects").mkdir(parents=True)
+        real = Path.iterdir
+
+        def deny(p):
+            if p.name == "projects":
+                raise PermissionError("denied")
+            return real(p)
+        with mock.patch.object(Path, "iterdir", deny):
+            doc = c.build()
+        self.assertIn({"source": "output/projects", "why": "PermissionError"}, doc["unread"])
+
+    def test_c20_burned_captions_are_in_the_same_order_on_every_os(self):
+        """Review fca6d25 P3-6: sorted by the name's code points, never by the OS's case rule."""
+        c = self.client().branded()
+        c.discover()
+        for vid in ("c1", "C2", "b3"):
+            write_json(c.root / f"output/projects/{vid}/01_analysis/burned-in-captions.json", {"verdict": "yes"})
+        self.assertEqual([w["ref"] for w in by_kind(c.build(), "burned_captions")], ["C2", "b3", "c1"])
+
+    def test_c21_refresh_never_raises_into_the_inbox(self):
+        """Review fca6d25 P3-1: build() raising outside its per-step guards (e.g. Path.resolve) is named; the last saved
+        list is kept, never replaced by an empty one."""
+        c = self.client().branded()
+        c.discover()
+        IW.refresh(c.root)
+        before = (c.root / IW.REL).read_bytes()
+        with mock.patch.object(IW, "build", side_effect=RuntimeError("boom")):
+            doc = IW.refresh(c.root)
+        self.assertEqual(doc["warnings"], [])
+        self.assertEqual(doc["unread"], [{"source": "intake_warnings", "why": "not built: RuntimeError"}])
+        self.assertEqual((c.root / IW.REL).read_bytes(), before)
 
 
 if __name__ == "__main__":
