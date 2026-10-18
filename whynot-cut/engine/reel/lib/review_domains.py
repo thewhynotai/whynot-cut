@@ -32,9 +32,11 @@ the Egyptian verb prefixes بـ هـ and ا ي ت ن).
 
 A lexicon's `zones` count for that lexicon's domain. Only a CLOSED bracket zone (a verse between ﴿ ﴾) hides anything,
 and only other domains' plain WORDS: a `terms` rule (unless it says `zone_hideable: false`, as the spelled 100 % and
-rank rules do) or a pattern rule that says `zone_hideable: true`. A zone holding a digit, %, Latin letters or any
-currency sign (an amount, «١٠٠٪», «بس بـ ٩٩», «#1», «﷼», English words) hides nothing, whatever the lexicon says
-(no verse is written that way). «﷼» stays a currency sign in the matching form; a further reading spells it «ريال».
+rank rules do) or a pattern rule that says `zone_hideable: true`. A zone holding any digit, a percent or per-mille
+sign, a letter of any script but Arabic or any currency sign (an amount, «١٠٠٪», «بس بـ ٩٩», «#1», «﷼», English or
+Cyrillic words) hides nothing, whatever the lexicon says (no verse is written that way). Rules read the text with the
+brackets as spaces, so a claim that runs past a bracket («﴿ خصم ﴾ ٥٠٪») is not inside the zone and shows. «﷼»
+stays a currency sign in the matching form; a further reading spells it «ريال».
 The same words are hidden in the speech's recitation of the verse (RECITED words in a row). An unclosed verse hides
 nothing, and a quotation after a citation («قال تعالى «…»», «ربنا قال “…”») counts as religious but hides nothing:
 «ربنا قال» is everyday speech, so a claim put in scripture's mouth reaches the business reviewer too. Verses quoted with
@@ -84,7 +86,9 @@ _PREFIXES = ("و", "ف", "ب", "ل", "ك", "ا", "ي", "ت", "ن", "ه", "ال",
              "فب", "فل", "هي", "هت", "هن", "بي", "بت", "بن", "وهي", "وهت", "وهن", "وبي", "وبت", "وبن")
 _WORD = re.compile(r"\w+")
 _GAPS = re.compile("[" + chr(0x200b) + chr(0x2060) + "]")        # zero-width space, word joiner: also read as a gap
-_NEVER_HIDDEN = re.compile(r"[0-9%A-Za-z]")       # an amount, a percent or Latin text (no verse is written in it)
+_ARABIC_BLOCKS = ((0x600, 0x6ff), (0x750, 0x77f), (0x870, 0x8ff), (0xfb50, 0xfdff), (0xfe70, 0xfeff),
+                  (0x10e60, 0x10e7f), (0x1ee00, 0x1eeff))   # Arabic, its supplements and presentation forms
+_NUMBER_SIGNS = frozenset("%‰‱؉؊")                 # percent and per-mille signs, Latin and Arabic
 _RIAL = "\ufdfc"                                   # ﷼: NFKC would spell it as the plain word «ریال»; it stays a sign
 WINDOW = 1000                                      # a longer text is read in overlapping windows of this many chars
 _OVERLAP = 200                                     # chars two windows share, so no claim is lost at a cut
@@ -102,9 +106,16 @@ def normalize(text: str) -> str:
 
 
 def _never_hidden(text: str) -> bool:
-    """The code floor: a zone holding a digit, a percent, Latin letters or any currency sign (Unicode Sc) hides
-    nothing, whatever the lexicon says."""
-    return bool(_NEVER_HIDDEN.search(text)) or any(unicodedata.category(ch) == "Sc" for ch in text)
+    """The code floor: a zone holding any digit or number (Unicode N*), a percent or per-mille sign, any currency sign
+    (Unicode Sc) or a letter of any script but Arabic (Latin, Cyrillic, Greek…) hides nothing, whatever the lexicon
+    says (no verse is written that way)."""
+    for ch in text:
+        cat = unicodedata.category(ch)
+        if cat[0] == "N" or cat == "Sc" or ch in _NUMBER_SIGNS:
+            return True
+        if cat[0] == "L" and not any(a <= ord(ch) <= b for a, b in _ARABIC_BLOCKS):
+            return True
+    return False
 
 
 def _windows(text: str) -> list:
@@ -404,6 +415,7 @@ def _zone_finder(zones: list):
                 stop = min(x for x in (k, nxt, len(norm)) if x >= 0)
                 spans.append((q, j + 1 if 0 <= j < stop else stop, zid, False))
         return spans
+    find.marks = tuple(sorted({m for _z, opener, closer, _h in brackets for m in (opener, closer)}))   # ﴿ ﴾
     return find
 
 
@@ -511,8 +523,12 @@ def _detect(text: str, ms: list, recited_words: dict | None = None):
 
 def _detect_one(norm: str, ms: list, recited_words: dict, zone_words: dict, support_only: frozenset | None = None):
     """{domain: rows} for one reading. With `support_only` (domains found elsewhere in the text), only those domains'
-    supporting rules are matched."""
-    tokens = [(m.group(0), m.start(), m.end()) for m in _WORD.finditer(norm)]
+    supporting rules are matched. Rules read the text with the zone brackets as spaces (same length), so a claim that
+    runs past a bracket («﴿ خصم ﴾ ٥٠٪») is matched whole and, reaching outside the zone, is never hidden by it."""
+    scan = norm
+    for mark in sorted({m for *_x, find in ms for m in getattr(find, "marks", ())}):
+        scan = scan.replace(mark, " " * len(mark))
+    tokens = [(m.group(0), m.start(), m.end()) for m in _WORD.finditer(scan)]
     zones = []
     for did, _r, _s, find in ms:
         for a, b, zid, hides in find(norm):
@@ -526,12 +542,12 @@ def _detect_one(norm: str, ms: list, recited_words: dict, zone_words: dict, supp
         def keep(h):
             return not (h[3] and any(za <= h[0] and h[1] <= zb for za, zb, owner in hide if owner != did))
         if support_only is not None:
-            hits = [h for h in _rule_hits(norm, tokens, supporting) if keep(h)] if did in support_only else []
+            hits = [h for h in _rule_hits(scan, tokens, supporting) if keep(h)] if did in support_only else []
         else:
-            hits = [h for h in _rule_hits(norm, tokens, rules) if keep(h)]
+            hits = [h for h in _rule_hits(scan, tokens, rules) if keep(h)]
             hits += [(a, b, zid, False) for a, b, owner, zid, _h in zones if owner == did]
             if hits:
-                hits += [h for h in _rule_hits(norm, tokens, supporting) if keep(h)]
+                hits += [h for h in _rule_hits(scan, tokens, supporting) if keep(h)]
         if hits:
             seen, rows = set(), []
             for a, b, rid, _h in sorted(hits, key=lambda h: (h[0], h[1], h[2])):

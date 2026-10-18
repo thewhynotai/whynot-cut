@@ -747,6 +747,147 @@ class TestRecallFollowUp(unittest.TestCase):
                                       "300 pounds for the session", "consultation 500 pounds", "pay only five hundred"))
 
 
+class TestFinalRound(unittest.TestCase):
+    """Review 4babf5e, the final bounded round: bare prices after a price noun mid-sentence (a unit word after the
+    number still vetoes), percent offers, the zone floor, an amount outside a one-word verse and the window mutants."""
+
+    BARE_PRICES = ("فيزيتا ٣٠٠", "الكشف ٣٠٠ وبس", "الكشف عندنا ٣٠٠", "الجلسة ٥٠٠", "الباقة كلها ٣٠٠٠", "الفيزيتا تلتمية",
+                   "كشفية ٢٠٠", "عربون ٥٠٠", "مقدم ٢٠٠٠", "قسط ٥٠٠", "الجلسة الأولى ٣٠٠", "الكشف ميتين وخمسين")
+    FILLER = ("والدكتور بيشوف الحالة كويس واحنا بنتابع معاك والمريض مرتاح جدا وبعدين بنكمل الكلام عن الضغط والسكر "
+              "واللي عنده مشكلة يسأل ").split()
+
+    def filler_with(self, claim: str, rnd) -> str:
+        words = [rnd.choice(self.FILLER) for _ in range(260)]                  # about 1,600 chars, no punctuation
+        words.insert(rnd.randrange(len(words) + 1), claim)
+        return " ".join(words)
+
+    def test_bare_price_after_a_price_noun_at_random_offsets(self):
+        """P2-1: the number after a price noun is a price whatever free speech follows, at any offset (the filler is
+        longer than a window, so cuts are crossed too)."""
+        import random
+        rnd = random.Random(4_850)
+        self.assertNotIn("business", domains(" ".join(self.FILLER * 12)))
+        missed = []
+        for claim in self.BARE_PRICES:
+            for _ in range(40):
+                t = self.filler_with(claim, rnd)
+                if "business" not in domains(t):
+                    missed.append((claim, t.index(claim)))
+        self.assertEqual(missed, [])
+        self.assertIn("الكشف ميتين وخمسين",                                    # the whole amount, not its first word
+                      [m["match"] for m in RD.detect("الكشف ميتين وخمسين والدكتور موجود")["business"]])
+
+    def test_a_unit_after_the_number_still_vetoes(self):
+        """Decision for P2-1: a measurement unit right after the number says what it counts, so it is not a price."""
+        for t in ("الجلسة ٤٥ دقيقة", "الكشف ٣ مرات", "الكشف ٣٠٠ مريض", "مقدم ١٠٠ فيديو", "الجلسة ١٢٠ دقيقة",
+                  "الجلسة ٣٠٠٠ بصيلة", "الجلسة ٥٠٠ نبضة", "الجلسة ٢٠٠ شوت", "الجلسة ٣٠٠ طلقة", "الجلسة ٣٠٠ درجة",
+                  "الجلسة ٣٠٠ سي سي", "الجلسة ٣٠٠ cc", "الكشف ١٢٠ على ٨٠", "الكشف ١٩٧٧٧", "الكشف ٢٠٢٤", "مقدم ٢٠ حلقة"):
+            for tail in ("", " والدكتور بيتابع"):
+                self.assertNotIn("business", domains(t + tail), t + tail)
+
+    def test_percent_offers(self):
+        """P2-2."""
+        for t in ("عرض رمضان ٣٠٪", "عرض الصيف ٥٠٪ على كل الجلسات", "٥٠٪ على كل الجلسات", "عرض العيد للمشتركين الجدد ٢٠٪",
+                  "٣٠٪ على الباقة", "٢٠٪ على الكشف", "30% on all sessions", "عرض ٥٠٪"):
+            self.assertIn("percent-off", [m["rule"] for m in RD.detect(t).get("business", [])], t)
+        for t in ("٥٠٪ من المرضى", "نسبة النجاح ٩٠٪", "العرض ده بيظهر في ٣٠٪ من المرضى", "العرض ده نسبته ٣٠٪",
+                  "بيزود الخطر ٢٠٪ على كل ١٠ كيلو", "الدوا بيأثر ٣٠٪ على الكلى", "عرض رمضان حوالي ٣٠٪ من الناس",
+                  "المريض بيكون عرضه للجلطة ٣٠٪ اكتر", "patients improved 70% on treatment"):
+            self.assertNotIn("business", domains(t), t)
+
+    def test_overlap_keeps_a_long_claim_at_every_cut(self):
+        """P3-1 (_OVERLAP): a 34-character claim survives a window cut at every offset."""
+        claim = "you can make five thousand a month"
+        lost = [pad for pad in range(RD.WINDOW - 120, RD.WINDOW + 10)
+                if "business" not in domains(("كلام " * 400)[:pad].rstrip() + " " + claim + " " + "كلام " * 60)]
+        self.assertEqual(lost, [])
+
+    def test_window_cuts_fall_on_spaces(self):
+        """P3-1 (_SLACK): a cut moves to a nearby space, so no window starts or ends inside a word (a word's tail
+        read alone could be a trigger: «BONSAI» cut to «AI»)."""
+        text = "كلام " * 600
+        parts = RD._windows(text)
+        self.assertGreater(len(parts), 2)
+        at = 0
+        for n, w in enumerate(parts):
+            at = text.index(w, max(at - RD._OVERLAP - RD._SLACK, 0))
+            if n:
+                self.assertEqual(text[at - 1], " ", n)
+            if n < len(parts) - 1:
+                self.assertEqual(text[at + len(w)], " ", n)
+        for pad in range(RD.WINDOW - 220, RD.WINDOW - 160):
+            self.assertNotIn("ai", domains("س" * 4 + " " + "ب" * pad + "BONSAI" + " كلام" * 300), pad)
+
+    def test_every_window_adds_its_own_rows(self):
+        """P3-1 (merge first window wins): a domain found in the first window still gets the rows of later ones."""
+        rules = [m["rule"] for m in RD.detect("خصم " + "كلام عادي جدا " * 150 + "الكشف ب ٥٠٠ جنيه")["business"]]
+        self.assertIn("pricing", rules)
+        self.assertIn("currency-amount", rules)
+
+    def test_support_pass_only_for_found_domains(self):
+        """P3-1 (support only all): supporting rows are added only to a domain some rule found."""
+        t = "خصم " + "كلام عادي جدا " * 150 + "تشخيص"
+        self.assertGreater(len(t), RD.WINDOW)
+        self.assertNotIn("ai", domains(t))
+        self.assertIn("ai-capability", [m["rule"] for m in RD.detect("AI " + "كلام عادي جدا " * 150 + "تشخيص")["ai"]])
+
+    def test_a_non_stem_word_inside_a_phrase_is_exact(self):
+        """P3-1 (ar exact via startswith): the second word of «تبدأ من» is the exact word, never a prefix of one."""
+        self.assertNotIn("business", domains("المشكلة بتبدأ منه"))
+        self.assertIn("business", domains("الأسعار بتبدأ من ٣٠٠"))
+
+    def test_zone_floor_counts_every_script_and_number_sign(self):
+        """P3-3: any Unicode digit, any letter that is not Arabic, per-mille signs and currency signs."""
+        for ch in ("е", "ε", "߀", "०", "‰", "؉", "‱", "¥", "Ж", "א"):
+            hit = RD.detect("﴿ خصم " + ch + " ﴾")
+            self.assertIn("religious", hit, ch)
+            self.assertIn("business", hit, ch)
+            self.assertTrue(RD._never_hidden("خصم " + ch), ch)
+        for ch in ("ݐ", "ࢠ", "۞", "ﷲ"):                                       # Arabic blocks and Quranic signs hide
+            self.assertFalse(RD._never_hidden(RD.normalize("خصم " + ch)), ch)
+        self.assertNotIn("business", domains("﴿ خصم ݐ ﴾"))
+
+    def test_an_amount_outside_the_verse_is_never_hidden(self):
+        """P3-4: a claim that reaches past the closing bracket is not inside the verse."""
+        for t in ("﴿ خصم ﴾ ٥٠٪", "﴿ الكشف ﴾ ٣٠٠ والدكتور موجود", "﴿ عرض ﴾ ٣٠٪"):
+            hit = RD.detect(t)
+            self.assertIn("religious", hit, t)
+            self.assertIn("business", hit, t)
+        for t in ("﴿ خصم ﴾ للمشتركين", "﴿ خصم للمشتركين ﴾", "﴿ فما ربحت تجارتهم ﴾ والدكتور بيقول كلام مهم"):
+            hit = RD.detect(t)
+            self.assertIn("religious", hit, t)
+            self.assertNotIn("business", hit, t)
+
+    def test_recall_misses_of_the_review(self):
+        """P3-5, each form on its own."""
+        for t in ("اقساط بدون فوايد", "١٢ شهر بدون فوايد", "قسطها على ١٢ شهر", "0% interest", "installments available",
+                  "BOGO", "اشتري ١ و خد ١ هدية", "consultation fee 500", "it's 400 a session", "الحق العرض",
+                  "interest-free installments", "pay in installments", "فوايد ٠٪", "الحقوا العرض", "اشتري ٢ وخد ١ مجانا"):
+            self.assertIn("business", domains(t), t)
+        for t in ("الأكل ده بدون فوايد", "قعدت ٣ شهور من غير فايدة", "no interest in food", "loss of interest",
+                  "اشتري ٢ علبة وخد واحدة الصبح", "اشتري ٢ علبة وخد ١ كل يوم", "الحقيقة العرض ده بيروح",
+                  "عندك الحق العرض ده مقلق", "الأكل ده زيرو فوايد", "10% interest in the study"):
+            self.assertNotIn("business", domains(t), t)
+
+    def test_new_branches_grow_linearly(self):
+        """Every new branch's worst shape: ten times the text costs about ten times the time (a ratio, never a
+        wall-clock bound; the small size grows until it takes at least 20 ms)."""
+        import time
+        ms = RD.matchers()
+        for unit in ("الكشف ٣٠٠ ", "الجلسة الأولى ", "عرض رمضان الجديد ", "٥٠٪ على ", "اشتري ١ و خد ", "قسط على ",
+                     "﴿ خصم ﴾ ٥٠٪ ", "الحق ", "installments ", "it's 400 a ", "0% "):
+            def cost(n):
+                t0 = time.perf_counter()
+                RD.detect(unit * n, ms)
+                return time.perf_counter() - t0
+            small = max(1, 3_000 // len(unit))
+            while cost(small) < 0.02:
+                small *= 2
+            t1 = min(cost(small) for _ in range(2))
+            t10 = cost(small * 10)
+            self.assertLess(t10 / t1, 30, unit)
+
+
 class TestPhrases(unittest.TestCase):
     """Pre-mortem T50 item 2: every reported miss or false alarm is one line of fixtures/review_domains/phrases.tsv."""
 
@@ -758,11 +899,12 @@ class TestPhrases(unittest.TestCase):
             text, *wants = line.split("\t")
             self.assertTrue(wants and all(w[:1] in "+-" and w[1:] in SHIPPED for w in wants), (n, line))
             rows.append((n, text, wants))
-        self.assertGreaterEqual(len(rows), 40)
+        self.assertGreaterEqual(len(rows), 150)
+        wrong = []                                    # every failing line is reported, not only the first
         for n, text, wants in rows:
             found = domains(text)
-            for w in wants:
-                self.assertEqual(w[1:] in found, w[0] == "+", (n, text, w, RD.detect(text)))
+            wrong += [(n, text, w, RD.detect(text)) for w in wants if (w[1:] in found) != (w[0] == "+")]
+        self.assertEqual(wrong, [], "\n".join(map(repr, wrong)))
 
 
 _REAL_LEXICON = RD.lexicon

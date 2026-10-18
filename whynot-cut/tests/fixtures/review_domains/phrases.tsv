@@ -76,3 +76,105 @@ take 2 SR tablets	-business
 take 20 SR tablets	-business
 give 3 SR doses	-business
 1 for 1	-business
+# Review 4babf5e (final round): a bare price after a price noun mid-sentence; a unit word after it still vetoes
+فيزيتا ٣٠٠ والدكتور بيشوف الحالة كويس	+business
+احنا الكشف ٣٠٠ وبس والدكتور بيشوف الحالة	+business
+الكشف عندنا ٣٠٠ واحنا بنتابع معاك	+business
+يا جماعة الجلسة ٥٠٠ والنتيجة رائعة جدا	+business
+الباقة كلها ٣٠٠٠ والجلسات ستة	+business
+الفيزيتا ٣٠٠ وبس والدكتور لطيف	+business
+كشفية ٢٠٠ والدكتور شاطر	+business
+عربون ٥٠٠ والباقي يوم العملية	+business
+المقدم ٢٠٠٠ والباقي على شهرين	+business
+قسط ٥٠٠ والدكتور بيتابع	+business
+الجلسة الأولى ٣٠٠ والتانية ٢٠٠	+business
+التكلفة ٥٠٠٠ والعملية سهلة	+business
+الاستشارة ٣٠٠ والدكتور بيرد	+business
+الاشتراك ٢٠٠ والجلسات مفتوحة	+business
+الباقة ١٥٠٠٠ والجلسات ستة	+business
+الكشف تلتمية والدكتور بيشوف الحالة	+business
+الفيزيتا تلتمية واحنا بنتابع معاك	+business
+الكشف ميتين وخمسين والدكتور موجود	+business
+الكشف ب ٦٠ والدكتور موجود	+business
+الباقة ٣٬٠٠٠ والجلسات ستة	+business
+الكشف ميه ميه والحمد لله	-business
+بعد الكشف الف سلامة عليك يا حاج	-business
+نتيجة الكشف الف مبروك يا حاج	-business
+الجلسة ٤٥ دقيقة والدكتور بيتابع	-business
+الكشف ٣ مرات في السنة والدكتور	-business
+الكشف ٣٠٠ مريض في اليوم	-business
+مقدم ١٠٠ فيديو على القناة	-business
+الجلسة ١٢٠ دقيقة والمريض مرتاح	-business
+الكشف ٢٠٢٤ والدكتور كان مسافر	-business
+الجلسة ٣٠٠٠ بصيلة والنتيجة حلوة	-business
+الجلسة ٥٠٠ نبضة والجلد بيهدى	-business
+الضغط في الكشف ١٢٠ على ٨٠ والنبض كويس	-business
+الكشف ١٠:٣٠ والدكتور بيوصل بدري	-business
+الكشف ١٩٧٧٧ والحجز بالتليفون	-business
+الجلسة ٢٠٠ مل محلول	-business
+الجلسة ١٠٠ وحدة والمريض مرتاح	-business
+الجلسة ٤٥ والدكتور بيتابع	-business
+عدد الجلسات ٦ والمتابعة كل شهر	-business
+الجلسات ١٠٠ والمرضى مبسوطين	-business
+السكر ٣٠٠ في الكشف والدكتور قلقان	-business
+المتابعة ١٢ شهر بعد العملية	-business
+الجلسة ١٥٠ جول والجلد كويس	-business
+الجلسة ٣٠٠ سي سي محلول	-business
+الجلسة ١٠٠ يونت بوتوكس والنتيجة حلوة	-business
+الجلسة ٣٠٠٠ شعرة والمريض مرتاح	-business
+# a percent offer: «عرض <1-3 words> N٪», «N٪ على <noun>»; a percent of patients or a success rate is not one
+عرض رمضان ٣٠٪ والدكتور موجود	+business
+عرض الصيف ٥٠٪ على كل الجلسات	+business
+٥٠٪ على كل الجلسات النهارده	+business
+عرض العيد للمشتركين الجدد ٢٠٪ والحجز مفتوح	+business
+٣٠٪ على الباقة الكاملة	+business
+٢٠٪ على الكشف والمتابعة	+business
+30% on all sessions this week	+business
+٥٠٪ من المرضى بيتحسنوا	-business
+نسبة النجاح ٩٠٪ والمريض بيخرج تاني يوم	-business
+نسبة النجاح ٩٠٪	-business
+العرض ده بيظهر في ٣٠٪ من المرضى	-business
+العرض ده نسبته ٣٠٪ في الستات	-business
+بيزود الخطر ٢٠٪ على كل ١٠ كيلو زيادة	-business
+الدوا بيأثر ٣٠٪ على الكلى	-business
+نسبة النجاح ٩٠٪ على المدى الطويل	-business
+عرض الجرح ٢ سم	-business
+المريض بيكون عرضه للجلطة ٣٠٪ اكتر	-business
+patients improved 70% on treatment	-business
+العرض ده بيظهر ٣٠٪ من الوقت	-business
+# the zone floor and an amount outside a one-word verse
+﴿ خصم е ﴾	+business	+religious
+﴿ خصم ‰ ﴾	+business	+religious
+﴿ خصم ﴾ ٥٠٪	+business	+religious
+﴿ الكشف ﴾ ٣٠٠ والدكتور موجود	+business	+religious
+﴿ فما ربحت تجارتهم ﴾ والدكتور بيقول كلام مهم	-business	+religious
+# instalments, no interest, buy-one-get-one, fees per session, urgency
+ممكن اقساط بدون فوايد على كل العمليات	+business
+١٢ شهر بدون فوايد والدكتور موجود	+business
+قسطها على ١٢ شهر والدكتور موجود	+business
+ممكن تقسطها على ستة شهور	+business
+0% interest for twelve months	+business
+installments available for all packages	+business
+BOGO on all creams	+business
+اشتري ١ و خد ١ هدية النهارده	+business
+اشتري ٢ وخد ١ مجانا	+business
+consultation fee 500 and the follow up	+business
+it's 400 a session and you need six	+business
+الحق العرض قبل ما يخلص	+business
+interest-free installments	+business
+you can pay in installments	+business
+فوايد ٠٪ لمدة سنة	+business
+الاقساط متاحة على كل الباقات	+business
+عندنا اقساط على كل الاجهزة	+business
+no interest payments for 6 months	+business
+installments with no interest on all packages	+business
+easy installments on all devices	+business
+الأكل ده بدون فوايد	-business
+قعدت ٣ شهور من غير فايدة من العلاج	-business
+the patient has no interest in food	-business
+loss of interest in daily activities	-business
+اشتري ٢ علبة وخد واحدة الصبح	-business
+اشتري ٢ علبة وخد ١ كل يوم	-business
+الحقيقة العرض ده بيروح لوحده	-business
+عندك الحق العرض ده مقلق	-business
+الأكل ده زيرو فوايد	-business
