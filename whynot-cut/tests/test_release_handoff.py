@@ -488,6 +488,27 @@ class TestSecretScan(HandoffCase):
                                                 ".venv", "adobe/node_modules", "out/renders",
                                                 "whynot-cut/evals/results"]))
 
+    def test_only_the_pinned_tls_fixtures_are_let_through(self):
+        tls = "whynot-cut/tests/fixtures/brand_web/tls/"
+        real = Path(rel.ROOT)
+        self.assertEqual(sorted(rel.SECRET_FIXTURES), [tls + "localhost-cert.pem", tls + "localhost-key.pem"])
+        for path, pin in rel.SECRET_FIXTURES.items():           # the committed files ARE the pinned localhost pair
+            self.assertEqual(rel.sha256_file(real / path), pin, path)
+        self.assertIn("-----BEGIN CERTIFICATE-----", (real / tls / "localhost-cert.pem").read_text("ascii"))
+        self.assertIn("-----BEGIN PRIVATE KEY-----", (real / tls / "localhost-key.pem").read_text("ascii"))
+        d = self.tmp / "tree"
+        for f in (tls + "localhost-cert.pem", tls + "localhost-key.pem"):      # the real fixtures: let through
+            p = d / f
+            p.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(real / f, p)
+        for f in (tls + "other.pem", "whynot-cut/tests/fixtures/localhost-key.pem"):   # siblings: still caught
+            p = d / f
+            p.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(real / tls / "localhost-key.pem", p)
+        self.assertEqual(sorted(rel.scan_secrets(d)), [tls + "other.pem", "whynot-cut/tests/fixtures/localhost-key.pem"])
+        (d / tls / "localhost-key.pem").write_text("-----BEGIN PRIVATE KEY-----\nnot the fixture\n", encoding="ascii")
+        self.assertIn(tls + "localhost-key.pem", rel.scan_secrets(d))   # other bytes at a pinned path: caught
+
 
 class TestSampleClientMaker(HandoffCase):
     def test_the_fixture_gets_the_engine_ffmpeg_and_the_four_steps(self):

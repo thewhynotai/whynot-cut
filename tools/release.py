@@ -247,6 +247,15 @@ BINARY_SUFFIXES = {".zip", ".ccx", ".zxp", ".pdf", ".mp4", ".mov", ".png", ".jpg
 SECRET_DIRS = {".venv", "venv", "node_modules", "renders"}
 SECRET_SUFFIXES = {".env", ".pem", ".key", ".p12", ".pfx"}
 SECRET_NAMES = {".env", "id_rsa", "id_ed25519"}
+# Committed test fixtures that look like secrets by name but are not: the self-signed CN=localhost pair the TLS loopback
+# tests use (J-T1, 7548403). Exact paths AND pinned sha256: any other .pem/.key/..., or other bytes at these paths
+# (a real key dropped there later), still refuses the hand-off.
+SECRET_FIXTURES = {
+    "whynot-cut/tests/fixtures/brand_web/tls/localhost-cert.pem":
+        "cfd54269553bb1147da328bd38cf144cf08133f110a9c04a8a6e55939bc98082",
+    "whynot-cut/tests/fixtures/brand_web/tls/localhost-key.pem":
+        "35d30849ff34de47768526b689b7803fb284a6c7a8cc4de61e6914387c2c4c3a",
+}
 CLIENT_PATH_WORDS = ("whynot-test", "whynot clients")
 
 
@@ -444,6 +453,9 @@ def scan_secrets(root: Path) -> list:
         dirnames[:] = keep
         for f in sorted(filenames):
             low = f.lower()
+            pinned = SECRET_FIXTURES.get((rel_dir / f).as_posix())
+            if pinned and sha256_file(Path(dirpath) / f) == pinned:
+                continue
             if (low in SECRET_NAMES or low.startswith(".env.") or Path(low).suffix in SECRET_SUFFIXES
                     or "credentials" in low):
                 found.append((rel_dir / f).as_posix())
