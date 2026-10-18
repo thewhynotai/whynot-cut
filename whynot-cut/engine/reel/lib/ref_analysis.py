@@ -17,6 +17,7 @@ from pathlib import Path
 from .common import Paths, ffmpeg_exe, file_locked, log, run, write_json
 
 SHOWINFO_T = re.compile(r"pts_time:([0-9.]+)")
+SUMMARY_KEYS = ("video", "duration_s", "cut_count", "cuts_per_minute", "shot_stats", "first_cut_s", "contact_sheets")
 
 
 def detect_cuts(video: Path, threshold: float = 0.30) -> list[float]:
@@ -61,7 +62,9 @@ def loudness_envelope(video: Path, hop_ms: int = 100) -> list[float]:
     return [(-120.0 if v == "-inf" else float(v)) for v in vals]
 
 
-def analyze_reference(video: Path, out_dir: Path, duration_s: float) -> dict:
+def analyze_reference(video: Path, out_dir: Path, duration_s: float, root=None) -> dict:
+    """Measure one reference video into out_dir/<stem>/. With the client `root`, the paths it records are stored
+    root-relative (T4.5: a moved client keeps its analysis); the returned record holds the same stored form."""
     cuts = detect_cuts(video)
     bounds = [0.0] + cuts + [duration_s]
     shots = [round(b - a, 3) for a, b in zip(bounds, bounds[1:]) if b - a > 0.04]
@@ -96,6 +99,9 @@ def analyze_reference(video: Path, out_dir: Path, duration_s: float) -> dict:
         "contact_sheets": sheets, "cut_frames": [str(c) for c in cut_frames],
         "note": "Scene detection also fires on hard graphic/B-roll changes and big punch-ins.",
     }
+    if root is not None:
+        from . import client_db
+        client_db.stored(root, "reference_analysis/x/measurements.json", res)
     write_json(sheet_dir / "measurements.json", res)
     return res
 
@@ -105,6 +111,7 @@ def analyze_all(paths: Paths, refs: list[Path], durations: dict) -> dict:
     (cached by path, size and modification time) and every video's 01_analysis gets the summary. Ten reels from one
     episode no longer re-analyse the same references ten times. Without a video id (onboarding a client) only the
     client cache is written."""
+    import copy
     import json
     cache_dir = paths.output / "client_database" / "reference_analysis"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -113,17 +120,33 @@ def analyze_all(paths: Paths, refs: list[Path], durations: dict) -> dict:
         idx = json.loads(idx_f.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         idx = {}
+    if not isinstance(idx, dict):
+        idx = {}
+    from . import client_db
+    root = paths.root
+
+    def usable(hit) -> bool:
+        sheets = hit.get("contact_sheets") if isinstance(hit, dict) else None
+        return isinstance(sheets, list) and isinstance(hit.get("shot_durations_s"), list) and \
+            all(k in hit for k in SUMMARY_KEYS) and \
+            all(isinstance(s, str) and Path(client_db.resolve(root, s)).exists() for s in sheets)
     results = []
     for v in refs:
         st = Path(v).stat()
-        key = f"{Path(v).resolve()}|{st.st_size}|{int(st.st_mtime)}"
+        tail = f"|{st.st_size}|{int(st.st_mtime)}"
+        key = client_db.to_stored(root, str(Path(v).resolve())) + tail    # T4.5: root-relative, a moved client hits
         hit = idx.get(key)
-        if hit and all(Path(s).exists() for s in hit.get("contact_sheets", [])):
+        if not usable(hit):                     # an entry from before T4.5 (absolute key of this very file)
+            hit = idx.get(f"{Path(v).resolve()}{tail}")
+            hit = client_db.stored(root, "reference_analysis/cache.json", {key: copy.deepcopy(hit)})[key] \
+                if usable(hit) else None
+        if usable(hit):
             log(paths, f"Reference {v.name}: cached client analysis")
+            idx[key] = hit
             results.append(hit)
             continue
         log(paths, f"Analyzing reference {v.name}")
-        r = analyze_reference(v, cache_dir, durations.get(str(v), 0))
+        r = analyze_reference(v, cache_dir, durations.get(str(v), 0), root=root)
         idx[key] = r
         results.append(r)
     with file_locked(idx_f):          # T2.4: reels of one episode share this cache: merge, keep what others added
@@ -134,8 +157,7 @@ def analyze_all(paths: Paths, refs: list[Path], durations: dict) -> dict:
         write_json(idx_f, {**(cur if isinstance(cur, dict) else {}), **idx})
     agg_shots = [s for r in results for s in r["shot_durations_s"]]
     summary = {
-        "references": [{k: r[k] for k in ("video", "duration_s", "cut_count", "cuts_per_minute",
-                                          "shot_stats", "first_cut_s", "contact_sheets")} for r in results],
+        "references": [{k: r[k] for k in SUMMARY_KEYS} for r in results],
         "aggregate": {
             "cuts_per_minute_mean": round(statistics.mean([r["cuts_per_minute"] for r in results]), 2) if results else None,
             "shot_median_s": round(statistics.median(agg_shots), 2) if agg_shots else None,
@@ -145,4 +167,5 @@ def analyze_all(paths: Paths, refs: list[Path], durations: dict) -> dict:
     if paths.video_id:
         write_json(paths.p("01_analysis/reference_analysis") / "reference-measurements.json", summary)
     write_json(cache_dir / "reference-measurements.json", summary)
-    return summary
+    # the caller (the CLI lists the contact sheets to view) gets paths it can open; the files keep the stored form
+    return client_db.resolved(root, "reference_analysis/reference-measurements.json", copy.deepcopy(summary))

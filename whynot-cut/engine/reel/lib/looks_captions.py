@@ -508,8 +508,8 @@ def _t42_highlight(spec: dict) -> tuple | None:
 
 
 def _caption_fonts(paths, emphasis: str | None) -> tuple[dict, dict | None]:
-    from .common import read_json
-    typ = read_json(paths.client_db / "branding/typography.json", {}) or {}
+    from . import client_db
+    typ = client_db.load(paths, "branding/typography.json", {}) or {}
     chain = font_chain(typ, "caption")
     step = int(((looks.caption_catalog().get("emphasis") or {}).get("weight") or {}).get("step_weight", 200))
     heavy = font_chain(typ, "caption", weight_step=step) if emphasis == "weight" else None

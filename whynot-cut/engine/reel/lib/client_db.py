@@ -70,17 +70,20 @@ def image_palette(p: Path, n: int = 6) -> list[dict]:
 
 def font_info(p: Path) -> dict:
     from fontTools.ttLib import TTFont
-    f = TTFont(str(p), lazy=True)
-    name = f["name"]
+    with TTFont(str(p), lazy=True) as f:     # closed at once: an open font file can't be moved or copied on Windows
+        name = f["name"]
 
-    def nm(i):
-        r = name.getName(i, 3, 1, 0x409) or name.getName(i, 1, 0, 0)
-        return str(r) if r else None
-    cmap = f.getBestCmap() or {}
+        def get(i):
+            r = name.getName(i, 3, 1, 0x409) or name.getName(i, 1, 0, 0)
+            return str(r) if r else None
+        names = {i: get(i) for i in (1, 2, 4, 6, 16, 17)}
+        cmap = f.getBestCmap() or {}
+        weight = f["OS/2"].usWeightClass if "OS/2" in f else None
+        has_gsub = "GSUB" in f
+    nm = names.get
     arabic = sum(1 for c in cmap if 0x0600 <= c <= 0x06FF)
     latin = sum(1 for c in cmap if 0x41 <= c <= 0x7A)
     pres_forms = sum(1 for c in cmap if 0xFE70 <= c <= 0xFEFF)
-    weight = f["OS/2"].usWeightClass if "OS/2" in f else None
     installed = [str(d / p.name) for d in plat.font_dirs() if (d / p.name).exists()]
     if not installed and nm(6):
         hit = installed_postscript_names().get(nm(6))
@@ -88,7 +91,7 @@ def font_info(p: Path) -> dict:
     return {"file": str(p), "family": nm(1), "subfamily": nm(2), "full_name": nm(4),
             "postscript_name": nm(6), "typographic_family": nm(16), "typographic_subfamily": nm(17),
             "weight_class": weight, "arabic_glyphs": arabic, "latin_glyphs": latin,
-            "arabic_presentation_forms": pres_forms, "has_gsub": "GSUB" in f,
+            "arabic_presentation_forms": pres_forms, "has_gsub": has_gsub,
             "supports_arabic": arabic > 30, "supports_latin": latin >= 52,
             "installed_locations": installed, "installed": bool(installed)}
 
@@ -200,6 +203,7 @@ def build(paths: Paths, inventory: dict) -> dict:
         "roles": typ_over.get("roles", {}),
         "missing_or_uninstalled": [f["file"] for f in fonts if not f["installed"]],
         "notes": typ_over.get("notes", [])}
+    stored(paths.root, "branding/typography.json", typography)        # T4.5: paths relative to the client root
     write_json(db / "branding/typography.json", typography)
 
     # ---- images
@@ -223,6 +227,7 @@ def build(paths: Paths, inventory: dict) -> dict:
                     "Originals referenced in place; derivatives live in client_database/assets/derivatives.",
                     "No AI-generated likeness of the client without explicit approval.",
                     "Do not retouch or alter the client's appearance."]}
+    stored(paths.root, "asset-manifest.json", manifest)
     write_json(db / "asset-manifest.json", manifest)
     write_json(db / "assets/asset-manifest.json", manifest)
 
@@ -317,7 +322,7 @@ def inside_root(v: str, root: str, fold: bool | None = None, sep: str | None = N
     from . import client_move_paths as cmp
     fold = cmp.FOLD_CASE if fold is None else fold
     sep = os.sep if sep is None else sep
-    for a, b in ((v, root), (cmp.real(v), cmp.real(root))):
+    for a, b in ((v, root), (cmp.real(v), cmp.real(root))) if native_abs(v) else ((v, root),):
         a, b = _norm(a, sep, fold), _norm(b, sep, fold)
         if a == b or a.startswith(b + sep):
             return True
@@ -381,6 +386,161 @@ def load(paths, rel: str, default=None):
     doc = read_json(db / rel)
     if doc is None:
         return copy.deepcopy(default)
+    return resolved(root, rel, doc)
+
+
+def resolved(root, rel: str, doc):
+    """`doc` (the content of database file `rel`) with every path field made openable here (`resolve`), in place."""
     for spec in path_fields(rel):
         _walk(doc, spec, lambda v: resolve(root, v))
     return doc
+
+
+# --------------------------------------------------------------------------- writing portable paths (T4.5 part B)
+def _plain(s: str) -> str:
+    r"""Without the Windows extended-length prefix (\\?\C:\x, \\?\UNC\srv\share): realpath may hand it back."""
+    if s.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + s[8:]
+    return s[4:] if s.startswith("\\\\?\\") else s
+
+
+def native_abs(v: str) -> bool:
+    """Absolute in this computer's own form, so it may be followed through links (realpath): on macOS/Linux a Windows
+    value (`D:\\x`, `\\\\srv\\x`) is not, and realpath would glue it onto the working folder."""
+    import os
+    import sys
+    if sys.platform == "win32":
+        return os.path.isabs(v)
+    return v.startswith("/") and "\\" not in v and not re.match(r"^[A-Za-z]:", v)
+
+
+def _parts(s: str) -> list[str]:
+    import os
+    s = os.path.normpath(_plain(s).replace("\\", "/")).replace("\\", "/")
+    return [x for x in s.split("/") if x not in ("", ".")]
+
+
+def rel_under(v: str, base: str) -> str | None:
+    """The root-relative POSIX form of absolute `v` when it is under `base` (not `base` itself), else None. Name by
+    name, case folded where the file system folds it (FOLD_CASE), then once more on the real paths (a junction alias,
+    macOS /var vs /private/var). The tail keeps the stored value's own spelling."""
+    from . import client_move_paths as cmp
+    if not isinstance(v, str) or not v or is_relative(v):
+        return None
+    for a, b in ((v, str(base)), (cmp.real(v), cmp.real(base))) if native_abs(v) else ((v, str(base)),):
+        pa, pb = _parts(a), _parts(b)
+        fa, fb = ([x.casefold() for x in pa], [x.casefold() for x in pb]) if cmp.FOLD_CASE else (pa, pb)
+        if pb and len(pa) > len(pb) and fa[:len(pb)] == fb and ".." not in pa[len(pb):]:
+            return "/".join(pa[len(pb):])
+    return None
+
+
+def to_stored(root, v, old_roots=()):
+    """What a writer stores for path value `v`: root-relative POSIX when it is under the client root, or under one of
+    `old_roots` (the folder a client was moved from), or when its tail from an anchor folder exists under the root (a
+    copy made by hand); anything else is kept exactly as it is (a font in the OS font folder, a value we can't place)."""
+    if not isinstance(v, str) or not v.strip():
+        return v
+    if is_relative(v):
+        return "/".join(x for x in v.replace("\\", "/").split("/") if x not in ("", "."))
+    for base in (root, *old_roots):
+        r = rel_under(v, str(base))
+        if r:
+            return r
+    moved = resolve(root, v)
+    return (rel_under(moved, str(root)) or v) if moved != v else v
+
+
+def stored(root, rel: str, doc):
+    """`doc` (the content of database file `rel`) with every path field in its stored form, in place; returns it."""
+    for spec in path_fields(rel):
+        _walk(doc, spec, lambda v: to_stored(root, v))
+    return doc
+
+
+def _require_lock(root):
+    """Migration rewrites the client's database: only by the session that holds the client's writer lock (T1.8)."""
+    from . import writer_lock
+    from .errors import Guidance
+    rec = writer_lock.read(root) or {}
+    if not rec or rec.get("session_id") != writer_lock.session_id():
+        raise Guidance(f"the client database of {root} is rewritten only under the client's writer lock, and this "
+                       f"session doesn't hold it (nothing was written)",
+                       "run it through `reel` (a writing command takes the lock), or wait until the other session ends",
+                       where=str(writer_lock.lock_path(root)))
+
+
+def path_files(db) -> list[str]:
+    """The database files that carry paths and exist, relative to client_database/ (POSIX), in a fixed order."""
+    db = Path(db)
+    out = [r for r in PATH_FIELDS if "*" not in r and (db / r).is_file()]
+    ra = db / "reference_analysis"
+    if ra.is_dir():
+        out += sorted(f"reference_analysis/{d.name}/measurements.json" for d in ra.iterdir()
+                      if d.is_dir() and (d / "measurements.json").is_file())
+    return out
+
+
+def _rekey_cache(root, doc: dict, old_roots) -> dict:
+    """reference_analysis/cache.json keys are "<video>|<size>|<mtime>": the video part is stored like a path value. A
+    key that would collide with an existing one keeps the existing entry."""
+    out = {}
+    for k, v in doc.items():
+        p, sep, rest = str(k).partition("|")
+        nk = to_stored(root, p, old_roots) + sep + rest if sep else k
+        if nk in out and nk != k:
+            continue
+        out[nk] = v
+    return out
+
+
+def migrate(paths, old_roots=(), dry_run: bool = False) -> dict:
+    """Rewrite every path value of the client database in its stored (root-relative) form (T4.5 part B). Only under
+    the client's writer lock held by this session (`dry_run` reads only); each file atomically through linksafe (never
+    through a link), with its modification time kept (`reel next` compares times); a file with nothing to change is not
+    touched. Returns {"changed": [{file, values}], "unchanged", "kept_absolute": [{file, value}], "errors"}."""
+    import copy
+    import json
+    import os
+    from . import linksafe
+    from .errors import FileFormatError, Guidance
+    db = Path(paths) if isinstance(paths, (str, Path)) else Path(paths.client_db)
+    root = getattr(paths, "root", None) if not isinstance(paths, (str, Path)) else None
+    root = Path(root) if root else db.parent.parent
+    if not dry_run:
+        _require_lock(root)
+    rep = {"changed": [], "unchanged": [], "kept_absolute": [], "errors": []}
+    for rel in path_files(db):
+        f = db / rel
+        try:
+            doc = read_json(f)
+        except FileFormatError as e:
+            rep["errors"].append({"file": rel, "why": str(e)})
+            continue
+        new, n = copy.deepcopy(doc), [0]
+
+        def fn(v, rel=rel):
+            s = to_stored(root, v, old_roots)
+            if s != v:
+                n[0] += 1
+            elif isinstance(v, str) and v.strip() and not is_relative(v):
+                rep["kept_absolute"].append({"file": rel, "value": v})
+            return s
+        for spec in path_fields(rel):
+            _walk(new, spec, fn)
+        if rel == "reference_analysis/cache.json" and isinstance(new, dict):
+            new = _rekey_cache(root, new, old_roots)
+        if new == doc:
+            rep["unchanged"].append(rel)
+            continue
+        if not dry_run:
+            try:
+                st = os.stat(f)
+                linksafe.replace_atomic(f, root, (json.dumps(new, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+                                        within="output/client_database")
+                os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+            except (Guidance, OSError) as e:
+                rep["errors"].append({"file": rel, "why": str(e)})
+                continue
+        rep["changed"].append({"file": rel, "values": n[0]})
+    return rep
