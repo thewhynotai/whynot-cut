@@ -137,6 +137,9 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
       `docs/superpowers/evidence/2026-10-1x-m1-*.md` (T53), and, if needed, `tools/eval_transcripts.py` with
       `tests/test_eval_transcripts*.py` (T57). The `evals/_fixtures/example-clinic.sh` hunk and the profile-schema
       `latin_backmap` hunk arrive as patches.
+      **Task 29 (R-4.7, plan ruling 2026-10-19):** `lib/emphasis.py`, `lib/endings.py`, `tests/test_emphasis*.py`, `tests/test_endings*.py`,
+      `tests/fixtures/emphasis/**`. The run-time `01_analysis/emphasis.json` and `face-samples.json` are written only by emphasis.py. The cli, plan, cut_proposals,
+      motion.json and emphasis.json hunks arrive as patches.
     - **Builder B (Addendum L session):** BL-15 (`lib/lead_steps.py`, `tests/test_lead_token*.py`), then BL-01 paths.
     - **Lane 1 and lane 2 paths:** go to whoever holds the claim in `D:\ClaudeData\claude-api-lane\claims\S1-<item>.claim`
       or `<BL-id>.claim`. The executor holds S1-T4.8 (`lib/intake_warnings.py`, `tests/test_t48_intake_warnings.py`) and
