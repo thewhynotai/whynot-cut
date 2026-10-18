@@ -201,7 +201,7 @@ def execute(paths: Paths, jsx: Path, timeout: int = 900) -> dict:
     aep = paths.p(f"04_after_effects/project/{paths.video_id}_{project_prefix()}_GFX.aep")
     t0 = time.time()
     res = run_after_effects(jsx, timeout, done=lambda: aep.exists() and aep.stat().st_mtime >= t0 - 1)
-    if res.get("status") in ("UNSUPPORTED", "REFUSED"):      # nothing ran: keep the precise status (T2.16)
+    if res.get("status") in ("UNSUPPORTED", "REFUSED", "SCRIPT_STAGE_FAILED"):   # nothing ran: keep the precise status
         return dict(res, ok=False)
     res["aep_exists"] = aep.exists()
     # existence is not evidence: a copied/older .aep must not count. Require a save during THIS run.

@@ -355,7 +355,12 @@ class TestScriptDriverLock(TempDir):
                    mock.patch.object(plat, "sandbox_refusal", lambda what, *t: None),
                    mock.patch.object(plat, "IS_MAC", False),
                    mock.patch.object(adobe_run.subprocess, "Popen",
-                                     ae_launch_stub(lambda argv, **kw: self.launched.append(argv)))]
+                                     ae_launch_stub(lambda argv, **kw: self.launched.append(argv))),
+                   # these tests are about the lock, not the -r path: on a machine whose temp folder has a space
+                   # or Arabic letters the (missing) x.jsx would otherwise go to the copy route
+                   # (tests/test_adobe_run_paths.py covers that route)
+                   mock.patch.object(adobe_run, "stage_script",
+                                     lambda jsx, keep_until: (None, str(Path(os.path.abspath(jsx)))))]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)

@@ -668,7 +668,8 @@ class TestBridgeNoReplyIsNotFinished(_Tmp):
 # ------------------------------------------------------------------------------------------- Gate 2 G1 (review D)
 class TestAsciiAeStage(_Tmp):
     """D1: an Arabic Windows user name makes %TEMP% non-ASCII too: the aerender stage then goes to the engine home
-    (when ASCII), %ProgramData%/WhyNotCut/tmp, %SystemDrive%/WhyNotCut-tmp, or the 8.3 short form of %TEMP%."""
+    (when ASCII), %ProgramData%/WhyNotCut/tmp (when no link and not another account's), or the 8.3 short form of
+    %TEMP%. Never a folder at the root of the system drive (Authenticated Users may modify one made there)."""
 
     ARABIC_TEMP = r"C:\Users\يونس\AppData\Local\Temp"
 
@@ -681,9 +682,7 @@ class TestAsciiAeStage(_Tmp):
         from lib import ae_render
         roots = ae_render.ascii_stage_roots(temp=self.ARABIC_TEMP, home=self.tmp / "eng", environ=self.env(),
                                             short_path=lambda p: None)
-        self.assertEqual(roots[0], self.tmp / "eng" / "tmp")
-        self.assertEqual(roots[1], self.tmp / "ProgramData" / "WhyNotCut" / "tmp")
-        self.assertEqual(roots[2], self.tmp / "sysdrive" / "WhyNotCut-tmp")
+        self.assertEqual(roots, [self.tmp / "eng" / "tmp", self.tmp / "ProgramData" / "WhyNotCut" / "tmp"])
 
     def test_non_ascii_home_skipped_short_path_last(self):
         from lib import ae_render

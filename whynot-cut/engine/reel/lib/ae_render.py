@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -68,11 +69,113 @@ def _short_path(p) -> str | None:
         return None
 
 
+FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+_WIN_LOCAL_SYSTEM_SID, _WIN_BUILTIN_ADMINISTRATORS_SID = 22, 26      # WELL_KNOWN_SID_TYPE
+
+
+def _is_reparse(p) -> bool:
+    """A link of any kind (symbolic link, junction, mount point), judged without following it."""
+    try:
+        st = os.lstat(p)
+    except OSError:
+        return False
+    return stat.S_ISLNK(st.st_mode) or bool(getattr(st, "st_file_attributes", 0) & FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _owner_trusted(p) -> bool:
+    """Windows: the folder's owner (GetNamedSecurityInfoW, OWNER_SECURITY_INFORMATION) is this process's user (the
+    token user SID), SYSTEM or the Administrators group. Any failure counts as untrusted. Elsewhere True (the
+    shared-folder routes are Windows-only)."""
+    if not plat.IS_WIN:
+        return True
+    try:
+        import ctypes
+        from ctypes import wintypes
+        adv = ctypes.WinDLL("advapi32", use_last_error=True)
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        PV = ctypes.c_void_p
+        adv.GetNamedSecurityInfoW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD, ctypes.POINTER(PV),
+                                              ctypes.POINTER(PV), ctypes.POINTER(PV), ctypes.POINTER(PV),
+                                              ctypes.POINTER(PV)]
+        adv.GetNamedSecurityInfoW.restype = wintypes.DWORD
+        adv.IsWellKnownSid.argtypes, adv.IsWellKnownSid.restype = [PV, ctypes.c_int], wintypes.BOOL
+        adv.EqualSid.argtypes, adv.EqualSid.restype = [PV, PV], wintypes.BOOL
+        adv.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+        adv.OpenProcessToken.restype = wintypes.BOOL
+        adv.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, PV, wintypes.DWORD,
+                                            ctypes.POINTER(wintypes.DWORD)]
+        adv.GetTokenInformation.restype = wintypes.BOOL
+        k32.GetCurrentProcess.argtypes, k32.GetCurrentProcess.restype = [], wintypes.HANDLE
+        k32.CloseHandle.argtypes, k32.CloseHandle.restype = [wintypes.HANDLE], wintypes.BOOL
+        k32.LocalFree.argtypes, k32.LocalFree.restype = [PV], PV
+        owner, sd = PV(), PV()
+        # SE_FILE_OBJECT = 1, OWNER_SECURITY_INFORMATION = 1
+        if adv.GetNamedSecurityInfoW(str(p), 1, 1, ctypes.byref(owner), None, None, None, ctypes.byref(sd)) != 0:
+            return False
+        try:
+            if not owner.value:            # FAT/exFAT, or a descriptor without an owner: nothing to trust
+                return False
+            if adv.IsWellKnownSid(owner, _WIN_LOCAL_SYSTEM_SID) or \
+                    adv.IsWellKnownSid(owner, _WIN_BUILTIN_ADMINISTRATORS_SID):
+                return True
+            tok = wintypes.HANDLE()
+            if not adv.OpenProcessToken(k32.GetCurrentProcess(), 0x0008, ctypes.byref(tok)):   # TOKEN_QUERY
+                return False
+            try:
+                n = wintypes.DWORD()
+                adv.GetTokenInformation(tok, 1, None, 0, ctypes.byref(n))                     # TokenUser: size
+                buf = ctypes.create_string_buffer(n.value)
+                if not n.value or not adv.GetTokenInformation(tok, 1, buf, n, ctypes.byref(n)):
+                    return False
+                user_sid = ctypes.cast(buf, ctypes.POINTER(PV))[0]     # TOKEN_USER.User.Sid
+                return bool(adv.EqualSid(owner, user_sid))
+            finally:
+                k32.CloseHandle(tok)
+        finally:
+            k32.LocalFree(sd)
+    except Exception:  # noqa: BLE001  (the call failed: do not trust the folder)
+        return False
+
+
+def folder_trust_problem(folders) -> str | None:
+    """None when each existing folder in `folders` is a plain folder (no link) owned by this account, SYSTEM or the
+    Administrators; else why not. Such a folder under a place every account may write (%ProgramData%) could otherwise
+    have its files swapped by another user before an Adobe app runs them as this one. A folder not made yet is fine:
+    this account makes it on use."""
+    for f in folders:
+        if not os.path.lexists(f):
+            continue
+        if _is_reparse(f):
+            return f"{f} is a link (reparse point)"
+        if not _owner_trusted(f):
+            return f"{f} is owned by another account"
+    return None
+
+
+def program_data_tmp(environ=None) -> Path | None:
+    """%ProgramData%/WhyNotCut/tmp (Windows), else None: a machine folder outside the user profile, so it stays ASCII
+    when an Arabic user name puts the profile (and an engine home inside it) out of reach of narrow command lines."""
+    env = os.environ if environ is None else environ
+    return Path(env["ProgramData"]) / "WhyNotCut" / "tmp" if env.get("ProgramData") else None
+
+
+def _trust_chain(root, environ=None) -> list:
+    """The folders of a stage root that need folder_trust_problem: WhyNotCut and tmp for %ProgramData%'s (every
+    account may create folders there); none for the others (the engine home and %TEMP% are the user's own)."""
+    pd = program_data_tmp(environ)
+    if pd is not None and os.path.normcase(os.path.abspath(root)) == os.path.normcase(os.path.abspath(pd)):
+        return [pd.parent, pd]
+    return []
+
+
 def ascii_stage_roots(temp=None, home=None, environ=None, short_path=_short_path) -> list[Path]:
     """Folders where the aerender stage may go, ASCII only, in order: the temp folder when it is ASCII; else (an
-    Arabic Windows user name puts %TEMP% under C:/Users/<name>) the engine home's tmp/, %ProgramData%/WhyNotCut/tmp,
-    %SystemDrive%/WhyNotCut-tmp, then the 8.3 short form of %TEMP%. Each is created on use; one that cannot be is
-    skipped."""
+    Arabic Windows user name puts %TEMP% under C:/Users/<name>) the engine home's tmp/ (the user's own: not checked,
+    as in adobe_run), %ProgramData%/WhyNotCut/tmp unless a part of it already there is a link or another account's
+    (folder_trust_problem, checked again by stage_ascii after mkdir), then the 8.3 short form of %TEMP%; with none,
+    stage_ascii refuses with a how. Never a folder at the root of the system drive: one made there inherits
+    Authenticated Users: Modify, so another account could swap the staged project (no owner check can see that).
+    Each is created on use; one that cannot be is skipped."""
     temp = str(temp if temp is not None else tempfile.gettempdir())
     if temp.isascii():
         return [Path(temp)]
@@ -83,10 +186,9 @@ def ascii_stage_roots(temp=None, home=None, environ=None, short_path=_short_path
         except Exception:  # noqa: BLE001
             home = None
     roots = [Path(home) / "tmp"] if home is not None else []
-    if env.get("ProgramData"):
-        roots.append(Path(env["ProgramData"]) / "WhyNotCut" / "tmp")
-    drive = env.get("SystemDrive") or "C:"
-    roots.append(Path(drive + "\\" if drive.endswith(":") else drive) / "WhyNotCut-tmp")
+    pd = program_data_tmp(env)
+    if pd is not None and folder_trust_problem(_trust_chain(pd, env)) is None:
+        roots.append(pd)
     sp = short_path(temp)
     if sp:
         roots.append(Path(sp))
@@ -108,6 +210,10 @@ def stage_ascii(aep: Path, out: Path | None = None) -> tuple[Path | None, Path, 
         tried.append(str(root))
         try:
             Path(root).mkdir(parents=True, exist_ok=True)
+            bad = folder_trust_problem(_trust_chain(root))      # again after mkdir: it may have been made meanwhile
+            if bad:
+                tried[-1] += f" ({bad})"
+                continue
             stage = Path(tempfile.mkdtemp(prefix="whynot-aerender-", dir=str(root)))
             break
         except OSError:

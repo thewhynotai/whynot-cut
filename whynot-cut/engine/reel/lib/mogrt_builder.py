@@ -59,7 +59,7 @@ def build(paths: Paths, timeout: int = 600) -> dict:
     p = run_after_effects(jsx, timeout, done=lambda: all(valid_mogrt(d0 / f"NH_{k}.mogrt", t0) for k in MOGRTS))
     if p.get("status") == "UNSUPPORTED":
         return {"status": "UNSUPPORTED", "ok": False, "msg": "After Effects not installed", "jsx": str(jsx)}   # T2.16
-    if p.get("status") == "REFUSED":
+    if p.get("status") in ("REFUSED", "SCRIPT_STAGE_FAILED"):    # nothing ran: keep the reason
         return dict(p, ok=False, jsx=str(jsx))
     d = mogrt_dir(paths)
     fresh = {k: valid_mogrt(d / f"NH_{k}.mogrt", t0) for k in MOGRTS}
@@ -67,6 +67,7 @@ def build(paths: Paths, timeout: int = 600) -> dict:
            "mogrts_written_this_run": fresh, "missing": [k for k, v in fresh.items() if not v],
            "status": "MOGRTS_CREATED" if all(fresh.values()) else ("PARTIAL" if any(fresh.values()) else "FAILED"),
            "elapsed_s": round(time.time() - t0, 1), "at": now_iso()}
+    res.update({k: p[k] for k in ("script_copy_used", "script_copy_kept_until") if k in p})   # the -r copy
     if res["status"] != "MOGRTS_CREATED":
         res["ok"] = False       # PARTIAL: some templates are missing - a failed build (exit 1), not exit 0 (Gate 2 minor)
     write_json(d / "mogrt-build-result.json", res)
