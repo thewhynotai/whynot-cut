@@ -129,6 +129,22 @@ Phase 4 (from 2026-10-16, after Gate 3 / v3.0.0-p3.1):
     `lib/looks_captions.py`, `tests/test_t45_*.py`, `tests/fixtures/t45/**`; cli, plan, previews, ae_builder and
     motion_plan hunks arrive as patches.
   - API backlog BL-15 (2026-10-18, lead-step approval token): `lib/lead_steps.py`, `tests/test_lead_token*.py`; guard.py and cli.py hunks arrive as patches.
+  - **PAUSE WINDOW 2026-10-18 11:00 → 31 Oct 22:00 (API lanes STOPPED at 10:41; roadmap Stage 1 "Pause window").** Until
+    the hand-back, these owners replace the lanes. On 31 Oct the executor gives the files back here before the guard
+    lifts the lanes' STOP on 1 Nov.
+    - **Builder A (Addenda K+M session):** every lane-4 path above, plus `tests/test_token_report*.py`,
+      `tests/fixtures/token_report/**`, `tests/test_latin_backmap*.py`, `config/defaults/latin-terms.json` (new, T55),
+      `docs/superpowers/evidence/2026-10-1x-m1-*.md` (T53), and, if needed, `tools/eval_transcripts.py` with
+      `tests/test_eval_transcripts*.py` (T57). The `evals/_fixtures/example-clinic.sh` hunk and the profile-schema
+      `latin_backmap` hunk arrive as patches.
+    - **Builder B (Addendum L session):** BL-15 (`lib/lead_steps.py`, `tests/test_lead_token*.py`), then BL-01 paths.
+    - **Lane 1 and lane 2 paths:** go to whoever holds the claim in `D:\ClaudeData\claude-api-lane\claims\S1-<item>.claim`
+      or `<BL-id>.claim`. The executor holds S1-T4.8 (`lib/intake_warnings.py`, `tests/test_t48_intake_warnings.py`) and
+      S1-Task25 (`lib/cut_proposals.py`, `lib/safety/takes.py`, `tests/test_safety_takes.py`,
+      `tests/test_safety_meaning_round3b.py`, `tests/fixtures/safety/kt7/**`).
+    - **BL-16** (safe ASCII engine home): `lib/portability.py`, new `lib/home_acl.py`, `tests/test_home_acl*.py`,
+      `tests/test_portability.py`, `skills/setup/references/platform-setup.md`; setup_env, runtime and ae_render arrive as
+      patches.
   - **ONE writer per shared file (2026-10-17, ownership audit; this overrides any grant above):**
     - executor is the only committer of `lib/plan.py`, `config/defaults/style.json`, `lib/qc.py`, `lib/previews.py`,
       `lib/handoff.py`, `lib/ps_builder.py`, `lib/publish.py`. Every other owner (Adobe T4.1/T4.6, lanes, wnc-queue swaps,
