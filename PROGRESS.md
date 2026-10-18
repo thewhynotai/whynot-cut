@@ -47,18 +47,19 @@ security line. Each row is OPEN until it is accepted and pushed.
 | T4.3 learning loop | lane 2 | committed b399ed2 (rules_loop + 77 tests; hooks in lane2\hooks\T43); Opus review requested by the executor against the 7-point OWNER UPGRADE |
 | T4.5 part B (relative paths, client-move/clone, guard ratchet) | API backlog BL-14 | swaps done (87b2228, cf31580); part B open |
 | T4.6 music in motion videos | Adobe | in progress (hunks in the tree) |
-| T4.8 early warnings | lane 1 | committed fca6d25; review PASS-WITH-MINORS (round 1): minors back to lane 1 |
-| T4.15 `reel clean` | lane 1 | committed 36cd6ad; review pending; executor rulings on Q1–Q5 posted |
+| T4.8 early warnings | lane 1 → executor | fix 1 committed 8c12875 (mutants 28/28); fresh Opus review running; then the hook patch (`work\t48-fix1\patch`) |
+| T4.15 `reel clean` | lane 1 → executor | committed 36cd6ad; fix round building (`work\t415-fix1`) on the Q1–Q5 rulings |
 | Task 18 licence files + SPDX headers | BL-02 (files + tool); executor applies headers at the gate | open |
 | Task 22 GPL / trademark notices | BL-03 | open |
-| Task 25 cut proposals + K-T7 | lane 2 | b563d74 review FAIL (round 3) → ESCALATED; executor ruling 10:25: one final bounded round 4 on the parked patch (narrow cut-off exemption; `domain: null` fails closed; default stays in code) |
+| Task 25 cut proposals + K-T7 | lane 2 → executor (subscription) | round 4 committed **a31ae0c** (the symmetric ruling-2 rule accepted by the owner, numbers.py glued prefixes + short units, mut 21/21); fresh Opus review running; final bounded round |
 | K1 follow-ups (K-T2 sheet, K-T4 qc line, K-T5 unit) | lane 2 | committed 008257b; review PASS-WITH-MINORS: minors back to lane 2 |
-| Task 26 fix (two cameras' C0001.MP4) | lane 1 | 0cd67d7 review PASS-WITH-MINORS (round 3) → ESCALATED; executor ruling 10:25: one final bounded round (failure-path deletes through linksafe, race → `changed`, N15 test); then P3 minors accepted |
+| Task 26 fix (two cameras' C0001.MP4) | lane 1 → executor (subscription) | final round **3b587ee**, review PASS-WITH-MINORS (0 P1/P2, 6 P3 accepted) → CLOSED once the full suite runs |
+| **Task 26 conform wiring** (plan session 2026-10-18: a feature the editor can't reach isn't done): `media.py.patch` (preflight measure/decide + the bilingual lines) + the conform step after intake (`media_normalise.conform` into `00_inputs/intermediates`; Premiere imports the copy: the ppro_build hunk is the Adobe track's) + the sequence fps from `real_fps` | executor (build) + Adobe (ppro_build hunk) | open, before the tag, own fresh review; spec `D:\ClaudeData\claude-api-lane\hooks\t26\README.md` |
 | Task 29 emphasis + endings | lane 2 | waits for T4.1 |
 | Tasks 50–60 (Addendum M Gate 4 list) | lane 4 | 50: 4babf5e PWM (round 3) → ESCALATED; ruling: one final bounded round (bare prices mid-sentence, «عرض … ٪», zone floor, mutants), then P3 minors accepted. 51 accepted with follow-ups. 52 patch set v2 owed. 54: bdbfe06 in review; design ruling = structural rule A + unit list B. 53, 55–60 queued |
 | K-T2 / K-T7 hooks, K-T1 guard test | executor (apply) | K-T2 `cli.py` hunk next (accel.py.patch dropped, SITE_LANES stays cpu); K-T7 hooks wait for the Task 25 close |
 | Task 23 / Task 28 hooks, T4.5 plan.py swaps | executor (apply) | Task 23 47a8b41 and swaps cf31580 committed; Task 28 hooks being applied |
-| Manual verse slot (replaces cancelled K-T8): the plugin never writes Quran text on screen; a recited verse gets an empty caption span, a Premiere marker «آية: يضيفها المونتير يدويًا» and a NEEDS-YOU line | executor | open, before the tag |
+| Manual verse slot (replaces cancelled K-T8): the plugin never writes Quran text anywhere (on screen, marker comments, NEEDS-YOU, logs); a recited verse gets an empty caption span, a Premiere marker «آية: يضيفها المونتير يدويًا» (comment = timecodes + cue phrase) and a NEEDS-YOU line; also fixes needs_you's business/ai → medical approver bug and adds the schema kinds | executor | building (Opus subagent, brief `work\manual-verse\BRIEF.md`), before the tag |
 | BL-01 read-once hook, BL-04 run-state/resume | API backlog | open |
 | **BL-15 lead-step approval token** (engine refuses a lead-only step unless the guard saw that exact plain lead call: the real fix for the subagent guard hole; guard commits 42a675b + a2dcf71 = review FAIL, improvement, not counted) | API backlog (design by executor) | open |
 | L-T8 engine write gate (client sources; ~190 call sites) | executor | spec says Gate 5 (Addendum L table); not on the Gate 4 line |
