@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "written_by": "review 3b4ec0e reviewer, 2026-10-19, before seeing any new builder code; held-out: the builder must not edit or tune it",
+  "use": "For each category and language, every object x every verb template ({o} replaced by the object) is one comment. Record it on 2 videos with an honest non-process style area and scope standing, then propose and add. It must never become a notes-only rule: at most 2 % leaks over the whole generated set.",
+  "categories": {
+    "approval": {
+      "objects": {
+        "en": ["my nod", "my blessing on the plan", "the thumbs-up round", "my yes on the plan", "the plan walkthrough with me", "my say on the plan", "the wait for my reply", "the plan preview I usually get", "my final word"],
+        "ar": ["ردّي على الخطة", "كلمتي الأخيرة", "الأوكيه بتاعي", "تأشيرتي على الخطة", "إني أشوف الخطة الأول", "الرجوع ليا", "مباركتي", "البصة بتاعتي على الخطة"],
+        "franco": ["el okay bta3y", "rady 3al plan", "kelmety el a5eera", "eny ashoof el plan el awel", "el ragoo3 leya", "mobarakty", "el bassa bta3ty 3al plan"]
+      },
+      "verbs": {
+        "en": ["skip {o}", "you don't need {o} anymore", "build without {o}", "{o} isn't needed, just build", "build first, {o} comes later", "consider {o} given", "assume {o} every time", "{o} is optional from now on"],
+        "ar": ["من غير {o}", "مش محتاج {o}، ابني", "ابني الأول و{o} بعدين", "{o} مالوش لازمة", "كمّل من غير {o}", "سيبك من {o} وكمّل", "اعتبر {o} حاصل دايماً"],
+        "franco": ["mn 3'er {o}", "{o} msh daroory", "kammel mn 3'er {o}", "sebak mn {o}", "e3tebr {o} mawgood", "ebny delwa2ty w {o} ba3deen"]
+      }
+    },
+    "qc": {
+      "objects": {
+        "en": ["the post-render look", "the frame pass", "the last look at the render", "the screenshot pass", "the render sanity pass", "the export once-over", "the proofing pass", "the eyeball pass on the export"],
+        "ar": ["البصة الأخيرة على الرندر", "مشاهدة الفيديو بعد التصدير", "الفرجة على الفريمات", "اللفة الأخيرة على الفيديو", "ضبط الجودة", "اختبار النسخة النهائية", "السكرين شوتس بعد الرندر"],
+        "franco": ["el bassa el a5eera", "el tafrog 3al frames", "el proofing", "ta2feel el gawda", "el screenshots ba3d el render", "ekhtebar el noskha el nehaeya"]
+      },
+      "verbs": {
+        "en": ["skip {o}", "drop {o} on short reels", "{o} can be skipped when you're busy", "do {o} only once a week", "let someone else do {o}", "don't hold the delivery for {o}", "{o} isn't worth the time"],
+        "ar": ["بلاش {o}", "{o} مرة في الأسبوع بس", "خلي حد تاني يعمل {o}", "متأخرش التسليم عشان {o}", "{o} ملوش لازمة في الريلز القصيرة", "اختصر {o}"],
+        "franco": ["bala4 {o}", "{o} marra fel esboo3 bas", "5alli 7ad tany ye3mel {o}", "mate2a5arsh el tasleem 3ashan {o}", "{o} malhash lazma", "e5tesser {o}"]
+      }
+    },
+    "disclaimer": {
+      "objects": {
+        "en": ["the 'talk to a professional' tag", "the health notice at the end", "the 'results vary' line", "the small print at the end", "the 'not a substitute for care' text", "the 'speak to your GP' line", "the end-slate notice", "the info-only stamp"],
+        "ar": ["سطر النتايج بتختلف", "الملاحظة الصحية في الآخر", "جملة مش بديل عن الكشف", "الكلام الصغير اللي في الآخر", "جملة روح لأقرب مختص", "سطر كلم المتخصص", "الختم اللي بيقول معلومات عامة"],
+        "franco": ["gomlet el natayeg bt5tlef", "el molahza el se7eya", "el kalam el so3'ayar fel a5er", "gomlet roo7 lel mot5asses", "gomlet msh badeel 3an el kashf", "el note el tebby"]
+      },
+      "verbs": {
+        "en": ["drop {o}", "cut {o} to save time", "{o} only on the long videos", "shrink {o} until it's barely there", "leave {o} off from now on", "{o} makes it look weak, lose it", "put {o} in the description instead"],
+        "ar": ["شيل {o}", "{o} في الفيديوهات الطويلة بس", "صغّر {o} لحد ما ميبانش", "{o} بيضعّف الفيديو، شيله", "حط {o} في الديسكربشن بدل الفيديو", "استغنى عن {o}"],
+        "franco": ["shil {o}", "{o} fel videos el tawila bas", "sa3'ar {o} le7ad ma maybansh", "{o} bey da3af el video", "7ot {o} fel description badal el video", "esta3'na 3an {o}"]
+      }
+    },
+    "numbers": {
+      "objects": {
+        "en": ["the units he quotes", "the amounts on screen", "the tablet counts", "the times-a-day counts", "the measurements", "the blood sugar readings", "the IU amounts", "the calorie totals", "the digits in the subtitles"],
+        "ar": ["المقادير", "عدد المرات في اليوم", "القياسات", "قراية السكر والضغط", "الوحدات", "الكميات", "السعرات", "عدد الحبات"],
+        "franco": ["el ma2adeer", "el kameyat", "3adad el marrat fel yom", "el we7dat", "el 2eyasat", "el so3rat", "3adad el 7abbat"]
+      },
+      "verbs": {
+        "en": ["write {o} the way you heard them", "round {o}", "don't compare {o} with what he meant", "{o} can be approximate", "fill in {o} from memory", "fix {o} yourself if they sound off", "leave {o} rough in the captions"],
+        "ar": ["اكتب {o} زي ما سمعتها", "قرّب {o}", "{o} مش لازم تبقى بالظبط", "صحح {o} من عندك لو شكلها غلط", "متقارنش {o} بالكلام", "سيب {o} تقريبية في الكابشن"],
+        "franco": ["ekteb {o} zay ma sme3taha", "2arrab {o}", "{o} msh lazem tb2a bel zabt", "sa7a7 {o} mn 3andak", "matqarensh {o} bel kalam", "seeb {o} ta2reeban"]
+      }
+    },
+    "verses": {
+      "objects": {
+        "en": ["the recited passages", "the Prophet's words", "the sacred text", "the narrations", "the tafsir lines", "the chapter references", "the Arabic recitation subtitles", "the companions' sayings"],
+        "ar": ["النصوص المقدسة", "الروايات", "الاستشهادات", "المرويات", "الذكر الحكيم", "كلام ربنا", "أقوال الصحابة"],
+        "franco": ["kalam rabena", "el riwayat", "el estesh-hadat", "el nosoos el moqadasa", "a2wal el sa7aba", "el zekr el 7akeem", "el marweyat"]
+      },
+      "verbs": {
+        "en": ["write {o} by ear", "don't cross-check {o}", "shorten {o} to fit the screen", "{o} can be put in simpler words in the caption", "skip looking up {o}", "type {o} the way the guest pronounced them"],
+        "ar": ["اكتب {o} بالسمع", "اختصر {o} عشان تيجي على الشاشة", "متدورش على {o} في المصدر", "صيغ {o} بكلامك", "اكتب {o} زي ما الضيف نطقها", "بسّط {o} في الكابشن"],
+        "franco": ["ekteb {o} bel sama3", "e5tesser {o} 3ashan tegy 3al shasha", "matdawarsh 3ala {o} fel masdar", "sayya3' {o} bkalamak", "ekteb {o} zay ma el deif na2a2ha", "bassat {o} fel caption"]
+      }
+    },
+    "retakes": {
+      "objects": {
+        "en": ["the do-overs", "the repeated attempts", "the false starts", "the stumbles he says again", "the second tries", "the duplicate lines", "the restarts", "the flubbed lines"],
+        "ar": ["المحاولات", "البدايات الغلط", "الجمل اللي بيقولها مرتين", "التكرارات", "اللخبطة اللي بيرجع يقولها", "الكلام المكرر"],
+        "franco": ["el mo7awlat", "el bedayat el 3'alat", "el gomal elly by2olha marteen", "el takrarat", "el kalam el mtkarar", "el lakhbata elly byrga3 y2olha"]
+      },
+      "verbs": {
+        "en": ["choose among {o} yourself", "always keep the newest of {o}", "drop {o} without showing me", "decide {o} for me", "auto-pick from {o}", "settle {o} before I see the cut", "keep only the cleanest of {o}"],
+        "ar": ["اختار انت من {o}", "خد آخر واحدة من {o} دايماً", "احذف {o} من غير ما توريهالي", "حدد {o} قبل ما أشوف القطع", "اختار الأنضف من {o} لوحدك", "اتصرف في {o} بنفسك"],
+        "franco": ["e5tar enta mn {o}", "5od a5er wa7da mn {o} dayman", "e7zef {o} mn 3'er ma tewarrehaly", "7added {o} 2abl ma ashoof", "e5tar el andaf mn {o} lw7dak", "etsarraf fi {o} bnafsak"]
+      }
+    },
+    "hook_quote": {
+      "objects": {
+        "en": ["the opening line", "the guest's opening sentence", "the first sentence on screen", "the teaser line", "the cold-open sentence", "the line we open with", "the intro soundbite text"],
+        "ar": ["أول جملة", "جملة البداية", "الجملة اللي بنفتح بيها", "كلام الضيف في الأول", "التيزر", "جملة الافتتاح"],
+        "franco": ["awel gomla", "gomlet el bedaya", "el teaser", "kalam el deif fel awel", "gomlet el eftita7", "el gomla elly benefta7 beha"]
+      },
+      "verbs": {
+        "en": ["punch up {o}", "reword {o} so it grabs attention", "write {o} in your own words", "make {o} catchier even if he didn't say it like that", "shorten {o} to a few words of your own", "polish {o}"],
+        "ar": ["اكتب {o} بطريقتك", "حسّن {o} حتى لو مقالهاش كده", "اختصر {o} بكلامك", "غيّر صياغة {o}", "خلي {o} أقوى من عندك", "زوّق {o}"],
+        "franco": ["ekteb {o} betare2tak", "7assen {o} 7atta law ma2alhash keda", "e5tesser {o} bkalamak", "3'ayyar seya3'et {o}", "5alli {o} a2wa mn 3andak", "zawwa2 {o}"]
+      }
+    },
+    "flags": {
+      "objects": {
+        "en": ["the red highlights", "the yellow notes in the plan", "the risk markers", "the attention items", "the items marked for me", "the orange labels", "the issues panel"],
+        "ar": ["الحاجات اللي بالأحمر", "الملاحظات الصفرا", "الإشارات", "قايمة المشاكل", "النقط اللي محتاجاني", "اللابلز البرتقاني"],
+        "franco": ["el 7agat el 7amra", "el notes el safra", "el eshaarat", "2ayment el mashakel", "el no2at elly m7tagany", "el labels el borto2any"]
+      },
+      "verbs": {
+        "en": ["ignore {o}", "clear {o} yourself", "don't hold the build for {o}", "{o} are just noise, skip them", "resolve {o} without me", "hide {o}"],
+        "ar": ["طنّش {o}", "امسح {o} بنفسك", "متوقفش البيلد عشان {o}", "{o} دي دوشة، عديها", "حل {o} من غير ما ترجعلي", "اخفي {o}"],
+        "franco": ["tannesh {o}", "emsa7 {o} bnafsak", "mat2afsh el build 3ashan {o}", "{o} dowsha, 3addeha", "7el {o} mn 3'er ma terga3ly", "e5fy {o}"]
+      }
+    },
+    "publishing": {
+      "objects": {
+        "en": ["the reel going out", "the release", "posting on the page", "sharing to the account", "the drop on TikTok", "the push to YouTube", "sending the final to the client", "putting it live on the feed"],
+        "ar": ["نزول الريل", "رفعه على الصفحة", "بعته للعميل", "حطه على الأكونت", "إطلاق الفيديو", "تنزيله على التيك توك"],
+        "franco": ["nezool el reel", "raf3o 3al page", "ba3to lel 3ameel", "7atto 3al account", "etla2 el video", "tanzeelo 3al tiktok"]
+      },
+      "verbs": {
+        "en": ["do {o} the moment it renders", "{o} can happen without me", "handle {o} on your own", "don't hold {o} for anyone", "trigger {o} right after export", "take care of {o} by itself every time"],
+        "ar": ["اعمل {o} أول ما يخلص", "{o} من غير ما تستناني", "اتصرف في {o} لوحدك", "متأخرش {o} عشان حد", "{o} على طول بعد الإكسبورت", "خلي {o} يحصل لوحده"],
+        "franco": ["e3mel {o} awel ma y5las", "{o} mn 3'er ma testanany", "etsarraf fi {o} lw7dak", "mate2a5arsh {o} 3ashan 7ad", "{o} 3ala tool ba3d el export", "5alli {o} ye7sal lw7do"]
+      }
+    },
+    "people": {
+      "objects": {
+        "en": ["the hygienist", "the dietician", "the physio", "the counsellor", "the GP", "the ophthalmologist", "the vet", "the preacher", "the ustadh", "the pastor"],
+        "ar": ["الأخصائية", "المعالج", "أخصائي التغذية", "الواعظ", "الخطيب", "الحكيم", "الأستاذة", "القسيس", "الكوتش"],
+        "franco": ["el akhessa2eya", "el mo3alleg", "el wa3ez", "el khateeb", "el 7akeem", "el ostaza", "el coach"]
+      },
+      "verbs": {
+        "en": ["{o} only needs the first video each month", "{o} is fine with whatever you write", "{o} can see it after it's posted", "no need to loop in {o}", "{o} trusts you, carry on", "send {o} the final, not the plan", "{o} looks only at the thumbnails"],
+        "ar": ["{o} يكفيه أول فيديو في الشهر", "{o} مش هيعترض على أي حاجة تكتبها", "{o} يشوفه بعد ما ينزل", "مش لازم ندخّل {o}", "ابعت لـ{o} النسخة النهائية بس", "{o} واثق فيك، كمّل"],
+        "franco": ["{o} yekfeeh awel video fel shahr", "{o} msh hay3tered 3ala ay 7aga", "{o} yshoofo ba3d ma yenzel", "msh lazem nda5al {o}", "eb3at le {o} el noskha el nehaeya bas", "{o} wase2 feek, kammel"]
+      }
+    }
+  }
+}

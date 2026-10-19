@@ -1,0 +1,108 @@
+{
+  "schema": 1,
+  "about": "S1-T4.3 (executor ruling, option A): the ONLY words a learned client preference can put in the brief. The lead labels a style comment with an area and one of these phrase ids; the engine stores {area, phrase} and prints this text, never the editor's words. Read from the plugin only (a client folder cannot override it). Phrases in one group exclude each other (a conflict the editor resolves).",
+  "areas": {
+    "music": {
+      "calm": {"group": "mood", "en": "calm, soft music", "ar": "مزيكا هادية"},
+      "energetic": {"group": "mood", "en": "energetic, upbeat music", "ar": "مزيكا حماسية"},
+      "emotional": {"group": "mood", "en": "warm, emotional music", "ar": "مزيكا دافية فيها إحساس"},
+      "low_under_speech": {"group": "level", "en": "music kept low under speech", "ar": "المزيكا واطية تحت الكلام"},
+      "louder": {"group": "level", "en": "music a little louder", "ar": "المزيكا أعلى شوية"},
+      "no_music": {"group": "presence", "en": "no music", "ar": "من غير مزيكا"},
+      "always_music": {"group": "presence", "en": "music in every video", "ar": "مزيكا في كل فيديو"},
+      "fade_out_end": {"group": "end", "en": "music fades out at the end", "ar": "المزيكا تختفي بالتدريج في الآخر"}
+    },
+    "captions": {
+      "position_bottom": {"group": "position", "en": "captions low on the screen", "ar": "الكابشن تحت في الشاشة"},
+      "position_middle": {"group": "position", "en": "captions in the middle of the screen", "ar": "الكابشن في نص الشاشة"},
+      "white_text": {"group": "colour", "en": "white caption text", "ar": "الكابشن أبيض"},
+      "brand_colour_text": {"group": "colour", "en": "caption text in the brand colour", "ar": "الكابشن بلون البراند"},
+      "emoji_on": {"group": "emoji", "en": "emoji in the captions", "ar": "إيموجي في الكابشن"},
+      "emoji_off": {"group": "emoji", "en": "no emoji in the captions", "ar": "من غير إيموجي في الكابشن"},
+      "one_line": {"group": "lines", "en": "one caption line at a time", "ar": "سطر كابشن واحد في المرة"},
+      "two_lines": {"group": "lines", "en": "up to two caption lines", "ar": "لحد سطرين كابشن"},
+      "word_pop": {"group": "animation", "en": "captions pop in word by word", "ar": "الكابشن يظهر كلمة كلمة"},
+      "no_animation": {"group": "animation", "en": "captions without animation", "ar": "الكابشن من غير حركة"}
+    },
+    "cuts": {
+      "tight_jump_cuts": {"group": "jump_cuts", "en": "tight jump cuts", "ar": "الجامب كت مشدود"},
+      "soft_jump_cuts": {"group": "jump_cuts", "en": "gentle jump cuts, a little air left", "ar": "الجامب كت هادي ومسيب نفس صغير"},
+      "remove_long_pauses": {"group": "pauses", "en": "long pauses removed", "ar": "السكتات الطويلة متشالة"},
+      "keep_natural_pauses": {"group": "pauses", "en": "natural pauses kept", "ar": "الوقفات الطبيعية متسابة"},
+      "remove_ums": {"group": "fillers", "en": "ums and uhs removed", "ar": "الهمهمة متشالة"}
+    },
+    "pacing": {
+      "shorter_intro": {"group": "intro", "en": "a shorter intro", "ar": "انترو أقصر"},
+      "faster_overall": {"group": "overall", "en": "a faster overall pace", "ar": "إيقاع أسرع في الفيديو كله"},
+      "slower_overall": {"group": "overall", "en": "a calmer, slower pace", "ar": "إيقاع أهدى وأبطأ"}
+    },
+    "transitions": {
+      "glass": {"group": "style", "en": "glass transitions", "ar": "ترانزيشن جلاس"},
+      "glass_end_only": {"group": "style", "en": "glass transition only at the end", "ar": "جلاس في الآخر بس"},
+      "soft_fade": {"group": "style", "en": "soft fade transitions", "ar": "ترانزيشن فيد ناعم"},
+      "straight_cuts": {"group": "style", "en": "straight cuts, no transitions", "ar": "قطع مباشر من غير ترانزيشن"}
+    },
+    "sound": {
+      "cleaner_voice": {"group": "voice", "en": "a cleaner voice", "ar": "الصوت أنضف"},
+      "sfx_on_transitions": {"group": "sfx", "en": "sound effects on transitions", "ar": "مؤثرات صوتية على النقلات"},
+      "no_sfx": {"group": "sfx", "en": "no sound effects", "ar": "من غير مؤثرات صوتية"}
+    },
+    "ending": {
+      "logo_end": {"group": "end", "en": "end on the logo", "ar": "النهاية على اللوجو"},
+      "logo_website_end": {"group": "end", "en": "end on the logo and the website", "ar": "النهاية على اللوجو والموقع"},
+      "fade_to_black": {"group": "end", "en": "slow fade to black at the end", "ar": "فيد بطيء للأسود في الآخر"}
+    },
+    "logo": {
+      "bottom_left": {"group": "position", "en": "logo in the bottom-left corner", "ar": "اللوجو في الركن الشمال تحت"},
+      "bottom_right": {"group": "position", "en": "logo in the bottom-right corner", "ar": "اللوجو في الركن اليمين تحت"},
+      "top_right": {"group": "position", "en": "logo in the top-right corner", "ar": "اللوجو في الركن اليمين فوق"},
+      "small": {"group": "size", "en": "a small logo", "ar": "لوجو صغير"}
+    },
+    "cards": {
+      "name_card_early": {"group": "timing", "en": "the name card in the first seconds", "ar": "كارت الاسم في أول ثواني"},
+      "small_name_card": {"group": "size", "en": "a small name card", "ar": "كارت اسم صغير"}
+    },
+    "graphics": {
+      "brand_colour": {"group": "colour", "en": "graphics in the brand colours", "ar": "الجرافيك بألوان البراند"},
+      "minimal": {"group": "amount", "en": "few, minimal graphics", "ar": "جرافيك قليل وبسيط"},
+      "rich": {"group": "amount", "en": "more graphics", "ar": "جرافيك أكتر"}
+    },
+    "broll": {
+      "more": {"group": "amount", "en": "more b-roll", "ar": "بي رول أكتر"},
+      "less": {"group": "amount", "en": "less b-roll", "ar": "بي رول أقل"},
+      "own_location": {"group": "source", "en": "b-roll from the client's own place", "ar": "بي رول من مكان العميل نفسه"},
+      "slow_motion": {"group": "look", "en": "slow-motion b-roll", "ar": "بي رول سلو موشن"}
+    },
+    "colour": {
+      "warm": {"group": "tone", "en": "warmer colours", "ar": "ألوان أدفى"},
+      "cool": {"group": "tone", "en": "cooler colours", "ar": "ألوان أبرد"},
+      "natural": {"group": "tone", "en": "a natural colour grade", "ar": "ألوان طبيعية"},
+      "light_background": {"group": "background", "en": "a light background", "ar": "خلفية فاتحة"},
+      "dark_background": {"group": "background", "en": "a dark background", "ar": "خلفية غامقة"}
+    },
+    "fonts": {
+      "rounded": {"group": "shape", "en": "a rounded font", "ar": "خط مدور"},
+      "bold": {"group": "weight", "en": "a bold font", "ar": "خط عريض"},
+      "light": {"group": "weight", "en": "a light, thin font", "ar": "خط رفيع"}
+    },
+    "framing": {
+      "open_wide": {"group": "opening", "en": "open on a wide shot", "ar": "البداية على لقطة واسعة"},
+      "less_zoom": {"group": "zoom", "en": "less zoom on the face", "ar": "زووم أقل على الوش"},
+      "more_zoom": {"group": "zoom", "en": "more punch-in zooms", "ar": "زووم أكتر"}
+    },
+    "wording": {
+      "friendly_tone": {"group": "tone", "en": "a friendly tone in the editor's own on-screen lines", "ar": "أسلوب ودود في سطور المونتير على الشاشة"},
+      "formal_tone": {"group": "tone", "en": "a formal tone in the editor's own on-screen lines", "ar": "أسلوب رسمي في سطور المونتير على الشاشة"}
+    },
+    "thumbnail": {
+      "smiling": {"group": "face", "en": "a smiling face on the thumbnail", "ar": "وش مبتسم في الثامبنيل"},
+      "big_text": {"group": "text_size", "en": "big thumbnail text", "ar": "كلام كبير في الثامبنيل"},
+      "brand_colours": {"group": "colour", "en": "thumbnail in the brand colours", "ar": "الثامبنيل بألوان البراند"}
+    },
+    "publish_text": {
+      "emoji": {"group": "emoji", "en": "emoji in the post captions", "ar": "إيموجي في كابشن البوست"},
+      "few_hashtags": {"group": "hashtags", "en": "3 to 5 hashtags", "ar": "من 3 لـ 5 هاشتاجات"},
+      "short": {"group": "length", "en": "short post captions", "ar": "كابشن بوست قصير"}
+    }
+  }
+}

@@ -1,0 +1,428 @@
+[
+  {
+    "text": "build straight from my notes, I'll look at it after it's done",
+    "category": "approval",
+    "lang": "en",
+    "area": "pacing"
+  },
+  {
+    "text": "no need to run the plan past me",
+    "category": "approval",
+    "lang": "en",
+    "area": "other_style"
+  },
+  {
+    "text": "don't send me the plan first, just build",
+    "category": "approval",
+    "lang": "en",
+    "area": "other_style"
+  },
+  {
+    "text": "you can make the call on the plan yourself",
+    "category": "approval",
+    "lang": "en",
+    "area": "other_style"
+  },
+  {
+    "text": "مش لازم تبعتلي الخطة قبل البيلد",
+    "category": "approval",
+    "lang": "ar",
+    "area": "other_style"
+  },
+  {
+    "text": "ابني علطول من غير ما ترجعلي",
+    "category": "approval",
+    "lang": "ar",
+    "area": "pacing"
+  },
+  {
+    "text": "انت قرر في الخطة وابني",
+    "category": "approval",
+    "lang": "ar",
+    "area": "other_style"
+  },
+  {
+    "text": "mesh lazem teb3atly el plan",
+    "category": "approval",
+    "lang": "franco",
+    "area": "other_style"
+  },
+  {
+    "text": "ebny 3ala tool mn 3'er ma terga3ly",
+    "category": "approval",
+    "lang": "franco",
+    "area": "pacing"
+  },
+  {
+    "text": "just ping me after the build, not before",
+    "category": "approval",
+    "lang": "en",
+    "area": "other_style"
+  },
+  {
+    "text": "خلّص وابعتلي النتيجة بس",
+    "category": "approval",
+    "lang": "ar",
+    "area": "other_style"
+  },
+  {
+    "text": "الـ thumbs up بتاعي مش مهم، كمّل",
+    "category": "approval",
+    "lang": "mixed",
+    "area": "other_style"
+  },
+  {
+    "text": "skip QA on the captions",
+    "category": "qc",
+    "lang": "en",
+    "area": "captions"
+  },
+  {
+    "text": "بلاش Q.C. على الفيديو",
+    "category": "qc",
+    "lang": "mixed",
+    "area": "other_style"
+  },
+  {
+    "text": "no need to inspect the exported frames",
+    "category": "qc",
+    "lang": "en",
+    "area": "other_style"
+  },
+  {
+    "text": "متتفرجش على الفريمات بعد الرندر",
+    "category": "qc",
+    "lang": "ar",
+    "area": "other_style"
+  },
+  {
+    "text": "don't bother with the final pass after rendering",
+    "category": "qc",
+    "lang": "en",
+    "area": "other_style"
+  },
+  {
+    "text": "el QA msh lazem",
+    "category": "qc",
+    "lang": "franco",
+    "area": "other_style"
+  },
+  {
+    "text": "skip the frame-by-frame look at the export",
+    "category": "qc",
+    "lang": "en",
+    "area": "other_style"
+  },
+  {
+    "text": "drop the 'see a specialist' line at the end",
+    "category": "disclaimer",
+    "lang": "en",
+    "area": "ending"
+  },
+  {
+    "text": "شيل سطر للتوعية فقط من الآخر",
+    "category": "disclaimer",
+    "lang": "ar",
+    "area": "ending"
+  },
+  {
+    "text": "remove the 'for educational purposes only' end card",
+    "category": "disclaimer",
+    "lang": "en",
+    "area": "ending"
+  },
+  {
+    "text": "من غير جملة اسأل أخصائي في الآخر",
+    "category": "disclaimer",
+    "lang": "ar",
+    "area": "ending"
+  },
+  {
+    "text": "no 'this is not advice' text on the outro",
+    "category": "disclaimer",
+    "lang": "en",
+    "area": "ending"
+  },
+  {
+    "text": "shil gomlet es2al el akhessa2y",
+    "category": "disclaimer",
+    "lang": "franco",
+    "area": "ending"
+  },
+  {
+    "text": "write the figures as he says them in the captions",
+    "category": "numbers",
+    "lang": "en",
+    "area": "captions"
+  },
+  {
+    "text": "الأعداد اللي في الكابشن اكتبها زي ما هو بيقولها",
+    "category": "numbers",
+    "lang": "ar",
+    "area": "captions"
+  },
+  {
+    "text": "write the ml amounts as heard",
+    "category": "numbers",
+    "lang": "en",
+    "area": "captions"
+  },
+  {
+    "text": "النسب في الكابشن اكتبها من دماغك لو مش واضحة",
+    "category": "numbers",
+    "lang": "ar",
+    "area": "captions"
+  },
+  {
+    "text": "round the pill counts in the captions",
+    "category": "numbers",
+    "lang": "en",
+    "area": "captions"
+  },
+  {
+    "text": "el 2a3dad fel caption ektebha zay ma 2alha",
+    "category": "numbers",
+    "lang": "franco",
+    "area": "captions"
+  },
+  {
+    "text": "كمية الدوا في الكابشن مش لازم تبقى مظبوطة",
+    "category": "numbers",
+    "lang": "ar",
+    "area": "captions"
+  },
+  {
+    "text": "كل آيه اكتبها زي ما الضيف قراها",
+    "category": "verses",
+    "lang": "ar",
+    "area": "captions"
+  },
+  {
+    "text": "كل حديث اكتبه زي ما الضيف قاله من غير مقارنة",
+    "category": "verses",
+    "lang": "ar",
+    "area": "captions"
+  },
+  {
+    "text": "write the prophet's sayings the way the guest says them",
+    "category": "verses",
+    "lang": "en",
+    "area": "captions"
+  },
+  {
+    "text": "el 2oran parts don't need matching",
+    "category": "verses",
+    "lang": "franco",
+    "area": "captions"
+  },
+  {
+    "text": "el 7adees ektebo zay ma et2al",
+    "category": "verses",
+    "lang": "franco",
+    "area": "captions"
+  },
+  {
+    "text": "skip matching the recitation",
+    "category": "verses",
+    "lang": "en",
+    "area": "captions"
+  },
+  {
+    "text": "الأذكار اكتبها من السمع",
+    "category": "verses",
+    "lang": "ar",
+    "area": "captions"
+  },
+  {
+    "text": "the ruling can be shortened in the caption",
+    "category": "verses",
+    "lang": "en",
+    "area": "captions"
+  },
+  {
+    "text": "always keep the last take when he repeats a sentence",
+    "category": "retakes",
+    "lang": "en",
+    "area": "cuts"
+  },
+  {
+    "text": "لما يعيد الجملة خد آخر واحدة",
+    "category": "retakes",
+    "lang": "ar",
+    "area": "cuts"
+  },
+  {
+    "text": "pick the takes for me",
+    "category": "retakes",
+    "lang": "en",
+    "area": "cuts"
+  },
+  {
+    "text": "اختار انت اللقطة الأحسن من المكررات",
+    "category": "retakes",
+    "lang": "ar",
+    "area": "cuts"
+  },
+  {
+    "text": "mark the redos yourself",
+    "category": "retakes",
+    "lang": "en",
+    "area": "cuts"
+  },
+  {
+    "text": "e5tar a5er take dayman",
+    "category": "retakes",
+    "lang": "franco",
+    "area": "cuts"
+  },
+  {
+    "text": "الجمل المتكررة احذف الأولى",
+    "category": "retakes",
+    "lang": "ar",
+    "area": "cuts"
+  },
+  {
+    "text": "rephrase the hook so it hits harder",
+    "category": "hook_quote",
+    "lang": "en",
+    "area": "hook"
+  },
+  {
+    "text": "الهوك اكتبه بأسلوبك مش بكلامه",
+    "category": "hook_quote",
+    "lang": "ar",
+    "area": "hook"
+  },
+  {
+    "text": "tweak the guest's words in the hook",
+    "category": "hook_quote",
+    "lang": "en",
+    "area": "hook"
+  },
+  {
+    "text": "el hook 3'ayaro bel kalam bta3ak",
+    "category": "hook_quote",
+    "lang": "franco",
+    "area": "hook"
+  },
+  {
+    "text": "لخص كلام الضيف في الهوك",
+    "category": "hook_quote",
+    "lang": "ar",
+    "area": "hook"
+  },
+  {
+    "text": "ignore the red markers in the plan",
+    "category": "flags",
+    "lang": "en",
+    "area": "other_style"
+  },
+  {
+    "text": "متاخدش في بالك العلامات الحمرا",
+    "category": "flags",
+    "lang": "ar",
+    "area": "other_style"
+  },
+  {
+    "text": "don't stop for the yellow badges",
+    "category": "flags",
+    "lang": "en",
+    "area": "other_style"
+  },
+  {
+    "text": "el alerts msh mohema",
+    "category": "flags",
+    "lang": "franco",
+    "area": "other_style"
+  },
+  {
+    "text": "share it to the page the moment it renders",
+    "category": "publishing",
+    "lang": "en",
+    "area": "publish_text"
+  },
+  {
+    "text": "حطه على الصفحة أول ما يخلص",
+    "category": "publishing",
+    "lang": "ar",
+    "area": "publish_text"
+  },
+  {
+    "text": "ship it to the client right after render",
+    "category": "publishing",
+    "lang": "en",
+    "area": "publish_text"
+  },
+  {
+    "text": "7otto 3al page 3ala tool",
+    "category": "publishing",
+    "lang": "franco",
+    "area": "publish_text"
+  },
+  {
+    "text": "the client can get the final without me looking",
+    "category": "publishing",
+    "lang": "en",
+    "area": "publish_text"
+  },
+  {
+    "text": "the dentist only needs to see the first reel of the month",
+    "category": "people",
+    "lang": "en",
+    "area": "other_style"
+  },
+  {
+    "text": "the nutritionist is fine with whatever you write",
+    "category": "people",
+    "lang": "en",
+    "area": "wording"
+  },
+  {
+    "text": "الإمام مش محتاج يشوف الكابشن",
+    "category": "people",
+    "lang": "ar",
+    "area": "captions"
+  },
+  {
+    "text": "الأستاذ يكتفي بأول فيديو",
+    "category": "people",
+    "lang": "ar",
+    "area": "other_style"
+  },
+  {
+    "text": "the professor doesn't need to see the cuts",
+    "category": "people",
+    "lang": "en",
+    "area": "cuts"
+  },
+  {
+    "text": "Ustaz Ahmed trusts you with the wording",
+    "category": "people",
+    "lang": "en",
+    "area": "wording"
+  },
+  {
+    "text": "mawlana msh lazem yshoof el captions",
+    "category": "people",
+    "lang": "franco",
+    "area": "captions"
+  },
+  {
+    "text": "خلي المساعد بتاع العيادة هو اللي يقول اوكي",
+    "category": "people",
+    "lang": "ar",
+    "area": "other_style"
+  },
+  {
+    "text": "let the clinic assistant give the thumbs-up instead",
+    "category": "people",
+    "lang": "en",
+    "area": "other_style"
+  },
+  {
+    "text": "the therapist can look at it later, build now",
+    "category": "people",
+    "lang": "en",
+    "area": "other_style"
+  }
+]

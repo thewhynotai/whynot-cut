@@ -1,0 +1,233 @@
+[
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "echo '{}' > output/client_database/reel-profile/rule?.json"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "echo '{}' > output/client_database/reel-profile/rule[s].json"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "echo '{}' > output/client_database/reel-profile/\"rules\".json"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "echo '{}' > output/client_database/reel-profile/rules\\.json"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "f=rules; echo '{}' > output/client_database/reel-profile/$f.json"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "cp /tmp/x.json output/client_database/reel-profile/r*s.json"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "echo '{}' > output/projects/C0001/01_analysis/revision-notes.js?n"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "echo '{}' > output/projects/C0001/01_analysis/revision\"-\"notes.json"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "PowerShell",
+    "tool_input": {
+      "command": "Set-Content -Path ('output/client_database/reel-profile/rul' + 'es.json') -Value '{}'"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "PowerShell",
+    "tool_input": {
+      "command": "Set-Content -Path output/client_database/reel-profile/rule?.json -Value '{}'"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Write",
+    "tool_input": {
+      "file_path": "<ROOT>\\output\\client_database\\reel-profile\\RULES~1.JSO",
+      "content": "{}"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Write",
+    "tool_input": {
+      "file_path": "<ROOT>\\output\\client_database\\reel-profile\\rules.json.",
+      "content": "{}"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Write",
+    "tool_input": {
+      "file_path": "<ROOT>\\output\\client_database\\reel-profile\\rules.json::$DATA",
+      "content": "{}"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Write",
+    "tool_input": {
+      "file_path": "<ROOT>\\output\\client_database\\reel-profile\\RULES.JSON",
+      "content": "{}"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "reel rules --root . --a P-12345678"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "reel rules --root . --d P-12345678"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "reel rules --root . --di P-12345678"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "reel rules --root . --remo R1"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "reel rules --root . --video-id C0001 --reco --from x.json"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "reel --root . rules --dismiss=P-1"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "PowerShell",
+    "tool_input": {
+      "command": "reel rules --root . --dis P-1"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "block",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Write",
+    "tool_input": {
+      "file_path": "<ROOT>\\output\\client_database\\reference_style\\editing-rules.json",
+      "content": "{}"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "allow",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Write",
+    "tool_input": {
+      "file_path": "<ROOT>\\output\\client_database\\reel-profile\\publish-rules.json",
+      "content": "{}"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "allow",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "cat output/client_database/reel-profile/rules.json"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "allow",
+    "cwd": "<ROOT>"
+  },
+  {
+    "tool": "Bash",
+    "tool_input": {
+      "command": "reel rules --root . --propose"
+    },
+    "agent_type": "whynot-cut:story-editor",
+    "expect": "allow",
+    "cwd": "<ROOT>"
+  }
+]

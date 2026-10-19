@@ -110,8 +110,13 @@ def standing_word(text: str) -> bool:
     return _has(s, [norm(w) for w in _STANDING])
 
 
+_FREQUENCY = re.compile(r"(?<!\w)once (?:a|an|per|every|each)(?!\w)|(?<!\w)مره (?:في|كل)(?!\w)")
+
+
 def this_clip_only(text: str) -> bool:
-    return _has(norm(text), [norm(w) for w in _THIS_CLIP])
+    """"for this video only" and its forms; "only once a week" / «مرة في الأسبوع» is a frequency, never this clip."""
+    s = norm(text)
+    return _has(_FREQUENCY.sub(" ", s), [norm(w) for w in _THIS_CLIP])
 
 
 # ---- safety: a rule may never weaken a review, an approval gate, a K1 switch or the QC (owner upgrade 6)
@@ -277,6 +282,68 @@ REFUSED_EN = ("This touches something the review protects (the doctor or sheikh,
               "style request, it is done by hand in this video.")
 
 
+# ---- S1-T4.3 final round (executor ruling after review 3b4ec0e, option A): STRUCTURED preferences only. A learned
+# preference is {area, phrase id} from the engine's own vocabulary (config/defaults/preference-phrases.json, read from
+# the plugin only: a client folder cannot override it). The lead picks the phrase id when it labels a comment; the
+# brief prints the ENGINE's phrase, never the editor's words, so no wording can carry a gate change into it. A wish
+# with no phrase (or a phrase of another area) is never a rule: --propose lists a recurring one under `by_hand`.
+PHRASES_FILE = "preference-phrases.json"
+_PHRASE_ID = re.compile(r"[a-z][a-z0-9_]{1,40}")
+_PHRASE_BAD = re.compile(r"[{}<>`\n\r]|<!--|-->")
+PHRASE_MAX = 160
+BY_HAND_AR = "اتقال في {n} فيديوهات: طبّقه يدوي في كل فيديو"
+BY_HAND_EN = "said on {n} videos: apply by hand per video"
+_VOCAB: dict = {}
+
+
+def phrases() -> dict:
+    """{area: {phrase id: {"group", "en", "ar"}}}, checked once: known areas only (never process / other_style), ids
+    and groups short lower-case keys, both texts present, at most PHRASE_MAX characters, one line, no format field,
+    markup or comment marker. A damaged vocabulary is a plugin bug: Guidance, nothing is learned."""
+    if _VOCAB:
+        return _VOCAB
+    from .common import CONFIG_DIR, read_json
+    path = CONFIG_DIR / PHRASES_FILE
+    try:
+        doc = read_json(path, None)
+    except FileFormatError:
+        doc = None
+    areas = (doc or {}).get("areas") if isinstance(doc, dict) and doc.get("schema") == 1 else None
+    if not isinstance(areas, dict):
+        raise Guidance(f"{path}: the preference vocabulary is missing or damaged", "reinstall the plugin",
+                       where=str(path))
+    out = {}
+    for area, items in areas.items():
+        if area not in AREAS or area in (PROCESS_AREA, "other_style") or not isinstance(items, dict):
+            raise Guidance(f"{path}: area {area!r} cannot hold preferences", "reinstall the plugin", where=str(path))
+        for pid, ph in items.items():
+            ok = (isinstance(pid, str) and _PHRASE_ID.fullmatch(pid) and isinstance(ph, dict)
+                  and isinstance(ph.get("group"), str) and _PHRASE_ID.fullmatch(ph["group"])
+                  and all(isinstance(ph.get(k), str) and 0 < len(ph[k]) <= PHRASE_MAX
+                          and not _PHRASE_BAD.search(ph[k]) for k in ("en", "ar")))
+            if not ok:
+                raise Guidance(f"{path}: phrase {area}.{pid} is not a valid entry", "reinstall the plugin",
+                               where=str(path))
+        out[area] = {pid: {k: items[pid][k] for k in ("group", "en", "ar")} for pid in items}
+    _VOCAB.update(out)
+    return _VOCAB
+
+
+def phrase_of(label) -> tuple[str, str] | None:
+    """(area, phrase id) when the label names a phrase of ITS OWN area in the vocabulary, else None."""
+    if not isinstance(label, dict):
+        return None
+    area, pid = label.get("area"), label.get("phrase")
+    if isinstance(area, str) and isinstance(pid, str) and pid in phrases().get(area, {}):
+        return area, pid
+    return None
+
+
+def _notes_only(label) -> bool:
+    """A label that is not one of the four T4.2 knobs (its rule would be a preference in the brief)."""
+    return not _knob((label or {}).get("knob"))
+
+
 # ---- the keyword reader: a label read from the words (a helper; history() never counts an unlabelled comment)
 _CAPTION = ("caption", "captions", "subtitle", "subtitles", "font", "text size", "الكابشن", "كابشن", "الكابشنز",
             "الخط", "خط", "الترجمه", "الكلام اللي على الشاشه")
@@ -417,6 +484,13 @@ def check_intent(intent) -> dict | None:
         out["direction"] = direction
     if knob is None and "value" in intent:
         raise Guidance("a topic label has no value", "put the detail in the comment text")
+    if "phrase" in intent:
+        ph = intent["phrase"]
+        if knob is not None or not isinstance(ph, str) or not _PHRASE_ID.fullmatch(ph):
+            raise Guidance(f"intent phrase {ph!r} is not a phrase id", "use a topic label with an id from "
+                           "`reel rules --phrases` for its area, e.g. {\"topic\": \"music_low\", \"area\": "
+                           "\"music\", \"phrase\": \"low_under_speech\"}")
+        out["phrase"] = ph
     return out
 
 
@@ -532,6 +606,10 @@ def record(root, video_id: str, items) -> dict:
         notes = doc.setdefault("notes", [])
         if not isinstance(notes, list):
             raise _damaged(path, "`notes` is not a list")
+        if notes and doc.get("seal") != seal_of(notes):     # 3b4ec0e P2-1: never seal a hand-added note
+            raise Guidance(f"{path} was changed by hand (its seal does not match), so nothing is added to it",
+                           "restore the copy `reel rules --record` wrote, or delete the file, then record this round's "
+                           "comments again; nothing was written", where=str(path))
         seen = {(norm(n.get("text")), _ikey(n.get("intent")), n.get("scope")) for n in notes if isinstance(n, dict)}
         n_max = max([int(m.group(1)) for n in notes if isinstance(n, dict)
                      for m in [re.fullmatch(r"N(\d+)", str(n.get("id", "")))] if m] or [0])
@@ -548,6 +626,7 @@ def record(root, video_id: str, items) -> dict:
             added.append(e)
         if added:
             doc["schema"], doc["video_id"] = SCHEMA, video_id
+            doc["seal"] = seal_of(notes)                   # 3b4ec0e P2-1: a hand-written note is not counted
             linksafe.replace_atomic(path, root, _bytes(doc), within)
     return {"ok": True, "file": str(path), "added": len(added), "already_recorded": skipped, "total": len(notes),
             "ids": [e["id"] for e in added]}
@@ -582,6 +661,11 @@ def history(root) -> tuple[list[dict], list[str]]:
         notes = doc.get("notes")
         if not isinstance(notes, list):
             warnings.append(f"{f}: `notes` is not a list: its comments are not counted")
+            continue
+        if doc.get("seal") != seal_of(notes):
+            warnings.append(f"{f}: not written by `reel rules --record` (its seal does not match): its comments are "
+                            "not counted (restore the copy `reel rules` wrote, or delete the file and record the "
+                            "comments again)")
             continue
         for n in notes:
             if not isinstance(n, dict) or not isinstance(n.get("text"), str) or not n["text"].strip():
@@ -705,7 +789,10 @@ class _State:
             return "its seal does not match its rules" if "seal" in doc else "it has no seal"
         for r in rules:
             if not isinstance(r, dict) or r.get("status") not in ("active", "replaced", "removed") \
-                    or not isinstance(r.get("id"), str):
+                    or not re.fullmatch(r"R\d+", str(r.get("id"))) \
+                    or any(r.get(k) is not None and not re.fullmatch(r"\d{4}-\d\d-\d\d", str(r.get(k)))
+                           for k in ("added", "replaced", "removed")) \
+                    or (r.get("area") is not None and r.get("area") not in AREAS):
                 return "a rule row is not one `reel rules` writes"
             knob = r.get("knob")
             if knob is None:
@@ -766,8 +853,11 @@ def _summary(rule: dict) -> tuple[str, str]:
                 ("من غير صوت على عنوان الهوك", "no sound on the hook title"))
     if k == "highlight_colour":
         return f"لون التمييز {v}", f"highlight colour {v}"
-    said = _md_safe(rule.get("text"), 120)
-    return f"«{said}» (ملاحظة للمحرر)", f"\"{said}\" (a note for the editor)"
+    ph = phrase_of({"area": rule.get("area"), "phrase": rule.get("phrase")})
+    if ph:
+        item = phrases()[ph[0]][ph[1]]
+        return item["ar"], item["en"]
+    return "(مش متطبّقة)", "(not shown)"
 
 
 def _relation(r: dict, subject: str, polarity: str, knob, value, tone: str = "") -> str | None:
@@ -804,12 +894,13 @@ def propose(root) -> dict:
     reg = st.registry()
     active = [r for r in reg["rules"] if isinstance(r, dict) and r.get("status") == "active"]
     used = _used(reg["rules"])
-    dismissed: dict = {}
+    dismissed: dict = {}                                # by subject (an older entry without one: by proposal id)
     for d in reg.get("dismissed") or []:
-        dismissed.setdefault(d["proposal"], set()).update(tuple(x) for x in d["from"] if isinstance(x, list)
-                                                          and len(x) == 2)
+        dismissed.setdefault(d.get("subject") or d["proposal"], set()).update(
+            tuple(x) for x in d["from"] if isinstance(x, list) and len(x) == 2)
     groups: dict = {}
     refused = []
+    hand: dict = {}                                     # free-text wishes: listed, never a proposal
     live = [n for n in notes if not (n["scope"] == "this_clip" or this_clip_only(n["text"])
                                      or (n["video_id"], n["id"]) in used)]
     bad = {norm(n["text"]) for n in live if weakens_safety(n["text"], _label(n)[0])}
@@ -819,7 +910,21 @@ def propose(root) -> dict:
             refused.append({"video_id": n["video_id"], "note": n["id"], "text": n["text"], "ar": REFUSED_AR,
                             "en": REFUSED_EN})
             continue
-        subject, polarity, value = _target(label, n["text"])
+        if _notes_only(label):
+            ph = phrase_of(label)
+            if ph is None:                                 # free text: never a rule (option A)
+                key = (label or {}).get("topic") or (label or {}).get("knob") or _core(n["text"])
+                h = hand.setdefault(key, {"topic": key, "area": (label or {}).get("area"), "videos": [],
+                                          "standing": False, "text": n["text"]})
+                if n["video_id"] not in h["videos"]:
+                    h["videos"].append(n["video_id"])
+                h["standing"] = h["standing"] or n["scope"] == "standing" or standing_word(n["text"])
+                h["text"] = n["text"]
+                continue
+            area, pid = ph
+            subject, polarity, value = f"phrase:{area}.{phrases()[area][pid]['group']}", pid, pid
+        else:
+            subject, polarity, value = _target(label, n["text"])
         if subject == "knob:caption_size_px" and polarity == "value":
             cur = st.current_size()
             if value == cur:
@@ -846,24 +951,19 @@ def propose(root) -> dict:
         if knob == "caption_size_px":
             value, why_not = _size_value(st, polarity, g["explicit"])
         p = {"id": _gid(subject, polarity), "subject": subject, "polarity": polarity, "knob": knob, "value": value,
+             "area": (g["label"] or {}).get("area"),
+             "phrase": value if subject.startswith("phrase:") else None,
              "target": "style.json + notes.md" if knob else "notes.md",
              "text": g["comments"][-1]["text"], "videos": g["videos"], "comments": g["comments"],
              "why": ("standing word" if g["standing"] else f"said on {len(g['videos'])} videos"),
              "read_by": sorted(g["how"]), "qualifies": qualifies,
-             "tone": _text_polarity(g["comments"][-1]["text"]),
-             "mixed": not polarity and len({_text_polarity(c["text"]) for c in g["comments"]}) > 1}
-        if subject.startswith("other:"):
-            p["note"] = f"{subject[6:]!r} is not one of the style knobs `reel plan` reads: notes.md only"
+             "tone": _text_polarity(g["comments"][-1]["text"])}
         if why_not:
             p["qualifies"], p["not_actionable"] = False, why_not
         p["ar"], p["en"] = _summary(p)
-        if p["mixed"]:                                    # the editor must see that the wordings point both ways
-            said = " | ".join(_md_safe(c["text"], 80) for c in g["comments"])
-            p["ar"] = f"التعليقات مش متفقة في الاتجاه، اسأل المحرر قبل ما تضيفها: {said}"
-            p["en"] = f"the comments point both ways, ask the editor before adding it: {said}"
         if _find(active, "same", subject, polarity, knob, value, p["tone"]):
             continue                                       # already a rule
-        said_no = dismissed.get(p["id"])
+        said_no = (dismissed.get(subject) or set()) | (dismissed.get(p["id"]) or set())
         if said_no is not None and {(c["video_id"], c["note"]) for c in p["comments"]} <= said_no:
             continue                                       # the editor said no; a NEW comment brings it back
         clash = _find(active, "conflict", subject, polarity, knob, value, p["tone"])
@@ -889,20 +989,25 @@ def propose(root) -> dict:
                           "ar": "التعليقات دي متعارضة: المحرر يختار واحدة (أو ولا واحدة)",
                           "en": "these comments disagree: the editor picks one (or neither)"})
     out_props = sorted([p for p in proposals if p["qualifies"]], key=lambda p: p["id"])
+    by_hand = [{"topic": h["topic"], "area": h["area"], "videos": h["videos"], "text": h["text"],
+                "ar": BY_HAND_AR.format(n=len(h["videos"])), "en": BY_HAND_EN.format(n=len(h["videos"]))}
+               for h in hand.values() if h["standing"] or len(h["videos"]) >= 2]
     rules = [_public(r) for r in active]
-    return {"ok": True, "proposals": out_props, "conflicts": conflicts, "refused": refused, "active": rules,
+    return {"ok": True, "proposals": out_props, "conflicts": conflicts, "refused": refused, "by_hand": by_hand,
+            "active": rules,
             "summary": [{"id": r["id"], "ar": r["ar"], "en": r["en"]} for r in rules] +
                        [{"id": p["id"], "ar": "مقترح: " + p["ar"], "en": "proposed: " + p["en"]} for p in out_props],
             "warnings": warnings}
 
 
 def _public(r: dict) -> dict:
-    out = {k: r.get(k) for k in ("id", "status", "knob", "value", "text", "added", "replaced", "replaced_by",
+    out = {k: r.get(k) for k in ("id", "status", "knob", "value", "phrase", "area", "added", "replaced", "replaced_by",
                                  "removed", "proposal", "videos") if r.get(k) is not None}
     out["ar"], out["en"] = _summary(r)
-    if r.get("status") == "active" and _refused_now(r):
-        out["refused"] = True
-        out["ar"], out["en"] = "مرفوضة ومش متطبّقة: " + out["ar"], "refused, ignored: " + out["en"]
+    why = _refused_now(r) if r.get("status") == "active" else None
+    if why:
+        out["refused"] = why
+        out["ar"], out["en"] = "مرفوضة ومش متطبّقة: " + out["ar"], f"{why}, ignored: " + out["en"]
     out["target"] = "style.json + notes.md" if r.get("knob") else "notes.md"
     return out
 
@@ -926,14 +1031,13 @@ PREFERENCES_K1 = ("ولا بتغيّر مراجعة الأرقام أو الآي
                   "number, verse, retake or verbatim hook-quote checks (the K1 switches)")
 
 
-def _refused_now(r: dict) -> bool:
-    """A notes-only rule whose words the safety class refuses today (one added by hand, or before the class grew):
-    shown as refused and ignored, never as a rule (review b399ed2 P2-2)."""
+def _refused_now(r: dict) -> str | None:
+    """Why a notes-only rule is not shown as a rule today (None = it is): "off" (preferences switched off), or
+    "refused" (the safety class or the positive gate refuses its words: a row added by hand, or before the gate grew).
+    Review b399ed2 P2-2 / 3b4ec0e P3-1: active AND history rows are rechecked."""
     if r.get("knob"):
-        return False
-    subject = str(r.get("subject") or "")
-    topic = subject.split(":", 1)[1] if subject.startswith(("topic:", "other:")) else ""
-    return weakens_safety(str(r.get("text") or ""), {"topic": topic or "x", "area": "other_style"})
+        return None
+    return None if phrase_of({"area": r.get("area"), "phrase": r.get("phrase")}) else "refused"
 
 
 def _render_block(rules: list) -> str:
@@ -944,21 +1048,23 @@ def _render_block(rules: list) -> str:
     if not active:
         lines.append("- (no active rule)")
     for r in active:
-        if _refused_now(r):
-            lines.append(f"- {r['added']} · {r['id']} · refused, ignored (it names something the review protects) / "
-                         "مرفوضة ومش متطبّقة")
+        why = _refused_now(r)
+        if why:
+            lines.append(f"- {_md_safe(r['added'], 20)} · {_md_safe(r['id'], 20)} · refused, ignored (not one of the "
+                         "engine's preference phrases) / مرفوضة ومش متطبّقة")
             continue
         ar, en = _summary(r)
         where = "style.json" if r.get("knob") else "preference only"
-        said = "" if r.get("knob") else f". Said: «{_md_safe(r.get('text'))}»"
-        lines.append(f"- {r['added']} · {r['id']} · {en} / {ar} ({where}){said}")
+        lines.append(f"- {_md_safe(r['added'], 20)} · {_md_safe(r['id'], 20)} · {en} / {ar} ({where})")
     if old:
         lines += ["", "### No longer active (kept for history)"]
         for r in old:
             _ar, en = _summary(r)
+            if _refused_now(r):                             # 3b4ec0e P3-1: history rows never carry refused words
+                en = "(not shown)"
             what = (f"replaced {r['replaced']} by {r.get('replaced_by')}" if r["status"] == "replaced"
                     else f"removed {r.get('removed')}")
-            lines.append(f"- {r['added']} · {r['id']} · {en}: {what}")
+            lines.append(f"- {_md_safe(r['added'], 20)} · {_md_safe(r['id'], 20)} · {en}: {_md_safe(what, 60)}")
     lines.append(BLOCK_END)
     return "\n".join(lines) + "\n"
 
@@ -1086,8 +1192,8 @@ def add(root, proposal_id: str, value=None, replace: str | None = None) -> dict:
         n = max([int(m.group(1)) for r in reg["rules"] if isinstance(r, dict)
                  for m in [re.fullmatch(r"R(\d+)", str(r.get("id", "")))] if m] or [0]) + 1
         rule = {"id": f"R{n}", "status": "active", "added": today, "proposal": proposal_id, "subject": p["subject"],
-                "polarity": polarity, "knob": knob, "value": v, "text": p["text"], "videos": p["videos"],
-                "from": [[c["video_id"], c["note"]] for c in p["comments"]], "tone": p["tone"],
+                "polarity": polarity, "knob": knob, "value": v, "phrase": p.get("phrase"), "videos": p["videos"],
+                "from": [[c["video_id"], c["note"]] for c in p["comments"]], "tone": p["tone"], "area": p.get("area"),
                 "source": sorted({c["source"] for c in p["comments"]})}
         note = ""
         if knob:
@@ -1150,8 +1256,8 @@ def dismiss(root, proposal_id: str) -> dict:
                            "run `reel rules --propose` and use an id it lists; nothing was written")
         new_reg = copy.deepcopy(reg)
         new_reg.setdefault("dismissed", []).append(
-            {"proposal": proposal_id, "from": [[c["video_id"], c["note"]] for c in p["comments"]],
-             "date": _today(), "text": p["text"]})
+            {"proposal": proposal_id, "subject": p["subject"],
+             "from": [[c["video_id"], c["note"]] for c in p["comments"]], "date": _today()})
         _commit(st, [(rules_path, _registry_bytes(new_reg))])
     return {"ok": True, "dismissed": proposal_id, "comments": len(p["comments"]),
             "next": "it is not proposed again unless the editor says it on another video"}
@@ -1222,7 +1328,7 @@ def applied(root, spec: dict | None) -> list[dict]:
         e = {"id": r["id"], "ar": ar, "en": en}
         k, v = r.get("knob"), r.get("value")
         if not k:
-            e["applied"] = "refused" if _refused_now(r) else "brief"
+            e["applied"] = _refused_now(r) or "brief"
         elif sources.get(k) == "reel":
             e["applied"] = "overridden by this reel"
         elif k == "caption_size_px":

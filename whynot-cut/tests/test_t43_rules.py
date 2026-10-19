@@ -4,10 +4,13 @@
 
 The revise skill records each round's comments, labelled with an intent, in the video's revision-notes.json
 (`reel rules --record`); `--propose` groups them by meaning across the client's videos (two or more videos, or one
-comment with a standing word) and lists conflicts and refusals; on the editor's confirmation `--add` writes a dated
-rule (reel-profile/rules.json + a marked block in notes.md + the T4.2 knob in style.json); `--list` / `--remove`
-manage them. A rule can never weaken a review, an approval gate or the QC.
-Case list: D:/ClaudeData/claude-api-lane/lane2/work/T43/cases.md. CLI, guard and skill hunks: hooks/T43 (lane 2).
+comment with a standing word) and lists conflicts, refusals and the wishes to do by hand; on the editor's confirmation
+`--add` writes a dated rule (reel-profile/rules.json + a marked block in notes.md + the T4.2 knob in style.json);
+`--list` / `--remove` manage them. A rule can never weaken a review, an approval gate or the QC.
+Final round (executor ruling, option A): a learned preference is ONLY {area, phrase id} from the engine's vocabulary
+(config/defaults/preference-phrases.json); the brief prints the vocabulary's text, never the editor's words; a wish
+with no phrase of its own area is listed under `by_hand`. These tests label a preference with a real phrase.
+Case list: D:/ClaudeData/claude-api-lane/work/S1-T4.3/cases.md. CLI, guard and skill hunks: hooks/S1-T4.3.
 Run:  bash tools/test.sh -p test_t43_rules.py
 """
 import sys as _sys
@@ -34,6 +37,12 @@ from lib.errors import Guidance  # noqa: E402
 IS_WIN = os.name == "nt"
 UP = {"knob": "caption_size_px", "direction": "up"}
 DOWN = {"knob": "caption_size_px", "direction": "down"}
+# real phrases of the engine's vocabulary (preference-phrases.json): the label a preference needs under option A
+GLASS = {"topic": "glass_end", "area": "transitions", "phrase": "glass_end_only"}
+LOGO_END = {"topic": "logo_end", "area": "ending", "phrase": "logo_end"}
+MUSIC_ON = {"topic": "music_on", "area": "music", "phrase": "always_music"}       # group "presence": the two conflict
+MUSIC_OFF = {"topic": "music_off", "area": "music", "phrase": "no_music"}
+MUSIC_LOW = {"topic": "music_low", "area": "music", "phrase": "low_under_speech"}   # group "level"
 
 
 def _link_dir(target: Path, link: Path) -> None:
@@ -72,9 +81,11 @@ class Client(unittest.TestCase):
         self._links.append(link)
 
     # helpers
-    def rec(self, vid, *items, old=False):
+    def rec(self, vid, *items, old=False, sealed=True):
         """Labelled comments go through record(); a plain string or an unlabelled item is an OLD note (written before
-        the skill labelled comments), put straight into the file as an earlier version would have left it."""
+        the skill labelled comments), put straight into the file as an earlier version would have left it. `sealed`:
+        the file carries a correct seal (so history() reads past the seal and the label checks themselves are
+        tested); sealed=False is a hand-written file, which history() never counts (the seal tests use it)."""
         if not old and all(isinstance(i, dict) and i.get("intent") for i in items):
             return RL.record(self.root, vid, list(items))
         f = RL.notes_path(self.root, vid)
@@ -83,6 +94,8 @@ class Client(unittest.TestCase):
             i = i if isinstance(i, dict) else {"text": i}
             n = len(doc["notes"]) + 1
             doc["notes"].append({"id": f"N{n}", "at": "2026-10-01T10:00:00+03:00", "source": "comment", **i})
+        if sealed:
+            doc["seal"] = RL.seal_of(doc["notes"])
         write_json(f, doc)
         return {"ok": True}
 
@@ -107,13 +120,14 @@ class Client(unittest.TestCase):
 # ====================================================================== A. record
 class TestRecord(Client):
     def test_a1_labelled_comments_are_stored_with_id_time_source(self):
-        r = self.rec("C0001", {"text": "الكابشن صغير", "intent": UP}, {"text": "شيل الموسيقى", "intent": {"topic": "music", "area": "other_style", "direction": "off"},
+        r = self.rec("C0001", {"text": "الكابشن صغير", "intent": UP}, {"text": "شيل الموسيقى", "intent": dict(MUSIC_OFF, direction="off"),
                                                                    "scope": "this_clip"})
         self.assertEqual((r["added"], r["ids"]), (2, ["N1", "N2"]))
         doc = read_json(RL.notes_path(self.root, "C0001"))
         self.assertEqual(doc["video_id"], "C0001")
         n1, n2 = doc["notes"]
         self.assertEqual(n1["intent"], UP)
+        self.assertEqual((n2["intent"]["area"], n2["intent"]["phrase"]), ("music", "no_music"))
         self.assertEqual(n1["source"], "comment")
         self.assertTrue(n1["at"])
         self.assertEqual(n2["scope"], "this_clip")
@@ -132,6 +146,10 @@ class TestRecord(Client):
                {"text": "x", "intent": {"knob": "highlight_colour", "direction": "value", "value": "pink"}},
                {"text": "x", "intent": {"knob": "caption_size_px", "direction": "value", "value": 72.5}},
                {"text": "x", "intent": {"topic": "a", "area": "other_style", "knob": "caption_size_px"}}, {"text": "x", "intent": "big"},
+               {"text": "x", "intent": {"topic": "a", "area": "music", "phrase": "not a phrase id"}},       # a phrase is an id,
+               {"text": "x", "intent": {"topic": "a", "area": "music", "phrase": "x{y}"}},                  # never free text
+               {"text": "x", "intent": {"topic": "a", "area": "music", "phrase": 5}},
+               {"text": "x", "intent": {"knob": "caption_size_px", "direction": "up", "phrase": "calm"}},
                {"text": "x", "scope": "forever"}, {"text": "x", "source": "email"}, {"text": "x" * 2001}, "x"]
         for b in bad:
             with self.subTest(b=b), self.assertRaises(Guidance):
@@ -140,9 +158,13 @@ class TestRecord(Client):
         with self.assertRaises(Guidance):
             RL.record(self.root, "C0001", [])
 
-    def test_a4_an_unknown_knob_is_kept_for_notes_md(self):
+    def test_a4_an_unknown_knob_is_recorded_and_never_becomes_a_rule(self):
         self.rec("C0001", {"text": "use the round font", "intent": {"knob": "caption_font", "area": "fonts", "direction": "value"}})
         self.assertEqual(read_json(RL.notes_path(self.root, "C0001"))["notes"][0]["intent"]["knob"], "caption_font")
+        self.rec("C0002", {"text": "the round font again", "intent": {"knob": "caption_font", "area": "fonts", "direction": "value"}})
+        r = self.props()                                  # said on two videos, but no phrase: by hand, not a proposal
+        self.assertEqual(r["proposals"], [])
+        self.assertEqual([h["topic"] for h in r["by_hand"]], ["caption_font"])
 
     def test_a5_a_damaged_notes_file_is_refused_never_overwritten(self):
         p = RL.notes_path(self.root, "C0001")
@@ -197,14 +219,17 @@ class TestDetect(Client):
         self.assertEqual((r["proposals"], r["conflicts"]), ([], []))
 
     def test_b3_same_labelled_comment_on_two_videos_is_a_group(self):
-        """S1-T4.3: a comment counts with the skill's label; the same words without one are only a warning."""
-        glass = {"topic": "glass_only_at_end", "area": "other_style"}
-        self.rec("C0001", {"text": "خلي الجلاس في الآخر بس", "intent": glass})
-        self.rec("C0002", {"text": "خلّي الجلاس في الاخر بس.", "intent": glass})
+        """S1-T4.3: a comment counts with the skill's label (its area and a phrase id); the same words without a
+        label are only a warning."""
+        self.rec("C0001", {"text": "خلي الجلاس في الآخر بس", "intent": GLASS})
+        self.rec("C0002", {"text": "خلّي الجلاس في الاخر بس.", "intent": GLASS})
         p = self.one()
         self.assertIsNone(p["knob"])
         self.assertEqual(p["target"], "notes.md")
         self.assertEqual(p["read_by"], ["label"])
+        self.assertEqual((p["subject"], p["polarity"], p["phrase"], p["area"]),
+                         ("phrase:transitions.style", "glass_end_only", "glass_end_only", "transitions"))
+        self.assertEqual((p["ar"], p["en"]), ("جلاس في الآخر بس", "glass transition only at the end"))   # the vocabulary's words
         self.tearDown()
         self.setUp()
         self.rec("C0001", "خلي الجلاس في الآخر بس")
@@ -213,24 +238,73 @@ class TestDetect(Client):
         self.assertEqual(r["proposals"], [])
         self.assertEqual(sum("relabel" in w for w in r["warnings"]), 2)
 
+    def test_b3a_three_wordings_of_one_phrase_are_one_group_on_three_videos(self):
+        for vid, text in (("C0001", "خلي الجلاس في الآخر بس"), ("C0002", "glass only at the end"),
+                          ("C0003", "الجلاس بس في الاخر")):
+            self.rec(vid, {"text": text, "intent": GLASS})
+        p = self.one()
+        self.assertEqual(p["videos"], ["C0001", "C0002", "C0003"])
+
+    def test_b3c_a_wish_with_no_phrase_is_listed_by_hand_never_proposed(self):
+        """Option A: a free topic (no phrase) is never a rule. Said on two videos it is listed under `by_hand`, with
+        the engine's sentence («اتقال في N فيديوهات…») and the editor's own words for the editor to read."""
+        free = {"topic": "glass_only_at_end", "area": "transitions"}
+        self.rec("C0001", {"text": "خلي الجلاس في الآخر بس", "intent": free})
+        self.rec("C0002", {"text": "glass only at the end", "intent": free})
+        r = self.props()
+        self.assertEqual((r["proposals"], r["conflicts"]), ([], []))
+        self.assertEqual(len(r["by_hand"]), 1)
+        h = r["by_hand"][0]
+        self.assertEqual((h["topic"], h["area"], h["videos"], h["text"]),
+                         ("glass_only_at_end", "transitions", ["C0001", "C0002"], "glass only at the end"))
+        self.assertEqual((h["ar"], h["en"]), (RL.BY_HAND_AR.format(n=2), RL.BY_HAND_EN.format(n=2)))
+        self.assertIn("2", h["ar"])
+        self.assertEqual(r["summary"], [])                # the summary holds rules and proposals only
+        with self.assertRaises(Guidance):
+            RL.add(self.root, RL._gid("topic:glass_only_at_end", ""))
+        self.assertEqual(self.files(), {})
+
+    def test_b3d_a_one_off_wish_by_hand_is_not_listed_until_it_recurs_or_is_standing(self):
+        free = {"topic": "glass", "area": "transitions"}
+        self.rec("C0001", {"text": "glass at the end", "intent": free})
+        self.assertEqual(self.props()["by_hand"], [])
+        self.rec("C0002", {"text": "الجلاس في الآخر، دايماً", "intent": free})
+        self.assertEqual(len(self.props()["by_hand"]), 1)
+        self.tearDown()
+        self.setUp()
+        self.rec("C0001", {"text": "always glass at the end", "intent": free})       # a standing word alone is enough
+        self.assertEqual(len(self.props()["by_hand"]), 1)
+        self.tearDown()
+        self.setUp()
+        self.rec("C0001", {"text": "glass at the end, this video only", "intent": free})
+        self.rec("C0002", {"text": "glass at the end", "intent": free, "scope": "this_clip"})
+        self.assertEqual(self.props()["by_hand"], [])     # a comment for one clip never counts, by hand either
+
     def test_b3b_the_same_comment_twice_in_one_video_is_not_two_reels(self):
-        glass = {"topic": "glass", "area": "other_style"}
-        self.rec("C0001", {"text": "خلي الجلاس في الآخر بس", "intent": glass},
-                 {"text": "glass only at the end please", "intent": glass})
+        self.rec("C0001", {"text": "خلي الجلاس في الآخر بس", "intent": GLASS},
+                 {"text": "glass only at the end please", "intent": GLASS})
         r = self.props()
         self.assertEqual(r["proposals"], [])              # one video, no standing word: not a rule yet
-        self.rec("C0002", {"text": "glass at the end again", "intent": glass})
+        self.rec("C0002", {"text": "glass at the end again", "intent": GLASS})
         self.assertEqual(self.one()["videos"], ["C0001", "C0002"])
 
     def test_b4_a_standing_word_makes_one_comment_a_proposal(self):
-        for text in ("always put the logo at the end", "never use red", "دايماً حط اللوجو في الآخر",
+        for text in ("always put the logo at the end", "never use red in the captions", "دايماً حط اللوجو في الآخر",
                      "دايما حط اللوجو في الآخر", "دائماً حط اللوجو في الآخر", "أبداً متحطش موسيقى",
-                     "from now on no music", "بعد كده خلي الهوك أقصر", "كل مرة حط الاسم"):
+                     "from now on no music", "بعد كده خلي المزيكا أهدى", "كل مرة حط اللوجو"):
             with self.subTest(text=text):
                 self.tearDown()
                 self.setUp()
-                self.rec("C0001", {"text": text, "intent": {"topic": "t", "area": "other_style"}})
+                self.rec("C0001", {"text": text, "intent": LOGO_END})
                 self.assertEqual(self.one()["why"], "standing word")
+        for text in ("always put the logo at the end", "دايماً حط اللوجو في الآخر"):   # the same, no phrase: by hand
+            with self.subTest(by_hand=text):
+                self.tearDown()
+                self.setUp()
+                self.rec("C0001", {"text": text, "intent": {"topic": "t", "area": "ending"}})
+                r = self.props()
+                self.assertEqual(r["proposals"], [])
+                self.assertEqual([h["videos"] for h in r["by_hand"]], [["C0001"]])
 
     def test_b5_a_negated_standing_word_is_not_standing(self):
         for text in ("مش دايماً حط اللوجو", "مش دايما حط اللوجو", "not always the logo", "doesn't always need music",
@@ -239,8 +313,9 @@ class TestDetect(Client):
                 self.assertFalse(RL.standing_word(text))
                 self.tearDown()
                 self.setUp()
-                self.rec("C0001", text)
-                self.assertEqual(self.props()["proposals"], [])
+                self.rec("C0001", {"text": text, "intent": LOGO_END})      # one video, no standing word: nothing yet
+                r = self.props()
+                self.assertEqual((r["proposals"], r["by_hand"]), ([], []))
 
     def test_b6_this_clip_only_never_counts(self):
         self.rec("C0001", {"text": "دايماً كبّر الكابشن في الفيديو ده بس", "intent": UP})
@@ -254,7 +329,7 @@ class TestDetect(Client):
         self.assertEqual(self.one()["why"], "standing word")
 
     def test_b7_old_unlabelled_comments_never_count_and_the_keyword_reader_is_a_helper(self):
-        self.rec("C0001", "make the captions bigger please")
+        self.rec("C0001", "make the captions bigger please")      # a (sealed) file whose notes carry no label
         self.rec("C0002", "كبّر الكابشن شوية")
         r = self.props()                                  # S1-T4.3 ruling: only labelled comments count
         self.assertEqual(r["proposals"], [])
@@ -280,17 +355,22 @@ class TestDetect(Client):
         ids = [n["id"] for n in RL.history(self.root)[0]]
         self.assertEqual(ids, [f"N{i}" for i in range(1, 12)])
 
-    def test_b8_topic_label_is_a_notes_only_proposal_and_unknown_knob_says_why(self):
-        self.rec("C0001", {"text": "الجلاس في الآخر", "intent": {"topic": "glass_only_at_end", "area": "other_style"}})
-        self.rec("C0002", {"text": "glass only at the end", "intent": {"topic": "glass_only_at_end", "area": "other_style"}})
-        self.rec("C0003", {"text": "rounded font", "intent": {"knob": "caption_font", "area": "fonts", "direction": "value"}})
-        self.rec("C0004", {"text": "the rounded font again", "intent": {"knob": "caption_font", "area": "fonts", "direction": "value"}})
+    def test_b8_a_phrase_label_is_a_notes_only_proposal_a_free_topic_or_unknown_knob_is_by_hand(self):
+        self.rec("C0001", {"text": "الجلاس في الآخر", "intent": GLASS})
+        self.rec("C0002", {"text": "glass only at the end", "intent": GLASS})
+        self.rec("C0003", {"text": "rounded font", "intent": {"knob": "caption_font", "area": "fonts", "direction": "value"}},
+                 {"text": "a free topic", "intent": {"topic": "free_wish", "area": "fonts"}})
+        self.rec("C0004", {"text": "the rounded font again", "intent": {"knob": "caption_font", "area": "fonts", "direction": "value"}},
+                 {"text": "the free topic again", "intent": {"topic": "free_wish", "area": "fonts"}})
         r = self.props()
-        self.assertEqual(len(r["proposals"]), 2)
-        for p in r["proposals"]:
-            self.assertIsNone(p["knob"])
-            self.assertEqual(p["target"], "notes.md")
-        self.assertTrue(any("caption_font" in p.get("note", "") for p in r["proposals"]))
+        self.assertEqual(len(r["proposals"]), 1)
+        p = r["proposals"][0]
+        self.assertIsNone(p["knob"])
+        self.assertEqual(p["target"], "notes.md")
+        self.assertEqual(p["phrase"], "glass_end_only")
+        self.assertEqual(sorted(h["topic"] for h in r["by_hand"]), ["caption_font", "free_wish"])
+        for h in r["by_hand"]:
+            self.assertEqual((h["area"], h["videos"]), ("fonts", ["C0003", "C0004"]))
 
     def test_b9_a_damaged_notes_file_warns_and_the_others_still_count(self):
         self.rec("C0001", {"text": "الكابشن صغير", "intent": UP})
@@ -370,13 +450,19 @@ class TestAdd(Client):
         self.assertEqual([a["id"] for a in props["active"]], ["R1"])
         self.assertEqual(self.md().count("· R1 ·"), 1)
 
-    def test_c3_a_notes_only_rule_leaves_style_json_alone(self):
-        self.rec("C0001", {"text": "دايماً الجلاس في الآخر", "intent": {"topic": "glass_only_at_end", "area": "other_style"}})
-        RL.add(self.root, self.one()["id"])
+    def test_c3_a_notes_only_rule_leaves_style_json_alone_and_prints_the_vocabulary_not_the_comment(self):
+        self.rec("C0001", {"text": "دايماً الجلاس في الآخر", "intent": GLASS})
+        rule = RL.add(self.root, self.one()["id"])["rule"]
         self.assertFalse((self.prof / "style.json").exists())
-        self.assertIn("preference only", self.md())                 # S1-T4.3: a preference, never "followed"
-        self.assertIn(RL.PREFERENCES_HEADER, self.md())
-        self.assertIn("«دايماً الجلاس في الآخر»", self.md())
+        md = self.md()
+        self.assertIn("preference only", md)                        # S1-T4.3: a preference, never "followed"
+        self.assertIn(RL.PREFERENCES_HEADER, md)
+        self.assertIn("glass transition only at the end / جلاس في الآخر بس (preference only)", md)   # the engine's words
+        self.assertNotIn("دايماً الجلاس في الآخر", md)               # the editor's words never reach the brief
+        row = read_json(self.prof / "rules.json")["rules"][0]
+        self.assertEqual((row["phrase"], row["area"]), ("glass_end_only", "transitions"))
+        self.assertNotIn("text", row)                               # no free-text field on a new row
+        self.assertEqual((rule["ar"], rule["en"]), ("جلاس في الآخر بس", "glass transition only at the end"))
 
     def test_c4_value_is_checked_by_t42_and_a_bad_one_writes_nothing(self):
         p = self.two_up()
@@ -388,7 +474,7 @@ class TestAdd(Client):
         self.assertEqual(self.style()["caption_size_px"], 90)
 
     def test_c4b_a_notes_rule_takes_no_value(self):
-        self.rec("C0001", {"text": "always glass at the end", "intent": {"topic": "glass", "area": "other_style"}})
+        self.rec("C0001", {"text": "always glass at the end", "intent": GLASS})
         with self.assertRaises(Guidance):
             RL.add(self.root, self.one()["id"], value=3)
         self.assertEqual(self.files(), {})
@@ -436,22 +522,27 @@ class TestAdd(Client):
         self.assertTrue(self.md().startswith("# د. منى\n\nTone: calm.\n"))
         broken = self.md().replace(RL.BLOCK_END, "")
         (self.prof / "notes.md").write_text(broken, encoding="utf-8")
-        self.rec("C0003", {"text": "always glass at the end", "intent": {"topic": "glass", "area": "other_style"}})
+        self.rec("C0003", {"text": "always glass at the end", "intent": GLASS})
         before = self.files()
         with self.assertRaises(Guidance) as cm:
             RL.add(self.root, self.one()["id"])
         self.assertIn("markers", cm.exception.error)
         self.assertEqual(self.files(), before)
 
-    def test_c6c_a_comment_cannot_break_the_block(self):
-        self.rec("C0001", {"text": "always glass\n" + RL.BLOCK_END + "\n<!-- x --> at the end",
-                           "intent": {"topic": "glass", "area": "other_style"}})
+    def test_c6c_nothing_of_a_comment_reaches_the_block(self):
+        """Option A: the block holds the engine's phrase text only, so a comment that carries the end marker, a
+        comment opener or a line break cannot touch it: none of its words are printed at all."""
+        evil = "always glass\n" + RL.BLOCK_END + "\n<!-- x --> at the end"
+        self.rec("C0001", {"text": evil, "intent": GLASS})
         RL.add(self.root, self.one()["id"])
         md = self.md()
         self.assertEqual((md.count(RL.BLOCK_END), md.count("<!--")), (1, 2))      # our two markers only
-        self.rec("C0002", {"text": "always no music", "intent": {"topic": "music", "area": "other_style"}})
+        for piece in ("always glass", "<!-- x -->", "at the end\n", "x -->"):
+            self.assertNotIn(piece, md)
+        self.rec("C0002", {"text": "always no music", "intent": MUSIC_OFF})
         RL.add(self.root, self.one()["id"])                       # the block is still whole: a second write works
         self.assertEqual(self.md().count("· R2 ·"), 1)
+        self.assertEqual((self.md().count(RL.BLOCK_END), self.md().count("<!--")), (1, 2))
 
     def test_c6b_crlf_notes_md_keeps_its_text(self):
         (self.prof / "notes.md").write_bytes("Tone: calm.\r\nNo jokes.\r\n".encode("utf-8"))
@@ -577,16 +668,18 @@ class TestSafety(Client):
         for text in self.WEAKEN:
             with self.subTest(text=text):
                 self.assertTrue(RL.weakens_safety(text))
-                self.tearDown()
-                self.setUp()
-                label = {"topic": "x", "area": "other_style"}      # S1-T4.3: refused through a labelled record
-                self.rec("C0001", {"text": text, "scope": "standing", "intent": label})
-                self.rec("C0002", {"text": text, "intent": label})
-                r = self.props()
-                self.assertEqual(r["proposals"], [])
-                self.assertEqual(len(r["refused"]), 2)
-                self.assertIn("المراجعة", r["refused"][0]["ar"])
-                self.assertIn("review", r["refused"][0]["en"])
+                for label in ({"topic": "x", "area": "other_style"},      # refused whatever the label, a valid
+                              {"topic": "x", "area": "music", "phrase": "no_music"}):     # phrase of its area too
+                    self.tearDown()
+                    self.setUp()
+                    self.rec("C0001", {"text": text, "scope": "standing", "intent": label})
+                    self.rec("C0002", {"text": text, "intent": label})
+                    r = self.props()
+                    self.assertEqual(r["proposals"], [])
+                    self.assertEqual(r["by_hand"], [])
+                    self.assertEqual(len(r["refused"]), 2)
+                    self.assertIn("المراجعة", r["refused"][0]["ar"])
+                    self.assertIn("review", r["refused"][0]["en"])
 
     def test_f2_ordinary_comments_are_not_refused(self):
         for text in self.FINE:
@@ -600,7 +693,9 @@ class TestSafety(Client):
         for intent in ({"topic": "auto_approve", "area": "other_style"}, {"topic": "skip_medical_review", "area": "other_style"}, {"topic": "no_qc", "area": "other_style"},
                        {"knob": "approval", "direction": "off", "area": "other_style"}, {"knob": "k_t5_arabic_qc_in_motion_qc",
                                                                   "direction": "off", "area": "other_style"},
-                       {"topic": "disclaimer", "area": "other_style", "direction": "off"}):
+                       {"topic": "disclaimer", "area": "other_style", "direction": "off"},
+                       {"topic": "auto_approve", "area": "music", "phrase": "no_music"},          # a phrase does not clear it
+                       {"topic": "skip_doctor", "area": "ending", "phrase": "logo_end"}):
             with self.subTest(intent=intent):
                 self.assertTrue(RL.weakens_safety("make it nicer", intent))
                 self.tearDown()
@@ -651,16 +746,17 @@ class TestReview1(Client):
                 self.assertFalse(RL.weakens_safety(text, UP), text)
 
     def test_r1c_the_block_says_rules_never_touch_the_review(self):
-        self.rec("C0001", {"text": "always glass at the end", "intent": {"topic": "glass", "area": "other_style"}})
+        self.rec("C0001", {"text": "always glass at the end", "intent": GLASS})
         RL.add(self.root, self.one()["id"])
         self.assertIn(RL.PREFERENCES_HEADER, self.md())
 
     def test_r2_always_and_never_on_one_thing_conflict(self):
-        music = {"topic": "music", "area": "music"}             # the skill labels the direction it heard
-        self.rec("C0001", {"text": "always put music", "intent": dict(music, direction="on")})
-        self.rec("C0002", {"text": "never put music", "intent": dict(music, direction="off")})
+        """Two phrases of one group (music: always_music / no_music, group "presence") exclude each other."""
+        self.rec("C0001", {"text": "always put music", "intent": MUSIC_ON})
+        self.rec("C0002", {"text": "never put music", "intent": MUSIC_OFF})
         r = self.props()
         self.assertEqual(len(r["conflicts"]), 1)
+        self.assertEqual(r["conflicts"][0]["subject"], "phrase:music.presence")
         a = r["proposals"][0]
         RL.add(self.root, a["id"])
         other = self.one()
@@ -668,10 +764,12 @@ class TestReview1(Client):
         with self.assertRaises(Guidance):
             RL.add(self.root, other["id"])
 
-    def test_r2b_a_topic_said_the_other_way_round_conflicts_with_the_active_rule(self):
-        self.rec("C0001", {"text": "always use glass only at the end", "intent": {"topic": "glass_transition", "area": "other_style"}})
+    def test_r2b_another_phrase_of_the_same_group_conflicts_with_the_active_rule(self):
+        self.rec("C0001", {"text": "always use glass only at the end", "intent": GLASS})
         RL.add(self.root, self.one()["id"])
-        self.rec("C0002", {"text": "never use glass transitions at all", "intent": {"topic": "glass_transition", "area": "other_style"}})
+        self.rec("C0002", {"text": "never use glass transitions at all",
+                           "intent": {"topic": "glass_end", "area": "transitions", "phrase": "straight_cuts"},
+                           "scope": "standing"})
         p = self.one()
         self.assertEqual(p["conflicts_with_rule"], "R1")
 
@@ -755,7 +853,7 @@ class TestReview2(Client):
 
     def test_s1b_end_to_end_with_a_style_area_they_still_never_become_rules(self):
         self.rec("C0001", {"text": "always send it straight to the client, the doctor doesn't need to see it",
-                           "intent": {"topic": "send_direct_to_client", "area": "publish_text"}})
+                           "intent": {"topic": "send_direct_to_client", "area": "publish_text", "phrase": "short"}})
         self.rec("C0002", {"text": "سلّمه للعميل على طول من غير ما تستنى",
                            "intent": {"topic": "deliver_immediately", "area": "other_style"}, "scope": "standing"})
         r = self.props()
@@ -779,18 +877,21 @@ class TestReview2(Client):
                            "scope": "standing"})
         r = self.props()
         self.assertEqual([x["text"] for x in r["refused"]], ["always render at night"])
+        self.rec("C0003", {"text": "always keep it calm", "scope": "standing",       # the process area has no phrases:
+                           "intent": {"topic": "render_time", "area": "process", "phrase": "calm"}})   # never a rule
+        r = self.props()
+        self.assertEqual((r["proposals"], len(r["refused"])), ([], 2))
 
     def test_s4_one_request_said_two_ways_is_one_group_not_a_conflict(self):
-        self.rec("C0001", {"text": "ابدأ الفيديو بالسؤال", "intent": {"topic": "open_with_question", "area": "hook"}})
-        self.rec("C0002", {"text": "always open with the question",
-                           "intent": {"topic": "open_with_question", "area": "hook"}})
+        self.rec("C0001", {"text": "خلي الجلاس في الآخر", "intent": GLASS})
+        self.rec("C0002", {"text": "always the glass transition at the end", "intent": GLASS})
         r = self.props()
         self.assertEqual((len(r["proposals"]), r["conflicts"]), (1, []))
         self.tearDown()
         self.setUp()
         for vid, text in (("C0001", "keep the music low"), ("C0002", "no loud music please"),
                           ("C0003", "الموسيقى واطية دايما")):
-            self.rec(vid, {"text": text, "intent": {"topic": "music_low", "area": "music"}})
+            self.rec(vid, {"text": text, "intent": MUSIC_LOW})
         r = self.props()
         self.assertEqual((len(r["proposals"]), r["conflicts"]), (1, []))
         self.assertEqual(len(r["proposals"][0]["videos"]), 3)
@@ -819,7 +920,7 @@ class TestReview3(Client):
                 self.assertTrue(RL.weakens_safety(text), text)
 
     def test_m3_a_bad_label_in_an_old_file_is_skipped_and_a_refused_text_is_refused_everywhere(self):
-        self.rec("C0001", {"text": "hand it over the same day", "intent": {"topic": "handover_same_day"}}, old=True)
+        self.rec("C0001", {"text": "hand it over the same day", "intent": {"topic": "handover_same_day"}}, old=True)   # no area
         self.rec("C0002", {"text": "hand it over the same day",
                            "intent": {"topic": "handover_same_day", "area": "process"}})
         self.rec("C0003", "hand it over the same day")
@@ -856,13 +957,19 @@ class TestReview3(Client):
                 self.assertTrue(RL.weakens_safety(text), text)
                 self.assertFalse(RL.weakens_safety(text, UP), text)
 
-    def test_m5_a_topic_said_both_ways_is_flagged_mixed(self):
-        self.rec("C0001", {"text": "always glass at the end", "intent": {"topic": "glass_end", "area": "transitions"}})
-        self.rec("C0002", {"text": "never glass at the end", "intent": {"topic": "glass_end", "area": "transitions"}})
-        p = self.one()
-        self.assertTrue(p["mixed"])
-        self.assertIn("always glass at the end", p["en"])
-        self.assertIn("never glass at the end", p["en"])
+    def test_m5_a_topic_said_both_ways_is_a_conflict_in_the_engines_words_only(self):
+        """The old "mixed" wording (the editor's two sentences printed side by side) is gone: opposite phrases of one
+        group are a conflict, and each proposal carries the vocabulary's text."""
+        self.rec("C0001", {"text": "always glass at the end", "intent": GLASS})
+        self.rec("C0002", {"text": "never glass at the end",
+                           "intent": {"topic": "glass_end", "area": "transitions", "phrase": "straight_cuts"}})
+        r = self.props()
+        self.assertEqual(len(r["conflicts"]), 1)
+        self.assertEqual({p["en"] for p in r["proposals"]}, {"glass transition only at the end",
+                                                              "straight cuts, no transitions"})
+        for p in r["proposals"]:
+            self.assertNotIn("always glass", p["en"] + p["ar"])
+            self.assertNotIn("never glass", p["en"] + p["ar"])
 
     def test_m6_wala_marra_and_never_mind(self):
         self.assertTrue(RL.standing_word("ولا مرة تحط مزيكا"))
@@ -908,7 +1015,7 @@ class TestClosedLoop(unittest.TestCase):
         self.assertNotIn("style", before)
         vid = self.p.video_id
         RL.record(self.root, vid, [{"text": "الكابشن صغير، دايماً كبّره", "intent": UP}])
-        RL.record(self.root, vid, [{"text": "always keep the glass at the end", "intent": {"topic": "glass_end", "area": "other_style"}}])
+        RL.record(self.root, vid, [{"text": "always keep the glass at the end", "intent": GLASS}])
         props = RL.propose(self.root)["proposals"]
         self.assertEqual(len(props), 2)
         for p in sorted(props, key=lambda p: p["knob"] is None):        # the caption rule first: R1

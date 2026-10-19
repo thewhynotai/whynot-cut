@@ -602,8 +602,7 @@ def _real(p: Path) -> str:
 def _ai_files(paths: Paths, events: dict) -> dict:
     """event id -> the files it shows that the asset manifest marks `ai_generated: true` (M4), in plan order. A file
     matches by its client-relative path, or by the real path of the asset or of its display copy."""
-    from . import client_db
-    man = client_db.load(paths, "asset-manifest.json", {}) or {}
+    man = read_json(paths.client_db / "asset-manifest.json", {}) or {}
     gen: set = set()
     for a in man.get("assets") or []:
         if isinstance(a, dict) and isinstance(a.get("rel"), str) and a.get("ai_generated") is True:
