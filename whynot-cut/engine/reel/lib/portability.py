@@ -2,7 +2,9 @@
 
 * A non-ASCII engine home on Windows (an Arabic user name puts it under C:\\Users\\<name>\\.whynot-cut): CTranslate2
   (Whisper's model.bin) and OpenCV open files through narrow paths, so Whisper may fail to load and face detection
-  silently finds nothing (every reframe centred). Doctor warns and suggests WHYNOT_HOME=C:\\whynot.
+  silently finds nothing (every reframe centred). Doctor warns and suggests an ASCII engine home (BL-16:
+  `suggested_home()`, <drive>:\\WhyNotCut on a fixed local NTFS drive, a non-system drive first; reel setup locks it).
+* The engine home's access list (BL-16, lib/home_acl.py): no other account may write there.
 * OpenCV's face model: `cv2.CascadeClassifier(<haarcascade>).empty()` must be False, else face detection is off.
 * ffmpeg: which binary runs (override, the pinned one, the runtime's imageio-ffmpeg, PATH), its version, and a
   self-test of the filters the engine relies on (builds differ: an old PATH ffmpeg may lack `ebur128=peak=true`).
@@ -11,6 +13,7 @@ Every check takes its inputs as arguments (fakes in tests); `doctor_checks()` ru
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -20,7 +23,8 @@ try:
 except ImportError:                       # setup/setup_env.py: lib/ is on sys.path, no package (home_path_fix only)
     import plat  # type: ignore[no-redef]
 
-SUGGESTED_HOME = r"C:\whynot"
+HOME_FOLDER = "WhyNotCut"
+_DRIVE_KINDS = {2: "removable", 3: "fixed", 4: "network", 5: "cdrom", 6: "ramdisk"}      # GetDriveTypeW
 # the filters the engine's ffmpeg command lines use (audio cleanup, loudness, QC, shots, SFX, previews)
 FFMPEG_FILTERS = ("afftdn", "agate", "alimiter", "astats", "bandreject", "highpass", "lowpass", "ebur128", "aformat",
                   "aresample", "aevalsrc", "anoisesrc", "showspectrumpic", "select", "scale", "pad", "crop", "overlay",
@@ -30,7 +34,40 @@ SELFTEST = ["-hide_banner", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "sin
             "-af", "afftdn,alimiter,ebur128=peak=true", "-f", "null", "-"]
 
 
-def home_path_fix(home, is_win: bool | None = None) -> dict | None:
+def windows_drives() -> list[tuple[str, str, str | None]]:
+    """[("D:", kind, file system)] for this PC's drive letters: kind removable / fixed / network / cdrom / ramdisk /
+    other; the file system is read for fixed drives only (a network or removable drive may stall)."""
+    import ctypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    mask, out = k32.GetLogicalDrives(), []
+    for i in range(26):
+        if not mask >> i & 1:
+            continue
+        root = f"{chr(65 + i)}:\\"
+        kind = _DRIVE_KINDS.get(k32.GetDriveTypeW(root), "other")
+        fs = ctypes.create_unicode_buffer(64)
+        ok = kind == "fixed" and k32.GetVolumeInformationW(root, None, 0, None, None, None, fs, 64)
+        out.append((root[:2], kind, fs.value if ok else None))
+    return out
+
+
+def suggested_home(drives=None, system: str | None = None) -> str:
+    """The ASCII engine home to suggest on Windows: <drive>:\\WhyNotCut on a fixed local NTFS drive, the first
+    non-system one in letter order when there is one, else the system drive. Never a network, removable or FAT/exFAT
+    drive. Only the engine home goes there, never client folders. A folder made at a drive root inherits "Authenticated
+    Users: Modify", so reel setup locks it to the user on creation (lib/home_acl.py). Inputs injectable (tests)."""
+    system = (system or os.environ.get("SystemDrive") or "C:")[:2].upper()
+    if drives is None:
+        try:
+            drives = windows_drives() if plat.IS_WIN else []
+        except (OSError, AttributeError):
+            drives = []
+    good = sorted(d[:2].upper() for d, kind, fs in drives if kind == "fixed" and (fs or "").upper() == "NTFS")
+    pick = next((d for d in good if d != system), system)
+    return f"{pick}\\{HOME_FOLDER}"
+
+
+def home_path_fix(home, is_win: bool | None = None, suggestion: str | None = None) -> dict | None:
     """A doctor fix when the engine home has non-ASCII characters on Windows, else None."""
     is_win = plat.IS_WIN if is_win is None else is_win
     s = str(home)
@@ -39,9 +76,10 @@ def home_path_fix(home, is_win: bool | None = None) -> dict | None:
     return {"item": f"the engine home {s} has non-ASCII characters: on Windows Whisper's model loader and OpenCV's face "
                     "detector open files through narrow paths there, so transcription may fail and every reframe may "
                     "come out centred", "who": "editor",
-            "fix": f"move the engine to an ASCII folder: run `setx WHYNOT_HOME {SUGGESTED_HOME}` in a terminal, open a "
-                   "new Claude Code session, then `reel setup` (it builds the engine there; the Whisper model downloads "
-                   "again unless you copy the models folder across)"}
+            "fix": f"move the engine to an ASCII folder: run `setx WHYNOT_HOME {suggestion or suggested_home()}` in a "
+                   "terminal (for example; any ASCII folder on a local NTFS drive, for the engine only), open a new "
+                   "Claude Code session, then `reel setup` (it creates the folder, locks it to your account and builds "
+                   "the engine there; the Whisper model downloads again unless you copy the models folder across)"}
 
 
 def face_model_check(cv2=None) -> dict:
@@ -64,7 +102,7 @@ def face_model_check(cv2=None) -> dict:
 def face_model_fix(check: dict, home) -> dict | None:
     if check.get("ok") is not False:
         return None
-    hint = (f"set WHYNOT_HOME to an ASCII folder (`setx WHYNOT_HOME {SUGGESTED_HOME}`), new session, then reel setup"
+    hint = (f"set WHYNOT_HOME to an ASCII folder (`setx WHYNOT_HOME {suggested_home()}`), new session, then reel setup"
             if not str(check.get("path") or home).isascii() else
             "reel setup --force   (re-installs the engine packages from the hash lock)")
     return {"item": f"face detection is off: OpenCV cannot load {check.get('path') or 'its face model'} "
@@ -113,12 +151,15 @@ def ffmpeg_fix(rep: dict, bad_override: str | None = None) -> list[dict]:
 
 
 def doctor_checks(home) -> tuple[dict, list[dict]]:
-    """(report, fixes) for reel doctor: engine-home path, OpenCV face model (not on macOS), ffmpeg + filter test."""
+    """(report, fixes) for reel doctor: engine-home path and access list, OpenCV face model (not on macOS), ffmpeg +
+    filter test."""
+    from . import home_acl
     from .common import ffmpeg_choice
     fixes = []
     f = home_path_fix(home)
     if f:
         fixes.append(f)
+    fixes += home_acl.doctor_fixes(home)
     face = None if plat.IS_MAC else face_model_check()
     f = face_model_fix(face or {}, home)
     if f:

@@ -1,0 +1,245 @@
+"""The engine home's access list (BL-16). The engine home holds the Python runtime and the models, so an account that
+may change files there could plant code that runs as the editor.
+
+* `create_home(home)` (reel setup): creates the folder exclusively. On Windows, a new home outside the user profile
+  (e.g. D:\\WhyNotCut: a folder made at a drive root inherits "Authenticated Users: Modify") is locked right away:
+  `icacls <home> /inheritance:r /grant:r <user SID>:(OI)(CI)F *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F`, then read
+  back. If that fails, the new folder is removed and HomeAclError (Arabic first, with the exact command) stops setup.
+* `doctor_fixes(home)` (reel doctor, every time): Windows reads the ACL; a write right for any SID but the user,
+  SYSTEM and Administrators (or another owner) is an editor fix with the exact icacls command. A home or parent that
+  is a junction or symlink is a fix too. POSIX: no group or other write.
+
+The ACL is read as SDDL: SIDs and the fixed SDDL aliases (SY, BA, AU...), never account names, so a localized Windows
+reads the same. icacls and whoami run only from System32 (never PATH, L-G11), as a list argv with no shell.
+"""
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+from pathlib import Path
+
+from .errors import Guidance
+from .linksafe import is_link
+
+SYSTEM, ADMINS = "S-1-5-18", "S-1-5-32-544"
+_ALIASES = {"SY": SYSTEM, "BA": ADMINS, "WD": "S-1-1-0", "AU": "S-1-5-11", "BU": "S-1-5-32-545", "IU": "S-1-5-4",
+            "CO": "S-1-3-0", "OW": "S-1-4", "BG": "S-1-5-32-546", "PU": "S-1-5-32-547", "AN": "S-1-5-7",
+            "NU": "S-1-5-2", "NS": "S-1-5-20", "LS": "S-1-5-19", "AC": "S-1-15-2-1"}
+_NAMES = {"S-1-1-0": "Everyone", "S-1-5-11": "Authenticated Users", "S-1-5-32-545": "Users",
+          "S-1-5-4": "Interactive users", "S-1-3-0": "Creator Owner", "S-1-5-32-546": "Guests",
+          "S-1-5-7": "Anonymous", "S-1-15-2-1": "All app packages"}
+# SDDL rights (generic, standard, file / directory-service letters, which share the same bits)
+_RIGHTS = {"GA": 0x10000000, "GX": 0x20000000, "GW": 0x40000000, "GR": 0x80000000, "SD": 0x10000, "RC": 0x20000,
+           "WD": 0x40000, "WO": 0x80000, "CC": 0x1, "DC": 0x2, "LC": 0x4, "SW": 0x8, "RP": 0x10, "WP": 0x20,
+           "DT": 0x40, "LO": 0x80, "CR": 0x100, "FA": 0x1F01FF, "FR": 0x120089, "FW": 0x120116, "FX": 0x1200A0}
+# write data / add file, append / add folder, delete child, delete, change permissions, take ownership, generic
+# write and all: anything that lets an account put or swap a file
+_WRITE = 0x2 | 0x4 | 0x40 | 0x10000 | 0x40000 | 0x80000 | 0x40000000 | 0x10000000
+_DENY = {"D", "OD", "XD"}
+_SID_RE = re.compile(r"S-1-\d+(-\d+)+")
+
+
+class HomeAclError(OSError):
+    def __init__(self, msg: str, how: str):
+        super().__init__(msg)
+        self.how = how
+
+
+def system32(name: str, environ=None) -> str:
+    env = os.environ if environ is None else environ
+    return os.path.join(env.get("SystemRoot", r"C:\Windows"), "System32", name)
+
+
+def current_user_sid(runner=subprocess.run, environ=None) -> str:
+    """The SID of the user this process runs as, from System32's `whoami /user` (CSV: "name","S-1-5-..."). OSError
+    when it cannot be told."""
+    try:
+        r = runner([system32("whoami.exe", environ), "/user", "/fo", "csv", "/nh"], capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise OSError(f"whoami failed ({type(e).__name__})") from e
+    sid = (r.stdout or b"").decode("utf-8", "replace").strip().rsplit(",", 1)[-1].strip().strip('"')
+    if r.returncode != 0 or not _SID_RE.fullmatch(sid):
+        raise OSError("cannot tell which user this process runs as (no SID)")
+    return sid
+
+
+def _grants(sid: str) -> list[str]:
+    return [f"*{s}:(OI)(CI)F" for s in (sid, SYSTEM, ADMINS)]
+
+
+def lock_argv(home, sid: str, environ=None) -> list[str]:
+    return [system32("icacls.exe", environ), str(home), "/inheritance:r", "/grant:r", *_grants(sid)]
+
+
+def lock_command(home, sid: str) -> str:
+    """The same command for the editor to type: every grant in quotes, or PowerShell would read (OI) as a command."""
+    return f'icacls "{home}" /inheritance:r /grant:r ' + " ".join(f'"{g}"' for g in _grants(sid))
+
+
+def _mask(rights: str) -> int:
+    if rights.lower().startswith("0x"):
+        return int(rights, 16)
+    if rights.isdigit():
+        return int(rights)
+    parts = [rights[i:i + 2] for i in range(0, len(rights), 2)]
+    return sum(_RIGHTS.get(p, _WRITE) for p in parts)                  # an unknown letter pair counts as write
+
+
+def _label(sid: str) -> str:
+    return f"{_NAMES[sid]} ({sid})" if sid in _NAMES else sid
+
+
+def acl_problems(sddl: str, user_sid: str) -> list[str]:
+    """Who else may write in the folder this SDDL describes: one label per SID with a write right in an allow entry
+    (inherit-only entries count: new files get them), plus an owner other than the user, SYSTEM or Administrators.
+    No access list at all (a NULL DACL) is "Everyone"; an entry this reader cannot split (a conditional entry with
+    its own brackets) is a problem too."""
+    ok = {user_sid, SYSTEM, ADMINS}
+    out = []
+    owner = re.search(r"O:(.*?)(?=G:|D:|S:|$)", sddl)
+    dacl = re.search(r"D:([A-Z_]*)(.*)$", sddl)
+    if not dacl or "NO_ACCESS_CONTROL" in dacl.group(1):
+        out.append("Everyone (no access list)")
+    else:
+        aces = re.findall(r"\(([^()]*)\)", dacl.group(2))
+        if dacl.group(2).count("(") != len(aces):
+            out.append("an access entry this check cannot read")
+        for ace in aces:
+            f = ace.split(";")
+            if len(f) < 6 or f[0] in _DENY:
+                continue
+            sid = _ALIASES.get(f[5], f[5])
+            if sid not in ok and _mask(f[2]) & _WRITE and _label(sid) not in out:
+                out.append(_label(sid))
+    if owner:
+        o = _ALIASES.get(owner.group(1), owner.group(1))
+        if o not in ok:
+            out.append(f"{_label(o)} (owner)")
+    return out
+
+
+def read_sddl(path) -> str:
+    """Windows: the owner and access list of `path` as SDDL (Win32 GetNamedSecurityInfoW). OSError when unreadable."""
+    import ctypes
+    from ctypes import wintypes
+    adv = ctypes.WinDLL("advapi32", use_last_error=True)
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    vp = ctypes.c_void_p
+    adv.GetNamedSecurityInfoW.argtypes = (wintypes.LPCWSTR, ctypes.c_int, wintypes.DWORD, vp, vp, vp, vp,
+                                          ctypes.POINTER(vp))
+    adv.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    adv.ConvertSecurityDescriptorToStringSecurityDescriptorW.argtypes = (vp, wintypes.DWORD, wintypes.DWORD,
+                                                                         ctypes.POINTER(vp), vp)
+    k32.LocalFree.argtypes = (vp,)
+    k32.LocalFree.restype = vp
+    sd = vp()
+    # 1 = SE_FILE_OBJECT; OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION
+    rc = adv.GetNamedSecurityInfoW(str(path), 1, 0x1 | 0x4, None, None, None, None, ctypes.byref(sd))
+    if rc != 0:
+        raise OSError(f"cannot read the access list of {path} ({rc})")
+    try:
+        text = vp()
+        if not adv.ConvertSecurityDescriptorToStringSecurityDescriptorW(sd, 1, 0x1 | 0x4, ctypes.byref(text), None):
+            raise OSError(f"cannot read the access list of {path} ({ctypes.get_last_error()})")
+        try:
+            return ctypes.wstring_at(text.value)
+        finally:
+            k32.LocalFree(text)
+    finally:
+        k32.LocalFree(sd)
+
+
+def under_profile(home, environ=None) -> bool:
+    env = os.environ if environ is None else environ
+    prof = env.get("USERPROFILE")
+    if not prof:
+        return False
+    h, p = (os.path.normcase(os.path.abspath(x)) for x in (home, prof))
+    try:
+        return os.path.commonpath([h, p]) == p
+    except ValueError:                                                     # another drive
+        return False
+
+
+def _link_problem(home: Path) -> str | None:
+    for p in (home, home.parent):
+        try:
+            if is_link(p):
+                return str(p)
+        except Guidance:                                                   # can't tell = a link (linksafe fails closed)
+            return str(p)
+    return None
+
+
+def create_home(home, *, is_win: bool | None = None, environ=None, runner=subprocess.run, sid: str | None = None,
+                read=None) -> bool:
+    """Create the engine home (parents as needed) and, on Windows outside the user profile, lock it to the user,
+    SYSTEM and Administrators. True when it was made here; False when it already existed (left as it is: doctor
+    checks it). Raises HomeAclError (the new folder removed again) when the lock fails or a link is in the way."""
+    home = Path(home)
+    is_win = os.name == "nt" if is_win is None else is_win
+    if home.is_dir():
+        return False
+    bad = _link_problem(home)
+    if bad:
+        raise HomeAclError(f"فولدر المحرك {home} أو الفولدر اللي فوقه اختصار (junction أو symlink)، فالإعداد وقف / "
+                           f"the engine home {home} or its parent folder is a link ({bad}), so setup stopped",
+                           "pick a real folder: set WHYNOT_HOME to it, open a new session, then reel setup again")
+    home.parent.mkdir(parents=True, exist_ok=True)
+    os.mkdir(home)                                     # exclusive: FileExistsError if another process made it first
+    if not is_win or under_profile(home, environ):
+        return True
+    cmd = None
+    try:
+        sid = sid or current_user_sid(environ=environ)
+        cmd = lock_command(home, sid)
+        r = runner(lock_argv(home, sid, environ), capture_output=True, timeout=60)
+        if r.returncode != 0:
+            raise OSError(f"icacls exit {r.returncode}")
+        left = acl_problems((read or read_sddl)(home), sid)
+        if left:
+            raise OSError("still writable by " + ", ".join(left))
+    except (OSError, subprocess.SubprocessError) as e:
+        try:
+            os.rmdir(home)                             # the empty folder made above; a next setup creates it again
+        except OSError:
+            pass
+        raise HomeAclError(f"مقدرناش نقفل فولدر المحرك {home} على حسابك بس، فالإعداد وقف (حساب تاني على الجهاز كان "
+                           f"هيقدر يغيّر فيه) / could not lock the engine home {home} to your account ({e}), so setup "
+                           "stopped: another account on this PC could change the engine there",
+                           (f"run in a terminal: {cmd}  then reel setup again" if cmd else
+                            "run reel setup again; if it repeats, send this report")) from e
+    return True
+
+
+def doctor_fixes(home, *, is_win: bool | None = None, read=None, sid: str | None = None) -> list[dict]:
+    """Doctor's fixes for the engine home: a link, or a folder other accounts may write in. None for a missing home."""
+    home = Path(home)
+    is_win = os.name == "nt" if is_win is None else is_win
+    if not os.path.lexists(home):
+        return []
+    if is_win:
+        bad = _link_problem(home)
+        if bad:
+            return [{"item": f"the engine home {home} is reached through a link ({bad}): the engine never trusts a "
+                             "junction or symlink for its own runtime", "who": "editor",
+                     "fix": "set WHYNOT_HOME to the real folder (or a new one), open a new Claude Code session, then "
+                            "reel setup"}]
+        try:
+            sid = sid or current_user_sid()
+            who = acl_problems((read or read_sddl)(home), sid)
+        except OSError as e:
+            return [{"item": f"the access list of the engine home {home} could not be read ({e})", "who": "editor",
+                     "fix": "run reel doctor again; if it repeats, send this report"}]
+        if not who:
+            return []
+        return [{"item": f"other accounts on this PC may change files in the engine home {home} ({', '.join(who)}): "
+                         "one could plant code that runs as you", "who": "editor",
+                 "fix": f"run in a terminal: {lock_command(home, sid)}  then reel doctor again (if it says access is "
+                        "denied, another account made this folder: point WHYNOT_HOME to a new one)"}]
+    if os.stat(home).st_mode & 0o022:
+        return [{"item": f"the engine home {home} is writable by the group or others: another account could plant "
+                         "code that runs as you", "who": "editor",
+                 "fix": f'run in a terminal: chmod go-w "{home}"  then reel doctor again'}]
+    return []

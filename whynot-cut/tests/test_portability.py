@@ -54,10 +54,12 @@ def _done(rc=0, out="", err=""):
 # ------------------------------------------------------------------------------------------- MI-14 doctor
 class TestDoctorPortability(_Tmp):
     def test_a_non_ascii_windows_engine_home_is_a_fix_naming_whynot_home(self):
-        f = portability.home_path_fix(PureWindowsPath("C:/Users/يونس/.whynot-cut"), is_win=True)
+        f = portability.home_path_fix(PureWindowsPath("C:/Users/يونس/.whynot-cut"), is_win=True,
+                                      suggestion=r"D:\WhyNotCut")
         self.assertIsNotNone(f)
         self.assertIn("non-ASCII", f["item"])
-        self.assertIn(r"WHYNOT_HOME C:\whynot", f["fix"])
+        self.assertIn(r"setx WHYNOT_HOME D:\WhyNotCut", f["fix"])
+        self.assertNotIn(r"C:\whynot", f["fix"])
         self.assertIsNone(portability.home_path_fix(PureWindowsPath("C:/Users/yunus/.whynot-cut"), is_win=True))
         self.assertIsNone(portability.home_path_fix("/Users/يونس/.whynot-cut", is_win=False))   # macOS: not affected
 
@@ -75,6 +77,29 @@ class TestDoctorPortability(_Tmp):
         self.assertIs(portability.face_model_check(fake_cv2(False))["ok"], True)
         self.assertIsNone(portability.face_model_fix({"ok": True}, "C:/h"))
 
+    def test_a_face_model_fix_on_a_non_ascii_path_names_the_suggested_home(self):
+        bad = {"ok": False, "path": "C:/Users/يونس/.whynot-cut/runtimes/r/cv2/data/x.xml", "error": "empty"}
+        with mock.patch.object(portability, "suggested_home", return_value=r"E:\WhyNotCut"):
+            fix = portability.face_model_fix(bad, "C:/Users/يونس/.whynot-cut")
+        self.assertIn(r"setx WHYNOT_HOME E:\WhyNotCut", fix["fix"])
+
+    def test_doctor_checks_add_the_home_acl_fixes(self):
+        from lib import home_acl
+        fix = {"item": "ACL-PROBE", "who": "editor", "fix": "x"}
+        with mock.patch.object(home_acl, "doctor_fixes", return_value=[fix]) as df, \
+                mock.patch.object(portability, "face_model_check", return_value={"ok": True}), \
+                mock.patch.object(portability, "ffmpeg_report", return_value={}):
+            _, fixes = portability.doctor_checks(self.tmp)
+        df.assert_called_once_with(self.tmp)
+        self.assertIn(fix, fixes)
+
+    def test_no_text_names_the_old_root_folder(self):
+        """BL-16: a folder made at the root of C:\\ lets every signed-in account modify what is inside."""
+        for f in (SK / "engine" / "reel" / "lib" / "portability.py",
+                  SK / "skills" / "setup" / "references" / "platform-setup.md"):
+            with self.subTest(file=f.name):
+                self.assertNotRegex(f.read_text(encoding="utf-8"), r"(?i)c:\\{1,2}whynot(?!cut)")
+
     def test_doctor_carries_the_portability_report_and_its_fixes(self):
         from lib import onboard
         fix = {"item": "PORTABILITY-PROBE", "who": "editor", "fix": "x"}
@@ -83,6 +108,44 @@ class TestDoctorPortability(_Tmp):
         dc.assert_called_once()
         self.assertEqual(rep["portability"], {"probe": 1})
         self.assertIn(fix, rep["fixes"])
+
+
+# ------------------------------------------------------------------------------------------- BL-16 suggestion
+class TestSuggestedHome(unittest.TestCase):
+    """BL-16: an ASCII folder on a fixed local NTFS drive, a non-system drive first; never network, removable or FAT."""
+
+    def pick(self, *drives, system="C:"):
+        return portability.suggested_home(drives=list(drives), system=system)
+
+    def test_a_single_system_drive(self):
+        self.assertEqual(self.pick(("C:", "fixed", "NTFS")), r"C:\WhyNotCut")
+
+    def test_a_second_fixed_ntfs_drive_is_preferred(self):
+        self.assertEqual(self.pick(("C:", "fixed", "NTFS"), ("D:", "fixed", "NTFS")), r"D:\WhyNotCut")
+
+    def test_removable_network_and_fat_drives_are_never_suggested(self):
+        for d in (("D:", "removable", "NTFS"), ("D:", "network", "NTFS"), ("D:", "fixed", "FAT32"),
+                  ("D:", "fixed", "exFAT"), ("D:", "fixed", None), ("D:", "cdrom", "CDFS"), ("D:", "ramdisk", "NTFS")):
+            with self.subTest(drive=d):
+                self.assertEqual(self.pick(("C:", "fixed", "NTFS"), d), r"C:\WhyNotCut")
+
+    def test_the_first_good_non_system_drive_in_letter_order(self):
+        self.assertEqual(self.pick(("C:", "fixed", "NTFS"), ("F:", "fixed", "NTFS"), ("D:", "fixed", "FAT32"),
+                                   ("E:", "fixed", "ntfs")), r"E:\WhyNotCut")
+
+    def test_another_system_drive_letter(self):
+        self.assertEqual(self.pick(("C:", "fixed", "NTFS"), ("D:", "fixed", "NTFS"), system="D:"), r"C:\WhyNotCut")
+        self.assertEqual(self.pick(("D:", "fixed", "NTFS"), system="d:"), r"D:\WhyNotCut")
+
+    def test_no_drive_list_falls_back_to_the_system_drive(self):
+        self.assertEqual(self.pick(), r"C:\WhyNotCut")
+        self.assertEqual(self.pick(system="E:"), r"E:\WhyNotCut")
+
+    @unittest.skipUnless(IS_WIN, "drive letters: Windows")
+    def test_this_machine_gives_an_ascii_drive_root_folder(self):
+        drives = portability.windows_drives()
+        self.assertTrue(any(k == "fixed" for _, k, _ in drives), drives)
+        self.assertRegex(portability.suggested_home(), r"^[A-Z]:\\WhyNotCut$")
 
 
 # ------------------------------------------------------------------------------------------- MI-15 --footage
