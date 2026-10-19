@@ -20,5 +20,15 @@
   "captions_during_hook": "hide",
   "hook_title_sfx": true,
   "highlight_colour": "brand",
-  "knobs_note": "Read by `reel plan` (T4.2); builds follow the compiled plan, so run `reel plan` after a change. caption_size_px: null = the caption template's size, or a whole number 32-140 px on a 1080 px wide frame (caption lines get shorter as it grows); one reel may set global.caption_size_px in edit-decisions. captions_during_hook: hide | show (captions under the hook title; client only). hook_title_sfx: true | false (the hook title's sound). highlight_colour: brand | accent | ink | #RRGGBB (the keyword caption box in Premiere; checked for contrast against the caption text and replaced by a readable brand colour, with a warning, when too faint; After Effects captions use the brand colour for now). A reel may override hook_title_sfx and highlight_colour in edit-decisions global."
+  "knobs_note": "Read by `reel plan` (T4.2); builds follow the compiled plan, so run `reel plan` after a change. caption_size_px: null = the caption template's size, or a whole number 32-140 px on a 1080 px wide frame (caption lines get shorter as it grows); one reel may set global.caption_size_px in edit-decisions. captions_during_hook: hide | show (captions under the hook title; client only). hook_title_sfx: true | false (the hook title's sound). highlight_colour: brand | accent | ink | #RRGGBB (the keyword caption box in Premiere; checked for contrast against the caption text and replaced by a readable brand colour, with a warning, when too faint; After Effects captions use the brand colour for now). A reel may override hook_title_sfx and highlight_colour in edit-decisions global.",
+  "camera": {
+    "ease_ms": 250,
+    "why": "T4.1 smooth zoom: each story punch-in eases in and out over ease_ms (bezier keys on Motion Scale/Position). 0 = hard punches; a slow_push pushes across its whole piece whatever this says. Reframes, punch-outs, jump-cut zoom masks, punches on a cut or next to another shot, and 4:5 window framing stay hard."
+  },
+  "fades": {
+    "video_in_ms": 0,
+    "video_out_ms": 0,
+    "audio_in_ms": 0,
+    "audio_out_ms": 0
+  }
 }

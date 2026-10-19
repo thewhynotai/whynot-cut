@@ -1062,6 +1062,17 @@ def final_checks(inp: PlanInputs, events: list, verse: list | None = None):
 
 
 @_in_context
+def apply_ease(inp: PlanInputs, spec: dict, camera: list):
+    """3.0 T4.1: the smooth-zoom keys of the story moves and the reel fades (style.json camera.ease_ms, fades;
+    lib/camera_ease.py). `camera` (apply_framing's layer) gives the shot each story move sits on, used only for easing:
+    the spec's pieces never change for it (a podcast plan keeps its Gate 1 fingerprint)."""
+    from .camera_ease import spec_fields
+    fields, warns = spec_fields(spec["main_segments"], inp.style, inp.fps, spec["duration_ms"], camera=camera,
+                                verse=spec.get("manual_verse"))     # no ease starts inside a recited verse
+    return dict(spec, **fields), [], warns
+
+
+@_in_context
 def assemble_spec(inp: PlanInputs, cam: dict, fr: dict, tm: dict, au: dict, recipe_info) -> dict:
     """The timeline spec (01_analysis/timeline-spec.json) from the steps' data."""
     import copy
@@ -1242,7 +1253,7 @@ def build_plan(inp: PlanInputs) -> dict:
     tm = step(apply_timemap(inp, fr["camera"], fr["merged"], vd["events"], vd["broll"], vd["cues"], cam["box"]))
     tm = step(apply_manual_verse(inp, tm))
     au = step(build_audio(inp, tm["cues"], tm["tmap"], tm["dur_f"]))
-    spec = assemble_spec(inp, cam, fr, tm, au, vd["recipe_info"])
+    spec = step(apply_ease(inp, assemble_spec(inp, cam, fr, tm, au, vd["recipe_info"]), fr["camera"]))
     step(final_checks(inp, tm["events"], tm.get("manual_verse")))
     return {"ok": not errors, "errors": errors, "warnings": warnings, "spec": spec, "broll": tm["broll"],
             "cues": au["cues"], "seq_srts": tm["seq_srts"], "decisions": len(inp.ed.get("decisions", [])),
@@ -1263,7 +1274,6 @@ def plan_fingerprint(paths: Paths, checked: bool = False) -> str:
     key order or file formatting. `checked=True` (approve-plan) reads the spec through stamps.read_compiled: another
     minor version or a 2.x spec warns, another major version is refused with a re-run hint (T2.3). The other callers
     (the re-plan that invalidates an approval, qc, the gate) must still read a spec the re-run is about to replace."""
-    import hashlib
     import json
     f = paths.p("01_analysis/timeline-spec.json")
     if checked:
@@ -1273,12 +1283,36 @@ def plan_fingerprint(paths: Paths, checked: bool = False) -> str:
             raise FileNotFoundError(f)
     else:
         spec = json.loads(f.read_text(encoding="utf-8"))
+    return spec_fingerprint(spec)
+
+
+def spec_fingerprint(spec: dict) -> str:
+    """plan_fingerprint of a spec already read (T4.1: also of the spec without its ease keys, ease_only_reapproval)."""
+    import hashlib
+    import json
     body = {k: v for k, v in spec.items() if k not in ("generated", "engine_version")}   # T2.3: a re-compile by a newer
     # engine that changes nothing stays approved
     if isinstance(body.get("source_range"), dict):        # `reel range` re-run with the same points: set_at etc. only
         body["source_range"] = {k: v for k, v in body["source_range"].items() if not _volatile(k)}
+    if isinstance(body.get("camera_ease"), dict) and not body["camera_ease"].get("runs"):
+        body.pop("camera_ease")           # T4.1: the recorded ease with nothing eased builds nothing new: same approval
     text = json.dumps(body, sort_keys=True, ensure_ascii=False)
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
+
+
+def ease_only_reapproval(paths: Paths, appr) -> bool:
+    """3.0 T4.1 (executor ruling 2026-10-17): the approval no longer matches ONLY because the re-plan added the smooth
+    zoom keys (the approved fingerprint is the current spec's without them). Gate 1 then says so in editor words
+    (camera_ease.EASE_REAPPROVE) instead of the plain "plan changed"."""
+    import json
+    from .camera_ease import ease_only_change
+    if not isinstance(appr, dict) or not appr.get("approved"):
+        return False
+    try:
+        spec = json.loads(paths.p("01_analysis/timeline-spec.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return ease_only_change(spec, appr.get("plan_fingerprint"), spec_fingerprint)
 
 
 def _volatile(key: str) -> bool:
@@ -1322,6 +1356,9 @@ def approval_state(paths: Paths) -> dict:
         return {"state": "current", "by": by, "message": f"approved by {by}"}
     if approved_before_3(appr):
         return {"state": "stale", "by": by, "message": OLDER_APPROVAL["en"], "editor_message": dict(OLDER_APPROVAL)}
+    if ease_only_reapproval(paths, appr):              # T4.1: only the smooth zoom keys were added since the approval
+        from .camera_ease import EASE_REAPPROVE
+        return {"state": "stale", "by": by, "message": EASE_REAPPROVE["en"], "editor_message": dict(EASE_REAPPROVE)}
     return {"state": "stale", "by": by, "message": "plan changed since approval — re-approve"}
 
 
@@ -1345,6 +1382,33 @@ def _seq_frame(spec: dict, src_ms: float) -> int:
     return spec["duration_frames"]
 
 
+def smooth_zoom_lines(ce_: dict) -> list:
+    """T4.1 (round 4 M-7): the edit plan's smooth-zoom line, EN then AR, counted per move (a move split by a cut or
+    a cutaway counts once): punch-ins that ease in and out, slow pushes, punch-ins eased on one side only."""
+    moves = {}
+    for r_ in ce_.get("runs") or []:
+        m_ = moves.setdefault(r_.get("decision_id"), {"push": False, "in": False, "out": False})
+        m_["push"] = m_["push"] or r_.get("camera") == "slow_push"
+        m_["in"] = m_["in"] or bool(r_.get("ease_in"))
+        m_["out"] = m_["out"] or bool(r_.get("ease_out"))
+    push = sum(1 for m_ in moves.values() if m_["push"])
+    both = sum(1 for m_ in moves.values() if not m_["push"] and m_["in"] and m_["out"])
+    one = sum(1 for m_ in moves.values() if not m_["push"] and not (m_["in"] and m_["out"]))
+    en, ar = [], []
+    if both:
+        en.append(f"{both} punch-in{'s' if both != 1 else ''} ease{'' if both != 1 else 's'} in and out")
+        ar.append(f"{both} punch-in {'بيدخلوا ويخرجوا' if both != 1 else 'بيدخل ويخرج'} بنعومة")
+    if push:
+        en.append(f"{push} slow push{'es' if push != 1 else ''} across the shot")
+        ar.append(f"{push} slow push طول اللقطة كلها")
+    if one:
+        en.append(f"{one} punch-in{'s' if one != 1 else ''} ease{'' if one != 1 else 's'} on one side only "
+                  "(the other side is on a cut or another shot)")
+        ar.append(f"{one} punch-in بنعومة من ناحية واحدة بس (الناحية التانية على قطع أو لقطة تانية)")
+    ms_ = f" ({ce_.get('ease_ms')} ms)" if (both or one) else ""      # ease_ms is not a slow push's length
+    return [f"Smooth zoom{ms_}: " + "; ".join(en) + ".", f"زوم ناعم{ms_}: " + "، ".join(ar) + "."]
+
+
 def write_edit_plan(paths: Paths) -> Path:
     """Human-readable playback of the compiled plan for editor approval (01_analysis/edit-plan.md)."""
     from .common import write_text
@@ -1365,6 +1429,13 @@ def write_edit_plan(paths: Paths) -> Path:
          + f" · {len(pend)} items need content approval", "",
          "Times are on the reel's timeline (after pause removal and word cuts).", "",
          f"Framing: {spec.get('framing', 'fit')}", ""]
+    ce_ = spec.get("camera_ease") or {}
+    if ce_.get("runs"):                  # T4.1: the smooth zoom, in the editor's words (why a re-approval may be asked)
+        L += smooth_zoom_lines(ce_) + [""]
+    fd_ = spec.get("fades") or {}
+    if any(fd_.values()):
+        L += [f"Fades: picture in {fd_.get('video_in_ms', 0)} ms, out {fd_.get('video_out_ms', 0)} ms; sound in "
+              f"{fd_.get('audio_in_ms', 0)} ms, out {fd_.get('audio_out_ms', 0)} ms", ""]
     rec = spec.get("recipe")
     if rec:
         lab = rec.get("label") or {}

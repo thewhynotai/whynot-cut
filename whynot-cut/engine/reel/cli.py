@@ -518,7 +518,7 @@ def require_plan_approval(p: Paths):
     """Hard gate before slow Adobe builds: the CURRENT plan must be approved (by the editor, or
     explicitly delegated by them). A re-plan after approval invalidates it; an approval from before 3.0 says so
     plainly (3.0 F2)."""
-    from lib.plan import OLDER_APPROVAL, approved_before_3, plan_fingerprint
+    from lib.plan import OLDER_APPROVAL, approved_before_3, ease_only_reapproval, plan_fingerprint
     appr = read_json(p.p("01_analysis/plan-approval.json"))
     if not appr or appr.get("stale") or appr.get("plan_fingerprint") != plan_fingerprint(p):
         how = ("Show the editor 01_analysis/edit-plan.md (playback in chat); after they approve run "
@@ -526,6 +526,10 @@ def require_plan_approval(p: Paths):
                "`reel approve-plan --by delegated --note \"<their words>\"`.")
         if approved_before_3(appr):
             out({"blocked": OLDER_APPROVAL["en"], "editor_message": dict(OLDER_APPROVAL), "how": how})
+        elif ease_only_reapproval(p, appr):         # T4.1: only the smooth zoom keys were added since the approval
+            from lib.camera_ease import EASE_REAPPROVE
+            out({"blocked": f"edit plan not approved since this change: {EASE_REAPPROVE['en']}",
+                 "editor_message": dict(EASE_REAPPROVE), "how": how})
         else:
             out({"blocked": "edit plan not approved (or changed since approval)", "how": how})
         raise SystemExit(2)
@@ -816,6 +820,13 @@ def cmd_premiere(a):
     p = P(a)
     refuse_stale_window(p)
     tm = build_xml(p, prefer_ae_renders=False)   # Premiere-only: brand stills, never stale AE renders
+    spec_ = read_json(p.p("01_analysis/timeline-spec.json"), {}) or {}
+    if (spec_.get("camera_ease") or {}).get("runs") or any((spec_.get("fades") or {}).values()):   # T4.1
+        tm.setdefault("warnings", []).extend([
+            "smooth zoom and fades are not in the XML version: the punch-ins cut hard and nothing fades. The project "
+            "the WhyNot Cut Bridge builds in Premiere has them.",
+            "الزوم الناعم والفيد مش موجودين في نسخة الـ XML: الـ punch-ins بتقطع على طول ومفيش فيد. المشروع اللي "
+            "بيبنيه WhyNot Cut Bridge في بريمير فيه الاتنين."])
     gen = [x for x in tm["media"]]
     set_status(p, "ASSETS_GENERATED", f"{len(gen)} media referenced", "assets")
     set_status(p, "PROJECT_ASSEMBLED", "FCP7 XML interchange built", "premiere", [tm["xml"]])

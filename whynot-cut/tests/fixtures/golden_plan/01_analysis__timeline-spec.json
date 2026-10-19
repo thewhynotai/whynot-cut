@@ -2,6 +2,11 @@
  "base_offset_x": 0.0,
  "base_offset_y": 0.0,
  "base_scale_percent": 500.0,
+ "camera_ease": {
+  "curve": "bezier",
+  "ease_ms": 250,
+  "runs": []
+ },
  "caption_highlights": [
   {
    "at_ms": 8600,

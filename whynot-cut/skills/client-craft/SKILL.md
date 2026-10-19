@@ -58,6 +58,10 @@ reel ref-style   --root "<CLIENT>" --record --by client-researcher   # after wri
     in burned captions), `lead_in_ms` (e.g. 200: a line appears just before the words), `size`
   - `style.json`, beyond pacing and music: `reframe_sharpen` {amount, grain_percent} when the client sharpens the
     upscaled 9:16 crop; `framing` "9:16" or "4:5" (the speaker in a 1080×1350 window over a blurred fill);
+    `camera.ease_ms` (smooth zoom on the story punch-ins, default 250, 0 = hard punches, when the references show
+    hard or slower zooms; a slow_push always pushes across its whole piece); `fades` {video_in_ms, video_out_ms,
+    audio_in_ms, audio_out_ms} (default 0 = off; under one frame counts as off) when the client's reels fade to/from
+    black at the start/end. The picture fade is one black layer over everything; sound effects never fade;
     `export` {name pattern with {episode} {video_id} {name} {version}, video, audio, folder} from the client's
     delivery spec, which the handoff turns into the exact file name
   - `style.json`, the four caption and hook knobs that `reel plan` reads (set one only when the references or the

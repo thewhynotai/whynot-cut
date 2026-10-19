@@ -92,6 +92,11 @@ A wrong value here is a plan error naming the field; fix it and run `reel plan` 
 `type`: hold | punch_in | punch_out | slow_push | reframe. `scale_factor` multiplies base scale (1.05–1.12 typical);
 `offset_y`/`offset_x` px in sequence space (positive y moves the image down to keep eyes in frame when scaling).
 The compiler splits V01 at every camera change; timeline time always equals source time (sync safe).
+A punch_in eases in and out over the client's `style.json` `camera.ease_ms` (default 250 ms, bezier); a slow_push
+pushes in across its whole piece (from the picture before it to its scale_factor), so use slow_push for a slow zoom.
+punch_out and reframe stay hard. A move that starts or ends on a pause/word cut, or next to another shot (podcast
+framing), stays hard on that side; the automatic jump-cut zooms and 4:5 window framing stay hard on purpose. Don't
+shorten a punch-in to fake a smooth zoom: one shorter than 2 x the ease shares its frames between the two eases.
 
 ## Quality rules
 - Same-track graphics cannot overlap (compiler error). One primary graphic at a time.
