@@ -1,0 +1,114 @@
+{
+  "schema": 1,
+  "plan_kind": "timeline",
+  "plan_fingerprint": "7607284fb3e3f74d",
+  "key": "ai+medical",
+  "client_set": [
+    "ai",
+    "medical"
+  ],
+  "review_detect": "review",
+  "lines_total": 3,
+  "lines": [
+    {
+      "event_id": "G01",
+      "text": "أهلا بيكم في Example Clinic",
+      "evidence": "أهلا بيكم في Example Clinic",
+      "start_s": 1.0,
+      "end_s": 4.0,
+      "detected": {},
+      "extra": [],
+      "required": [
+        "ai",
+        "medical"
+      ],
+      "suggested": []
+    },
+    {
+      "event_id": "G02",
+      "text": "قال رسول الله ﷺ: «تداووا» — خد ٥٠٠ مجم بعد الأكل",
+      "evidence": "النبي ﷺ قال تداووا، والجرعة ٢٥٠ مجم بعد الأكل",
+      "start_s": 6.0,
+      "end_s": 10.0,
+      "detected": {
+        "medical": [
+          {
+            "rule": "dose",
+            "match": "500 مجم",
+            "in": "screen"
+          },
+          {
+            "rule": "treatment",
+            "match": "والجرعه",
+            "in": "speech"
+          },
+          {
+            "rule": "dose",
+            "match": "250 مجم",
+            "in": "speech"
+          }
+        ],
+        "religious": [
+          {
+            "rule": "citation",
+            "match": "رسول الله",
+            "in": "screen"
+          },
+          {
+            "rule": "citation",
+            "match": "صلي الله عليه وسلم",
+            "in": "screen"
+          },
+          {
+            "rule": "quoted-scripture",
+            "match": "«تداووا»",
+            "in": "screen"
+          },
+          {
+            "rule": "citation",
+            "match": "صلي الله عليه وسلم",
+            "in": "speech"
+          }
+        ]
+      },
+      "extra": [
+        "religious"
+      ],
+      "required": [
+        "ai",
+        "medical",
+        "religious"
+      ],
+      "suggested": []
+    },
+    {
+      "event_id": "G03",
+      "text": "اسأل دكتورك قبل أي دوا",
+      "evidence": "اسأل دكتورك قبل أي دوا",
+      "start_s": 14.0,
+      "end_s": 17.0,
+      "detected": {
+        "medical": [
+          {
+            "rule": "treatment",
+            "match": "دوا",
+            "in": "screen"
+          },
+          {
+            "rule": "treatment",
+            "match": "دوا",
+            "in": "speech"
+          }
+        ]
+      },
+      "extra": [],
+      "required": [
+        "ai",
+        "medical"
+      ],
+      "suggested": []
+    }
+  ],
+  "ai_assets": [],
+  "note": "Hints point the reviewer at lines and domains; the reviewer still reads every line and may flag any line for any domain."
+}

@@ -1240,10 +1240,9 @@ class TestMotionScan(Base):
 
 # ---------------------------------------------------------------- registry structure and extensibility
 class TestStructure(unittest.TestCase):
-    # Items later tasks add: the business/ai checker guidance (M1-T3) and every eval case (M1-T5). When one lands,
-    # this test fails until it is removed from the list (a ratchet, never a silent skip).
-    PENDING = {("business", "reference"), ("ai", "reference"),
-               ("medical", "eval"), ("religious", "eval"), ("business", "eval"), ("ai", "eval")}
+    # Items later tasks add: the business/ai checker guidance (M1-T3). When one lands, this test fails until it is
+    # removed from the list (a ratchet, never a silent skip). The eval cases landed with M1-T5 (Task 53).
+    PENDING = {("business", "reference"), ("ai", "reference")}
 
     def test_shipped_registry(self):
         reg = RD.registry()

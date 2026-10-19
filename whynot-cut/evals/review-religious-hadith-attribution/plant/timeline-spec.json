@@ -1,0 +1,47 @@
+{
+  "fps": 30,
+  "duration_frames": 600,
+  "generated": "2026-10-19T09:00:00+00:00",
+  "main_segments": [],
+  "events": [
+    {
+      "event_id": "G01",
+      "decision_id": "D01",
+      "template": "statement_bar",
+      "start_ms": 1000,
+      "end_ms": 4000,
+      "src_start_ms": 1500,
+      "src_end_ms": 4500,
+      "params": {
+        "text": "أهلا بيكم في درس النهارده"
+      },
+      "evidence": "أهلا بيكم في درس النهارده"
+    },
+    {
+      "event_id": "G02",
+      "decision_id": "D02",
+      "template": "statement_bar",
+      "start_ms": 6000,
+      "end_ms": 10000,
+      "src_start_ms": 6500,
+      "src_end_ms": 10500,
+      "params": {
+        "text": "قال رسول الله ﷺ: «خير الأمور أوسطها»"
+      },
+      "evidence": "وزي ما بنقول خير الأمور أوسطها"
+    },
+    {
+      "event_id": "G03",
+      "decision_id": "D03",
+      "template": "statement_bar",
+      "start_ms": 14000,
+      "end_ms": 17000,
+      "src_start_ms": 14500,
+      "src_end_ms": 17500,
+      "params": {
+        "text": "اشتركوا في القناة"
+      },
+      "evidence": "اشتركوا في القناة"
+    }
+  ]
+}

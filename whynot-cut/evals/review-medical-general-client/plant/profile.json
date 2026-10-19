@@ -1,0 +1,21 @@
+{
+  "id": "example-coach",
+  "display_name": "Example Coach / كوتش مثال",
+  "prefix": "EX",
+  "languages": [
+    "ar"
+  ],
+  "rtl": true,
+  "speciality": "Lifestyle talks (fictional example)",
+  "domain": "general",
+  "people": [
+    {
+      "name": "Coach Sample Example / الكوتش سامبل إكزامبل",
+      "role": "client: the speaker on camera",
+      "gender": "male",
+      "honorific_ar": "الكوتش",
+      "honorific_en": "Coach",
+      "pronouns": "he/him"
+    }
+  ]
+}

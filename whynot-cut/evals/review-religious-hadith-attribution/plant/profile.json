@@ -1,0 +1,21 @@
+{
+  "id": "example-talks",
+  "display_name": "Example Talks / دروس مثال",
+  "prefix": "ET",
+  "languages": [
+    "ar"
+  ],
+  "rtl": true,
+  "speciality": "Weekly talks on faith and daily life (fictional example)",
+  "domain": "religious",
+  "people": [
+    {
+      "name": "Sheikh Sample Example / الشيخ سامبل إكزامبل",
+      "role": "client: the speaker on camera",
+      "gender": "male",
+      "honorific_ar": "الشيخ",
+      "honorific_en": "Sheikh",
+      "pronouns": "he/him"
+    }
+  ]
+}

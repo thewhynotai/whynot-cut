@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: review-ai-negative-clean
+description: 'M1-T5 ai review, negative: the reviewer writes the review-flags table (review-input.json); graded per (line, flag, verdict) on the trace.'
+tags: [review, ai, negative, arabic]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

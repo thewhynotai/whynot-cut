@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "assets": [
+    {
+      "rel": "data/Broll/gen-skin-after.png",
+      "kind": "image",
+      "source": "generated",
+      "ai_generated": true,
+      "realistic": true,
+      "note": "fictional: a realistic AI-generated skin close-up"
+    },
+    {
+      "rel": "data/Broll/clinic-front.png",
+      "kind": "image",
+      "source": "client",
+      "ai_generated": false
+    }
+  ]
+}

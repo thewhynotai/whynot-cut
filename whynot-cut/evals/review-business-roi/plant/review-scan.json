@@ -1,0 +1,85 @@
+{
+  "schema": 1,
+  "plan_kind": "timeline",
+  "plan_fingerprint": "c21fc666c25b01b5",
+  "key": "ai+business+medical",
+  "client_set": [
+    "ai",
+    "business",
+    "medical"
+  ],
+  "review_detect": "review",
+  "lines_total": 3,
+  "lines": [
+    {
+      "event_id": "G01",
+      "text": "كورس الليزر للتمريض من Example Clinic",
+      "evidence": "كورس الليزر للتمريض من Example Clinic",
+      "start_s": 1.0,
+      "end_s": 4.0,
+      "detected": {},
+      "extra": [],
+      "required": [
+        "ai",
+        "business",
+        "medical"
+      ],
+      "suggested": []
+    },
+    {
+      "event_id": "G02",
+      "text": "هتكسب ٢٠ ألف في الشهر",
+      "evidence": "هتكسب ٢٠ ألف في الشهر",
+      "start_s": 6.0,
+      "end_s": 10.0,
+      "detected": {
+        "business": [
+          {
+            "rule": "earnings-word",
+            "match": "هتكسب",
+            "in": "screen"
+          },
+          {
+            "rule": "earnings-amount",
+            "match": "هتكسب 20 الف",
+            "in": "screen"
+          },
+          {
+            "rule": "earnings-word",
+            "match": "هتكسب",
+            "in": "speech"
+          },
+          {
+            "rule": "earnings-amount",
+            "match": "هتكسب 20 الف",
+            "in": "speech"
+          }
+        ]
+      },
+      "extra": [],
+      "required": [
+        "ai",
+        "business",
+        "medical"
+      ],
+      "suggested": []
+    },
+    {
+      "event_id": "G03",
+      "text": "سجل في الكورس من اللينك",
+      "evidence": "سجل في الكورس من اللينك",
+      "start_s": 14.0,
+      "end_s": 17.0,
+      "detected": {},
+      "extra": [],
+      "required": [
+        "ai",
+        "business",
+        "medical"
+      ],
+      "suggested": []
+    }
+  ],
+  "ai_assets": [],
+  "note": "Hints point the reviewer at lines and domains; the reviewer still reads every line and may flag any line for any domain."
+}

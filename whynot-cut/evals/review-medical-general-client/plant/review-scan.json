@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "plan_kind": "timeline",
+  "plan_fingerprint": "d07c03a390703042",
+  "key": "ai+medical",
+  "client_set": [
+    "ai",
+    "medical"
+  ],
+  "review_detect": "review",
+  "lines_total": 3,
+  "lines": [
+    {
+      "event_id": "G01",
+      "text": "أهلا بيكم في الحلقة",
+      "evidence": "أهلا بيكم في الحلقة",
+      "start_s": 1.0,
+      "end_s": 4.0,
+      "detected": {},
+      "extra": [],
+      "required": [
+        "ai",
+        "medical"
+      ],
+      "suggested": []
+    },
+    {
+      "event_id": "G02",
+      "text": "الأعشاب دي بتعالج السكر نهائي",
+      "evidence": "الأعشاب دي بتعالج السكر نهائي، جربوها",
+      "start_s": 6.0,
+      "end_s": 10.0,
+      "detected": {},
+      "extra": [],
+      "required": [
+        "ai",
+        "medical"
+      ],
+      "suggested": []
+    },
+    {
+      "event_id": "G03",
+      "text": "تابعونا للحلقة الجاية",
+      "evidence": "تابعونا للحلقة الجاية",
+      "start_s": 14.0,
+      "end_s": 17.0,
+      "detected": {},
+      "extra": [],
+      "required": [
+        "ai",
+        "medical"
+      ],
+      "suggested": []
+    }
+  ],
+  "ai_assets": [],
+  "note": "Hints point the reviewer at lines and domains; the reviewer still reads every line and may flag any line for any domain."
+}

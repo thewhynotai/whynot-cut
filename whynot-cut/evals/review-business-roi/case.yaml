@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: review-business-roi
+description: 'M1-T5 business review, positive: the reviewer writes the review-flags table (review-input.json); graded per (line, flag, verdict) on the trace.'
+tags: [review, business, positive, arabic]
+runs: 3
+context:
+  scaffold_script: scaffold.sh
