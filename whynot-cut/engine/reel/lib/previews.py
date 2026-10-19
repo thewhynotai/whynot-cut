@@ -3,7 +3,8 @@
 Purpose: (1) instant visual QC of the plan, (2) fallback media for the Premiere XML when
 After Effects renders are unavailable. Final animated/editable versions are the AE comps.
 Text engines, best first: macOS CoreText (installed brand font), HarfBuzz + FreeType (the client's font FILE; every
-OS), then the arabic_reshaper + python-bidi fallback (breaks fonts with few presentation forms; last resort only).
+OS), then Pillow with arabic_reshaper's presentation forms (breaks fonts with few presentation forms; last resort
+only). Every engine takes its line breaks and run order from lib/bidi_lines (UAX #9, Addendum M2-T1).
 Stored text always stays in logical order.
 """
 from __future__ import annotations
@@ -20,15 +21,66 @@ from . import fonts as fontdb
 _ARABIC_TEXT = __import__("re").compile("[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]")
 
 
-def _shape(s: str) -> str:
+def _shape(line) -> str:
+    """Last-resort PIL text: a bidi_lines Line (from _wrap_block) as one string in visual order, on the levels of its
+    whole block (a wrapped line keeps the block's direction; W7/N0/N1 see across the break), each run reshaped to
+    Arabic presentation forms (arabic_reshaper; it drops harakat, as before) and brackets mirrored in right-to-left
+    runs: the same order as the HarfBuzz and CoreText stills (Addendum M2-T1). Nothing is caught here: a bidi_lines
+    error raises instead of drawing logical (reversed) text, and arabic_reshaper is an engine module (runtime.py)."""
+    import arabic_reshaper
+    from . import bidi_lines
+    if not isinstance(line, bidi_lines.Line):
+        raise TypeError(f"_shape takes a bidi_lines.Line from _wrap_block, not {type(line).__name__}")
+    return bidi_lines.visual(line.par, line.par_start, line.par_end, shape=arabic_reshaper.reshape)
+
+
+def _pil_font(path, size: int, index: int = 0):
+    """A last-resort Pillow font, laid out BASIC (review 081cb9f P3-3). _shape hands Pillow a string already in visual
+    order; Pillow's RAQM layout (a Pillow wheel with libraqm finds libfribidi at run time, e.g. a Homebrew fribidi on a
+    Mac) would run UAX #9 over it again and draw Arabic words reversed and numbers on the wrong side. Pillow's own
+    ImageFont.load_default() (a block with no font at all) is BASIC already (Pillow 12.3; pinned by a test)."""
+    return ImageFont.truetype(path, size, index=index, layout_engine=ImageFont.Layout.BASIC)
+
+
+def _wrap_width(max_chars) -> float:
+    """The line width (characters) of a text block. 0 or less = one word per line, as ae_builder.wrap_lines did; a
+    value that is not a finite number (None, a string, a bool, NaN; from a hand-edited plan) is refused with a plain
+    message instead of a TypeError deep in the wrap."""
+    import math
+    import numbers
+    import reprlib
     try:
-        import arabic_reshaper
-        from bidi.algorithm import get_display
-        import re as _re
-        rtl = bool(_re.search('[\u0600-\u06FF]', s))
-        return get_display(arabic_reshaper.reshape(s), base_dir='R' if rtl else None)
-    except Exception:
-        return s
+        shown = reprlib.repr(max_chars)                       # capped: a hand-edited plan can hold anything
+    except ValueError:                                        # an integer past Python's 4300-digit str limit
+        shown = f"an integer of {max_chars.bit_length()} bits"
+    bad = ValueError(f"max_chars must be a number of characters, not {shown}")
+    if isinstance(max_chars, bool) or not isinstance(max_chars, numbers.Number):
+        raise bad
+    try:
+        w = float(max_chars)
+    except (TypeError, ValueError, OverflowError) as e:       # OverflowError: an integer past float range
+        raise bad from e
+    if not math.isfinite(w):
+        raise bad
+    return w if w > 0 else 1.0
+
+
+def _wrap_block(text: str, max_chars) -> list:
+    """The lines of a still's text block (bidi_lines.Line): broken by lib/bidi_lines' no-break rules («الـ MRI», «٥٠٠
+    mg», a phone number, a bracket and its word), balanced like the AE titles (fewest lines, then even), with ONE
+    direction for the whole block; each line keeps its paragraph's runs (M2-T1). publish.highlight_spans reads the same
+    lines. As with ae_builder.wrap_lines: a literal «\\n» or a newline is a forced break, any run of spaces, tabs,
+    U+001F and Unicode spaces (U+2002, U+2009, U+3000 …) is one space, blank lines are dropped, an empty text is one
+    empty line, and max_chars 0 or less puts one word on each line. Unlike it, the other UAX #9 paragraph separators
+    («\\r», AE's own line break; U+2028/U+2029, U+0085, U+000B/U+000C, U+001C–U+001E) are forced breaks, not spaces,
+    and a no-break space (U+00A0, U+2007, U+202F) joins its two words."""
+    import re
+    from . import bidi_lines
+    width = _wrap_width(max_chars)
+    text = re.sub(r"[ \t\x1f\u1680\u2000-\u2006\u2008-\u200a\u205f\u3000]+", " ",
+                  str(text or "").replace("\\n", "\n"))
+    out = bidi_lines.lay_out(text, width, balanced=True)
+    return [ln for ln in out if ln.text] or out[:1]
 
 
 class Brand:
@@ -93,7 +145,7 @@ class Brand:
         if not f:
             return None
         self.engines.add("pillow-fallback")
-        return ImageFont.truetype(f, size, index=index)
+        return _pil_font(f, size, index)
 
     def _has_arabic(self, face: dict) -> bool:
         fam = ((self.typography or {}).get("families") or {}).get(face.get("family")) or {}
@@ -155,9 +207,8 @@ class _ArabicAware:
 
 def _text_block(d: ImageDraw.ImageDraw, text: str, font, cx: int, cy: int, fill, line_gap=1.3, max_chars=24,
                 shadow=True):
-    from .ae_builder import wrap_lines
     font = font.for_text(text) if hasattr(font, "for_text") else font     # G72: Arabic without an Arabic brand font
-    lines = wrap_lines(text, max_chars).split("\r")
+    lines = _wrap_block(text, max_chars)
     if getattr(font, "engine", None) in ("coretext", "harfbuzz"):
         im = d._image
         asc, desc = font.getmetrics()
@@ -166,10 +217,10 @@ def _text_block(d: ImageDraw.ImageDraw, text: str, font, cx: int, cy: int, fill,
         boxes = []
         col = tuple(fill) + ((255,) if len(fill) == 3 else ())
         for l in lines:
-            img, base, w = font.render(l, col)
+            img, base, w = font.render(l.text, col, bidi=l)
             x = int(cx - w / 2) - 4
             if shadow:
-                sh, _, _ = font.render(l, (0, 0, 0, 110))
+                sh, _, _ = font.render(l.text, (0, 0, 0, 110), bidi=l)
                 im.alpha_composite(sh, (max(0, x + 3), max(0, y + 4))) if im.size[0] > 1 else None
             if im.size[0] > 1:
                 im.alpha_composite(img, (max(0, x), max(0, y)))
@@ -526,7 +577,8 @@ def grab_frame(video: Path, ms: int, size: tuple | None = None) -> Image.Image |
 STILLS_MANIFEST = "03_broll/.stills-manifest.json"
 MANIFEST_FORMAT = 1
 _RENDERER_SOURCES = ("previews.py", "font_roles.py", "fonts.py", "hb_text.py", "ct_text.py", "legibility.py",
-                     "motion_layout.py", "ae_builder.py")      # contrast() and wrap_lines() shape the stills too
+                     "motion_layout.py", "ae_builder.py",       # contrast() and wrap_lines() shape the stills too
+                     "bidi_lines.py")                           # line breaks and run order (M2-T1)
 
 
 def _sha256(data: bytes) -> str:
@@ -933,8 +985,7 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None,
             ev["params"]["on_fill"] = True
         # a card (name card, glass card, CTA) overlaps the caption band at the same time: move the caption above the
         # card, or below it when there is no room above (a card at the top of the frame: seen on a real client)
-        from .ae_builder import wrap_lines
-        n = len(wrap_lines(ev["params"]["text"], t.get("max_chars", 30)).split("\r"))
+        n = len(_wrap_block(ev["params"]["text"], t.get("max_chars", 30)))       # the lines _text_block draws
         half = n * t["size"] * t.get("line_gap", 1.3) / 2 + t.get("bar_pad_y", 8)
         cards = [(av[2], av[3] if len(av) > 3 else H) for av in (avoid or []) if s < av[1] and av[0] < e]
         clash = [(top, bot) for top, bot in cards if not (bot < t["y"] - half - 12 or top > t["y"] + half + 12)]

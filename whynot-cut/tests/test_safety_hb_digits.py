@@ -23,7 +23,9 @@ class TestDigitRuns(unittest.TestCase):
         self.assertEqual(hb_text.runs("خد ٥٠٠ مجم"), (True, [("R", "خد "), ("L", "٥٠٠"), ("R", " مجم")]))
         self.assertEqual(hb_text.runs("٣٫٥ مجم"), (True, [("L", "٣٫٥"), ("R", " مجم")]))
         self.assertEqual(hb_text.runs("۱۲۰/۸۰")[1], [("L", "۱۲۰/۸۰")])            # Persian digits too
-        self.assertEqual(hb_text.runs("٧٠٪ من الناس")[1][0], ("L", "٧٠٪"))           # the Arabic percent sign
+        # the Arabic percent sign: UAX #9 puts it LEFT of the number in Arabic text (W5 only joins ET to EN; «٧٠» is
+        # AN), as the captions already draw it (test_looks_captions); the digits keep their order (M2-T1)
+        self.assertEqual(hb_text.runs("٧٠٪ من الناس")[1][:2], [("L", "٧٠"), ("R", "٪ من الناس")])
 
     def test_western_digits_and_plain_arabic_unchanged(self):
         self.assertEqual(hb_text.runs("خد 500 مجم"), (True, [("R", "خد "), ("L", "500"), ("R", " مجم")]))

@@ -5,7 +5,6 @@ Pillow-only fallback (no libraqm) cannot shape fonts that lack presentation-form
 from __future__ import annotations
 
 import math
-import re
 
 try:
     import CoreText
@@ -30,23 +29,31 @@ class CTFontSpec:
         return (int(math.ceil(CoreText.CTFontGetAscent(self._font))),
                 int(math.ceil(CoreText.CTFontGetDescent(self._font))))
 
-    def render(self, text: str, rgba=(255, 255, 255, 255)):
-        return render_line(text, self, rgba)
+    def render(self, text: str, rgba=(255, 255, 255, 255), bidi=None):
+        return render_line(text, self, rgba, bidi)
 
 
-_ARABIC = re.compile("[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]")
-RLM = "\u200f"
+def rtl_base(text: str, base: int | None = None, bidi=None) -> str:
+    """CoreText runs its own UAX #9, so it gets lib/bidi_lines.host_text (M2-T1): the text spelled with the marks,
+    embeddings and overrides that make any conforming engine draw bidi_lines' order. A line with an Arabic letter, or
+    a wrapped line of an Arabic paragraph, keeps a right-to-left BASE direction even when it starts with a Latin word
+    ('evidence إنها ممكن تساعد' was laid out left-to-right, the first word on the wrong side: seen live on C0238
+    GFX_003), and a phone number reads as dialled. `bidi` = the bidi_lines.Line the text was cut from (a wrapped line
+    keeps the levels of its whole block: W7/N0/N1 across the break); without it the text is one paragraph, its
+    direction `base` (None = decided from the text, HL1). A Line whose text is not `text` is refused (ValueError):
+    a wrong call fails loudly instead of drawing another line's order. One line per call: a paragraph separator
+    inside the text (a newline, U+2029 …; previews._wrap_block splits them) or nesting past the host's 125 levels
+    raises ValueError from host_text, where HarfBuzz would draw it; no caller sends such text."""
+    from . import bidi_lines
+    if bidi is not None:
+        if bidi.text != text:
+            raise ValueError("the bidi Line is not the line being drawn")
+        return bidi_lines.host_text(bidi, base)
+    return bidi_lines.host_text(bidi_lines.paragraph(text, base=base))
 
 
-def rtl_base(text: str) -> str:
-    """Any line with Arabic gets a right-to-left BASE direction. Otherwise the first strong character decides,
-    and a line that starts with a Latin word ('evidence إنها ممكن تساعد') is laid out left-to-right, putting
-    the first word on the wrong side (seen live on C0238 GFX_003)."""
-    return RLM + text if _ARABIC.search(text) and not text.startswith(RLM) else text
-
-
-def _line(text: str, font: CTFontSpec, rgba):
-    text = rtl_base(text)
+def _line(text: str, font: CTFontSpec, rgba, base: int | None = None, bidi=None):
+    text = rtl_base(text, base, bidi)
     r, g, b = rgba[:3]
     a = rgba[3] if len(rgba) > 3 else 255
     color = Quartz.CGColorCreateGenericRGB(r / 255, g / 255, b / 255, a / 255)
@@ -60,10 +67,10 @@ def measure(text: str, font: CTFontSpec) -> float:
     return float(w)
 
 
-def render_line(text: str, font: CTFontSpec, rgba=(255, 255, 255, 255)):
+def render_line(text: str, font: CTFontSpec, rgba=(255, 255, 255, 255), bidi=None):
     """Return (PIL RGBA image, baseline_y_from_top, width). Image height = ascent+descent (+pad)."""
     from PIL import Image
-    line = _line(text, font, rgba)
+    line = _line(text, font, rgba, bidi=bidi)
     w, asc, desc, lead = CoreText.CTLineGetTypographicBounds(line, None, None, None)
     pad = 4
     W = max(1, int(math.ceil(w)) + pad * 2)

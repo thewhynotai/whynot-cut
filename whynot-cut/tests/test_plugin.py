@@ -1199,10 +1199,11 @@ class TestRTLLineDirection(unittest.TestCase):
             rng, n = CoreText.CTRunGetStringRange(r), CoreText.CTRunGetGlyphCount(r)
             if n:
                 runs.append((rng.location, rng.length, min(p.x for p in CoreText.CTRunGetPositions(r, (0, n), None))))
-        # the renderer may prepend a direction mark, so locate runs by what they contain, not by index
-        lead = 1 if runs and min(r[0] for r in runs) == 0 and len(runs) > 6 else 0
+        # the renderer adds bidi controls (lib/bidi_lines.host_text), so locate runs by what they contain, not by index
+        host = ct_text.rtl_base("evidence إنها ممكن تساعد")
+        lead, ar = host.index("evidence"), host.index("إنها")
         latin = next(x for loc, ln, x in runs if loc <= lead < loc + ln)                  # run holding "e" of evidence
-        arabic = [x for loc, ln, x in runs if loc >= lead + 9 and ln >= 4]               # the Arabic words
+        arabic = [x for loc, ln, x in runs if loc >= ar and ln >= 4]                     # the Arabic words
         self.assertTrue(all(latin > x for x in arabic), f"first (Latin) word must be RIGHTMOST: {runs}")
 
 

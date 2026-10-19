@@ -2,14 +2,15 @@
 
 Same contract as ct_text (macOS CoreText): full OpenType shaping (Arabic GSUB joining, marks, ligatures, kerning) and a
 right-to-left base direction for any line that contains Arabic, so Arabic/mixed lines render the way they will in
-Adobe apps. Used on Windows/Linux, and on macOS when CoreText can't find the exact installed font.
+Adobe apps. The run order comes from lib/bidi_lines (UAX #9), the one bidi module every renderer shares. Used on
+Windows/Linux, and on macOS when CoreText can't find the exact installed font.
 The font FILE comes from the client's own assets (typography.json), so rendering doesn't depend on installed fonts.
 """
 from __future__ import annotations
 
 import math
-import re
-import unicodedata
+
+from . import bidi_lines
 
 try:
     import freetype  # type: ignore
@@ -18,7 +19,6 @@ try:
 except Exception:  # packages missing
     AVAILABLE = False
 
-_ARABIC = re.compile("[֐-ࣿיִ-﷿ﹰ-﻿]")   # Hebrew + Arabic blocks (strong RTL)
 _FACES: dict = {}
 _FACES_MAX = 32          # a long-lived process renders many clients' fonts: keep the most recent few
 
@@ -59,52 +59,25 @@ class HBFontSpec:
     def getmetrics(self):
         return self._asc, self._desc
 
-    def render(self, text: str, rgba=(255, 255, 255, 255)):
-        return render_line(text, self, rgba)
+    def render(self, text: str, rgba=(255, 255, 255, 255), bidi=None):
+        return render_line(text, self, rgba, bidi)
 
 
-# --------------------------------------------------------------------------- bidi (paragraph = one line)
-def _cls(ch: str) -> str:
-    bd = unicodedata.bidirectional(ch)
-    # digits first: Arabic-Indic digits, the Arabic decimal separator «٫» and percent sign «٪» sit inside the Arabic
-    # block, and a number keeps its left-to-right order in RTL text («٥٠٠ مجم», «٣٫٥», «٧٠٪»), never reversed
-    # (K-T5: «٣٫٥» was drawn «٥٫٣»)
-    if ch.isdigit() or bd in ("EN", "AN") or ch == "٪":
-        return "L"
-    if _ARABIC.match(ch):
-        return "R"
-    if bd in ("R", "AL"):
-        return "R"
-    if bd == "L":
-        return "L"           # Latin keeps left-to-right order inside RTL text ("50 ملغ")
-    return "N"               # spaces, punctuation
-
-
+# --------------------------------------------------------------------------- bidi (lib/bidi_lines: UAX #9)
 def runs(text: str) -> tuple[bool, list[tuple[str, str]]]:
     """Split a line into directional runs in LOGICAL order and say whether the base direction is RTL.
-    Neutrals between two runs of the same direction join them; otherwise they take the base direction."""
-    rtl = bool(_ARABIC.search(text))
-    base = "R" if rtl else "L"
-    cls = [_cls(c) for c in text]
-    n = len(cls)
-    for i, c in enumerate(cls):
-        if c != "N":
-            continue
-        j = i
-        while j < n and cls[j] == "N":
-            j += 1
-        prev = next((cls[k] for k in range(i - 1, -1, -1) if cls[k] != "N"), base)
-        nxt = cls[j] if j < n else base
-        fill = prev if prev == nxt else base
-        for k in range(i, j):
-            cls[k] = fill
-    out = []
-    for ch, c in zip(text, cls):
-        if out and out[-1][0] == c:
-            out[-1] = (c, out[-1][1] + ch)
+    The order is lib/bidi_lines' (Addendum M2-T1, UAX #9): RTL when the line has any Arabic letter (HL1), neutrals
+    between two runs of the same direction join them (N1), a number keeps its left-to-right order in RTL text
+    («٥٠٠ مجم», «٣٫٥»; K-T5: «٣٫٥» was once drawn «٥٫٣») and «٧٠٪» has its percent sign on the left, as in the captions."""
+    par = bidi_lines.paragraph(text)
+    out: list[tuple[str, str]] = []
+    for r in bidi_lines.logical_runs(par):
+        d = "R" if r.rtl else "L"
+        if out and out[-1][0] == d:
+            out[-1] = (d, out[-1][1] + r.text)
         else:
-            out.append((c, ch))
-    return rtl, out
+            out.append((d, r.text))
+    return par.rtl, out
 
 
 def _shape(run_text: str, direction: str, font: HBFontSpec):
@@ -118,24 +91,27 @@ def _shape(run_text: str, direction: str, font: HBFontSpec):
             for info, pos in zip(buf.glyph_infos, buf.glyph_positions)]
 
 
-def shape_line(text: str, font: HBFontSpec):
-    """Glyphs in VISUAL left-to-right order: [(glyph_id, advance, x_off, y_off)] (px)."""
-    rtl, rs = runs(text)
-    shaped = [_shape(t, d, font) for d, t in rs]        # HarfBuzz returns RTL runs already in visual order
-    if rtl:
-        shaped.reverse()                                 # RTL paragraph: runs are laid out right to left
-    return [g for run in shaped for g in run]
+def shape_line(text: str, font: HBFontSpec, bidi=None):
+    """Glyphs in VISUAL left-to-right order: [(glyph_id, advance, x_off, y_off)] (px). bidi_lines gives the runs in
+    visual order (UAX #9 L1–L2 on this line); HarfBuzz returns each right-to-left run's glyphs already in visual order
+    and mirrors its brackets (L4). `bidi` = a bidi_lines.Line cut from a longer paragraph (a wrapped line keeps the
+    paragraph's direction and levels); without it the text is one paragraph. A Line whose text is not `text` is
+    refused (ValueError): a wrong call fails loudly instead of drawing another line's order."""
+    if bidi is not None and bidi.text != text:
+        raise ValueError("the bidi Line is not the line being drawn")
+    runs = bidi.runs if bidi is not None else bidi_lines.line_runs(bidi_lines.paragraph(text))
+    return [g for r in runs for g in _shape(r.text, "R" if r.rtl else "L", font)]
 
 
 def measure(text: str, font: HBFontSpec) -> float:
     return float(sum(g[1] for g in shape_line(text, font)))
 
 
-def render_line(text: str, font: HBFontSpec, rgba=(255, 255, 255, 255)):
+def render_line(text: str, font: HBFontSpec, rgba=(255, 255, 255, 255), bidi=None):
     """Return (PIL RGBA image, baseline_y_from_top, width), same geometry as ct_text.render_line."""
     import numpy as np
     from PIL import Image
-    glyphs = shape_line(text, font)
+    glyphs = shape_line(text, font, bidi)
     w = sum(g[1] for g in glyphs)
     pad = 4
     asc, desc = font.getmetrics()

@@ -212,29 +212,55 @@ def _text_width(font, s: str) -> float:
     if getattr(font, "engine", None) in ("coretext", "harfbuzz"):
         return float(font.render(s, (255, 255, 255, 255))[2])
     from PIL import Image, ImageDraw
+    from . import bidi_lines
     from .previews import _shape
-    return float(ImageDraw.Draw(Image.new("RGBA", (1, 1))).textlength(_shape(s), font=font))
+    return float(ImageDraw.Draw(Image.new("RGBA", (1, 1))).textlength(_shape(bidi_lines.lay_out(s)[0]), font=font))
 
 
-def highlight_spans(text: str, phrase: str, boxes: list, font, max_chars: int) -> list[tuple[int, int, int, int]]:
+# punctuation that UAX #9 can move away from its word («complete … test.» in an Arabic block shows «.complete …»): a
+# piece made only of these is not boxed («%» and «٪» belong to their number, so they are)
+_MOVABLE = frozenset(".,،؛؟!?:;…\"'«»‹›“”‘’„()[]{}")
+
+
+def highlight_spans(text: str, phrase: str, boxes: list, font, max_chars) -> list[tuple[int, int, int, int]]:
     """Screen boxes of the words of `phrase` inside a text block drawn by previews._text_block (same wrap, one box per
-    line). Arabic lines run right to left, so a word's offset is measured from the right edge (logical order: a run of
-    several Latin words inside an Arabic line is laid out LTR, so their boxes would swap; one Latin word is fine)."""
-    from .ae_builder import wrap_lines
+    line). Each line is laid out from bidi_lines.line_pieces (the runs _text_block drew it with, resolved over the
+    whole block: M2-T1), left to right from the line's left edge, so a word sits where it was drawn: a Latin phrase
+    inside an Arabic line keeps its order, and a wrapped all-Latin line of an Arabic block has its period on the left.
+    A word the bidi order splits apart («بالـMRI scan» draws «MRI scan بالـ») gets one box per drawn part, never one
+    box over the word between; a moved «.» is not boxed. A word matches when all its tokens are phrase words, and
+    words joined by a no-break space match one by one (the box covers the joined word)."""
+    from . import bidi_lines
     from .plan import norm
+    from .previews import _wrap_block
     font = font.for_text(text) if hasattr(font, "for_text") else font     # the font _text_block drew with (G72)
     want = set(norm(phrase).split())
+
+    def hit(w: str) -> bool:
+        # a word (each part of a no-break-space join) matches when every token of it is in the phrase: «COVID-19»
+        # matches the phrase «COVID-19», not «19»; «د.\u00a0أحمد» matches «أحمد»
+        parts = (norm(p).split() for p in re.split("[\u00a0\u2007\u202f]", w))
+        return any(toks and set(toks) <= want for toks in parts)
+
     spans = []
-    for line, (x0, y0, x1, y1) in zip(wrap_lines(text, max_chars).split("\r"), boxes):
-        words = line.split(" ")
-        rtl = bool(re.search("[؀-ۿ]", line))
+    for ln, (x0, y0, x1, y1) in zip(_wrap_block(text, max_chars), boxes):
+        words = ln.text.split(" ")
+        if not any(hit(w) for w in words):
+            continue
+        x, parts, last = float(x0), {}, None              # word -> [[left, right], ...] in drawn order
+        for pc in bidi_lines.line_pieces(ln):              # the runs the line was drawn with, left to right
+            w = _text_width(font, pc.text)
+            k = pc.word if pc.word is not None and not set(pc.text) <= _MOVABLE else None
+            if k is not None:
+                if k == last:
+                    parts[k][-1][1] = x + w                # the next piece of the same drawn part («٪» + «٤٠»)
+                else:
+                    parts.setdefault(k, []).append([x, x + w])
+            last = k
+            x += w
         for k, w in enumerate(words):
-            if not norm(w) or norm(w) not in want:
-                continue
-            before = _text_width(font, " ".join(words[:k]) + " ") if k else 0.0
-            ww = _text_width(font, w)
-            a = x1 - before - ww if rtl else x0 + before
-            spans.append((int(a) - 4, int(y0) - 10, int(a + ww) + 4, int(y1) + 10))
+            if hit(w) and k in parts:
+                spans += [(int(a_) - 4, int(y0) - 10, int(b_) + 4, int(y1) + 10) for a_, b_ in parts[k]]
     return spans
 
 
