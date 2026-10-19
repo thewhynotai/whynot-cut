@@ -30,7 +30,8 @@ OTHER = "S-1-5-21-309784801-1742820768-791828555-1002"
 D_SUBFOLDER = ("O:S-1-5-21-309784801-1742820768-791828555-1001D:(A;ID;FA;;;BA)(A;OICIIOID;GA;;;BA)(A;ID;FA;;;SY)"
                "(A;OICIIOID;GA;;;SY)(A;ID;0x1301bf;;;AU)(A;OICIIOID;SDGXGWGR;;;AU)(A;ID;0x1200a9;;;BU)"
                "(A;OICIIOID;GXGR;;;BU)")
-# read on the company PC: the C:\ root; a folder made there (C:\whynot) inherits its AU entry as below
+# read on the company PC: the C:\ root. C_SUBFOLDER is DERIVED from it by the inheritance rules (what a C:\whynot
+# made there gets), not read from a real folder: no test or probe creates anything at the root of C:\
 C_ROOT = ("O:S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464D:PAI(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)"
           "(A;OICI;0x1200a9;;;BU)(A;OICIIO;SDGXGWGR;;;AU)(A;;LC;;;AU)(A;;0x1000a1;;;S-1-15-3-65536-1888954469-"
           "739942743-1668119174-2468466756-4239452838-1296943325-355587736-700089176)")
@@ -72,6 +73,13 @@ class TestAclProblems(unittest.TestCase):
         self.assertEqual(home_acl.acl_problems(f"O:{ME}D:P(OA;;FA;guid;;{OTHER})", ME), [OTHER])
         cond = f"O:{ME}D:P(A;;FA;;;{ME})(XA;;FA;;;WD;(@User.x == 1))(A;;FA;;;SY)"       # its own brackets
         self.assertIn("an access entry this check cannot read", home_acl.acl_problems(cond, ME))
+        self.assertEqual(home_acl.acl_problems(f"O:{ME}D:P(A;;FA;;)", ME), ["an access entry this check cannot read"])
+
+    def test_creator_owner_and_the_builtin_administrator_are_not_flagged(self):
+        self.assertEqual(home_acl.acl_problems(f"O:{ME}D:P(A;OICIIO;GA;;;CO)(A;OICI;FA;;;{ME})", ME), [])
+        admin = "S-1-5-21-309784801-1742820768-791828555-500"
+        self.assertEqual(home_acl.acl_problems("O:LAD:P(A;OICI;FA;;;LA)", admin), [])
+        self.assertEqual(home_acl.acl_problems("O:LAD:P(A;OICI;FA;;;LA)", ME), ["LA", "LA (owner)"])
 
     def test_a_null_dacl_and_another_owner_are_flagged(self):
         self.assertEqual(home_acl.acl_problems(f"O:{ME}D:NO_ACCESS_CONTROL", ME), ["Everyone (no access list)"])
@@ -98,6 +106,12 @@ class TestLockCommand(unittest.TestCase):
         self.assertEqual(cmd, f'icacls "D:\\Why Not Cut" /inheritance:r /grant:r "*{ME}:(OI)(CI)F" '
                               '"*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F"')
 
+    def test_explicit_grants_of_the_flagged_sids_are_removed_too(self):
+        argv = home_acl.lock_argv("H", ME, environ={}, remove=["S-1-5-32-545", OTHER])
+        self.assertEqual(argv[1:6], ["H", "/inheritance:r", "/remove:g", "*S-1-5-32-545", "/remove:g"])
+        self.assertEqual(argv[6:8], [f"*{OTHER}", "/grant:r"])
+        self.assertIn('/remove:g "*S-1-5-32-545"', home_acl.lock_command("H", ME, ["S-1-5-32-545"]))
+
     def test_the_user_sid_comes_from_system32_whoami(self):
         seen = []
 
@@ -123,7 +137,7 @@ def _ok(argv, **kw):
     return subprocess.CompletedProcess(argv, 0, b"", b"")
 
 
-class TestCreateHome(_Tmp):
+class TestPrepareHome(_Tmp):
     def create(self, home, *, runner=_ok, read=lambda p: LOCKED, profile=None, is_win=True):
         calls = []
 
@@ -131,7 +145,7 @@ class TestCreateHome(_Tmp):
             calls.append(argv)
             return runner(argv, **kw)
         env = {"USERPROFILE": str(profile or self.tmp / "profile"), "SystemRoot": r"C:\Windows"}
-        made = home_acl.create_home(home, is_win=is_win, environ=env, runner=run, sid=ME, read=read)
+        made = home_acl.prepare_home(home, is_win=is_win, environ=env, runner=run, sid=ME, read=read)
         return made, calls
 
     def test_a_new_home_outside_the_profile_is_locked_and_read_back(self):
@@ -147,12 +161,49 @@ class TestCreateHome(_Tmp):
         self.assertTrue(made)
         self.assertEqual(calls, [])
 
-    def test_an_existing_home_is_left_as_it_is(self):
+    def test_an_existing_locked_home_is_left_as_it_is(self):
         home = self.tmp / "WhyNotCut"
         home.mkdir()
         made, calls = self.create(home)
         self.assertFalse(made)
         self.assertEqual(calls, [])
+
+    def test_an_existing_home_others_may_write_in_stops_setup_and_is_kept(self):
+        """Review finding 1: setup never continues on a writable-by-others home (e.g. one the installer or uv's
+        download made, or a C:\\whynot made by hand); the editor gets the exact command, nothing is changed."""
+        home = self.tmp / "WhyNotCut"
+        (home / "bin").mkdir(parents=True)
+        with self.assertRaises(home_acl.HomeAclError) as cm:
+            self.create(home, read=lambda p: D_SUBFOLDER)
+        self.assertTrue((home / "bin").is_dir())
+        self.assertFalse(str(cm.exception)[:1].isascii())
+        self.assertIn("Authenticated Users (S-1-5-11)", str(cm.exception))
+        self.assertIn(home_acl.lock_command(home, ME, ["S-1-5-11"]), cm.exception.how)
+
+    def test_an_existing_open_home_inside_the_profile_is_not_checked(self):
+        profile = self.tmp / "Users" / "x"
+        (profile / ".whynot-cut").mkdir(parents=True)
+        made, calls = self.create(profile / ".whynot-cut", profile=profile, read=lambda p: D_SUBFOLDER)
+        self.assertEqual((made, calls), (False, []))
+
+    def test_a_file_in_the_way_is_guidance(self):
+        home = self.tmp / "WhyNotCut"
+        home.write_text("x", encoding="utf-8")
+        with self.assertRaises(home_acl.HomeAclError):
+            self.create(home)
+        self.assertTrue(home.is_file())
+
+    def test_an_item_made_before_the_lock_stops_setup(self):
+        """Review finding 2: whatever another account put into the new folder before the lock stays theirs."""
+        home = self.tmp / "WhyNotCut"
+
+        def planted(argv, **kw):
+            (home / "sitecustomize.py").write_text("x", encoding="utf-8")
+            return _ok(argv)
+        with self.assertRaises(home_acl.HomeAclError) as cm:
+            self.create(home, runner=planted)
+        self.assertIn("before it was locked", str(cm.exception))
+        self.assertTrue(home.is_dir())                                    # not empty: never removed by us
 
     def test_macos_only_creates_the_folder(self):
         made, calls = self.create(self.tmp / "WhyNotCut", is_win=False)
@@ -182,7 +233,7 @@ class TestCreateHome(_Tmp):
         env = {"USERPROFILE": str(self.tmp / "profile")}
         with mock.patch.object(home_acl, "current_user_sid", side_effect=OSError("no SID")), \
                 self.assertRaises(home_acl.HomeAclError):
-            home_acl.create_home(home, is_win=True, environ=env, runner=_ok, read=lambda p: LOCKED)
+            home_acl.prepare_home(home, is_win=True, environ=env, runner=_ok, read=lambda p: LOCKED)
         self.assertFalse(home.exists())
 
     @unittest.skipUnless(IS_WIN, "junctions: Windows")
@@ -209,7 +260,17 @@ class TestDoctorFixes(_Tmp):
         (fix,) = self.fixes(home, read=lambda p: C_SUBFOLDER)
         self.assertEqual(fix["who"], "editor")
         self.assertIn("Authenticated Users (S-1-5-11)", fix["item"])
-        self.assertIn(home_acl.lock_command(home, ME), fix["fix"])
+        self.assertIn(home_acl.lock_command(home, ME, ["S-1-5-11"]), fix["fix"])
+
+    def test_a_top_level_item_owned_by_another_account_is_a_fix(self):
+        """Review finding 4: the folder's own list does not cover what another account already owns inside."""
+        home = self.tmp / "h"
+        (home / "runtimes").mkdir(parents=True)
+        (home / "models").mkdir()
+        read = lambda p: f"O:{OTHER}D:PAI(A;OICI;FA;;;{ME})" if str(p).endswith("runtimes") else LOCKED   # noqa: E731
+        (fix,) = self.fixes(home, read=read)
+        self.assertIn("(runtimes)", fix["item"])
+        self.assertIn("new empty folder", fix["fix"])
 
     def test_a_locked_or_profile_home_has_no_fix(self):
         home = self.tmp / "h"
@@ -262,12 +323,24 @@ class TestRealLock(_Tmp):
         home = self.tmp / "WhyNotCut"
         env = dict(os.environ, USERPROFILE=str(self.tmp / "profile"))
         try:
-            self.assertTrue(home_acl.create_home(home, is_win=True, environ=env))
+            self.assertTrue(home_acl.prepare_home(home, is_win=True, environ=env))
             sddl = home_acl.read_sddl(home)
             sid = home_acl.current_user_sid()
             self.assertEqual(home_acl.acl_problems(sddl, sid), [], sddl)
             self.assertIn("D:P", sddl)                                         # protected: nothing inherited
             self.assertEqual(home_acl.doctor_fixes(home, is_win=True), [])
+            self.assertFalse(home_acl.prepare_home(home, is_win=True, environ=env))     # a second setup: as it is
+            # review finding 3: an explicit grant (Users: modify) is flagged, and the doctor's command removes it
+            icacls = home_acl.system32("icacls.exe")
+            r = subprocess.run([icacls, str(home), "/grant", "*S-1-5-32-545:(OI)(CI)M"], capture_output=True,
+                               timeout=60)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            (fix,) = home_acl.doctor_fixes(home, is_win=True)
+            self.assertIn("Users (S-1-5-32-545)", fix["item"])
+            r = subprocess.run(home_acl.lock_argv(home, sid, remove=["S-1-5-32-545"]), capture_output=True,
+                               timeout=60)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(home_acl.doctor_fixes(home, is_win=True), [], home_acl.read_sddl(home))
         finally:
             if home.exists():
                 os.rmdir(home)                                                 # empty folder, never a tree walk
