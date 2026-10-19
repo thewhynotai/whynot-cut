@@ -407,7 +407,7 @@ def run_script(paths, timeout: int = 900) -> dict:
     jsx = write_fallback_script(paths)
     t0 = time.time()
     r = run_after_effects(jsx, timeout, done=lambda: aep.exists() and aep.stat().st_mtime >= t0 - 1)
-    if r.get("status") in ("UNSUPPORTED", "REFUSED"):    # nothing built is never exit 0 (T2.16 review); REFUSED:
+    if r.get("status") in ("UNSUPPORTED", "REFUSED", "SCRIPT_STAGE_FAILED"):    # nothing built is never exit 0; REFUSED:
         return dict(r, ok=False, jsx=str(jsx))           # the sandbox, or the build lock (`blocked`: exit 2)
     said = next((ln.split(REFUSED_MARK, 1)[1].strip() for ln in str(r.get("stdout") or "").splitlines()
                  if REFUSED_MARK in ln), None)            # macOS: osascript prints the script's result
@@ -421,4 +421,5 @@ def run_script(paths, timeout: int = 900) -> dict:
     # BUILT_UNVERIFIED is not a pass (no read-back, QC cannot pass): ok false, exit 1 (Gate 2 minor)
     res = {"status": "BUILT_UNVERIFIED" if fresh else "FAILED", "ok": False, "jsx": str(jsx), "aep": str(aep),
            "readback": None, "aep_sha1": _sha1(aep) if fresh else "", "reasons": why}
+    res.update({k: r[k] for k in ("script_copy_used", "script_copy_kept_until") if k in r})   # the -r copy
     return _record(paths, res)

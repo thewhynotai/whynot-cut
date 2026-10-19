@@ -49,3 +49,6 @@ the script refuses (an alert in AE) while the open project has unsaved changes: 
 `--run-script` checks first and returns REFUSED at once, naming the project; tell the editor, do not retry.
 The exception is a busy build lock (`BRIDGE_BUSY`, another build holds the lock): wait for that build to finish,
 then run the command again.
+`SCRIPT_STAGE_FAILED` (exit 1) or `REFUSED` with `refused: "ae-script-path"` (exit 2): nothing ran in AE (the script
+could not be read, or could not be copied to a path `AfterFX -r` accepts); give the editor the `how` as it is; do not
+retry on your own.
