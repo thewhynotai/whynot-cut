@@ -4,7 +4,7 @@ from __future__ import annotations
 from fractions import Fraction
 from pathlib import Path
 
-from .common import Paths, ffmpeg_exe, run, write_json, write_text, fmt_ts, load_config, now_iso
+from .common import Paths, ffmpeg_exe, file_locked, read_json, run, write_json, write_text, fmt_ts, load_config, now_iso
 
 import re
 
@@ -232,17 +232,42 @@ def preflight(paths: Paths, main_footage: list[Path]) -> dict:
             report["issues"].append({"file": str(f), "severity": "error", "msg": "; ".join(pr["errors"]) or "no video stream"})
             continue
         report["valid"].append(str(f))
+        nd = None
+        try:                         # R-4.4: the real motion rate, VFR, HDR; intermediates are conformed later, in output/
+            from .media_normalise import decide, intake_lines, measure
+            nm = measure(f)
+            nd = decide(nm, sfps)
+            pr["normalise"] = {"measure": nm, "decision": {k: nd[k] for k in ("actions", "cfr_fps", "tonemap", "cadence")}}
+            for ar, en in zip(intake_lines(nm, nd, "ar"), intake_lines(nm, nd, "en")):   # Arabic first, then English
+                report["issues"].append({"file": str(f), "severity": "info", "msg": f"{ar}\n{en}",
+                                         "msg_ar": ar, "msg_en": en})
+        except Exception:  # noqa: BLE001  advisory: never stops the preflight
+            nd = None
+        # T26 wiring: a file whose decision has "cfr" gets its evenly timed copy made automatically (the conform step
+        # after this preflight), so the old advice to ask for a constant-frame-rate export holds only without one
+        cfr = bool(nd and "cfr" in (nd.get("actions") or []) and nd.get("cfr_fps"))
         if v.get("vfr"):
+            head = (f"variable frame rate (average {v['fps']:.3f} fps vs base {v.get('fps_base') or 0:.3f} fps; typical of "
+                    "Zoom/Riverside/phone recordings): ")
+            if cfr:
+                report["issues"].append({"file": str(f), "severity": "info",
+                    "msg": head + f"an evenly timed copy at {nd['cfr_fps']:g} fps is made automatically for editing "
+                                  "(in output/, recorded as normalise.conform in preflight.json) and Premiere imports it "
+                                  "once it is ready; the original stays as it is."})
+            else:
+                report["issues"].append({"file": str(f), "severity": "warning",
+                    "msg": head + "Premiere can drift out of sync on long files. Ask for a "
+                                  "constant-frame-rate export of this file (e.g. HandBrake 'Constant Framerate') before "
+                                  "editing."})
+        # the rate Premiere will see: the copy's (the real motion rate) when one is made, else the file's own
+        rate = float(nd["cfr_fps"]) if cfr else v["fps"]
+        if rate and abs(rate - sfps) > 0.01:
+            what = f"source {rate:.5g} fps" + (" (the real motion rate: the copy for editing runs at it)" if cfr else "")
             report["issues"].append({"file": str(f), "severity": "warning",
-                "msg": f"variable frame rate (average {v['fps']:.3f} fps vs base {v.get('fps_base') or 0:.3f} fps; typical of "
-                       "Zoom/Riverside/phone recordings): Premiere can drift out of sync on long files. Ask for a "
-                       "constant-frame-rate export of this file (e.g. HandBrake 'Constant Framerate') before editing."})
-        if v["fps"] and abs(v["fps"] - sfps) > 0.01:
-            report["issues"].append({"file": str(f), "severity": "warning",
-                "msg": f"source {v['fps']:.5g} fps vs {sfps:.5g} fps sequence: Premiere drops/duplicates frames (motion "
-                       f"judders), audio sync is preserved. If the client's reels are {v['fps']:.5g} fps, set the profile's "
+                "msg": f"{what} vs {sfps:.5g} fps sequence: Premiere drops/duplicates frames (motion "
+                       f"judders), audio sync is preserved. If the client's reels are {rate:.5g} fps, set the profile's "
                        f"sequence rate: reel-profile/sequence-settings.json "
-                       + ('{"general": {"timebase": %d, "ntsc": %s}}' % (round(v['fps']), 'true' if abs(v['fps'] - round(v['fps'])) > 0.001 else 'false'))})
+                       + ('{"general": {"timebase": %d, "ntsc": %s}}' % (round(rate), 'true' if abs(rate - round(rate)) > 0.001 else 'false'))})
         if (v["display_width"], v["display_height"]) != (sw, sh):
             sc = min(sw / v["display_width"], sh / v["display_height"])
             report["conversions"].append({"file": str(f), "type": "scale",
@@ -320,7 +345,11 @@ def preflight(paths: Paths, main_footage: list[Path]) -> dict:
         if v["pix_fmt"] and "10" in v["pix_fmt"]:
             report["issues"].append({"file": str(f), "severity": "info", "msg": f"{v['pix_fmt']} 10-bit source; no color changes applied (already graded)"})
     report["ok"] = not any(i["severity"] == "error" for i in report["issues"])
-    write_json(paths.p("00_inputs/preflight.json"), report)
+    pf = paths.p("00_inputs/preflight.json")
+    pf.parent.mkdir(parents=True, exist_ok=True)
+    with file_locked(pf):            # T26: the conform job updates this file too (read-modify-write under its lock)
+        _initial_conform(paths, report, _read_doc(pf))
+        write_json(pf, report)
     L = ["# Media Preflight", "", f"Generated {report['generated']}", "",
          f"Sequence target: {sw}x{sh} @ {sfps} fps, {srate} Hz", "", "## Files", ""]
     for pr in report["files"]:
@@ -329,7 +358,8 @@ def preflight(paths: Paths, main_footage: list[Path]) -> dict:
                  f"(display {v.get('display_width')}x{v.get('display_height')}, rot {v.get('rotation')}), {v.get('fps')} fps, "
                  f"{v.get('pix_fmt')}, TC {v.get('timecode')}; audio "
                  + ", ".join(f"{a['codec']} {a['sample_rate']}Hz {a['channels']}ch" for a in pr["audio"]))
-    L += ["", "## Issues", ""] + [f"- [{i['severity']}] {Path(i['file']).name}: {i['msg']}" for i in report["issues"]] + \
+    L += ["", "## Issues", ""] + [f"- [{i['severity']}] {Path(i['file']).name}: " + i["msg"].replace("\n", "\n  ")
+                                   for i in report["issues"]] + \
          ["", "## Required conversions", ""] + ([f"- {c['msg']}" for c in report["conversions"]] or ["- none"]) + \
          ["", f"**Preflight {'PASSED' if report['ok'] else 'FAILED'}**"]
     write_text(paths.p("00_inputs/preflight-report.md"), "\n".join(L) + "\n")
@@ -394,3 +424,468 @@ def snap_range_points(path: Path, in_ms: int, out_ms: int, search_ms: int = 2500
         out[kind] = {"requested_ms": t, "suggested_ms": int(best), "moved_ms": int(best - t),
                      "note": "speech at the requested point: moved to the nearest pause"}
     return out
+
+
+# --------------------------------------------------------------------------- T26 wiring: the conform step
+# After a preflight, each main-footage file whose normalise.decision.actions is not empty gets its evenly timed / SDR
+# copy (media_normalise.conform) in 00_inputs/intermediates/, recorded in preflight.json files[i].normalise.conform as
+# hooks/t26/CONTRACT.md says (the Adobe half, ppro_build, imports it only when `ready`):
+#   {state: ready | pending | failed | not_needed, path, parts: [{path, from_ms, to_ms}], cfr_fps, source_tag,
+#    source_size, reason, lines: {ar, en}, at}
+# Paths are relative to the client root, POSIX, always inside output/ (BL-14). `ready` = the copy exists, is a plain
+# file under output/ with no link on the way, PyAV opens it, and the source still has the size, tag and age it had;
+# anything else turns it back to `pending` and the job makes it again (reused when the sidecar still matches).
+# The job: `reel conform --wait` (also what preflight starts in the background), one per item (the OS lock on
+# 00_inputs/conform-job.lock), the GPU lane from gpu_lock.site_slot("conform"), every record written under
+# preflight.json's own file lock (common.file_locked + the atomic write_json). A preflight.json without normalise
+# records (before Task 26) is never written. Nothing here ever fails the intake: a failure is a `failed` record.
+CONFORM_ENV = "WHYNOT_CONFORM"          # background (default) | inline | off; inside the test sandbox: inline
+CONFORM_MODES = ("background", "inline", "off")
+CONFORM_KEYS = ("state", "path", "parts", "cfr_fps", "source_tag", "source_size", "reason", "lines", "at")
+INTERMEDIATES_REL = "00_inputs/intermediates"
+JOB_REL = "00_inputs/conform-job"       # its OS lock file is conform-job.lock (released by the OS when the job ends)
+JOB_LOG_REL = "logs/conform-job.log"
+JOB_WAIT_S = 12 * 3600.0                # `reel conform --wait` waits this long for a job that is already running
+STALE_PASSES = 2                        # a source that changes during its encode is made again, at most this often
+MTIME_SLACK_S = 2.0                     # FAT / SMB keep times in 2 s steps
+_CHILDREN: list = []                    # background jobs started by this process (never collected while running)
+_PENDING = ("The evenly timed / SDR copy of this clip is being made in the background: until it is ready, the "
+            "original is used.",
+            "النسخة المظبوطة من الفيديو ده بتتعمل في الخلفية: لحد ما تخلص هنستخدم الأصلي.")
+_UNVERIFIED = ("The evenly timed / SDR copy was made but could not be checked: the original is used.",
+               "النسخة المظبوطة اتعملت بس ماقدرناش نتأكد منها: هنستخدم الأصلي.")
+_FAILED = ("Making the evenly timed / SDR copy failed: the original is used.",
+           "عمل النسخة المظبوطة فشل: هنستخدم الأصلي.")
+
+
+def _read_doc(pf: Path):
+    """preflight.json as a dict, or None (missing, unreadable, not JSON): never raises."""
+    try:
+        doc = read_json(pf)
+    except (OSError, ValueError):
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _lines(pair) -> dict:
+    en, ar = pair
+    return {"ar": [ar], "en": [en]}
+
+
+def _same_file(a, b) -> bool:
+    import os
+    return os.path.normcase(os.path.abspath(str(a))) == os.path.normcase(os.path.abspath(str(b)))
+
+
+def _src_rel(paths: Paths, src) -> str:
+    """The source as the summary names it: client-root-relative POSIX when inside the client, else as recorded."""
+    import os
+    from .media_normalise import _under
+    rel = _under(os.path.abspath(str(src)), os.path.abspath(str(paths.root)))
+    return rel.replace("\\", "/") if rel else str(src)
+
+
+def client_rel(paths: Paths, p) -> str | None:
+    """A copy's path as the record keeps it: relative to the client root, POSIX, `output/...` (a copy written into a
+    linked output/ folder, through its real folder, is named through output/ too). None when it is not inside output/
+    (never recorded: the contract allows nothing else)."""
+    import os
+    from .media_normalise import _under
+    if not p:
+        return None
+    a = os.path.abspath(str(p))
+    out = os.path.join(os.path.abspath(str(paths.root)), "output")
+    for base in (out, os.path.realpath(out)):
+        rel = _under(a, base)
+        if rel:                                             # '' is output/ itself: never a copy
+            parts = rel.replace("\\", "/").split("/")
+            if "" in parts or "." in parts or ".." in parts:
+                return None
+            return "output/" + "/".join(parts)
+    return None
+
+
+def conform_windows(paths: Paths, src):
+    """The source windows (seconds, source clock) this item uses: the Gate 0 window of a reel cut from an episode (or
+    any range, `reel range`) when `src` is its footage; None for a whole clip (the whole file is conformed)."""
+    from .common import source_range
+    rng = source_range(paths)
+    if not rng or rng.get("out_ms") is None or Path(src).name != Path(rng["footage"]).name:
+        return None
+    return [(int(rng["in_ms"]) / 1000, int(rng["out_ms"]) / 1000)]
+
+
+def _facts(paths: Paths, src) -> dict | None:
+    """{tag, size, mtime} of the source now, or None when it is gone."""
+    import os
+    from . import media_normalise as MN
+    try:
+        st = os.stat(src)
+    except OSError:
+        return None
+    return {"tag": MN._source_tag(Path(src), paths.root), "size": int(st.st_size), "mtime": st.st_mtime}
+
+
+def _record(paths: Paths, src, state: str, *, cfr_fps=None, path=None, parts=(), reason=None, lines=None,
+            facts=None) -> dict:
+    from . import media_normalise as MN
+    facts = facts or _facts(paths, src) or {"tag": MN._source_tag(Path(src), paths.root), "size": 0}
+    ln = lines or {}
+    return {"state": state, "path": path, "parts": [dict(x) for x in parts],
+            "cfr_fps": float(cfr_fps) if cfr_fps else None, "source_tag": facts["tag"],
+            "source_size": int(facts["size"]), "reason": reason,
+            "lines": {"ar": list(ln.get("ar") or []), "en": list(ln.get("en") or [])}, "at": now_iso()}
+
+
+def _pending(paths: Paths, src, decision: dict, reason: str) -> dict:
+    return _record(paths, src, "pending", cfr_fps=(decision or {}).get("cfr_fps"), reason=reason,
+                   lines=_lines(_PENDING))
+
+
+def _copy_problem(paths: Paths, rel) -> str | None:
+    """Why the copy named `rel` can't be used (None = it can): a client-relative output/ path, its folder inside the
+    client's output/ with no link on the way (media_normalise.client_output, fails closed), a plain file (never a link
+    or a hard link) with bytes in it."""
+    from . import media_normalise as MN
+    if not isinstance(rel, str) or not rel.startswith("output/") or "\\" in rel or ".." in rel.split("/"):
+        return f"{rel!r} is not a client-relative path inside output/"
+    full = Path(paths.root) / rel
+    if MN.client_output(full.parent, paths.root) is None:
+        return f"{rel} is not inside the client's output/ folder (or a link is on the way)"
+    if not MN._plain_file(full):
+        return f"{rel} is missing (or is a link)"
+    if full.stat().st_size <= 0:
+        return f"{rel} is empty"
+    return None
+
+
+def conform_current(paths: Paths, src, rec, decision=None, windows=None) -> str | None:
+    """None when the `ready` record `rec` still describes a usable copy of `src`, else why not: the source's size, tag
+    (its client-relative path) or age changed (newer than its copy), the copy is gone / not a plain file under output/,
+    the decision's rate changed, or the copies no longer cover this item's windows (`windows` as conform_windows
+    gives them; None = a whole-file copy)."""
+    import os
+    if not isinstance(rec, dict) or rec.get("state") != "ready":
+        return "it is not ready"
+    facts = _facts(paths, src)
+    if facts is None:
+        return "the source file is gone"
+    if facts["size"] != rec.get("source_size"):
+        return "the source size changed"
+    if facts["tag"] != rec.get("source_tag"):
+        return "the source tag changed (the file was moved or renamed)"
+    if decision is not None and (decision.get("cfr_fps") or None) != (rec.get("cfr_fps") or None):
+        return "the frame rate to conform to changed"
+    whole, parts = rec.get("path"), rec.get("parts") or []
+    if bool(whole) == bool(parts):
+        return "the record names no copy (or both a whole copy and parts)"
+    if windows is None and not whole:
+        return "this item uses the whole file but the record has parts"
+    if windows is not None:
+        if whole:
+            return "this item uses windows but the record has a whole-file copy"
+        for a, b in windows:
+            if not any(isinstance(x, dict) and x.get("from_ms") is not None and x.get("to_ms") is not None
+                       and x["from_ms"] <= round(a * 1000) and x["to_ms"] >= round(b * 1000) for x in parts):
+                return f"no part covers the window {a:g}-{b:g} s"
+    for rel in ([whole] if whole else [x.get("path") if isinstance(x, dict) else None for x in parts]):
+        why = _copy_problem(paths, rel)
+        if why:
+            return why
+        if facts["mtime"] > os.stat(Path(paths.root) / rel).st_mtime + MTIME_SLACK_S:
+            return "the source is newer than its copy"
+    return None
+
+
+def _initial_conform(paths: Paths, report: dict, old: dict | None) -> None:
+    """preflight: the conform record of each measured file. Nothing to change -> not_needed; a copy from the last run
+    that is still current -> kept `ready`; everything else -> `pending` (the conform step after the preflight makes
+    it). Never raises (a record that can't be built is `failed`, with the reason)."""
+    olds = [x for x in ((old or {}).get("files") or []) if isinstance(x, dict)]
+    for pr in report["files"]:
+        nz = pr.get("normalise")
+        if not isinstance(nz, dict) or not isinstance(nz.get("decision"), dict):
+            continue
+        src, dec = pr["path"], nz["decision"]
+        try:
+            if not dec.get("actions"):
+                nz["conform"] = _record(paths, src, "not_needed")
+                continue
+            prev = next((((x.get("normalise") or {}).get("conform")) for x in olds
+                         if x.get("path") and _same_file(x["path"], src)), None)
+            if isinstance(prev, dict) and prev.get("state") == "ready" and \
+                    conform_current(paths, src, prev, dec, conform_windows(paths, src)) is None:
+                nz["conform"] = prev
+                continue
+            nz["conform"] = _pending(paths, src, dec, "queued: the copy is made after the preflight")
+        except Exception as e:  # noqa: BLE001  the preflight never fails because of the copy
+            nz["conform"] = _record(paths, src, "failed", reason=f"{type(e).__name__}: {str(e)[:200]}",
+                                    lines=_lines(_FAILED), facts={"tag": "0" * 10, "size": 0})
+
+
+def _measured(doc) -> list:
+    """The file records of preflight.json that carry a normalise decision (Task 26 and later)."""
+    return [x for x in ((doc or {}).get("files") or []) if isinstance(x, dict) and x.get("path")
+            and isinstance(x.get("normalise"), dict) and isinstance(x["normalise"].get("decision"), dict)]
+
+
+def _refresh(paths: Paths, retry_failed: bool) -> list:
+    """Under preflight.json's lock: a stale `ready` (or a not_needed whose source changed) -> pending, a missing
+    record -> pending or not_needed, a `failed` one -> pending when `retry_failed`. Writes only when something changed.
+    Returns the sources still to make (pending)."""
+    pf = paths.p("00_inputs/preflight.json")
+    todo = []
+    with file_locked(pf):
+        doc = _read_doc(pf)
+        changed = False
+        for fr in _measured(doc):
+            nz, src = fr["normalise"], fr["path"]
+            dec, rec = nz["decision"], nz.get("conform")
+            state = rec.get("state") if isinstance(rec, dict) else None
+            new = rec
+            if not dec.get("actions"):
+                f = _facts(paths, src)
+                if state == "not_needed" and f and (f["tag"], f["size"]) == (rec.get("source_tag"),
+                                                                             rec.get("source_size")):
+                    continue
+                if state is None:
+                    new = _record(paths, src, "not_needed")
+                elif state != "pending":
+                    new = _pending(paths, src, dec, "the source changed: it is measured again")
+            elif state == "ready":
+                why = conform_current(paths, src, rec, dec, conform_windows(paths, src))
+                if why:
+                    new = _pending(paths, src, dec, f"the copy is stale ({why}): it is made again")
+            elif state == "failed" and not retry_failed:
+                continue
+            elif state != "pending":
+                new = _pending(paths, src, dec, "queued: the copy is made again" if state == "failed" else
+                               "queued: the copy is made after the preflight")
+            if new is not rec:
+                nz["conform"] = new
+                changed = True
+            if isinstance(new, dict) and new.get("state") == "pending":
+                todo.append(src)
+        if changed:
+            write_json(pf, doc)
+    return todo
+
+
+def _store(paths: Paths, src, rec: dict, nm=None, nd=None) -> None:
+    """One file's record (and its fresh measurement, when the job measured again) into preflight.json, under its
+    lock; a file the preflight no longer lists is left alone."""
+    pf = paths.p("00_inputs/preflight.json")
+    with file_locked(pf):
+        doc = _read_doc(pf)
+        fr = next((x for x in _measured(doc) if _same_file(x["path"], src)), None)
+        if fr is None:
+            return
+        if nd is not None:
+            fr["normalise"]["measure"] = nm
+            fr["normalise"]["decision"] = {k: nd[k] for k in ("actions", "cfr_fps", "tonemap", "cadence")}
+        fr["normalise"]["conform"] = rec
+        write_json(pf, doc)
+
+
+def _verify(paths: Paths, rel: str) -> str | None:
+    """The engine's check before `ready`: a usable path (_copy_problem) that PyAV opens with a video stream and a
+    duration (the ffprobe-equivalent the engine uses everywhere)."""
+    why = _copy_problem(paths, rel)
+    if why:
+        return why
+    pr = probe(Path(paths.root) / rel)
+    if pr.get("errors") or not pr.get("video") or not pr.get("duration_s"):
+        return f"{rel} does not open as a video ({'; '.join(pr.get('errors') or []) or 'no video stream'})"
+    return None
+
+
+def _conform_one(paths: Paths, src, lane: str):
+    """Measure the source again, make (or reuse) its copy, verify it. Returns (record, measure, decision); never
+    raises (a failure is a `failed` record with the reason and the plain lines)."""
+    from . import media_normalise as MN
+    from .common import seq_fps
+    before = _facts(paths, src)
+    if before is None:
+        return _record(paths, src, "failed", reason="the source file is gone", lines=_lines(_FAILED),
+                       facts={"tag": MN._source_tag(Path(src), paths.root), "size": 0}), None, None
+    nm = nd = None
+    try:
+        nm = MN.measure(src)
+        nd = MN.decide(nm, seq_fps())
+        if nm.get("errors"):
+            return _record(paths, src, "failed", reason="the source could not be measured: " + "; ".join(nm["errors"]),
+                           lines=_lines(_FAILED), facts=before), nm, nd
+        if not nd.get("actions"):
+            return _record(paths, src, "not_needed", facts=before), nm, nd
+        windows = conform_windows(paths, src)
+        res = MN.conform(Path(src), paths.p(INTERMEDIATES_REL), nd, lane=lane, ranges=windows, client_root=paths.root)
+    except Exception as e:  # noqa: BLE001  the original stays the one used
+        return _record(paths, src, "failed", cfr_fps=(nd or {}).get("cfr_fps"), reason=f"{type(e).__name__}: "
+                       f"{str(e)[:300]}", lines=_lines(_FAILED), facts=before), nm, nd
+    cfr = nd.get("cfr_fps")
+    if not res.get("ok"):
+        reason = res.get("reason") or (f"skipped: {res['skipped']}" if res.get("skipped") else "the copy was not made")
+        return _record(paths, src, "failed", cfr_fps=cfr, reason=reason, lines=res.get("lines") or _lines(_FAILED),
+                       facts=before), nm, nd
+    if windows:
+        parts = [{"path": client_rel(paths, x.get("path")), "from_ms": int(round(float(x["from_s"]) * 1000)),
+                  "to_ms": int(round(float(x["to_s"]) * 1000))} for x in res.get("parts") or []]
+        whole, rels = None, [x["path"] for x in parts]
+    else:
+        parts, whole = [], client_rel(paths, res.get("path"))
+        rels = [whole]
+    if not rels or any(r is None for r in rels):
+        return _record(paths, src, "failed", cfr_fps=cfr, reason="the copy was written outside the client's output/ "
+                       "folder: it is never used", lines=_lines(_UNVERIFIED), facts=before), nm, nd
+    for rel in rels:
+        why = _verify(paths, rel)
+        if why:
+            return _record(paths, src, "failed", cfr_fps=cfr, reason=f"the copy could not be verified: {why}",
+                           lines=_lines(_UNVERIFIED), facts=before), nm, nd
+    if _facts(paths, src) != before:                      # the editor replaced the file during the encode
+        return _pending(paths, src, nd, "the source changed while its copy was made: it is made again"), nm, nd
+    return _record(paths, src, "ready", cfr_fps=cfr, path=whole, parts=parts, reason=res.get("reason"),
+                   lines=res.get("lines"), facts=before), nm, nd
+
+
+def conform_summary(paths: Paths) -> dict:
+    """{state, files: [{file, state, path, parts, cfr_fps, reason, lines}], job, pid}. state: "none" (no record:
+    no preflight yet, or one from before Task 26), else pending > failed > ready > not_needed."""
+    doc = _read_doc(paths.p("00_inputs/preflight.json")) if getattr(paths, "video_id", None) else None
+    files = []
+    for fr in _measured(doc):
+        rec = fr["normalise"].get("conform")
+        if isinstance(rec, dict):
+            files.append({"file": _src_rel(paths, fr["path"]), **{k: rec.get(k) for k in
+                          ("state", "path", "parts", "cfr_fps", "reason", "lines")}})
+    states = {x["state"] for x in files}
+    state = next((s for s in ("pending", "failed", "ready", "not_needed") if s in states), "none")
+    return {"state": state, "files": files, "job": None, "pid": None}
+
+
+def _job_running(paths: Paths) -> bool:
+    from .file_lock import LockTimeout
+    try:
+        with file_locked(paths.p(JOB_REL), 0):
+            return False
+    except LockTimeout:
+        return True
+
+
+def run_conform_job(paths: Paths, wait_s: float = 0.0) -> dict:
+    """The conform job of one item (in this process): every pending file is made, verified and recorded; stale
+    copies found on the way are made again (STALE_PASSES). One job per item: with another one running, it waits up to
+    `wait_s` for it (`job: "running"` when it is still running). Returns conform_summary() with job "done"."""
+    import contextlib
+    from .file_lock import LockTimeout
+    pf = paths.p("00_inputs/preflight.json")
+    if not _measured(_read_doc(pf)):
+        return conform_summary(paths)                       # nothing to do, and an old file is never written
+    stack = contextlib.ExitStack()
+    try:
+        stack.enter_context(file_locked(paths.p(JOB_REL), wait_s))
+    except LockTimeout:
+        return dict(conform_summary(paths), job="running")
+    with stack:
+        for _ in range(STALE_PASSES + 1):
+            todo = _refresh(paths, retry_failed=False)
+            if not todo:
+                break
+            try:
+                from . import gpu_lock
+                with gpu_lock.site_slot("conform", log_to=paths) as lane:
+                    for src in todo:
+                        rec, nm, nd = _conform_one(paths, src, lane)
+                        _store(paths, src, rec, nm, nd)
+            except Exception as e:  # noqa: BLE001  a slot or a write that broke: the files left pending are failed
+                why = f"{type(e).__name__}: {str(e)[:300]}"
+                for fr in _measured(_read_doc(pf)):
+                    rec = fr["normalise"].get("conform")
+                    if isinstance(rec, dict) and rec.get("state") == "pending":
+                        _store(paths, fr["path"], _record(paths, fr["path"], "failed", cfr_fps=rec.get("cfr_fps"),
+                                                          reason=why, lines=_lines(_FAILED)))
+                break
+    return dict(conform_summary(paths), job="done")
+
+
+def _popen(cmd, **kw):
+    """subprocess.Popen for the background job only (tests replace this)."""
+    import subprocess
+    return subprocess.Popen(cmd, **kw)
+
+
+def _spawn_job(paths: Paths) -> int:
+    """Start `reel conform --wait` for this item as a detached process (the same interpreter and engine; Windows
+    DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW, CREATE_BREAKAWAY_FROM_JOB tried first so the
+    caller's job object can't take it down; POSIX a new session), its output appended to logs/conform-job.log. It
+    inherits WHYNOT_LOCK_SESSION, so it is the same writer of the client folder. Returns its pid."""
+    import os
+    import subprocess
+    import sys
+    cli = Path(__file__).resolve().parents[1] / "cli.py"
+    cmd = [sys.executable, *(["-s"] if sys.flags.no_user_site else []), "-B", str(cli), "--root", str(paths.root)]
+    cmd += ["--episode", paths.episode_id] if getattr(paths, "episode_id", None) else ["--video-id", str(paths.video_id)]
+    cmd += ["conform", "--wait"]
+    log_path = paths.p(JOB_LOG_REL)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8", PYTHONDONTWRITEBYTECODE="1")
+    env[CONFORM_ENV] = "inline"                             # the job itself never starts another one
+    with open(log_path, "ab") as logf:
+        logf.write(f"[{now_iso()}] conform job started for {paths.video_id}\n".encode("utf-8"))
+        logf.flush()
+        kw = {"stdin": subprocess.DEVNULL, "stdout": logf, "stderr": logf, "cwd": str(cli.parent), "env": env,
+              "close_fds": True}
+        if os.name == "nt":
+            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+            try:
+                proc = _popen(cmd, creationflags=flags | subprocess.CREATE_BREAKAWAY_FROM_JOB, **kw)
+            except OSError:                                  # the caller's job forbids breakaway: start inside it
+                proc = _popen(cmd, creationflags=flags, **kw)
+        else:
+            proc = _popen(cmd, start_new_session=True, **kw)
+    _CHILDREN.append(proc)
+    return proc.pid
+
+
+def _mode(mode=None) -> str:
+    import os
+    from .plat import SANDBOX_ENV
+    m = str(mode or os.environ.get(CONFORM_ENV) or "").strip().lower()
+    if m in CONFORM_MODES:
+        return m
+    return "inline" if os.environ.get(SANDBOX_ENV) else "background"   # a unit test never leaves a process behind
+
+
+def start_conform(paths: Paths, mode: str | None = None) -> dict:
+    """The conform step after the preflight (and `reel conform` without --wait): refresh the records (a failed one is
+    tried again, a stale `ready` is made again), then make what is pending: in a detached background job (default), in
+    this process ("inline"), or not at all ("off": the records stay pending). WHYNOT_CONFORM chooses when `mode` is
+    None. Returns conform_summary() with job: None (nothing to do) | "started" (+ pid) | "running" | "inline" | "off".
+    Never raises: anything that breaks is a `failed` record with the reason."""
+    pf = paths.p("00_inputs/preflight.json")
+    if not _measured(_read_doc(pf)):
+        return conform_summary(paths)
+    m = _mode(mode)
+    try:
+        todo = _refresh(paths, retry_failed=True)
+        if not todo:
+            return conform_summary(paths)
+        if m == "off":
+            return dict(conform_summary(paths), job="off")
+        if m == "inline":
+            return dict(run_conform_job(paths), job="inline")
+        if _job_running(paths):
+            return dict(conform_summary(paths), job="running")
+        pid = _spawn_job(paths)
+        return dict(conform_summary(paths), job="started", pid=pid)
+    except Exception as e:  # noqa: BLE001  the intake never fails because of the copy
+        why = f"{type(e).__name__}: {str(e)[:300]}"
+        try:
+            for fr in _measured(_read_doc(pf)):
+                rec = fr["normalise"].get("conform")
+                if isinstance(rec, dict) and rec.get("state") == "pending":
+                    _store(paths, fr["path"], _record(paths, fr["path"], "failed", cfr_fps=rec.get("cfr_fps"),
+                                                      reason=why, lines=_lines(_FAILED)))
+        except Exception:  # noqa: BLE001
+            pass
+        return dict(conform_summary(paths), state="failed", reason=why, lines=_lines(_FAILED))

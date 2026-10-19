@@ -18,6 +18,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -184,6 +185,26 @@ class _Out(unittest.TestCase):
         with quiet():
             return m, self.cf(fx(name), self.out, MN.decide(m), **kw)
 
+    def ls(self, folder=None, settle_s: float = 5.0):
+        """The folder's entries once no scanner copy is in it. On this PC a file filter (the antivirus) briefly renames
+        a just-deleted file to `<NAME IN UPPER CASE>.tmp`, holds it and deletes it within ~50 ms (reproduced with plain
+        Python rename + delete, no engine code: CLOSEOUT T26-wire, section B). Only that transient form is waited
+        out (up to settle_s); anything of ours that stays is still listed, so a real leftover fails the test."""
+        folder = self.out if folder is None else folder
+        t0 = time.monotonic()
+        while True:
+            items = list(folder.iterdir())
+            if not any(_scanner_copy(p.name) for p in items) or time.monotonic() - t0 > settle_s:
+                return items
+            time.sleep(0.05)
+
+
+def _scanner_copy(name: str) -> bool:
+    """`TAG60_REAL30.FC772D56FE.CONFORM.HELD.JSON.tmp`: an upper-cased name of ours + `.tmp`, made by a file filter
+    outside the engine (the engine's own temp files are `.<name>.<12 hex>.tmp`, lower case, with a leading dot)."""
+    stem = name[:-4] if name.endswith(".tmp") else None
+    return bool(stem) and stem == stem.upper() and ".CONFORM" in stem and not stem.startswith(".")
+
 
 class TestConform(_Out):
     def frames(self, path):
@@ -254,7 +275,7 @@ class TestConform(_Out):
         self.assertFalse(r["ok"])
         self.assertEqual(r["skipped"], "disk")
         self.assertTrue(r["lines"]["en"])
-        self.assertFalse(self.out.exists() and any(self.out.iterdir()))
+        self.assertFalse(self.out.exists() and any(self.ls()))
 
     def test_c06_ranges_only_with_handles(self):
         m, r = self.conform("tag60_real30", ranges=[(1.0, 1.5)])
@@ -798,7 +819,7 @@ class TestBatchBTimeout(_Out):
         self.assertFalse(r["ok"])
         self.assertEqual(r["skipped"], "timeout")
         self.assertTrue(r["lines"]["en"] and r["lines"]["ar"])
-        self.assertEqual(list(self.out.iterdir()), [])                            # no .partial.mp4, no sidecar
+        self.assertEqual(list(self.ls()), [])                            # no .partial.mp4, no sidecar
 
     def test_a_locked_partial_is_retried_and_still_reported_as_a_timeout(self):
         def slow(cmd):
@@ -821,7 +842,7 @@ class TestBatchBTimeout(_Out):
             m, r = self.conform("tag60_real30", runner=slow)
         self.assertEqual(r["skipped"], "timeout")
         self.assertEqual(len(calls), 3)
-        self.assertEqual(list(self.out.iterdir()), [])
+        self.assertEqual(list(self.ls()), [])
         unlink, calls = held_for(99)
         with mock.patch.object(MN.linksafe, "remove", unlink), mock.patch.object(MN.time, "sleep"):
             m, r = self.conform("tag60_real30", runner=slow)
@@ -844,7 +865,7 @@ class TestBatchBTimeout(_Out):
         self.assertFalse(r2["ok"])
         self.assertEqual(r2["skipped"], "in use")
         self.assertTrue(r2["lines"]["en"] and r2["lines"]["ar"])
-        self.assertEqual(sorted(p.name for p in self.out.iterdir()),
+        self.assertEqual(sorted(p.name for p in self.ls()),
                          sorted([Path(r1["path"]).name, Path(r1["sidecar"]).name]))  # no partial left
         self.assertEqual(Path(r1["sidecar"]).read_text(encoding="utf-8"), side_before)
         m, r3 = self.conform("tag60_real30")                                       # the old copy is still reused
@@ -865,7 +886,7 @@ class TestBatchBTimeout(_Out):
             self.assertEqual(sha(r3["path"]), h16, (r2, r3))                     # reused = really the crf16 copy
         else:
             self.assertEqual(json.loads(Path(r3["sidecar"]).read_text(encoding="utf-8"))["crf"], 16)
-        self.assertEqual(sorted(p.name for p in self.out.iterdir()),
+        self.assertEqual(sorted(p.name for p in self.ls()),
                          sorted([Path(r1["path"]).name, side.name]))              # no partial, no record aside
 
     def test_a_record_that_cannot_be_set_aside_keeps_the_old_pair(self):
@@ -881,7 +902,7 @@ class TestBatchBTimeout(_Out):
             m, r2 = self.conform("tag60_real30", crf=18)
         self.assertEqual(r2["skipped"], "in use")
         self.assertEqual((sha(r1["path"]), Path(r1["sidecar"]).read_text(encoding="utf-8")), before)
-        self.assertEqual(len(list(self.out.iterdir())), 2)
+        self.assertEqual(len(list(self.ls())), 2)
         m, r3 = self.conform("tag60_real30")
         self.assertTrue(r3["reused"])
 
@@ -940,7 +961,7 @@ class TestBatchBTimeout(_Out):
         if r["reused"]:
             self.assertEqual(sha(r["path"]), r16_sha)
         self.assertEqual(json.loads(Path(r["sidecar"]).read_text(encoding="utf-8"))["crf"], 16)
-        self.assertEqual(len(list(self.out.iterdir())), 2, list(self.out.iterdir()))
+        self.assertEqual(len(list(self.ls())), 2, list(self.ls()))
 
     def test_the_new_record_cannot_be_written(self):
         """Review r2 #5: the crf18 copy took the name but its record failed: no record is left that describes
@@ -962,7 +983,7 @@ class TestBatchBTimeout(_Out):
                 self.assertEqual(r2["lines"], {"en": [MN.LINES["no_record"][0]], "ar": [MN.LINES["no_record"][1]]})
                 self.assertTrue(MN._plain_file(Path(r2["path"])))
                 self.assertFalse(Path(r1["sidecar"]).exists())                    # the crf16 record went aside
-                self.assertFalse([p for p in self.out.iterdir() if p.name.endswith(".held.json")])
+                self.assertFalse([p for p in self.ls() if p.name.endswith(".held.json")])
                 self.no_wrong_reuse(h16)
 
     def test_the_old_record_cannot_be_put_back(self):
@@ -1012,7 +1033,7 @@ class TestBatchBTimeout(_Out):
         self.assertFalse(os.path.lexists(calls[0]))                                # cleared on reuse (P3-2)
         m, r4 = self.conform("tag60_real30")
         self.assertTrue(r4["ok"] and not r4["reused"], r4)
-        self.assertEqual(len(list(self.out.iterdir())), 2)
+        self.assertEqual(len(list(self.ls())), 2)
 
     def test_a_linked_copy_with_a_matching_record_is_never_reused(self):
         """Review r2 #5: a hard-linked .mp4 or .json with a VALID matching record is still not ours."""
@@ -1081,7 +1102,7 @@ class TestBatchBTimeout(_Out):
             raise OSError("disk gone")
         m, r = self.conform("tag60_real30", runner=boom)
         self.assertFalse(r["ok"])
-        self.assertEqual(list(self.out.iterdir()), [])
+        self.assertEqual(list(self.ls()), [])
 
 
 class TestReview2063755(_Out):
@@ -1120,7 +1141,7 @@ class TestReview2063755(_Out):
         self.assert_changed(r2)
         self.assertEqual(v.read_bytes(), b"CLIENT FOOTAGE")
         self.assertEqual(os.stat(v).st_nlink, 1)                                   # the planted name was removed
-        self.assertEqual(sorted(p.name for p in self.out.iterdir()), pair)
+        self.assertEqual(sorted(p.name for p in self.ls()), pair)
         self.assertEqual((sha(r1["path"]), Path(r1["sidecar"]).read_text(encoding="utf-8")), before)
         m, r3 = self.conform("tag60_real30")
         self.assertTrue(r3["reused"])                                              # the old pair was never touched
@@ -1559,6 +1580,86 @@ class TestT26Final(_Out):
                     else:                                                          # POSIX: rename replaces the link
                         self.assertTrue(r["ok"], r)                                # itself, never its target
                         self.assertTrue(MN._plain_file(out))
+
+
+class TestRecordTempFiles(_Out):
+    """T26-wire item B (coordinator, suite 8bb853a): no temp file of a record write ever stays in the output folder.
+    linksafe.replace_atomic writes `.<record>.<12 hex>.tmp` and, when the write fails, removes it with one plain
+    unlink, which a virus scanner holding the fresh file defeats; conform now removes it through linksafe."""
+
+    def stuck_write(self, err):
+        """replace_atomic whose temp file stays behind (its own clean-up defeated), then the error."""
+        def write(path, root, data, within=None):
+            tmp = Path(path).with_name(f".{Path(path).name}.{'ab12' * 3}.tmp")
+            MN.linksafe.create_new(tmp, root, data, within)
+            raise err
+        return write
+
+    def tmps(self):
+        return [p.name for p in self.ls() if p.name.endswith(".tmp")]
+
+    def test_a_failed_record_write_leaves_no_temp_file(self):
+        for err in (MN.Guidance("access denied", "close it"), PermissionError("locked by a virus scan")):
+            with self.subTest(type(err).__name__):
+                m, r1 = self.conform("tag60_real30")
+                with mock.patch.object(MN.linksafe, "replace_atomic", side_effect=self.stuck_write(err)):
+                    m, r2 = self.conform("tag60_real30", crf=18)
+                self.assertTrue(r2["ok"], r2)
+                self.assertIn("could not be saved", r2["reason"])
+                self.assertEqual(self.tmps(), [])
+                self.assertEqual(sorted(p.name for p in self.ls()), [Path(r2["path"]).name])   # the copy only
+
+    def test_a_temp_file_still_held_is_named_in_the_reason(self):
+        real_remove = MN.linksafe.remove
+
+        def held(path, root, within=None):
+            if str(path).endswith(".tmp"):
+                raise MN.linksafe.RemoveIncomplete(0, [(str(path), "held by a scanner")])
+            return real_remove(path, root, within)
+        m, r1 = self.conform("tag60_real30")
+        with mock.patch.object(MN.linksafe, "replace_atomic", side_effect=self.stuck_write(PermissionError("x"))), \
+                mock.patch.object(MN.linksafe, "remove", held), mock.patch.object(MN.time, "sleep"):
+            m, r2 = self.conform("tag60_real30", crf=18)
+        self.assertTrue(r2["ok"], r2)
+        self.assertIn("could not be removed yet", r2["reason"])
+        m, r3 = self.conform("tag60_real30")                                       # the next encode clears it
+        self.assertEqual(self.tmps(), [])
+
+    def test_an_earlier_runs_temp_file_is_removed_before_the_encode_and_nothing_else_is(self):
+        m, r1 = self.conform("tag60_real30")
+        side = Path(r1["sidecar"])
+        ours = side.with_name(f".{side.name}.0123456789ab.tmp")
+        ours.write_bytes(b"{}")
+        other = side.with_name(".someone-elses.json.0123456789ab.tmp")            # not this record's name
+        other.write_bytes(b"keep")
+        folder = side.with_name(f".{side.name}.ffffffffffff.tmp")                 # a folder under that name
+        folder.mkdir()
+        (folder / "keep.txt").write_bytes(b"keep")
+        m, r2 = self.conform("tag60_real30", crf=18)                               # a new copy: an encode
+        self.assertTrue(r2["ok"], r2)
+        self.assertFalse(os.path.lexists(ours))
+        self.assertEqual(other.read_bytes(), b"keep")
+        self.assertEqual((folder / "keep.txt").read_bytes(), b"keep")              # never someone's folder
+
+    def test_a_temp_file_link_is_removed_as_a_name_only(self):
+        m, r1 = self.conform("tag60_real30")
+        side = Path(r1["sidecar"])
+        target = self.tmp / "assets" / "linked"
+        target.mkdir()
+        (target / "keep.txt").write_bytes(b"CLIENT FOOTAGE")
+        lnk = side.with_name(f".{side.name}.0123456789ab.tmp")
+        _junction(lnk, target)
+        self.addCleanup(lambda: _unlink_dir(lnk) if MN.linksafe.is_link(lnk) else None)
+        m, r2 = self.conform("tag60_real30", crf=18)
+        self.assertTrue(r2["ok"], r2)
+        self.assertEqual((target / "keep.txt").read_bytes(), b"CLIENT FOOTAGE")
+        self.assertFalse(os.path.lexists(lnk))
+
+    def test_the_scanner_copy_pattern_names_only_the_outside_form(self):
+        self.assertTrue(_scanner_copy("TAG60_REAL30.FC772D56FE.CONFORM.HELD.JSON.tmp"))
+        for ours in ("tag60_real30.fc772d56fe.conform.held.json", ".tag60_real30.fc772d56fe.conform.json.ab12ab12ab12.tmp",
+                     "tag60_real30.fc772d56fe.conform.partial.mp4", "C0001.E523330249.conform.mp4"):
+            self.assertFalse(_scanner_copy(ours), ours)
 
 
 if __name__ == "__main__":

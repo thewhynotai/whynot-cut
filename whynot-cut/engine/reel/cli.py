@@ -198,7 +198,33 @@ def cmd_preflight(a):
                f"{len(rep['valid'])} valid, {len(rep['issues'])} notes", "preflight",
                [p.p("00_inputs/preflight-report.md")],
                blockers=[i["msg"] for i in rep["issues"] if i["severity"] == "error"])
-    out({"ok": rep["ok"], "issues": rep["issues"], "conversions": rep["conversions"]})
+    out({"ok": rep["ok"], "issues": rep["issues"], "conversions": rep["conversions"], "conform": conform_after_intake(p)})
+
+
+def conform_after_intake(p: Paths) -> dict:
+    """Task 26: after the preflight, the evenly timed / SDR copy of each file that needs one is made in the background
+    (lib/media.py start_conform; preflight.json files[i].normalise.conform). An aid: the intake never fails on it."""
+    try:
+        from lib.media import start_conform
+        return start_conform(p)
+    except Exception as e:  # noqa: BLE001
+        return {"state": "failed", "files": [], "job": None, "pid": None, "reason": f"{type(e).__name__}: {e}"[:300],
+                "lines": {"ar": ["عمل النسخة المظبوطة فشل: هنستخدم الأصلي."],
+                          "en": ["Making the evenly timed / SDR copy failed: the original is used."]}}
+
+
+def cmd_conform(a):
+    """Task 26: make (or check) the evenly timed / SDR copy of this item's footage and print the record state. Without
+    --wait the job runs in the background (the state printed is what it is now); --wait runs it here, after any job
+    that is already running, until every file is ready, failed or not_needed."""
+    from lib.media import JOB_WAIT_S, run_conform_job, start_conform
+    p = P(a)
+    if a.wait:
+        start_conform(p, mode="off")       # a failed copy is tried again and a stale one is made again
+        res = run_conform_job(p, wait_s=JOB_WAIT_S)
+    else:
+        res = start_conform(p)
+    out(dict(res, ok=True, video_id=p.video_id))
 
 
 def _parse_time_ms(v: str) -> int:
@@ -1036,7 +1062,7 @@ OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (
 #   WRITES_IF    write only with a flag. inbox: `--no-refresh` reads the last discovery (its clip-ids map and probe
 #                cache are deterministic caches) but runs discovery when there is none yet, so it writes then.
 # scaffold creates a new folder: there is nothing to lock yet (it runs before the lock is taken).
-CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze", "preflight", "transcribe",
+CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze", "preflight", "conform", "transcribe",
                "transcript-correct", "transcript-verify", "transcript-relisten", "audio-clean", "plan",
                "review-flags", "removed-review", "approve-plan", "previews", "sfx", "preview-video", "ppro-build", "ppro-frames", "premiere", "verify",
                "qc", "handoff", "mogrt-build", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build",
@@ -1594,6 +1620,9 @@ CORE_COMMANDS: dict[str, str] = {
     "ref-analyze": "measure the client's reference edits",
     "ref-style": "show, record or apply the client's reference editing style",
     "preflight": "inspect the raw footage (streams, frame rate, audio) before editing",
+    "conform": "the evenly timed / SDR copy of this clip's footage (VFR, a wrong frame-rate tag, HDR) that Premiere "
+               "imports: preflight starts it in the background; prints each file's state (ready, pending, failed, "
+               "not_needed); --wait makes it here and returns when it is ready or failed",
     "range": "set or show the in/out range of a reel cut from a longer raw file",
     "transcribe": "word-timed Whisper transcript (SRT and words) of the clip",
     "transcript-correct": "apply proofread corrections to the transcript",
@@ -1694,6 +1723,10 @@ def main(argv: list[str] | None = None):
         motion_cli.add_args(name, sp)
         if name in ("preflight", "transcribe"):
             sp.add_argument("--footage")
+        if name == "conform":
+            sp.add_argument("--wait", action="store_true",
+                            help="make the copy in this process (after a job that is already running) and return only "
+                                 "when every file is ready, failed or not_needed; use it before ppro-build")
         if name == "serve":
             sp.add_argument("verb", nargs="?", choices=list(SERVE_VERBS), metavar="{ensure,status,stop,run}",
                             help="ensure: start once in the background (idempotent); status (default); stop; "

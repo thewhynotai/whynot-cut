@@ -24,6 +24,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -460,6 +461,28 @@ def _drop(tmp: Path, anchor: str, within: str | None) -> str:
     return f"{tmp.name} could not be removed yet ({last})"
 
 
+_RECORD_TMP = re.compile(r"^\.(?P<name>.+)\.[0-9a-f]{12}\.tmp$")    # linksafe.replace_atomic's temp file names
+
+
+def _drop_record_tmps(side: Path, anchor: str, within: str | None) -> str:
+    """The temp files linksafe.replace_atomic leaves beside the record `side` (`.<name>.<12 hex>.tmp`) when a write
+    fails: its own clean-up is one plain unlink, which a virus scanner holding the fresh file for a moment defeats.
+    Each is removed as a name through linksafe (`_drop`: retried while held, never a folder, never through a link).
+    Never raises: '' when none is left, else why one stays."""
+    try:
+        names = os.listdir(side.parent)
+    except OSError:
+        return ""
+    left = []
+    for n in names:
+        m = _RECORD_TMP.match(n)
+        if m and m["name"] == side.name:
+            why = _drop(side.parent / n, anchor, within)
+            if why:
+                left.append(why)
+    return "; ".join(left)
+
+
 def _is_link(p) -> bool:
     """A symlink or a Windows junction / name-surrogate reparse point (never followed when writing). linksafe's test:
     it fails closed (Guidance when the OS can't say)."""
@@ -719,6 +742,7 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
                     res.update(ok=False, skipped="in use", reason=why(f"{held.name} could not be removed ({e})"))
                     fail("in_use")
                     return res
+                _drop_record_tmps(side, anchor, within)    # a record write that failed in an earlier run
                 def build(ln, a=a, b=b, out=tmp):
                     from . import accel
                     cmd = [ff, "-nostdin", "-y", "-v", "error", *accel.decode_args(ln)]
@@ -797,8 +821,9 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
                         # through the link, so it is not ours to use, and never removed through it either.
                         return changed(f"the output folder changed after the encode (a link appeared): the copy "
                                        f"{out.name} is not used and was left where the link points ({e})")
+                    left = _drop_record_tmps(side, anchor, within)     # its temp file never stays behind
                     res["reason"] = why(f"the record {side.name} could not be saved ({e}): that copy has no record "
-                                        "and is made again next time")
+                                        "and is made again next time" + (f"; {left}" if left else ""))
                     note("no_record")
                     record = None
                 if os.path.lexists(held):
