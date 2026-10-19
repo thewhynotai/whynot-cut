@@ -401,6 +401,33 @@ class TestGuardIssues(Client):
         rc, _, err = self.guard("Write", {"file_path": str(memory), "content": "x"}, recorded=False)
         self.assertEqual(rc, 0, err)
 
+    def test_every_write_into_the_store_is_refused_but_memory(self):
+        """Review 8d04064 P2-1, option (a): any target inside <claude config>/projects is refused, whatever its name
+        (a new folder, a moved folder) and whoever writes; a writing command run with the store as its working folder
+        (an archive extracted there) too; Claude Code's own <project>/memory/** stays open."""
+        store = self.claude / "projects"
+        (self.root / "pack").mkdir()
+        (self.root / "pack" / "x.jsonl").write_text("{}", encoding="utf-8")
+        for agent in (None, AGENT):
+            for tool, ti in (("Bash", {"command": f'cp -r pack "{(store / "brand-new").as_posix()}"'}),
+                             ("Bash", {"command": f'mv pack "{(store / "moved-here").as_posix()}"'}),
+                             ("PowerShell", {"command": f"Copy-Item -Recurse pack -Destination '{store / 'new-name'}'"}),
+                             ("Write", {"file_path": str(store / "brand-new" / "notes.txt"), "content": "x"})):
+                with self.subTest(agent=agent, tool=tool, ti=ti):
+                    rc, _, err = self.guard(tool, ti, agent, recorded=False)
+                    self.assertEqual(rc, 2, err)
+                    self.assertIn("transcript", err)
+        p = {"tool_name": "Bash", "tool_input": {"command": "tar -xf /tmp/pack.tar"}, "cwd": str(store),
+             "session_id": SESSION}
+        self.assertEqual(hook(GUARD, p, env=self.env)[0], 2)                # extraction with the store as cwd
+        p["tool_input"]["command"] = "ls -la"
+        self.assertEqual(hook(GUARD, p, env=self.env)[0], 0)                # reading there is fine
+        memory = store / "D--work-client" / "memory"
+        for tool, ti in (("Write", {"file_path": str(memory / "MEMORY.md"), "content": "x"}),
+                         ("Bash", {"command": f'echo x > "{(memory / "notes.md").as_posix()}"'})):
+            with self.subTest(memory=tool):
+                self.assertEqual(self.guard(tool, ti, None, recorded=False)[0], 0)
+
     def test_the_transcript_store_through_a_link_is_refused(self):
         """Judged by the real path: a folder link whose name says nothing, pointing into the store."""
         link = self.tmp / "innocent store"
