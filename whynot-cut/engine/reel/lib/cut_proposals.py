@@ -19,8 +19,9 @@ Rules (R-4.3 "Our version"; every number is a starting value of ours with its ba
   length) / 2 ≥ 0.65 with ≥ 2 shared content words; the better take is kept (complete, higher confidence, no filler;
   a tie keeps the later); an exact short repeat that is complete both times is emphasis, never proposed; takes that
   differ in meaning, or in a content word either take says and the other does not (each to the end of its sentence;
-  only after a take abandoned at a real cut-off, `cut_off`, do the kept take's later words go uncounted), are left
-  unticked; a medical or religious client, one whose domain is not set, or one whose settings cannot be read never
+  only after a take abandoned at a real cut-off, `cut_off`, do the kept take's later words go uncounted; an ending
+  in «ش» is a negation, never the rest of a cut-off word), are left unticked, and so is a later take longer than
+  12 words that the cut would stop inside; a medical or religious client, one whose domain is not set, or one whose settings cannot be read never
   gets a retake ticked (`retake_rule`);
 - false starts: a short or unsure cut-off word restarted within 400 ms;
 - fillers: pure hesitation sounds always; «امم» only stretched; context words («يعني», «بص», «طب», «إيه», «اه», "like",
@@ -148,7 +149,12 @@ _CLOSING = re.compile(r"[.!?؟…؛:;]$")                          # a take the 
 _TRAILING_QUOTES = re.compile(r"[\s\"'»”’›)\]}」』]+$")          # quotes and brackets after the mark («آمنة.»»)
 _CUT_MARK = re.compile(r"\w[-‐‑–—]$")                           # a word written as cut off ("am-", «آمـ-»)
 _NUMBER_CLITICS = ("و", "ب", "ف", "ل", "ك")                   # written onto a number: «بربع», «ب٥», «لعشرة», «كتسعة»
-_NEGATED_TAIL = ("ش", "شي", "n't", "nt", "'t", "not")         # «بيقلل» + «ش» is «بيقللش»: a negation, never a cut-off
+_NEGATED_TAIL = ("n't", "nt", "'t", "not")                    # "do" + "n't" is "don't": a negation, never a cut-off
+# An Egyptian negation without «م» closes the word on «ش» / «شي», whatever comes before it: «بيقلل» + «ش», «عنده» + «وش»,
+# «بيقلل» + «وش», «عندها» + «ش», «ينفع» + «كش», «بيجي» + «ليش», «تاخد» + «وهاش». An added ending that ends so is a
+# negation, never the rest of a cut-off word (executor ruling, review a31ae0c P1-1). The cost, on the safe side: a cut-off
+# word whose whole form ends in «ش» («بيم» / «بيمشي», «قما» / «قماش») is not taken as cut off, so the retake is unticked.
+_NEGATED_ENDING = ("ش", "شي")
 
 
 def _closed(raw) -> bool:
@@ -168,12 +174,13 @@ def _number_word(raw) -> bool:
 
 
 def _completes(frag: str, word: str) -> bool:
-    """`word` (folded) is `frag` (folded) said whole: a strict prefix of two or more letters that adds more than a
-    negation («بيقلل» / «بيقللش», "do" / "don't" never), and neither of them is a number word («بخمس» / «بخمستاشر»,
-    "four" / "fourteen" never)."""
+    """`word` (folded) is `frag` (folded) said whole: a strict prefix of two or more letters whose added ending is no
+    negation (never one that ends in «ش» / «شي»: «بيقلل» / «بيقللش» / «بيقللوش», «عنده» / «عندهوش»; never "n't":
+    "do" / "don't"), and neither of them is a number word («بخمس» / «بخمستاشر», "four" / "fourteen" never)."""
     from .safety.risk_words import _negation
+    tail = re.sub(r"[\W_]+$", "", word[len(frag):])      # a mark the fold leaves on («بيقللوش».»: «وش», not «وش»»)
     return len(frag) >= 2 and len(word) > len(frag) and word.startswith(frag) \
-        and word[len(frag):] not in _NEGATED_TAIL and not _negation(word) \
+        and tail not in _NEGATED_TAIL and not tail.endswith(_NEGATED_ENDING) and not _negation(word) \
         and not _number_word(frag) and not _number_word(word)
 
 
@@ -582,6 +589,14 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
             number_ar += "؛ بس الجزء ده بيبدأ من نص جملة، فسايبينه لحد ما تسمعه"
             number_en += "; it starts mid-sentence, so it is left unticked"
             conf = min(conf, V["conf_on_purpose"])
+        # a later take longer than the cap (retake_max_words) is cut only up to the cap: the cut stops inside it and
+        # leaves the rest of that take in the reel («… مش آمنة خالص. آمنة خالص.»). Shown, never ticked, never extended
+        # on its own: the editor sets the cut (executor ruling, review a31ae0c P2-1)
+        capped = drop[0] > keep[0] and not sentence_end(drop[0] + drop[1] - 1)
+        if capped:
+            number_ar += "؛ الإعادة أطول من الحد: راجع القص يدويًا"
+            number_en += "; the retake is longer than the limit: check the cut by hand"
+            conf = min(conf, V["conf_on_purpose"])
         extra = {"keep": {"start_ms": ks, "end_ms": ke, "word_ids": [ws[k]["id"] for k in range(keep[0], keep[0] + keep[1])]},
                  "similarity": round(sc, 2)}
         if differs:
@@ -625,7 +640,7 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
             number_ar += r_ar
             number_en += r_en
         add("retake", drop[0], drop[0] + drop[1] - 1, conf, ar + number_ar, en + number_en,
-            default="keep" if differs or lost or added or mid or has_number or never else None, extra=extra)
+            default="keep" if differs or lost or added or mid or capped or has_number or never else None, extra=extra)
         used.update(range(a, a + la))
         used.update(range(b, b + lb))
     if rule and rule.get("never") and any(p["kind"] == "retake" for p in props):
