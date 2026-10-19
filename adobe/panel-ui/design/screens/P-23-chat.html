@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="mock-states" content="empty,loading,normal,streaming,approved,done,focus,stopped,error,error-live,offline,no-claude,no-internet,limited,stale,long">
-<meta name="mock-keys" content="Cmd/Ctrl+Enter: the screen's one primary (Review the lines and approve while a prompt waits; Send when text is typed and nothing waits; Open the sequence when done); Cmd/Ctrl+.: Stop while a turn runs; Esc: close the top notice; Tab order: the conversation's controls top to bottom (Open on a step, the prompt's three buttons), then the message box, then Send or Stop (mirrored in Arabic). Enter in the message box is a new line; it never sends on its own (no single-key shortcuts: Premiere owns them). UXP keydown capture: lab item.">
+<meta name="mock-keys" content="Cmd/Ctrl+Enter: the screen's one primary (Review and approve while a prompt waits; Send when text is typed and nothing waits; Open the sequence when done); Cmd/Ctrl+.: Stop while a turn runs; Esc: close the top notice; Tab order: the conversation's controls top to bottom (Open on a step, the prompt's three buttons), then the message box, then Send or Stop (mirrored in Arabic). Enter in the message box is a new line; it never sends on its own (no single-key shortcuts: Premiere owns them). UXP keydown capture: lab item.">
 <meta name="mock-motion" content="a new turn: fades in 150 ms ease at the bottom, the list scrolls to it only when the editor was already at the bottom (static fallback: instant); streaming text: words append, the caret blinks 1 s (static fallback: a still caret); a step row turning done: the icon cross-fades 150 ms; the approval prompt after the answer collapses to its one-line record without a height animation; Stop: the button shows its busy icon until the turn ends. The pinned composer never moves.">
 <title>P-23 Chat</title>
 <link rel="stylesheet" href="../mockup.css">
@@ -28,13 +28,13 @@
    - Turns: the person's turn at the reading end in a bubble, the assistant's at the start with no bubble. Each message
      keeps its own language and direction (an Arabic message reads RTL in the English UI), Latin runs isolated. All
      message text is escaped: no markup from the stream reaches the panel.
-   - The approval prompt is buttons (F1): "Review the lines and approve" (opens P-07 when medical or religious lines are
+   - The approval prompt is buttons (F1): "Review and approve" (opens P-07 when medical or religious lines are
      flagged: the tick-each-line gate lives there), Change something, Stop here; plus the trust line: a NEW sequence, the
      original untouched, one Undo removes the copy.
    - One primary per screen: the prompt's main button while it waits; else Send once text is typed; else the done card's
      Open. Send is never violet while a prompt waits (the editor answers the prompt first).
-   - Review focus 1 (error): the link to Claude died mid-turn: what happened, that nothing changed in Premiere and no
-     half-made copy is left, and Try again. stopped: the editor pressed Stop.
+   - Review focus 1 (error): the link to Claude died mid-turn: what happened, that the original sequence is untouched, the
+     finished steps (and their new sequence) are kept and no half-made copy is left, and Try again. stopped: the editor pressed Stop.
    - Review focus 4: offline / no-claude (guided setup: sign in, or an API key in Settings) / no-internet / limited never
      hang: the composer is off and says why.
    - Review focus 2 (long): a long Latin file name inside Arabic, a long Arabic word, a Latin drug name and

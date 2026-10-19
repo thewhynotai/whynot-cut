@@ -147,14 +147,14 @@
     autopilot: function () {
       var auto = M.card('<div class="m-row">' + M.chip("info", t("p06.auto.chip"), "circle-check-big") + "</div>" +
         '<div class="t-meta tx-muted mt-2">' + t("p06.auto.why", { time: M.html(M.mono("14:31")) }) + "</div>" +
-        '<div class="m-row-top mt-2">' + M.status("waiting", 12) + '<div class="t-meta tx-text ms-1 m-grow">' + V1.tn("p06.auto.not_covered", 2) + "</div></div>" +
+        '<div class="m-row-top mt-2">' + M.status("waiting", 12) + '<div class="t-meta tx-text ms-1 m-grow">' + V1.tn("p06.auto.not_covered", 3) + "</div></div>" +
         '<div class="m-row mt-2">' + M.linkbtn(t("p06.auto.review"), M.rtl ? "chevron-left" : "chevron-right") + "</div>", "mt-4");
-      return { needs: 2, body: head(RUN, 3, "busy") + building() + auto + stepList(RUN) };
+      return { needs: 3, body: head(RUN, 3, "busy") + building() + auto + stepList(RUN) };
     },
     "autopilot-stopped": function () {
       var s = ["done", "done", "done", "done", "done", "done", "wait"];
-      return { needs: 2, body: head(s, 6, "waiting") +
-        M.card('<div class="m-row-top">' + M.status("waiting") + '<div class="m-col ms-2 m-grow"><div class="t-body">' + V1.tn("p06.auto.stopped", 2, { item: code(D.item) }) + "</div>" +
+      return { needs: 3, body: head(s, 6, "waiting") +
+        M.card('<div class="m-row-top">' + M.status("waiting") + '<div class="m-col ms-2 m-grow"><div class="t-body">' + V1.tn("p06.auto.stopped", 3, { item: code(D.item) }) + "</div>" +
           '<div class="t-meta tx-muted mt-1">' + t("p06.auto.stopped.sub") + "</div>" +
           '<div class="m-row mt-2">' + M.chip("info", t("p06.auto.chip"), "circle-check-big") + "</div></div></div>" +
           '<div class="m-col mt-3">' + PC.kbtn(t("p06.auto.review"), "enter", { kind: "primary", block: true, icon: "stethoscope" }) + "</div>", "mt-4") + stepList(s) };

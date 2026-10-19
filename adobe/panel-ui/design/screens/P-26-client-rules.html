@@ -24,7 +24,7 @@
    Data: lib/rules_loop.py: active rules {id, the engine's ar / en sentence, added, videos, source comment | review_list |
    hand_edit}, proposals {id, «مقترح: …», videos, why: said on 2+ videos or once with "always"}, conflicts (same knob,
    different values: pick one or neither, or it replaces an active rule), refusals (anything touching the doctor's or the
-   sheikh's review, an approval or the QC: never learned).
+   content owner's review, an approval or the QC: never learned).
    - The header line is the engine's: client preferences never turn off an approval, a review, the QC or a warning.
    - Confirm = `rules --add` (a lead step: only the editor, never by itself). Remove = `rules --remove`. "Not now" leaves
      the proposal suggested: the engine has no "not now" state yet (coverage map §2.1, C-7), so it only hides it in the
@@ -80,12 +80,14 @@
   function conflict(o) {
     o = o || {};
     var opts = R.conflict.map(function (p, i) {
-      return (i ? '<div class="mt-1"></div>' : "") + M.radio(M.txt(L === "ar" ? p.ar : p.en), false, { sub: t("p26.why.standing", { video: M.html(M.ltr(p.videos[0], "lat code")) }) });
+      return (i ? '<div class="mt-1"></div>' : "") + M.radio(M.txt(L === "ar" ? p.ar : p.en), false, { sub: t("p26.why.once", { video: M.html(M.ltr(p.videos[0], "lat code")) }) });
     }).join("") + '<div class="mt-1"></div>' + M.radio(t("p26.conflict.none"), false);
     return M.card('<div class="m-row-top">' + M.status("warn") + '<div class="t-label ms-2 m-grow">' + t("p26.conflict") + "</div></div>" +
       '<div class="m-col mt-3">' + opts + "</div>" +
       '<div class="t-meta tx-muted mt-2">' + t("p26.conflict.rule", { rule: M.txt(L === "ar" ? R.active[0].ar : R.active[0].en) }) + "</div>" +
-      '<div class="m-row mt-3">' + M.btn(t("p26.confirm"), { kind: o.primary ? "primary" : "secondary", icon: "circle-check-big", kbd: !!o.primary }) + "</div>", "mt-4");
+      /* nothing chosen yet: the confirm is off and says why (the editor picks one, or neither) */
+      '<div class="m-row mt-3">' + M.btn(t("p26.confirm"), { kind: "primary", icon: "circle-check-big", disabled: true }) + "</div>" +
+      '<div class="t-meta tx-muted mt-2">' + t("p26.conflict.pick") + "</div>", "mt-4");
   }
   /* a comment that would weaken safety: never learned, said plainly (information, not an error) */
   function refused() {

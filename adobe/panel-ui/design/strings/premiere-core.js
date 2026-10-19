@@ -203,7 +203,7 @@
     /* ---- P-10 needs you ---- */
     "p10.title": "Needs you", "p10.empty": "Nothing needs you right now.",
     "p10.k.words": "Listen to these words and confirm them.",
-    "p10.k.claim": "The doctor or the sheikh needs to confirm these lines.",
+    "p10.k.claim": "The doctor and the content owner need to confirm these lines.",
     "p10.k.fonts": "Install the client's fonts.", "p10.k.music": "Choose the music.",
     "p10.k.render": "Check the final mix and export.", "p10.k.restart": "Restart {app}.",
     "p10.sub": "Only you can do these. Claude waits for them.",
@@ -631,7 +631,7 @@
     /* ---- P-10 ---- */
     "p10.title": "مطلوب منك", "p10.empty": "مفيش حاجة مطلوبة منك دلوقتي.",
     "p10.k.words": "اسمع الكلمات دي وأكّدها.",
-    "p10.k.claim": "الدكتور أو الشيخ لازم يأكّد الجمل دي.",
+    "p10.k.claim": "الدكتور وصاحب المحتوى لازم يأكّدوا الجمل دي.",
     "p10.k.fonts": "سطّب خطوط العميل.", "p10.k.music": "اختار المزيكا.",
     "p10.k.render": "راجع المكس النهائي وصدّر.", "p10.k.restart": "اقفل {app} وافتحه تاني.",
     "p10.sub": "دي حاجات إنت بس اللي تقدر تعملها. Claude مستنيها.",

@@ -1,6 +1,6 @@
 # Panel V1 group (P-23 chat, P-24 episode and reels, P-26 client rules; Phase 4 states on P-05/P-06/P-07/P-10): extra Lucide names
 send-horizontal  # chat: send a message
-sparkles         # chat: suggestions
+sparkles         # P-24: good as motion
 bot              # review domain: AI disclosure
 briefcase        # review domain: business
 scale            # approver: business owner or legal adviser

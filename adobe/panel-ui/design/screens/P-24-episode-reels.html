@@ -100,7 +100,7 @@
   function bar(n, o) {
     o = o || {};
     var off = o.disabled || !n || o.needAvoid;
-    var label = n === 1 ? t("p24.make.one") : t("p24.make", { n: M.html(M.ltr(String(n || 0))) });
+    var label = n === 1 ? t("p24.make.one") : V1.tn("p24.make", n || 0);
     var hint = !n ? t("p24.make.none") : o.needAvoid ? t("p24.make.avoid") : "";
     return '<div class="m-col">' + PC.kbtn(label, "enter", { kind: "primary", block: true, icon: "list-video", disabled: off, focus: o.focus }) + "</div>" +
       (hint ? '<div class="t-meta tx-muted mt-2">' + hint + "</div>" : "") + M.trust(t("p24.trust"), "mt-2");
@@ -148,7 +148,7 @@
       var rows = ["R01", "R02"].map(function (id) {
         return M.li("circle-check", M.ltr(E.ep + "_" + id, "lat code") + " · " + t("p24.done.status.created"));
       }).join("");
-      return { needs: 0, body: slot(M.notice("ok", t("p24.done", { n: M.html(M.ltr("2")) }), { sub: t("p24.done.next") })) + head() +
+      return { needs: 0, body: slot(M.notice("ok", V1.tn("p24.done", 2), { sub: t("p24.done.next") })) + head() +
         M.card('<div class="m-col">' + rows + "</div>", "mt-4") };
     },
     long: function () {
