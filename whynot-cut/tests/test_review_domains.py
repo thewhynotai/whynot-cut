@@ -752,7 +752,8 @@ class TestFinalRound(unittest.TestCase):
     number still vetoes), percent offers, the zone floor, an amount outside a one-word verse and the window mutants."""
 
     BARE_PRICES = ("فيزيتا ٣٠٠", "الكشف ٣٠٠ وبس", "الكشف عندنا ٣٠٠", "الجلسة ٥٠٠", "الباقة كلها ٣٠٠٠", "الفيزيتا تلتمية",
-                   "كشفية ٢٠٠", "عربون ٥٠٠", "مقدم ٢٠٠٠", "قسط ٥٠٠", "الجلسة الأولى ٣٠٠", "الكشف ميتين وخمسين")
+                   "كشفية ٢٠٠", "عربون ٥٠٠", "مقدم ٢٠٠٠", "قسط ٥٠٠", "الجلسة الأولى ٣٠٠", "الكشف ميتين وخمسين",
+                   "الكشف عندي ٣٠٠", "الكشف يا جماعة ٣٠٠", "الكشف عندي في العيادة ٣٠٠")
     FILLER = ("والدكتور بيشوف الحالة كويس واحنا بنتابع معاك والمريض مرتاح جدا وبعدين بنكمل الكلام عن الضغط والسكر "
               "واللي عنده مشكلة يسأل ").split()
 
@@ -875,7 +876,8 @@ class TestFinalRound(unittest.TestCase):
         import time
         ms = RD.matchers()
         for unit in ("الكشف ٣٠٠ ", "الجلسة الأولى ", "عرض رمضان الجديد ", "٥٠٪ على ", "اشتري ١ و خد ", "قسط على ",
-                     "﴿ خصم ﴾ ٥٠٪ ", "الحق ", "installments ", "it's 400 a ", "0% "):
+                     "﴿ خصم ﴾ ٥٠٪ ", "الحق ", "installments ", "it's 400 a ", "0% ", "الكشف كان ٣٠٠ وبقى ",
+                     "الكشف عندي في يا ", "عرض جانبي بيقل "):
             def cost(n):
                 t0 = time.perf_counter()
                 RD.detect(unit * n, ms)
@@ -886,6 +888,58 @@ class TestFinalRound(unittest.TestCase):
             t1 = min(cost(small) for _ in range(2))
             t10 = cost(small * 10)
             self.assertLess(t10 / t1, 30, unit)
+
+
+class TestLastMiniRound(unittest.TestCase):
+    """Review dcd7e00, the last mini round: a filler gap before a bare price as a class, «عرض» only as an offer and a
+    «نسبة» statistic never an offer, and the clinic units that veto a bare price."""
+
+    def rules(self, text: str) -> list:
+        return [m["rule"] for m in RD.detect(text).get("business", [])]
+
+    def test_filler_gap_is_a_class(self):
+        """Up to 3 tokens of pronoun / possessive, place, vocative or copula between the price noun and the number;
+        a content word in the gap breaks the join."""
+        for gap in ("عندي", "عندكم", "بتاعنا", "بتاعتي", "هنا", "في العيادة", "في المركز", "عندنا في العيادة",
+                    "يا جماعة", "يا ستي", "كان", "بيبقى", "يا جماعة هيبقى", "حضرتك"):
+            for noun, number in (("الكشف", "٣٠٠"), ("الاستشارة", "450"), ("الباقة", "تلتمية")):
+                t = f"{noun} {gap} {number} والدكتور موجود"
+                self.assertIn("priced-amount", self.rules(t), t)
+        for t in ("الكشف عندي بكرة الساعة ٣", "الكشف عندي بكرة ٣٠٠", "الكشف هنا الصبح بدري ٣٠٠",
+                  "الكشف عندي ١٢٠ على ٨٠", "الجلسة عندي ٤٥ دقيقة", "الكشف هنا ٢٠٢٤", "الكشف عندي بكرة ١٠:٣٠"):
+            self.assertNotIn("priced-amount", self.rules(t), t)
+
+    def test_was_and_became_flags_both_amounts(self):
+        """«كان ٣٠٠ وبقى ٢٠٠»: one row that holds both prices; a second number with a unit is not joined."""
+        for t, both in (("الكشف كان ٣٠٠ وبقى ٢٠٠ والدكتور موجود", ("300", "200")),
+                        ("الجلسة كانت تلتمية وبقت ميتين", ("تلتميه", "ميتين")),
+                        ("الباقة كانت ٣٠٠٠ وهتبقى ٢٥٠٠", ("3000", "2500"))):
+            matches = [m["match"] for m in RD.detect(t)["business"] if m["rule"] == "priced-amount"]
+            self.assertTrue(any(all(x in m for x in both) for m in matches), (t, matches))
+        self.assertNotIn("business", domains("الجلسة كانت ١٢٠ دقيقة وبقت ٩٠ دقيقة"))
+        matches = [m["match"] for m in RD.detect("الكشف كان ٣٠٠ وبقى ٢٠٠ مريض")["business"]]
+        self.assertTrue(matches and all("200" not in m for m in matches), matches)
+
+    def test_offer_sense_and_statistics(self):
+        """«عرض» counts only as an offer; «نسبة» + outcome + «N٪ على <treatment>» is a statistic, not a price."""
+        for t in ("عرض جانبي ٢٪", "ده عرض جانبي نادر ٢٪", "العرض ده بيقل ٥٠٪ بعد العلاج", "عرض شائع ٣٠٪",
+                  "العرض ده بيختفي ٨٠٪", "نسبة النجاح ٩٠٪ على الليزر", "نسبة الاستجابة ٦٠٪ على البوتوكس",
+                  "التحسن بيوصل ٧٠٪ على الجلسات", "النتيجة ٩٥٪ على الفيلر", "بيقل ٥٠٪ على التاني",
+                  "نسبة النجاح ٩٠٪ على كل الجلسات", "التحسن بيوصل ٧٠٪ على كل الجلسات", "٣٠٪ على الكورس",
+                  "الشعر بيخف ٨٠٪ على الليزر"):
+            self.assertNotIn("business", domains(t), t)
+        for t in ("عرض خاص ٢٠٪", "العرض ده ٣٠٪", "عرض رمضان ٣٠٪", "خصم ٩٠٪", "نسبة الخصم ٣٠٪ على الباقة",
+                  "٥٠٪ على كل جلسات الليزر", "٢٠٪ على الكشف"):
+            self.assertIn("percent-off", self.rules(t), t)
+
+    def test_clinic_units_veto_a_bare_price(self):
+        """Each unit, as written and in an NFKC-folded spelling (presentation forms, fullwidth Latin)."""
+        for unit in ("جرافت", "جرافتات", "مليجرام", "ملليجرام", "ملجم", "ﻣﻠﺠﻢ", "ميلي جول", "جول", "حقنة", "حقن",
+                     "ضربة", "ضربات", "جلسة", "جلسات", "ألكس", "دايود", "إن دي ياج", "ان دي ياج", "ｍｇ"):
+            for t in (f"الجلسة ٣٠٠ {unit}", f"الجلسة ٣٠٠ {unit} والدكتور موجود"):
+                self.assertNotIn("business", domains(t), t)
+        for t in ("الجلسة ٥٠٠", "الجلسة ٥٠٠ والمريض مرتاح", "الباقة ٣ جلسات بـ ١٥٠٠ جنيه"):
+            self.assertIn("business", domains(t), t)
 
 
 class TestPhrases(unittest.TestCase):

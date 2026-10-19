@@ -178,3 +178,59 @@ loss of interest in daily activities	-business
 الحقيقة العرض ده بيروح لوحده	-business
 عندك الحق العرض ده مقلق	-business
 الأكل ده زيرو فوايد	-business
+# Review dcd7e00 (last mini round): a filler gap (pronoun, place, vocative, copula; up to 3 tokens) before a bare price
+الكشف عندي ٣٠٠ والدكتور موجود	+business
+الفيزيتا عندي ٤٠٠ والدكتور بيشوف الحالة	+business
+الجلسة عندي ٥٠٠ والنتيجة حلوة	+business
+الكشف عندي تلتمية والدكتور بيتابع	+business
+الكشف هنا ٣٠٠ والدكتور موجود	+business
+الكشف بتاعنا ٣٠٠ والمتابعة كل شهر	+business
+الكشف بتاعتنا ٣٠٠ واحنا بنتابع معاك	+business
+الكشف في العيادة ٣٠٠ والدكتور موجود	+business
+الكشف عندي في العيادة ٣٠٠ والدكتور موجود	+business
+الكشف يا جماعة ٣٠٠ والدكتور موجود	+business
+الكشف كان ٣٠٠ وبقى ٢٠٠ والدكتور موجود	+business
+الاستشارة عندنا في المركز ٤٠٠ والدكتور بيرد	+business
+الجلسة يا ستي هتبقى ٦٠٠ والنتيجة حلوة	+business
+الكشف عندي 300 والدكتور موجود	+business
+الكشف عندي بكرة الساعة ٣	-business
+الكشف عندي بكرة ١٠:٣٠ والدكتور موجود	-business
+الكشف عندي ١٢٠ على ٨٠ والنبض كويس	-business
+الجلسة عندي ٤٥ دقيقة والدكتور بيتابع	-business
+الجلسة كانت ١٢٠ دقيقة وبقت ٩٠ دقيقة	-business
+الكشف عندنا في العيادة ٢٠٢٤ كان زحمة	-business
+# «عرض» only in its offer sense; «نسبة» + an outcome is a statistic (treatment nouns after «N٪ على» need «كل»)
+عرض جانبي ٢٪	-business
+ده عرض جانبي نادر ٢٪	-business
+العرض ده بيقل ٥٠٪ بعد العلاج	-business
+العرض ده بيختفي ٨٠٪ بعد أول جلسة	-business
+نسبة النجاح ٩٠٪ على الليزر	-business
+نسبة الاستجابة ٦٠٪ على البوتوكس	-business
+التحسن بيوصل ٧٠٪ على الجلسات	-business
+النتيجة ٩٥٪ على الفيلر	-business
+نسبة النجاح ٩٠٪ على كل الجلسات	-business
+التحسن بيوصل ٧٠٪ على كل الجلسات	-business
+الشعر بيخف ٨٠٪ على الليزر	-business
+عرض خاص ٢٠٪	+business
+خصم ٩٠٪	+business
+العرض ده ٣٠٪ والحجز مفتوح	+business
+نسبة الخصم ٣٠٪ على الباقة	+business
+٥٠٪ على كل جلسات الليزر	+business
+# clinic units after a bare price (NFKC-folded spellings too); a session count is not a price
+الجلسة ٣٠٠٠ جرافت والنتيجة حلوة	-business
+الجلسة ٢٥٠ مليجرام فيتامين سي	-business
+الجلسة ٥٠٠ ملجم والمريض مرتاح	-business
+الجلسة ٢٥٠ ﻣﻠﺠﻢ والمريض مرتاح	-business
+الجلسة ٢٥٠ ｍｇ والمريض مرتاح	-business
+الجلسة ٢٠٠ ميلي جول والجلد كويس	-business
+الجلسة ٣٠٠ جول والجلد كويس	-business
+الجلسة ٣٠٠ حقنة والمريض مرتاح	-business
+الجلسة ٢٠٠ حقن والمريض مرتاح	-business
+الكشف ١٢٠ ضربة في الدقيقة	-business
+الكشف ١٠٠ ضربات والضغط كويس	-business
+الباقة ١٢٠ جلسة في السنة	-business
+الجلسة ٥٠٠ والمريض مرتاح	+business
+الباقة ٣ جلسات بـ ١٥٠٠ جنيه	+business
+الجلسة ٧٥٥ ألكس والشعر بيقل	-business
+الجلسة ٨١٠ دايود والشعر بيقل	-business
+الجلسة ١٠٦٤ إن دي ياج والشعر بيقل	-business
