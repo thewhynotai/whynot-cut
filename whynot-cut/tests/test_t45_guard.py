@@ -48,6 +48,15 @@ NAMED = re.compile(r"(?:/\s*\"|\"[^\"\n]*/)(?P<name>asset-manifest\.json|typogra
                    r"measurements\.json|reference_analysis)\b")
 THROUGH_DB = re.compile(r"client_db\.(?:load|stored|resolved|migrate|path_fields)\(")
 OWNERS = {"lib/client_db.py", "lib/ref_analysis.py", "lib/client_move.py"}
+# (d) PENDING 2026-10-19 (executor ruling: the guard is never committed red): the ONE file whose swap to client_db.load
+# is not in yet, and only its two reads (typography.json, asset-manifest.json). They land with
+# hooks/BL-14/ae_builder.patch (ADOBE-G4), which also deletes this line. No other entry; any other direct read in that
+# file still fails, and so does this entry once the file reads through client_db.load (stale).
+PENDING_SWAP = ("lib/ae_builder.py", {"typography.json", "asset-manifest.json"})
+
+
+def pending(f: str, name: str) -> bool:
+    return f == PENDING_SWAP[0] and name.rsplit("/", 1)[-1] in PENDING_SWAP[1]
 ALLOW_NAMED = {
     ("cli.py", "reference-measurements.json"),        # a video's own 01_analysis copy: only whether it exists
     ("lib/looks_recommend.py", "reference-measurements.json"),   # reads cuts_per_minute only, no path
@@ -98,8 +107,16 @@ class TestGuard(unittest.TestCase):
             self.assertEqual(NAME.search(line).group("name"), "reel-profile/profile.json", line)
 
     def test_files_with_paths_are_read_only_through_load(self):
-        bad = [f"{f}:{n} reads {name}" for f, n, name in direct_reads() if name == "?" or client_db.path_fields(name)]
+        bad = [f"{f}:{n} reads {name}" for f, n, name in direct_reads()
+               if (name == "?" or client_db.path_fields(name)) and not pending(f, name)]
         self.assertEqual(bad, [], "read these through client_db.load(paths, rel, default) (T4.5)")
+
+    def test_the_pending_swap_is_still_pending(self):
+        direct = sorted({name.rsplit("/", 1)[-1] for f, _n, name in direct_reads() if pending(f, name)})
+        named = sorted({name for f, _n, name in named_paths() if pending(f, name)})
+        want = sorted(PENDING_SWAP[1])
+        self.assertEqual((direct, named), (want, want), f"{PENDING_SWAP[0]} reads through client_db.load now: delete "
+                                                        "PENDING_SWAP")
 
     def test_the_named_path_scan_finds_a_two_step_read(self):
         self.assertTrue(NAMED.search('    manf = root / "output/client_database/asset-manifest.json"'))
@@ -109,7 +126,7 @@ class TestGuard(unittest.TestCase):
         self.assertTrue(THROUGH_DB.search('    man = client_db.load(paths, "asset-manifest.json", {})'))
 
     def test_every_named_path_goes_through_client_db_or_is_listed(self):
-        seen = {(f, name) for f, _n, name in named_paths()}
+        seen = {(f, name) for f, _n, name in named_paths() if not pending(f, name)}
         self.assertEqual(sorted(seen - ALLOW_NAMED), [], "read it through client_db.load (T4.5), or list it with why")
         self.assertEqual(sorted(ALLOW_NAMED - seen), [], "gone already: remove it from ALLOW_NAMED")
 

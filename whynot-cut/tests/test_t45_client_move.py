@@ -263,17 +263,18 @@ class TestMove(Base):
         self.assertEqual(ref_style.state(self.dest)["fingerprint"], ref_style.state(self.src)["fingerprint"])
 
     def test_nothing_under_the_copy_points_at_the_old_folder(self):
-        """REL-PREVIEW acceptance: no path in a JSON, MD or XML under the copy points outside it, except the files an
-        approval or sign-off is bound to (kept, listed with why: the executor's question in BL-14); logs and projects
-        are listed with what happens to them."""
+        """REL-PREVIEW acceptance: no path in a JSON, MD or XML under the copy points outside it, the files an
+        approval or sign-off hashes included (executor ruling (c) on BL-14 Q1: they are rewritten, their approvals
+        voided and listed; this fixture has none); logs and projects are listed with what happens to them."""
         doc = self.moved()
         out = doc["outside_database"]
         kept = {k["file"]: k["why"] for k in out["kept"]}
-        self.assertEqual(sorted(k for k, w in kept.items() if "approval" in w),
-                         ["output/projects/R01/01_analysis/timeline-spec.json",
-                          "output/projects/R01/06_audio/dialogue/pauses.json"])
-        self.assertEqual(sorted(k for k, w in kept.items() if "approval" not in w),
-                         ["output/projects/R01/09_handoff/delivery.json", "output/projects/R01/logs/pipeline.log"])
+        self.assertEqual(sorted(kept), ["output/projects/R01/09_handoff/delivery.json",
+                                        "output/projects/R01/logs/pipeline.log"])
+        rewritten = {r["file"] for r in out["rewritten"]}
+        self.assertLessEqual({"output/projects/R01/01_analysis/timeline-spec.json",
+                              "output/projects/R01/06_audio/dialogue/pauses.json"}, rewritten)
+        self.assertEqual(doc["approvals_to_redo"], [])
         self.assertIn("not on the list", kept["output/projects/R01/09_handoff/delivery.json"])
         olds = {str(self.src), str(self.src).replace("\\", "/"), json.dumps(str(self.src))[1:-1],
                 json.dumps(str(self.src), ensure_ascii=False)[1:-1]}
@@ -299,20 +300,28 @@ class TestMove(Base):
         self.assertEqual([p["file"] for p in out["projects"]], ["output/projects/R01/07_premiere/project/R01_EDIT.prproj"])
         self.assertIn("Link Media", out["projects"][0]["fix"])
         self.assertIn("reel ppro-build --force --video-id R01", out["projects"][0]["fix"])
-        self.assertIn("still name the old folder", doc["next"])
+        self.assertNotIn("approvals_to_redo", doc["next"])                     # nothing was approved here
         status = read_json(self.dest / "output/client_database/client-database-status.json")["issues"][0]
         self.assertIn("['assets\\\\Fonts\\\\B.ttf']" if IS_WIN else "['assets/Fonts/B.ttf']", status)  # relative in the db
         self.assertIsNone(CM.unmigrated(self.dest))
 
-    def test_an_approved_plan_naming_the_old_folder_stays_approved(self):
+    def test_an_approved_plan_naming_the_old_folder_is_voided_and_listed(self):
+        """Executor ruling (c) on BL-14 Q1: the plan points at the new folder's media, its approval is void on purpose
+        and listed; the old folder's approval still holds there."""
         from lib import plan as PL
         p = Paths(self.src, "R01")
         write_json(p.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor", "format": PL.APPROVAL_FORMAT,
                                                             "plan_fingerprint": PL.plan_fingerprint(p)})
-        spec = p.p("01_analysis/timeline-spec.json").read_bytes()
-        self.moved()
-        self.assertEqual((self.dest / "output/projects/R01/01_analysis/timeline-spec.json").read_bytes(), spec)
-        self.assertEqual(PL.approval_state(Paths(self.dest, "R01"))["state"], "current")
+        appr = p.p("01_analysis/plan-approval.json").read_bytes()
+        doc = self.moved()
+        q = Paths(self.dest, "R01")
+        self.assertEqual(json.loads(q.p("01_analysis/timeline-spec.json").read_text(encoding="utf-8"))["media"],
+                         str(self.dest / "data/Raw/clip 1.mp4"))
+        self.assertEqual(PL.approval_state(q)["state"], "stale")
+        self.assertEqual(q.p("01_analysis/plan-approval.json").read_bytes(), appr)     # never re-approved
+        self.assertEqual(PL.approval_state(p)["state"], "current")
+        self.assertEqual([(v["item"], v["kind"]) for v in doc["approvals_to_redo"]], [("R01", "plan")])
+        self.assertIn("approvals_to_redo", doc["next"])
 
     def test_a_value_from_the_other_systems_spelling_gets_this_computers_separators(self):
         old = "/Volumes/Drive/Acme" if IS_WIN else "D:\\C\\Acme"
@@ -867,13 +876,15 @@ class TestBoundDatabaseFiles(Base):
         self.assertNotIn(str(self.src), (self.dest / "output/client_database/client-database-status.json")
                          .read_text(encoding="utf-8").replace("\\\\", "\\"))
 
-    def test_brand_tokens_naming_a_path_are_kept_as_signed(self):
+    def test_brand_tokens_naming_a_path_point_at_the_new_folder(self):
+        """Ruling (c): the brand tokens (hashed by every motion plan) are rewritten, absolute like before (their
+        readers open them directly); a motion plan's approval they void is listed (test_t45_move_approvals)."""
         bt = self.src / "output/client_database/branding/brand-tokens.json"
         write_json(bt, {"roles": {"primary": {"hex": "#112233"}}, "source": str(self.src / "assets/Brand/guide.pdf")})
-        raw = bt.read_bytes()
         doc = self.moved()
-        self.assertEqual((self.dest / "output/client_database/branding/brand-tokens.json").read_bytes(), raw)
-        self.assertIn("approval", self.kept(doc)["output/client_database/branding/brand-tokens.json"])
+        got = read_json(self.dest / "output/client_database/branding/brand-tokens.json")
+        self.assertEqual(got, {"roles": {"primary": {"hex": "#112233"}}, "source": str(self.dest / "assets/Brand/guide.pdf")})
+        self.assertNotIn("output/client_database/branding/brand-tokens.json", self.kept(doc))
 
 
 class TestInterruptedCopyRule(Base):
@@ -1046,8 +1057,8 @@ class TestReviewR1Copy(Base):
         self.hold()
         doc = CM.move(self.src, self.dest, apply=True)
         self.assertIn(f"close the Premiere and After Effects projects you have open at {self.src} first", doc["next"])
-        self.assertIn("keep it until", doc["old_folder"])                          # the fixture's plan is kept
-        self.assertNotIn("delete the old one yourself", doc["old_folder"])
+        self.assertIn("delete the old one yourself", doc["old_folder"])     # nothing in the new folder reads the old
+        self.assertNotIn("keep it until", doc["old_folder"])
         plain = make_client(self.tmp, "Plain", steps=False)
         self.hold(plain)
         doc2 = CM.move(plain, self.tmp / "E drive" / "Plain2", apply=True)

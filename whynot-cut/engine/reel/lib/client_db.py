@@ -520,7 +520,7 @@ def migrate(paths, old_roots=(), dry_run: bool = False) -> dict:
         try:
             doc = read_json(f)
         except FileFormatError as e:
-            rep["errors"].append({"file": rel, "why": str(e)})
+            rep["errors"].append({"file": rel, "why": str(e), "damaged": True})
             continue
         new, n = copy.deepcopy(doc), [0]
 

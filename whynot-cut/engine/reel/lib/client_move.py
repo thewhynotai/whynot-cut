@@ -24,6 +24,16 @@ database is itself a link is refused (the copy would share it). Every run is a d
 removed again: only the names this run made, links unlinked as names. An interrupted one leaves
 `.whynot-move-incomplete`; the next run removes its own partial copy only when everything in it came from the client.
 Pipeline logs (history) and Premiere/After Effects projects (binary) are listed with their fix, never rewritten.
+
+The files an approval or sign-off hashes byte for byte (the timeline spec, the words, the motion script, the pauses, the
+reels plan, the brand tokens) are pointed at the new folder too, so no plan or transcript reads the old folder's media.
+That voids those approvals ON PURPOSE (executor ruling 2026-10-19 on BL-14 Q1, option (c)): each one is listed by item
+and kind in the result (`approvals_to_redo`) and, through VOIDED_REL, on NEEDS-YOU until the editor gives it again.
+Nothing here approves anything again. A clone leaves the source's approvals untouched and starts with none.
+Known limits: a reel cut from an episode is told to confirm its own transcript again (its check came from the
+episode's); the editor's reels picks are not listed on their own (the reels-plan line says to pick again); a run killed
+between rewriting an item's words and pinning its old-form transcript check (no hash) leaves that check counting for
+the new words in the engine, while NEEDS-YOU lists it.
 """
 from __future__ import annotations
 
@@ -54,7 +64,8 @@ LOG_EXT = {".log"}
 TEXT_MAX = 64 * 1024 * 1024
 INVENTORY = "output/discovery/input-inventory.json"
 # JSON files an approval or sign-off hashes byte for byte (plan.plan_fingerprint, transcribe.words_fingerprint and the
-# transcript check, cut_proposals, motion_plan.fingerprint, reels.reels_plan_fingerprint): never rewritten by a move
+# transcript check, cut_proposals, motion_plan.fingerprint, reels.reels_plan_fingerprint): rewritten like the others,
+# and the approvals they carry are listed as voided (APPROVALS)
 SIGNED = ("01_analysis/timeline-spec.json", "01_analysis/motion-script.json", "01_analysis/reels-plan.json",
           "02_transcription/words.json", "06_audio/dialogue/pauses.json", "branding/brand-tokens.json")
 # the JSON files known to carry media paths with nothing bound to their bytes (the release track's REL-PREVIEW list,
@@ -69,6 +80,45 @@ REBASE_JSON = {INVENTORY, "01_analysis/edit-decisions.json", "00_inputs/input-ma
 # bound to its bytes (the reference style every video's copy is checked against, the sealed rules registry) or written
 # by the editor or Claude, and none of it is opened as media
 DB_REBASE = ("output/client_database/client-database-status.json",)
+BRAND_TOKENS = "output/client_database/branding/brand-tokens.json"   # signed (motion plans): rewritten, kept absolute
+# (its readers open it directly, not through client_db.load)
+# the approvals and sign-offs a move voids on purpose: kind -> (its own file in the item's folder, the NEEDS-YOU line in
+# English and Arabic ({item}), what the editor does again: English, Arabic). Editor's words: no commands (HOW has those,
+# for the move's result). Only the plan and the transcript are the editor's own approvals; the others say what the
+# editor does once the step ran again.
+APPROVALS = {
+    "plan": ("01_analysis/plan-approval.json", "client moved: approve the plan again for {item}",
+             "اتنقل العميل: وافق تاني على الخطة لـ {item}",
+             "look at the plan again and approve it", "بص على الخطة تاني ووافق عليها"),
+    "transcript": ("02_transcription/verification.json", "client moved: approve the transcript again for {item}",
+                   "اتنقل العميل: وافق تاني على التفريغ لـ {item}",
+                   "listen to the transcript again and confirm it", "اسمع التفريغ تاني وأكّده"),
+    "cut-proposals": ("01_analysis/cut-proposals.json", "client moved: choose the cuts again for {item}",
+                      "اتنقل العميل: اختار القص تاني لـ {item}",
+                      "choose the cuts again from a new list of proposals", "اختار القص تاني من قائمة اقتراحات جديدة"),
+    "review": ("review-flags.json", "client moved: the content review is needed again for {item}",
+               "اتنقل العميل: مراجعة المحتوى لازم تتعمل تاني لـ {item}",
+               "the content review is done again before anything on screen is approved",
+               "مراجعة المحتوى بتتعمل تاني قبل الموافقة على أي كلام على الشاشة"),
+    "reels-plan": ("01_analysis/reels-plan-validated.json", "client moved: pick the reels again for {item}",
+                   "اتنقل العميل: اختار الريلز تاني لـ {item}",
+                   "the reels plan is checked again, then you pick the reels again",
+                   "خطة الريلز بتتراجع تاني، وبعدين تختار الريلز تاني"),
+}
+HOW = {"plan": "`reel approve-plan --by editor` after the editor looked at the plan",
+       "plan-motion": "`reel motion-plan` again, then `reel approve-plan --by editor` after the editor looked at it",
+       "transcript": "`reel transcript-verify --by editor` after the editor listened",
+       "cut-proposals": "`reel cut-proposals` again, then the editor chooses",
+       "review": "`reel review-flags` again with the reviewer's new table",
+       "reels-plan": "`reel reels-plan --episode {item}` again, then the editor picks"}
+# which of the item's files each approval hashes: an approval that can't be checked (None) is listed only when one of
+# them was rewritten; one that held and no longer holds always is (the dry run's forecast uses the same rule)
+TIMELINE_BOUND = ("01_analysis/timeline-spec.json",)
+MOTION_BOUND = ("01_analysis/motion-script.json", "02_transcription/words.json", "06_audio/dialogue/pauses.json")
+BOUND = {"transcript": ("02_transcription/words.json",), "cut-proposals": ("02_transcription/words.json",),
+         "reels-plan": ("01_analysis/reels-plan.json", "02_transcription/words.json")}
+PENDING_REL = "output/.whynot-move-pending.json"  # an "already moved" run that did not end cleanly: its old folder
+VOIDED_REL = "output/client-move-approvals.json"    # the voided approvals NEEDS-YOU lists until each holds again
 URL = re.compile(r"file://[^\s<>\"'`()\[\]{}]+")    # pathurl %-encodes brackets: one here ends the URL (a .md link)
 TIME_SLACK_NS = 2_000_000_000                       # FAT keeps file times to 2 s, exFAT to 10 ms, NTFS to 100 ns
 _END = r"(?=[\\/\"'`<>)\],;|\t\r\n]|$)"           # a root ends at a separator, a quote or the end, never mid-name
@@ -458,18 +508,15 @@ def _project_fix(rel: str, ext: str) -> str:
 
 
 def _rewritable(rel: str, ext: str) -> str | None:
-    """Why a file under output/ may NOT be rewritten (None = it may): an approval or sign-off hashes its exact bytes
-    (the plan, the words, the motion script, the reels plan, the pauses, the brand tokens); in the client database,
-    anything but DB_REBASE (bound to its bytes, or the editor's or Claude's own writing); a JSON file not on the list of
+    """Why a file under output/ may NOT be rewritten (None = it may): in the client database, anything but DB_REBASE
+    and the brand tokens (bound to its bytes, or the editor's or Claude's own writing); a JSON file not on the list of
     files known to carry media paths and nothing else that is bound to them (REBASE_JSON). Other text (reports,
     interchange XML) may be rewritten."""
     tail = rel.split("/", 3)[-1] if rel.startswith(("output/projects/", "output/episodes/")) else rel
-    if ext == ".json" and any(rel.endswith("/" + s) for s in SIGNED):
-        return ("an approval or sign-off is bound to its exact content (plan approval, transcript check, cut "
-                "proposals, motion or reels plan): kept so it stays approved. It names the old folder until its step "
-                "runs again; question for the executor in BL-14")
+    if ext == ".json" and tail in SIGNED:
+        return None                    # an approval it carries is voided on purpose and listed (APPROVALS)
     if rel.startswith("output/client_database/"):
-        if rel in DB_REBASE:
+        if rel in DB_REBASE or rel == BRAND_TOKENS:
             return None
         if rel.startswith("output/client_database/reference_style/"):
             return ("every video's copy of the client reference style is checked against this folder's exact bytes "
@@ -485,9 +532,11 @@ def _rewritable(rel: str, ext: str) -> str | None:
     return "not on the list of files a move may rewrite: it names the old folder until its step runs again"
 
 
-def plausible_old(root, old) -> str | None:
+def plausible_old(root, old, pointed: bool = True) -> str | None:
     """Why `old` can't be the folder this client was moved from (None = it can): a drive or file-system root, the home
-    folder, the client itself or a folder above it, or a folder no path of the database or inventory points into."""
+    folder, the client itself or a folder above it, or (`pointed`) a folder no path of the database or inventory points
+    into. The old folder of an "already moved" run that did not end cleanly (PENDING_REL) needs no pointing path: that
+    run may have rewritten them all."""
     root = Path(root)
     parts = client_db._parts(str(old))
     home = client_db._parts(str(Path.home()))
@@ -496,6 +545,11 @@ def plausible_old(root, old) -> str | None:
         return f"{old} is a drive, the top of the disk or your home folder, not a client folder"
     if _is_root(str(old), root) or client_db.rel_under(str(root), str(old)) is not None:
         return f"{old} is this client folder or a folder above it"
+    if client_db.rel_under(str(old), str(root)) is not None:
+        return f"{old} is a folder inside this client"
+    pending = _pending(root) if pointed else None
+    if not pointed or pending and _is_root(str(old), pending):
+        return None
     seen = [0]
 
     def note(v):
@@ -507,27 +561,42 @@ def plausible_old(root, old) -> str | None:
     return None if seen[0] else f"nothing in this client's database or discovery points into {old}"
 
 
-def rebase(root, olds, new=None, dry_run: bool = False) -> dict:
+def rebase(root, olds, new=None, dry_run: bool = False, before: dict | None = None, _heads: dict | None = None) -> dict:
     """Point the files under root/output/ that name an old folder (`olds`) at `new` (default: root), keeping each file's
-    modification time: the JSON files that carry media paths (REBASE_JSON; inside the client database root-relative),
-    and .md/.xml/... text. A file whose exact content an approval or sign-off is bound to is never rewritten (SIGNED),
-    nor a log (history) or a Premiere/AE project (binary): those are listed with what happens to them. Writes only with
-    `dry_run` False, through linksafe (never through a link). Returns {"rewritten": [{file, values}], "kept": [{file,
-    why}], "projects": [{file, app, fix}], "errors"}."""
+    modification time: the JSON files that carry media paths (REBASE_JSON and SIGNED; inside the client database
+    root-relative), and .md/.xml/... text. A log (history) or a Premiere/AE project (binary) is never rewritten: those
+    are listed with what happens to them. Writes only with `dry_run` False, through linksafe (never through a link).
+    The approvals a rewrite voids (`before`: approvals() as they held in the old folder, default: here before the
+    rewrite) are listed in `voided` (a dry run: the forecast) and, applied, added to VOIDED_REL (the forecast first, so
+    a run stopped part way still lists them; `_heads`: the old folders' looked-up forms, shared by both passes so an
+    offline share is looked up once). Returns {"rewritten":
+    [{file, values}], "kept": [{file, why}], "projects": [{file, app, fix}], "voided": [{item, kind, ...}], "errors"}."""
     root = Path(root)
     new = Path(new) if new is not None else root
     olds = [o for o in dict.fromkeys(str(o) for o in olds if o) if not _is_root(o, new)]
-    rep = {"rewritten": [], "kept": [], "projects": [], "errors": []}
+    rep = {"rewritten": [], "kept": [], "projects": [], "voided": [], "errors": []}
     if not olds:
         return rep
+    before = approvals(root) if before is None else before
+    forced: list = []
+    if not dry_run:             # first the forecast, so a run stopped part way (an error that escapes, Ctrl+C, a crash)
+        heads: dict = {} if _heads is None else _heads                       # still lists what it voided so far
+        ahead = rebase(root, olds, new, dry_run=True, before=before, _heads=heads)["voided"]
+        added: set = set()
+        if ahead:
+            try:
+                added = _record_voided(root, ahead, hashed=False)
+            except (Guidance, OSError, ValueError) as e:
+                rep["errors"].append({"file": VOIDED_REL, "why": str(e)})
+                return rep                     # nothing rewritten: no approval voided without a record
     tp, needles = _pairs(olds, new, True), _needles(olds)
-    heads: dict = {}
+    heads = ({} if _heads is None else _heads) if dry_run else heads
     ctx_abs = (olds, new, _pairs(olds, new, False), False, heads)
     ctx_rel = (olds, new, _pairs(olds, new, False, True), True, heads)
     owned = {f"output/client_database/{r}" for r in client_db.path_files(root / "output" / "client_database")}
     for rel, size, _m in scan(root, "scan")["files"]:
-        if rel in owned:                                 # client_db.migrate's: stored relative, never re-absolutised
-            continue
+        if rel in owned or rel in (PENDING_REL, VOIDED_REL):   # client_db.migrate's (stored relative, never
+            continue                                     # re-absolutised); this module's own records
         low = rel.casefold()
         ext = os.path.splitext(low)[1]
         p = str(root.joinpath(*rel.split("/")))
@@ -549,15 +618,16 @@ def rebase(root, olds, new=None, dry_run: bool = False) -> dict:
                 rep["kept"].append({"file": rel, "why": why})
             continue
         try:
-            text = Path(_x(p)).read_bytes().decode("utf-8-sig" if ext == ".json" else "utf-8")
+            raw = Path(_x(p)).read_bytes()
+            text = raw.decode("utf-8-sig" if ext == ".json" else "utf-8")
             if ext == ".json":
                 count = [0]
-                new_doc = _rebase_doc(json.loads(text), ctx_rel if rel.startswith("output/client_database/")
-                                      else ctx_abs, count)
+                new_doc = _rebase_doc(json.loads(text), ctx_rel if rel.startswith("output/client_database/") and
+                                      rel != BRAND_TOKENS else ctx_abs, count)
                 n, data = count[0], json.dumps(new_doc, ensure_ascii=False, indent=2) + "\n"
             else:
                 data, n = _rebase_text(text, olds, new, tp, heads)
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, RecursionError) as e:
             if _names(p, needles, lambda q: open(q, "rb")):
                 rep["kept"].append({"file": rel, "why": f"names the old folder but couldn't be read ({type(e).__name__})"
                                                        ": it is refreshed when its step runs again"})
@@ -575,6 +645,14 @@ def rebase(root, olds, new=None, dry_run: bool = False) -> dict:
             except (Guidance, OSError) as e:
                 rep["errors"].append({"file": rel, "why": str(e)})
                 continue
+            if rel.endswith("/02_transcription/words.json") and rel.count("/") == 4:
+                try:
+                    _pin_transcript_check(root, rel, hashlib.sha1(raw).hexdigest())
+                except (Guidance, OSError) as e:      # the old check can't be pinned: listed whatever it says now
+                    rep["errors"].append({"file": rel[:-len("words.json")] + "verification.json", "why": str(e)})
+                    key = tuple(rel.split("/")[1:3]) + ("transcript",)
+                    if before.get(key) is not False:         # never confirmed: nothing to list (r2 N-P3-2)
+                        forced.append(key)
         rep["rewritten"].append({"file": rel, "values": n})
     from .safety.takes import ED, HISTORY
     for r in list(rep["rewritten"]):
@@ -583,7 +661,262 @@ def rebase(root, olds, new=None, dry_run: bool = False) -> dict:
                                 "why": "`reel takes --undo` steps were recorded against the plan as it was before the "
                                        "move: an undo now refuses (nothing is overwritten); change the takes with "
                                        "`reel takes --drop/--keep` instead"})
+    hit = {r["file"] for r in rep["rewritten"]}
+    if dry_run:
+        rep["voided"] = _voided(root, before, None, hit)
+    else:                       # also after an error: what was rewritten so far voided its approvals (a rerun can't see
+        rep["voided"] = _voided(root, before, approvals(root), hit, forced)    # them any more)
+        if rep["voided"] or ahead:
+            try:
+                _record_voided(root, rep["voided"], drop=added)
+            except (Guidance, OSError, ValueError) as e:
+                rep["errors"].append({"file": VOIDED_REL, "why": str(e)})
     return rep
+
+
+# --------------------------------------------------------------------------- approvals a move voids (ruling (c))
+def _items(root: Path) -> list[tuple[str, str]]:
+    """(folder, id) of every clip/reel (output/projects) and episode (output/episodes) folder, never through a link."""
+    from .common import check_project_id
+    out = []
+    for folder, what in (("projects", "video id"), ("episodes", "episode id")):
+        try:
+            with os.scandir(_x(str(root / "output" / folder))) as it:
+                names = sorted(e.name for e in it if e.is_dir(follow_symlinks=False) and not e.name.startswith((".", "_")))
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+        for n in names:
+            try:
+                check_project_id(n, what, strict=folder == "episodes")
+            except Guidance:
+                continue                                 # not an item folder the engine made
+            out.append((folder, n))
+    return out
+
+
+def _plan_holds(p) -> bool:
+    from .plan import approval_state
+    return approval_state(p)["state"] == "current"
+
+
+def _transcript_holds(p) -> bool:
+    from .transcribe import transcript_verified
+    return transcript_verified(p)
+
+
+def _transcript_holds_pinned(p) -> bool:
+    """For a check a move voided: given again, i.e. recorded with the current words' hash (`reel transcript-verify`
+    always records it), never the old form without a hash."""
+    from .transcribe import words_fingerprint
+    v = json.loads(Path(_x(str(p.p(APPROVALS["transcript"][0])))).read_bytes().decode("utf-8-sig"))
+    return isinstance(v, dict) and bool(v.get("verified")) and v.get("words_sha1") == words_fingerprint(p)
+
+
+def _proposals_hold(p) -> bool:
+    doc = json.loads(p.p(APPROVALS["cut-proposals"][0]).read_text(encoding="utf-8-sig"))
+    words = p.p("02_transcription/words.json")
+    return isinstance(doc, dict) and words.is_file() and \
+        hashlib.sha1(words.read_bytes()).hexdigest() == doc.get("words_sha1")
+
+
+def _review_holds(p) -> bool:
+    from . import review_flags
+    return review_flags.load(p) is not None
+
+
+def _reels_hold(p) -> bool:
+    from .reels import reels_plan_fingerprint
+    doc = json.loads(p.p(APPROVALS["reels-plan"][0]).read_text(encoding="utf-8-sig"))
+    return isinstance(doc, dict) and doc.get("fingerprint") == reels_plan_fingerprint(p)
+
+
+_HOLDS = {"plan": _plan_holds, "transcript": _transcript_holds, "cut-proposals": _proposals_hold,
+          "review": _review_holds, "reels-plan": _reels_hold}
+
+
+def approvals(root) -> dict:
+    """{(folder, item, kind): True (it holds) | False (it does not) | None (it can't be told here)} of every approval or
+    sign-off (APPROVALS) whose own file is in an item's folder. Reads only."""
+    from .common import Context, Paths, use_context
+    from .episode import EpisodePaths
+    root = Path(root)
+    out: dict = {}
+    with use_context(Context(root)):
+        for folder, item in _items(root):
+            p = EpisodePaths(root, item) if folder == "episodes" else Paths(root, item)
+            for kind, spec in APPROVALS.items():
+                if kind == "reels-plan" and folder != "episodes" or not p.p(spec[0]).is_file():
+                    continue
+                try:
+                    out[(folder, item, kind)] = bool(_HOLDS[kind](p))
+                except Exception:  # noqa: BLE001 — a check that can't run here (damaged file, no plan): "can't tell",
+                    out[(folder, item, kind)] = None     # never "holds"; a move lists it to be given again
+    return out
+
+
+def _motion(root: Path, folder: str, item: str) -> bool:
+    return root.joinpath("output", folder, item, "01_analysis", "motion-plan.json").is_file()
+
+
+def _entry(folder: str, item: str, kind: str, motion: bool = False) -> dict:
+    """One voided approval: the move's result line (`how`: the lead's command) and its NEEDS-YOU words (no commands)."""
+    rel, en, ar, again, again_ar = APPROVALS[kind]
+    return {"folder": folder, "item": item, "kind": kind, "file": f"output/{folder}/{item}/{rel}",
+            "text": en.format(item=item), "text_ar": ar.format(item=item),
+            "why": f"The move pointed {item}'s files at the new folder, so the approval given in the old folder no "
+                   f"longer matches them; nothing approves it again by itself: {again}.",
+            "why_ar": f"النقل خلّى ملفات {item} تشاور على الفولدر الجديد، فالموافقة اللي اتعملت في الفولدر القديم "
+                      f"مبقتش ماشية عليها، ومفيش حاجة بتوافق تاني لوحدها: {again_ar}.",
+            "how": HOW["plan-motion" if kind == "plan" and motion else kind].format(item=item)}
+
+
+def _bound_hit(root: Path, key: tuple, hit: set) -> bool:
+    """Whether the move rewrote a file the approval `key` hashes."""
+    folder, item, kind = key
+    base, motion = f"output/{folder}/{item}/", _motion(root, folder, item)
+    bound = BOUND.get(kind) or (MOTION_BOUND if motion else TIMELINE_BOUND)
+    return any(base + b in hit for b in bound) or kind in ("plan", "review") and motion and BRAND_TOKENS in hit
+
+
+def _voided(root: Path, before: dict, after: dict | None, hit: set, forced=()) -> list[dict]:
+    """The approvals a move voided: one that held before and does not hold now, or one that could not be told and
+    whose hashed file was rewritten, or one `forced` (an old transcript check that could not be pinned). `after` None
+    (a dry run): the forecast, every one that holds or can't be told whose hashed file would be rewritten."""
+    keys = set(forced)
+    for key, was in before.items():
+        if was is False:
+            continue
+        if after is None or was is None:
+            if _bound_hit(root, key, hit) and (after is None or after.get(key) is not True):
+                keys.add(key)
+        elif after.get(key) is not True:
+            keys.add(key)
+    return [_entry(*k, motion=_motion(root, k[0], k[1])) for k in sorted(keys)]
+
+
+def _pin_transcript_check(root: Path, words_rel: str, old_sha: str):
+    """A transcript check recorded before checks carried the words' hash counts for any words (transcribe
+    .transcript_verified): once a move has rewritten the words, write into it the hash of the words it was given for
+    (`old_sha`), so it is void like every other check instead of silently holding for the rewritten words. Never through
+    a link; a damaged record is no check that holds (approvals() can't tell it; it is listed), left as it is."""
+    vf = str(root.joinpath(*words_rel.split("/")[:-1], "verification.json"))
+    if not os.path.lexists(_x(vf)):
+        return
+    if linksafe.is_link(vf):
+        raise OSError(0, f"{vf} is a link: never written through")
+    try:
+        doc = json.loads(Path(_x(vf)).read_bytes().decode("utf-8-sig"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return                                     # damaged: holds nothing (listed when its words were rewritten)
+    if not isinstance(doc, dict) or not doc.get("verified") or doc.get("words_sha1") is not None:
+        return
+    doc["words_sha1"] = old_sha
+    st = os.stat(_x(vf))
+    linksafe.replace_atomic(vf, root, (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+                            within="output")
+    os.utime(_x(vf), ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
+def _key(v) -> tuple | None:
+    """(folder, item, kind) of a record entry, or None for anything else (hostile or damaged content is skipped)."""
+    if not isinstance(v, dict):
+        return None
+    k = (v.get("folder"), v.get("item"), v.get("kind"))
+    return k if all(isinstance(x, str) for x in k) and k[0] in ("projects", "episodes") and k[2] in APPROVALS else None
+
+
+def _file_sha(root: Path, rel: str) -> str | None:
+    """The hash of an approval file as an approval: its JSON without "stale" (a re-plan marks an approval stale; that is
+    no approval given again) in a fixed form, or its bytes when it is no JSON object. None: no file."""
+    f = str(root.joinpath(*rel.split("/")))
+    try:
+        if not os.path.isfile(_x(f)):
+            return None
+        raw = Path(_x(f)).read_bytes()
+    except OSError:
+        return None
+    try:
+        doc = json.loads(raw.decode("utf-8-sig"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        doc = None
+    if isinstance(doc, dict):
+        raw = json.dumps({k: v for k, v in doc.items() if k != "stale"}, sort_keys=True, ensure_ascii=False).encode()
+    return hashlib.sha1(raw).hexdigest()
+
+
+def _record_voided(root: Path, voided: list[dict], hashed: bool = True, drop=()) -> set:
+    """Add the voided approvals to VOIDED_REL, each with the hash of its approval file as the move left it: NEEDS-YOU
+    lists it only while that file is unchanged and does not hold (an approval given again changes it; a later re-plan
+    is the usual flow then, never "client moved"). A newer entry for the same item and kind replaces the older one.
+    `hashed` False (an applied run's forecast, written before anything is rewritten): a transcript check gets no hash
+    (the run may still pin it), listed while it does not hold. `drop`: the keys that forecast ADDED (returned), removed
+    unless the final list has them; an older entry is never dropped by it."""
+    f = str(root.joinpath(*VOIDED_REL.split("/")))
+    entries = {}
+    if os.path.lexists(_x(f)):
+        try:
+            old = json.loads(Path(_x(f)).read_bytes().decode("utf-8-sig"))
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            old = None                             # damaged: rebuilt from this move's list
+        for v in old.get("voided") if isinstance(old, dict) and isinstance(old.get("voided"), list) else []:
+            k = _key(v)
+            if k and (v.get("sha1") is None or isinstance(v.get("sha1"), str)):
+                entries[k] = {"folder": k[0], "item": k[1], "kind": k[2], "sha1": v.get("sha1")}
+    for k in drop:
+        entries.pop(k, None)
+    added = set()
+    for v in voided:
+        k = (v["folder"], v["item"], v["kind"])
+        if k not in entries:
+            added.add(k)
+        elif not hashed:
+            continue                               # the forecast keeps an older entry as it is
+        entries[k] = {"folder": k[0], "item": k[1], "kind": k[2],
+                      "sha1": _file_sha(root, v["file"]) if hashed or k[2] != "transcript" else None}
+    doc = {"schema": 1, "voided": [entries[k] for k in sorted(entries)]}
+    linksafe.replace_atomic(f, root, (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+                            within="output")
+    return added
+
+
+def _still_holds(root: Path, key: tuple) -> bool | None:
+    from .common import Context, Paths, use_context
+    from .episode import EpisodePaths
+    folder, item, kind = key
+    if kind == "reels-plan" and folder != "episodes":
+        return None
+    with use_context(Context(root)):
+        p = EpisodePaths(root, item) if folder == "episodes" else Paths(root, item)
+        try:
+            return bool((_transcript_holds_pinned if kind == "transcript" else _HOLDS[kind])(p))
+        except Exception:  # noqa: BLE001 — a check that can't run (damaged file, no plan): not given again, still listed
+            return None
+
+
+def still_void(root) -> list[dict]:
+    """NEEDS-YOU's lines for the approvals a move voided (VOIDED_REL), Arabic first: each with folder, item, kind,
+    file (the ref), text, text_ar, why, why_ar, how. One is listed while its item is there, its approval file is the one
+    the move left (same hash; a missing hash: any) and it does not hold. Reads only; a damaged record raises
+    ValueError (NEEDS-YOU names it unread)."""
+    root = Path(root)
+    f = str(root.joinpath(*VOIDED_REL.split("/")))
+    if not os.path.isfile(_x(f)):
+        return []
+    doc = json.loads(Path(_x(f)).read_bytes().decode("utf-8-sig"))
+    if not isinstance(doc, dict) or not isinstance(doc.get("voided"), list):
+        raise ValueError(f"{VOIDED_REL}: not a list of voided approvals")
+    items = set(_items(root))
+    out = []
+    for v in doc["voided"]:
+        k = _key(v)
+        if not k or (k[0], k[1]) not in items or not isinstance(v.get("sha1"), (str, type(None))):
+            continue
+        e = _entry(*k, motion=_motion(root, k[0], k[1]))
+        now = _file_sha(root, e["file"])
+        if now is None or v.get("sha1") is not None and now != v["sha1"] or _still_holds(root, k) is True:
+            continue
+        out.append(e)
+    return sorted(out, key=lambda e: (e["folder"], e["item"], e["kind"]))
 
 
 def _names_text(s: str, needles: list) -> bool:
@@ -643,10 +976,28 @@ def _walk_known_paths(root: Path, fn):
             fn(f.get("path"))
 
 
+def _pending(root: Path) -> str | None:
+    """The old folder an "already moved" run that did not end cleanly recorded (PENDING_REL), when it is a plausible
+    one (a hostile or damaged marker is ignored: never a drive, the home folder or the client itself)."""
+    f = str(Path(root).joinpath(*PENDING_REL.split("/")))
+    try:
+        doc = json.loads(Path(_x(f)).read_bytes().decode("utf-8-sig")) if os.path.isfile(_x(f)) else None
+    except (OSError, UnicodeDecodeError, ValueError, RecursionError):
+        return None
+    old = doc.get("old_root") if isinstance(doc, dict) else None
+    if not isinstance(old, str) or not client_db.native_abs(old) or plausible_old(root, old, pointed=False):
+        return None
+    return old
+
+
 def detect_old_root(root) -> str | None:
-    """The folder this client was copied or moved from, read off its database and discovery inventory: the part before
-    the anchor folder (assets | data | output) of an outside path whose tail exists here; the most common one."""
+    """The folder this client was copied or moved from: the one an unfinished "already moved" run recorded (its files
+    may no longer name it), else read off its database and discovery inventory: the part before the anchor folder
+    (assets | data | output) of an outside path whose tail exists here; the most common one."""
     root = Path(root)
+    pending = _pending(root)
+    if pending:
+        return pending
     seen: dict[str, int] = {}
 
     def note(v):
@@ -667,6 +1018,13 @@ def unmigrated(root) -> dict | None:
     old = detect_old_root(root)
     if not old:
         return None
+    if _pending(root):
+        return {"refused": f"آخر تشغيل لـ --already-moved مخلصش، فشوية ملفات ممكن لسه بتشاور على {old}، فمش هقرا ولا "
+                           f"هكتب فيه حاجة / the last `client-move --already-moved` here did not finish: some files may "
+                           f"still point at {old} (nothing was read or written)",
+                "how": f"Run `reel client-move --root \"{root}\" --already-moved --apply` again and fix what it "
+                       "reports (a file another program holds, a link, a read-only drive).",
+                "copied_from": old}
     return {"refused": f"فولدر العميل ده نسخة من {old} وملفاته لسه بتشاور على هناك، فمش هقرا ولا هكتب فيه حاجة / "
                        f"this client folder is a copy of {old}: its files still point there (nothing was read or "
                        "written)",
@@ -749,9 +1107,10 @@ def _verify(src: Path, dest: Path, sc: dict) -> tuple[list[str], list[str]]:
     return problems, times
 
 
-def _rewrite_at(dest: Path, olds: list[str], command: str) -> tuple[dict, dict]:
+def _rewrite_at(dest: Path, olds: list[str], command: str, before: dict) -> tuple[dict, dict]:
     """Under the new folder's own writer lock: the database made relative, everything else under output/ pointed at
-    the new folder. The lease is not left behind in the new folder."""
+    the new folder (`before`: the approvals as they held in the old folder). The lease is not left behind in the new
+    folder."""
     from . import writer_lock
     from .client_move_paths import first_refusal
     linked = first_refusal(dest, (dest / "output", dest / writer_lock.LOG_REL, dest / writer_lock.LOCK_REL))
@@ -760,7 +1119,7 @@ def _rewrite_at(dest: Path, olds: list[str], command: str) -> tuple[dict, dict]:
     lk = writer_lock.acquire(dest, command)
     try:
         db = client_db.migrate(dest / "output" / "client_database", old_roots=olds)
-        rb = rebase(dest, olds)
+        rb = rebase(dest, olds, before=before)
     finally:
         lk.release()
         if (writer_lock.read(dest) or {}).get("session_id") == lk.sid:     # held for the session: not in the copy
@@ -793,6 +1152,7 @@ def _copy_client(src, dest, mode: str, apply: bool) -> dict:
     if not apply:
         if mode == "move":
             doc["outside_database"] = rebase(src, olds, new=dest, dry_run=True)
+            doc["approvals_to_redo"] = doc["outside_database"]["voided"]
         close = (f" Close the Premiere and After Effects projects you have open at {src} first (an open project keeps "
                  "saving to the old folder while it is copied).") if mode == "move" else ""
         return dict(doc, next=f"dry run: nothing was written.{close} Run `reel {verb} --to <folder> --apply` to do it.")
@@ -815,6 +1175,7 @@ def _copy_client(src, dest, mode: str, apply: bool) -> dict:
     try:
         linksafe.create_new(INCOMPLETE, dest, (json.dumps({"from": str(src), "mode": mode, "started": time.strftime(
             "%Y-%m-%dT%H:%M:%S%z"), "started_ns": time.time_ns()}, ensure_ascii=False) + "\n").encode("utf-8"))
+        before = approvals(src) if mode == "move" else {}  # a clone starts with none; the source's stay as they are
         made = _copy(src, dest, sc, mode)
         _dir_times(src, dest, sc)
         problems, times = _verify(src, dest, sc)
@@ -823,7 +1184,7 @@ def _copy_client(src, dest, mode: str, apply: bool) -> dict:
         if mode == "clone":
             from .client_marker import write_marker
             write_marker(dest)
-        rewrite, outside = _rewrite_at(dest, olds, f"reel {verb}")
+        rewrite, outside = _rewrite_at(dest, olds, f"reel {verb}", before)
         errors = rewrite["errors"] + outside["errors"]
         if errors:
             raise OSError(0, "the copy's files could not be rewritten for the new place: " +
@@ -842,15 +1203,13 @@ def _copy_client(src, dest, mode: str, apply: bool) -> dict:
         return dict(doc, **_refusal(f"the copy failed and was removed again: {e}", f"The client at {src} is "
                                     "untouched. Fix the cause, then run it again."))
     os.unlink(_x(dest / INCOMPLETE))
-    doc.update(applied=True, links=made, database=rewrite, outside_database=outside, mtime_rounded=times)
+    doc.update(applied=True, links=made, database=rewrite, outside_database=outside, mtime_rounded=times,
+               approvals_to_redo=_to_redo(dest, outside["voided"]))
     if times:
         doc["warnings"] = [f"{len(times)} file(s) lost part of their modification time on this drive (FAT/exFAT keeps "
                            "times to 2 s): `reel next` may ask to redo a step there. Prefer an NTFS / APFS drive."]
     if mode == "move":
-        doc["old_folder"] = (f"left in place at {src}: keep it until the steps listed as approved in "
-                             "`outside_database.kept` have run again at the new folder (their plans still read the old "
-                             "folder's media); then delete it yourself" if _kept_approved(outside) else
-                             f"left in place at {src}: check the new folder (`reel next --root \"{dest}\"`), then "
+        doc["old_folder"] = (f"left in place at {src}: check the new folder (`reel next --root \"{dest}\"`), then "
                              "delete the old one yourself")
         doc["next"] = (f"close the Premiere and After Effects projects you have open at {src} first (an open project "
                        f"keeps saving to the old folder), then work from {dest} from now on" + _then(outside))
@@ -860,17 +1219,25 @@ def _copy_client(src, dest, mode: str, apply: bool) -> dict:
     return doc
 
 
-def _kept_approved(outside: dict) -> bool:
-    return any("approval" in k["why"] for k in outside["kept"])
+def _to_redo(root: Path, voided: list[dict]) -> list[dict]:
+    """This run's voided approvals, then the ones an earlier run voided that are still not given again (a run that
+    stopped part way, an earlier move): once each. A damaged record adds nothing here (NEEDS-YOU names it unread)."""
+    out = {(v["folder"], v["item"], v["kind"]): v for v in voided}
+    try:
+        for v in still_void(root):
+            out.setdefault((v["folder"], v["item"], v["kind"]), v)
+    except (OSError, ValueError, RecursionError):
+        pass                                       # damaged record: named by NEEDS-YOU; this run's list stands
+    return list(out.values())
 
 
 def _then(outside: dict) -> str:
     out = []
     if outside["projects"]:
         out.append("relink or rebuild the Premiere/After Effects projects listed in `projects`")
-    if _kept_approved(outside):
-        out.append("the plans/transcripts listed in `outside_database.kept` still name the old folder (kept so they "
-                   "stay approved): re-run their steps before a build, or wait for the executor's answer (BL-14)")
+    if outside["voided"]:
+        out.append(f"give again the {len(outside['voided'])} approval(s) listed in `approvals_to_redo` (they are on "
+                   "NEEDS-YOU too: the move voided them on purpose, nothing approves them again by itself)")
     return ("; then " + "; ".join(out)) if out else ""
 
 
@@ -904,11 +1271,27 @@ def already_moved(root, old=None, apply: bool = False) -> dict:
     db = root / "output" / "client_database"
     if apply:
         client_db._require_lock(root)
+    marked = False
+    if apply and olds and not (_pending(root) and _is_root(old, _pending(root))):
+        try:                    # until a clean end: a rerun (and the copied-client refusal) still knows the old folder
+            linksafe.replace_atomic(str(root.joinpath(*PENDING_REL.split("/"))), root, (json.dumps(
+                {"old_root": old}, ensure_ascii=False) + "\n").encode("utf-8"), within="output")
+            marked = True
+        except (Guidance, OSError) as e:
+            return _refusal(f"couldn't write {PENDING_REL} ({e}); nothing was written",
+                            "Fix what it says (a link, a full or read-only drive), then run it again.")
     rep = client_db.migrate(db, old_roots=olds, dry_run=not apply)
     outside = rebase(root, olds, dry_run=not apply)
     doc = {"mode": "already-moved", "root": str(root), "old_root": old, "applied": apply, "database": rep,
-           "outside_database": outside}
+           "outside_database": outside, "approvals_to_redo": _to_redo(root, outside["voided"])}
     errors = rep["errors"] + outside["errors"]
+    # a damaged database file is no unfinished rewrite (a rerun can't rewrite it either, and `reel client-db` makes it
+    # again): the marker goes unless a file could not be WRITTEN (r4 P3-1)
+    if apply and not any(not e.get("damaged") for e in errors) and (marked or _pending(root)):
+        try:
+            os.unlink(linksafe.confine(PENDING_REL, root, within="output"))
+        except (Guidance, OSError) as e:
+            errors = [{"file": PENDING_REL, "why": f"couldn't be removed after a clean run ({e})"}]
     if errors:
         return dict(doc, ok=False, error="some files could not be rewritten: " +
                     "; ".join(f"{e['file']}: {e['why']}" for e in errors[:5]),
