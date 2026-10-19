@@ -442,13 +442,20 @@ def _state_of(e: dict) -> list:
 
 
 def given_rel(root: Path, given) -> str | None:
-    """A motion-script music.file as its data/Music/... path, or None when it is not under data/Music."""
+    """A motion-script music.file as its data/Music/... path, or None when it is not under data/Music. The folders
+    are compared one by one with _key (NFC, case-folded): on macOS resolve() keeps the case the script gives, so
+    data/music/Track.WAV still names data/Music/track.wav; the track part keeps the given spelling (the catalog
+    lookup is by _key too)."""
     g = str(given).replace("\\", "/")
     try:
         f = (Path(root) / g).resolve()
-        return "/".join(MUSIC_DIR) + "/" + f.relative_to(Path(root).joinpath(*MUSIC_DIR).resolve()).as_posix()
+        md = Path(root).joinpath(*MUSIC_DIR).resolve()
     except (OSError, ValueError, RuntimeError):
         return None
+    fp, mp = f.parts, md.parts
+    if len(fp) <= len(mp) or any(_key(a) != _key(b) for a, b in zip(fp, mp)):
+        return None
+    return "/".join(MUSIC_DIR + tuple(fp[len(mp):]))
 
 
 def music_state(root, script_music="__auto__", moods=None) -> list:
@@ -690,7 +697,8 @@ _PLAIN = [   # why (technical, kept in "why") -> what the editor reads, EN / Egy
     (r'has no "license" field', "the licence type (license) is missing", "نوع الترخيص (license) ناقص"),
     (r'needs a "source"', "the licence doesn't say where the music came from (source)",
      "الترخيص مش مكتوب فيه جبت الموسيقى منين (source)"),
-    (r"attribution", "the credit line (attribution) is missing", "سطر الإسناد (attribution) ناقص"),
+    (r"attribution text|\"attribution\" must be text", "the credit line (attribution) is missing",
+     "سطر الإسناد (attribution) ناقص"),
     (r"proof", "the purchase proof (proof) is missing or not found", "إثبات الشراء (proof) ناقص أو مش موجود"),
     (r"disagree", "it has two licence files that say different things", "ليه ملفين ترخيص مكتوب فيهم كلام مختلف"),
     (r'"files"', "the folder licence doesn't say which files it covers (files)",
@@ -698,16 +706,26 @@ _PLAIN = [   # why (technical, kept in "why") -> what the editor reads, EN / Egy
 ]
 
 
-def _plain(e: dict) -> tuple[str, str]:
-    """(EN, AR) of one track's licence problem in the editor's words; a file that cannot be read at all (empty,
-    broken, wrong format, a link, too big) is "can't be read" (the technical reason stays in `why`)."""
+def _plain_parts(e: dict) -> tuple[str, str, str]:
+    """(track name, EN reason, AR reason) of one track's licence problem in the editor's words. The patterns run on
+    the reason with the track's and its licence files' names taken out, so a track called attribution.wav or
+    proof.wav is never read as its name; a file that cannot be read at all (empty, broken, wrong format, a link, too
+    big) is "can't be read" (the technical reason stays in `why`)."""
     name = Path(e["rel"]).name
+    clean = e.get("why") or ""
+    for n in sorted({name + s for s in TRACK_LICENCE_SUFFIXES} | set(FOLDER_LICENCES) | {name}, key=len, reverse=True):
+        clean = clean.replace(n, "<file>")
     for pat, en, ar in _PLAIN:
-        mt = re.search(pat, e.get("why") or "")
+        mt = re.search(pat, clean)
         if mt:
-            return f"{name}: {en.format(*mt.groups())}", f"{name}: {ar.format(*mt.groups())}"
-    return (f"{name}: its licence file can't be read (the details say why)",
-            f"{name}: ملف الترخيص بتاعه مش مقروء (السبب في التفاصيل)")
+            return name, en.format(*mt.groups()), ar.format(*mt.groups())
+    return name, "its licence file can't be read (the details say why)", "ملف الترخيص بتاعه مش مقروء (السبب في التفاصيل)"
+
+
+def _plain(e: dict) -> tuple[str, str]:
+    """(EN, AR): "<track>: <reason>"."""
+    name, en, ar = _plain_parts(e)
+    return f"{name}: {en}", f"{name}: {ar}"
 
 
 def _plain_list(entries: list[dict], k: int = 3) -> tuple[str, str]:
@@ -800,11 +818,19 @@ def music_plan(root, script_music, recipe: dict | None, speech: list, n_frames: 
         # tracks that fit the mood and are refused only for their licence are named first, with their reasons
         fit_unlic = [x for x in catalog if not x["licensed"] and x["decodes"] and _score(x, moods) > 0]
         if fit_unlic:
-            names_ = ", ".join(Path(x["rel"]).name for x in fit_unlic[:3])
-            one = len(fit_unlic) == 1
-            fen, far = _plain_list(fit_unlic)
-            fit_en = f" {names_} {'fits' if one else 'fit'} the mood but {'lacks' if one else 'lack'} a valid licence: {fen}."
-            fit_ar = f" {names_} على المود بس {'ملوش' if one else 'ملهمش'} ترخيص صالح: {far}."
+            parts = [_plain_parts(x) for x in fit_unlic[:3]]
+            more = len(fit_unlic) - 3
+            if len(fit_unlic) == 1:
+                n, r_en, r_ar = parts[0]
+                fit_en = f" {n} fits the mood but lacks a valid licence ({r_en})."
+                fit_ar = f" {n} على المود بس ملوش ترخيص صالح ({r_ar})."
+            else:
+                fit_en = (" These tracks fit the mood but lack a valid licence: "
+                          + "; ".join(f"{n} ({r})" for n, r, _a in parts) + (f" (and {more} more)" if more > 0 else "")
+                          + ".")
+                fit_ar = (" التراكات دي على المود بس ملهمش ترخيص صالح: "
+                          + "؛ ".join(f"{n} ({a})" for n, _r, a in parts) + (f" (و{more} كمان)" if more > 0 else "")
+                          + ".")
         else:
             fit_en = fit_ar = ""
         if not moods:
@@ -813,6 +839,14 @@ def music_plan(root, script_music, recipe: dict | None, speech: list, n_frames: 
                   "add music yourself in After Effects.")
             ar = ("النوع ده من الفيديوهات مالوش مود موسيقى، فمفيش تراك اتختار. اختار تراك مرخّص للفيديو، أو حط "
                   "الموسيقى بنفسك في After Effects.")
+        elif _music_reached_through_link(root):
+            why = "data/ or data/Music is reached through a link (a junction or symlink): music is never read through a link"
+            en = ("No music was read: data/Music is reached through a link (a junction or shortcut), and WhyNot Cut "
+                  "never reads music through a link. Put the music in the real data/Music folder. Until then the video "
+                  "has speech and sound effects only.")
+            ar = ("مفيش موسيقى اتقرت: فولدر data/Music واصل له لينك (junction أو shortcut)، وWhyNot Cut عمره ما بيقرا "
+                  "موسيقى من لينك. حط الموسيقى في فولدر data/Music الحقيقي. لحد ما ده يحصل الفيديو فيه كلام ومؤثرات "
+                  "صوتية بس.")
         elif not usable:
             bad = [x for x in catalog if not x["licensed"]]
             damaged = [x for x in catalog if x["licensed"] and not x["decodes"]]
@@ -840,13 +874,15 @@ def music_plan(root, script_music, recipe: dict | None, speech: list, n_frames: 
                     ar = (f"مفيش موسيقى في data/Music ليها ترخيص صالح ({par}). ضيف ملف الترخيص جنب كل تراك (النموذج "
                           f"في التفاصيل)، أو ضيف تراكات مرخّصة. لحد ما ده يحصل الفيديو فيه كلام ومؤثرات صوتية بس.{dar}")
             elif catalog:
-                rs = ", ".join(Path(x["rel"]).name for x in catalog[:3]) + (
-                    f" (and {len(catalog) - 3} more)" if len(catalog) > 3 else "")
+                names3 = ", ".join(Path(x["rel"]).name for x in catalog[:3])
+                more = len(catalog) - 3
+                rs = names3 + (f" (and {more} more)" if more > 0 else "")
+                rs_ar = names3 + (f" (و{more} كمان)" if more > 0 else "")
                 why = f"no track in data/Music can be played: {rs}"
                 en = (f"None of the licensed music in data/Music can be played ({rs}). Replace the damaged tracks. Until "
                       "then the video has speech and sound effects only.")
-                ar = (f"مفيش موسيقى مرخّصة في data/Music بتشتغل ({rs}). بدّل التراكات البايظة. لحد ما ده يحصل الفيديو "
-                      "فيه كلام ومؤثرات صوتية بس.")
+                ar = (f"مفيش موسيقى مرخّصة في data/Music بتشتغل ({rs_ar}). بدّل التراكات البايظة. لحد ما ده يحصل "
+                      "الفيديو فيه كلام ومؤثرات صوتية بس.")
             else:
                 why = f"there is no music in data/Music. {tpl}"
                 en = ("There is no music in data/Music. Add licensed tracks, each with its licence file next to it "
@@ -860,8 +896,12 @@ def music_plan(root, script_music, recipe: dict | None, speech: list, n_frames: 
             rs = "; ".join(f"{Path(x['rel']).name}: moods {', '.join(x['moods']) or 'none'}"
                            + (f" (Arabic mood words not known: {', '.join(x['unknown_moods'])})"
                               if x.get("unknown_moods") else "") for x in seen)
+            rs_ar = "؛ ".join(f"{Path(x['rel']).name}: المود {', '.join(x['moods']) or 'مفيش'}"
+                              + (f" (كلمات مود عربي مش معروفة: {', '.join(x['unknown_moods'])})"
+                                 if x.get("unknown_moods") else "") for x in seen)
             if len(usable) > 3:
                 rs += f" (and {len(usable) - 3} more)"
+                rs_ar += f" (و{len(usable) - 3} كمان)"
             fit = [x for x in catalog if not x["licensed"] and x["decodes"] and _score(x, moods) > 0][:3]
             den, dar = _draft_line(write_licence_drafts(fit, drafts_dir, root) if (drafts_dir and fit and
                                                                                    chosen is None) else [])
@@ -869,7 +909,7 @@ def music_plan(root, script_music, recipe: dict | None, speech: list, n_frames: 
                 f"; fitting but not licensed: {_reasons(fit_unlic)}" if fit_unlic else "")
             en = (f"No licensed track fits this video's mood ({ms}): {rs}.{fit_en} Add a licensed track tagged with one "
                   f"of these moods (in its file name or music.json), or choose a track for this video.{den}")
-            ar = (f"مفيش تراك مرخّص على مود الفيديو ده ({ms}): {rs}.{fit_ar} ضيف تراك مرخّص متصنّف على المود ده (في اسم "
+            ar = (f"مفيش تراك مرخّص على مود الفيديو ده ({ms}): {rs_ar}.{fit_ar} ضيف تراك مرخّص متصنّف على المود ده (في اسم "
                   f"الملف أو music.json)، أو اختار تراك للفيديو ده.{dar}")
         if chosen is None:
             res["needs_you"].append(_need(why, "/".join(MUSIC_DIR), en, ar))

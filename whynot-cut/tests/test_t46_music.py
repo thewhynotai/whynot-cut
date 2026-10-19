@@ -434,6 +434,43 @@ class TestLicences(MusicDir):
         lib = {x["rel"]: x for x in music_library(self.root)}
         self.assertEqual(lib["data/Music/حزين_غريب.wav"]["unknown_moods"], ["غريب"])
 
+    def test_F2_plain_reason_never_reads_the_file_name(self):
+        """Minor 2: a track named attribution.wav / proof.wav / source.wav reads by its real problem, not its name."""
+        from lib import motion_audio
+        tone(self.music / "attribution.wav")
+        (self.music / "attribution.wav.licence.json").write_bytes(b"")             # empty: can't be read
+        tone(self.music / "proof.wav")
+        put_lic(self.music / "proof.wav.licence.json", {"license": "CC0-1.0"})      # no source
+        tone(self.music / "files.wav")
+        put_lic(self.music / "files.wav.licence.json", lic(license="GPL-3.0"))      # type not allowed
+        c = self.cat()
+        en, _ar = motion_audio._plain(c["attribution.wav"])
+        self.assertIn("can't be read", en)
+        self.assertNotIn("credit line", en)
+        en, _ar = motion_audio._plain(c["proof.wav"])
+        self.assertIn("source", en)
+        self.assertNotIn("proof", en.replace("proof.wav", ""))
+        en, _ar = motion_audio._plain(c["files.wav"])
+        self.assertIn("GPL-3.0", en)
+
+    def test_F5_hand_pick_with_another_letter_case_on_a_case_sensitive_system(self):
+        """Minor 5 (macOS): resolve() keeps the given case there and paths compare case-sensitively; given_rel compares
+        each component with _key, so data/music/Tense_Dark.WAV still names data/Music/tense_dark.wav."""
+        from lib import motion_audio
+        tone(self.music / "tense_dark.wav")
+
+        def strict_relative_to(self_, other):                         # a case-sensitive comparison, as on macOS
+            a, b = self_.parts, Path(other).parts
+            if a[:len(b)] != b:
+                raise ValueError(f"{self_} is not in the subpath of {other}")
+            return Path(*a[len(b):])
+        with mock.patch.object(Path, "resolve", lambda self_, strict=False: Path(os.path.abspath(self_))), \
+                mock.patch.object(Path, "relative_to", strict_relative_to):
+            rel = motion_audio.given_rel(self.root, "data/music/Tense_Dark.WAV")
+        self.assertIsNotNone(rel)
+        self.assertEqual(rel.casefold(), "data/music/tense_dark.wav")
+        self.assertTrue(rel.startswith("data/Music/"))
+
     def test_L11_two_spellings_that_disagree(self):
         tone(self.music / "a.wav")
         tone(self.music / "b.wav")
@@ -1430,6 +1467,73 @@ class TestMusicPlan(MusicPlanCase):
             it.watched(), it.listed(), it._motion_inputs()
         self.assertEqual(len(calls), 1, calls)
 
+    def test_F1_panel_follows_an_absolute_or_linked_hand_pick(self):
+        """Minor 1: the panel finds the hand-picked track the way the CLI fingerprint does (given_rel), so replacing
+        its bytes changes the panel's cache key; for an absolute path and for a symlink inside data/Music."""
+        from serve import engine_state as ES
+        f = self.licensed("tense_dark.wav", secs=1.0)
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, True)
+        act = {"client_root": self.root, "item": self.reel.video_id}
+        givens = [str(f.resolve())]
+        alias = self.music / "alias.wav"
+        try:
+            os.symlink(f, alias)
+            self.addCleanup(lambda: os.path.lexists(alias) and os.unlink(alias))
+            givens.append("data/Music/alias.wav")
+        except (OSError, NotImplementedError):
+            pass                                                          # no symlink rights here: absolute only
+        for given in givens:
+            r, _ = self.compile({"file": given})
+            self.assertTrue(r["ok"], (given, r["errors"]))
+            k0 = ES.PanelFields()._signature(act, home)
+            st = f.stat()
+            tone(f, 1.0, freq=777)
+            os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5 * 10 ** 9))
+            self.assertNotEqual(ES.PanelFields()._signature(act, home), k0, given)
+
+    def test_F3_mood_mismatch_text_is_arabic_and_names_each_track_once(self):
+        """Minor 3: text_ar has no English sentence parts; a fitting unlicensed track is named once."""
+        tone(self.music / "tense_x.wav", 30)                               # fits, no licence
+        self.licensed("calm_soft.wav")                                      # licensed, no fit
+        self.licensed("حزين_غريب.wav")                                      # licensed, no fit, an unknown word
+        r, plan = self.compile()
+        it = self.assert_no_music_one_need(r, plan)
+        for eng in ("moods ", "Arabic mood words not known", "more)", "fits the mood", "no licence file"):
+            self.assertNotIn(eng, it["text_ar"], eng)
+        self.assertNotIn("tense_x.wav: no licence file", it["text"])
+        self.assertNotIn("tense_x.wav: ملوش", it["text_ar"])
+        self.assertIn("tense_x.wav fits the mood but lacks a valid licence", it["text"])
+        self.assertIn("غريب", it["text_ar"])
+
+    def test_F4_auto_pick_behind_a_junction_says_why(self):
+        for whole in (False, True):
+            with self.subTest(whole_data=whole):
+                self.junction_music(whole)
+                r, plan = self.compile()
+                it = self.assert_no_music_one_need(r, plan)
+                self.assertIn("link", it["text"])
+                self.assertNotIn("There is no music in data/Music", it["text"])
+                self.doCleanups()
+                self.music.mkdir(parents=True, exist_ok=True)
+
+    def test_M3_residual_an_oversized_licence_never_fails_the_panel_closed(self):
+        """The engine reads a licence file at most 64 KB + 1 bytes (no link, regular file), so a licence over the
+        panel's 8 MB cap is just an invalid licence: the approval card stays, for the auto pick too."""
+        from serve import engine_state as ES
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, True)
+        self.licensed("tense_dark.wav", secs=3.0)
+        tone(self.music / "big_tense.wav", 1.0)
+        (self.music / "big_tense.wav.licence.json").write_bytes(b"{" + b" " * (8 * 1024 * 1024 + 10) + b"}")
+        for music in ("__unset__", {"file": "data/Music/big_tense.wav"}):
+            r, _ = self.compile(music)
+            with common.use_context(common.Context(root=self.root, home=home)):
+                it = ES._Item(common.Paths(self.root, self.reel.video_id))
+                if r["ok"]:
+                    self.assertIsNotNone(ES._plan_fingerprint(it, True), music)
+                self.assertTrue(it.inputs_ok(it._motion_inputs()), music)
+
     def test_M4_watched_tracks_follow_the_choice(self):
         from serve import engine_state as ES
         self.licensed("tense_dark.wav", secs=1.0)
@@ -1471,9 +1575,9 @@ class TestMusicPlan(MusicPlanCase):
         self.assertNotEqual(k0, k1, "adding a licence changes what the panel recomputes")
         with common.use_context(common.Context(root=self.root, home=home)):
             it = ES._Item(common.Paths(self.root, self.reel.video_id))
-            ins = [str(Path(f).resolve()) for f, _b, _l in it._motion_inputs()]
-            self.assertIn(str(lf.resolve()), ins)
-            self.assertIn(str(self.music.resolve()), [str(Path(x).resolve()) for x in it.watched()])
+            watched = [str(Path(x).resolve()) for x in it.watched()]
+            self.assertIn(str(lf.resolve()), watched)                     # watched, not an input (follow-up M-3)
+            self.assertIn(str(self.music.resolve()), watched)
         put_lic(lf, lic(source="edited"))
         os.utime(lf, ns=(time_ns() + 10 ** 9, time_ns() + 10 ** 9))
         self.assertNotEqual(cache._signature(act, home), k1, "editing it does too")
@@ -1697,6 +1801,9 @@ class TestMusicPlan(MusicPlanCase):
                 low = it[field].lower()
                 for w in banned:
                     self.assertNotIn(w, low, (name, field, w))
+            for eng in ("moods ", "Arabic mood words not known", "more)", "fits the mood", "no licence file",
+                        "can't be read", "isn't allowed"):
+                self.assertNotIn(eng, it["text_ar"], (name, eng))
             md = self.reel.p("01_analysis/motion-plan.md").read_text(encoding="utf-8")
             self.assertNotIn("none — music:", md, name)
             if name == "no match":

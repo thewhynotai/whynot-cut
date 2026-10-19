@@ -44,9 +44,10 @@ PanelState from the item's evidence files (panel_fields)
       qc          08_quality_control/qc-results.json `ok`: true -> done, false -> failed (qc.py:291-292,
                   motion_qc.py:175)
       approval inputs (_approval_inputs): plan-approval.json, plus the motion fingerprint's inputs only for a motion
-                  item or a record of kind "motion" (T4.6: with the data/Music licence files and music.json; the
-                  data/Music folders are watched and listed, and its tracks watched, so the panel recomputes when a
-                  licence or track changes), plus timeline-spec.json unless the record is of kind "motion"
+                  item or a record of kind "motion" (T4.6: the data/Music folders are watched and listed, and the
+                  licence files, music.json and the tracks the music choice reads are watched, so the panel recomputes
+                  when a licence or track changes; the engine reads them itself, capped and link-safe, so they are not
+                  inputs), plus timeline-spec.json unless the record is of kind "motion"
       handoff     09_handoff/README.md exists (cli.py:835)
     Approval card (only while the approve step is waiting):
       fingerprint the current plan's, what approve-plan records: lib/plan.py plan_fingerprint (plan.py:912,
@@ -567,9 +568,14 @@ class _Item:
         if m is False or (isinstance(m, dict) and m.get("off") is True):
             return [], []
         if isinstance(m, dict) and m.get("file"):
+            from lib.motion_audio import given_rel  # the CLI fingerprint's own reading (absolute path, link, case)
+
             def key(x: str) -> str:
                 return unicodedata.normalize("NFC", x.replace("\\", "/")).casefold()
-            want = key(os.path.normpath(str(m["file"])).replace("\\", "/"))
+            rel = given_rel(self.root, m["file"])
+            if rel is None:
+                return [], []
+            want = key(rel)
             hit = [t for t in tracks if key(t.relative_to(self.root).as_posix()) == want]
             if not hit:
                 return [], []
@@ -583,16 +589,18 @@ class _Item:
 
     def _motion_inputs(self) -> list | None:
         """lib/motion_plan.py fingerprint: source.json (motion_config.source), the script, words, pauses, the client's
-        brand tokens, motion.json (motion_config.motion_cfg) and (T4.6) the data/Music licence files the music choice
-        reads (_music_read; the tracks are only hashed by size and head/tail, so they are never an input here)."""
+        brand tokens and motion.json (motion_config.motion_cfg). The data/Music files its music choice reads (T4.6)
+        are watched (watched(), _music_read) but are not inputs here: the engine reads them itself with a cap (a
+        licence at most 64 KB + 1 bytes, music.json 1 MB), lstat first, a regular file only, no link, one checked
+        handle (lib/motion_audio.py _read_small), and hashes a track by size and head/tail only. An oversized or
+        hard-linked licence is then just an invalid licence, never a reason to drop the approval card."""
         cfg = self._config_files("motion.json")
         if cfg is None:
             return None
         return [(self.p(rel), self.base, True) for rel in (
             "00_inputs/source.json", "01_analysis/motion-script.json", "02_transcription/words.json",
             "06_audio/dialogue/pauses.json")] + [
-            (self.paths.client_db / "branding/brand-tokens.json", self.root, True)] + cfg + [
-            (f, self.root, True) for f in self._music_read()[0]]
+            (self.paths.client_db / "branding/brand-tokens.json", self.root, True)] + cfg
 
     def _approval_inputs(self, motion: bool) -> list | None:
         """lib/plan.py approval_state (:945): plan-approval.json, then the motion fingerprint's inputs (a record with
