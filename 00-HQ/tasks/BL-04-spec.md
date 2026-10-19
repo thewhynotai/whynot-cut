@@ -1,0 +1,11 @@
+<!-- Verbatim copy of BACKLOG.md section BL-04, taken 2026-10-19 10:07. BACKLOG.md stays the source if they differ. -->
+### BL-04 [Gate 4]: M5-T7 `run-state.json` + resume  [Gate 4 value: med]  Model: opus
+- Depends on: none (T4.7 autopilot ac6fbef is on the branch)
+- Spec: Addendum M §M5 row M5-T7 and the M5.4 resume budget (≤ 100k weighted per resume).
+- **Extra acceptance (REL-PREVIEW, 2026-10-19):** `reel next` on a 2.x item said PROJECT_ASSEMBLED and listed the later steps, but never `reel preflight`, and ppro-build then refused ("CLIP1.mov is not in this video's preflight"). `next` / `stale_steps` must list preflight first when `00_inputs/preflight.json` is missing, stale, or does not name the item's footage. The cli hunk arrives as a patch.
+- Owned files: new `whynot-cut/engine/reel/lib/run_state.py`, `whynot-cut/tests/test_run_state*.py`, `whynot-cut/tests/fixtures/run_state/**`.
+- Must not touch: `lib/autopilot.py`, `cli.py`, skills (call sites + `reel run-state` verb + skill text = patches).
+- Done criteria: `test_run_state.py`: kill after each stage → resume at the next stage, no stage repeated; a changed input (hash of the stage's declared inputs) re-runs only the affected stages and everything downstream; atomic writes (temp + replace, no torn JSON on kill); a corrupt state file → start fresh with a plain warning, never a crash; stage list taken from the existing pipeline names, not invented; state lives under `output/projects/<ID>/`; Windows + macOS paths; Arabic project names.
+- **Pre-mortem 2026-10-18 (owner rule; part of the done criteria):** `reel next` already resumes from disk through `cli.stale_steps` (an mtime dependency graph), and `handoff --delivered` refuses on it: run_state must NOT become a second, disagreeing source of truth. The CHEAP way to one answer: `run_state` records only which stages finished and when; for "is it stale?" it CALLS the existing `cli.stale_steps` (no second dependency table, no hashing of its own for staleness, no refactor of cli). Fingerprint media by size + mtime_ns (never hash GB files) and JSON by sha256. On resume, check that each recorded output still exists and matches; a missing or torn output re-runs that stage. Name which of the three pipelines (clip, podcast, motion) each stage list belongs to.
+- Risk: normal
+

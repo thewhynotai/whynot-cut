@@ -1,0 +1,22 @@
+diff --git a/whynot-cut/tests/test_structure.py b/whynot-cut/tests/test_structure.py
+index 9e218fb..831ae43 100644
+--- a/whynot-cut/tests/test_structure.py
++++ b/whynot-cut/tests/test_structure.py
+@@ -590,5 +590,17 @@ class TestAllowList(YamlRequired):
+         self.assertEqual(stale, [], "fixed: remove these KNOWN entries")
+
+
++class TestSpdxHeaders(unittest.TestCase):
++    """Task 18 (BL-02): every source file we own starts with the SPDX/© header (tools/spdx_headers.py; the executor
++    ran its --apply at the gate). A new file without it: run `python tools/spdx_headers.py --apply <file>`."""
++
++    def test_every_owned_source_file_has_the_header(self):
++        spec = importlib.util.spec_from_file_location("wnc_spdx_headers", REPO / "tools" / "spdx_headers.py")
++        sh = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(sh)
++        rep = sh.report(sh.scan(REPO))
++        self.assertEqual({"missing": rep["missing"], "partial": rep["partial"]}, {"missing": [], "partial": []})
++
++
+ if __name__ == "__main__":
+     unittest.main()

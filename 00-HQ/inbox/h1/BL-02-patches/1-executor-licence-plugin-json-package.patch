@@ -1,0 +1,54 @@
+diff --git a/package.py b/package.py
+index a0ecc1e..5317538 100644
+--- a/package.py
++++ b/package.py
+@@ -17,7 +17,7 @@ SKIP_DIRS = {"__pycache__", ".git", ".pytest_cache", "docs", ".superpowers", "to
+ # never leak into a release). The repo-root adobe/ (panel sources, node_modules, vendored upstream code), dist/, brand/,
+ # guide-ar/, installer/, tools/ and PROGRESS.md stay out; the built Adobe artefacts the installer needs live inside
+ # the plugin (whynot-cut/adobe/*.ccx, *.zxp) and ship with it.
+-SHIP_TOP = {".claude-plugin", "whynot-cut", "README.md"}
++SHIP_TOP = {".claude-plugin", "whynot-cut", "README.md", "LICENSE", "THIRD-PARTY-NOTICES.md"}   # Task 18: GPL + notices
+ SKIP_FILES = {".DS_Store", "Thumbs.db", "desktop.ini"}
+ EXEC = {"bin/reel", "setup/setup_env.sh", "setup/setup_env.py", "hooks/run_python.sh", "hooks/guard.py",
+         "hooks/session_context.py", "hooks/session_end.py", "hooks/stop_gate.py", "hooks/stop_gate.sh",
+diff --git a/whynot-cut/.claude-plugin/plugin.json b/whynot-cut/.claude-plugin/plugin.json
+index e62e0d8..297198a 100644
+--- a/whynot-cut/.claude-plugin/plugin.json
++++ b/whynot-cut/.claude-plugin/plugin.json
+@@ -9,7 +9,7 @@
+     "url": "https://thewhynot.ai/"
+   },
+   "homepage": "https://thewhynot.ai/",
+-  "license": "UNLICENSED",
++  "license": "GPL-3.0-or-later",
+   "keywords": [
+     "video-editing",
+     "premiere-pro",
+diff --git a/whynot-cut/tests/test_structure.py b/whynot-cut/tests/test_structure.py
+index 9e218fb..bba9a43 100644
+--- a/whynot-cut/tests/test_structure.py
++++ b/whynot-cut/tests/test_structure.py
+@@ -583,6 +583,23 @@ class TestReelFlags(YamlRequired):
+                                 "15: reel plan --bogus2: no such option"])
+
+
++class TestLicence(unittest.TestCase):
++    """Task 18 (BL-02): the plugin is GPL-3.0-or-later, and the release zip carries the licence and the notices."""
++
++    def test_plugin_licence_is_gpl3_or_later(self):
++        import json
++        self.assertEqual(json.loads((SK / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["license"],
++                         "GPL-3.0-or-later")
++        self.assertEqual((SK / "LICENSE").read_bytes(), (REPO / "LICENSE").read_bytes())
++
++    def test_the_zip_ships_the_licence_and_the_notices(self):
++        spec = importlib.util.spec_from_file_location("wnc_package_licence", REPO / "package.py")
++        pkg = importlib.util.module_from_spec(spec)
++        spec.loader.exec_module(pkg)
++        names = {p.relative_to(REPO).as_posix() for p in pkg.package_files(REPO)}
++        self.assertLessEqual({"LICENSE", "THIRD-PARTY-NOTICES.md", "whynot-cut/LICENSE"}, names)
++
++
+ class TestAllowList(YamlRequired):
+     def test_allow_list_has_no_stale_entries(self):
+         live = {(rel(f), m) for f, _, m in frontmatter_issues(SK) + reference_issues(SK) + reel_issues(SK, cli())}

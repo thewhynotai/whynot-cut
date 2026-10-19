@@ -1,0 +1,15 @@
+# Helper heavy jobs yield to these Gate 4 critical-path heavy.sh label prefixes (PLAYBOOK 3d).
+# Delete this file at the v3.0.0-p4 tag. One prefix per line.
+g4
+bl15
+mvf
+rev
+rv
+ui-r
+t43
+builderA
+bl
+t4
+adobe
+exec
+ui-

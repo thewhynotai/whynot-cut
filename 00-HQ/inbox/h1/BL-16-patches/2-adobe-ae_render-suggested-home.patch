@@ -1,0 +1,36 @@
+diff --git a/whynot-cut/engine/reel/lib/ae_render.py b/whynot-cut/engine/reel/lib/ae_render.py
+index 8031c4f..257d1f4 100644
+--- a/whynot-cut/engine/reel/lib/ae_render.py
++++ b/whynot-cut/engine/reel/lib/ae_render.py
+@@ -219,10 +219,11 @@ def stage_ascii(aep: Path, out: Path | None = None) -> tuple[Path | None, Path,
+         except OSError:
+             continue
+     if stage is None:
++        from .portability import suggested_home
+         raise StageError(f"aerender needs ASCII paths, and no ASCII folder could hold its stage (the temp folder "
+                          f"{tempfile.gettempdir()} is not ASCII; tried: {', '.join(tried) or 'none'}): run "
+-                         "`setx WHYNOT_HOME C:\\whynot` (or `setx TEMP C:\\Temp` after creating that folder) in a "
+-                         "terminal, open a new Claude Code session, then render again")
++                         f"`setx WHYNOT_HOME {suggested_home()}` in a terminal, open a new Claude Code session, run "
++                         "`reel setup` (it creates that folder and locks it to your account), then render again")
+     try:
+         r_aep = stage / "project.aep"
+         shutil.copy2(aep, r_aep)
+diff --git a/whynot-cut/tests/test_portability.py b/whynot-cut/tests/test_portability.py
+index adb205b..a886f16 100644
+--- a/whynot-cut/tests/test_portability.py
++++ b/whynot-cut/tests/test_portability.py
+@@ -787,8 +787,11 @@ class TestAsciiAeStage(_Tmp):
+             with self.assertRaises(ae_render.StageError) as cm:
+                 ae_render.stage_ascii(aep)
+         msg = str(cm.exception)
+-        self.assertIn("setx WHYNOT_HOME", msg)
+-        self.assertIn("TEMP", msg)
++        self.assertIn(self.ARABIC_TEMP, msg)
++        # BL-16: the suggested ASCII engine home, never a folder at the root of C:\ (whynot or Temp)
++        self.assertRegex(msg, r"setx WHYNOT_HOME [A-Z]:\\WhyNotCut")
++        self.assertNotRegex(msg, r"(?i)c:\\(whynot(?!cut)|temp)")
++        self.assertIn("reel setup", msg)
+ 
+ 
+ class TestRunDecodesLeniently(unittest.TestCase):

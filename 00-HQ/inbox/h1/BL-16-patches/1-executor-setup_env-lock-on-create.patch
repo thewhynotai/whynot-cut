@@ -1,0 +1,100 @@
+diff --git a/whynot-cut/setup/setup_env.py b/whynot-cut/setup/setup_env.py
+index f7f0249..5194b71 100755
+--- a/whynot-cut/setup/setup_env.py
++++ b/whynot-cut/setup/setup_env.py
+@@ -43,6 +43,8 @@ sys.path.insert(0, str(PLUGIN / "engine" / "reel" / "lib"))
+ import plat  # noqa: E402  (stdlib only)
+ import runtime as R  # noqa: E402  (stdlib only)
+ import writer_lock as WL  # noqa: E402  (stdlib only: pid_alive)
++sys.path.insert(1, str(PLUGIN / "engine" / "reel"))
++from lib import home_acl  # noqa: E402  (BL-16, stdlib only: lock a new engine home to the user)
+ 
+ BUILD_LOCK_STALE_S = 2 * 3600
+ 
+@@ -442,15 +444,18 @@ def main(argv=None):
+             raise Failed(f"this plugin ships no runtime lock for {key or 'this platform'} ({ent['file'].name})",
+                          how="WhyNot Cut runs on Windows x64 and macOS (Apple Silicon or Intel)")
+         rid = R.runtime_id(ent["file"].read_bytes(), ent["declared_id"])
++        if not a.check:
++            try:      # BL-16: before anything (uv's download included) is written in the engine home
++                home_acl.prepare_home(home)
++            except home_acl.HomeAclError as e:
++                raise Failed(str(e), how=e.how) from None
++            (home / "models").mkdir(exist_ok=True)
+         if a.uv:
+             uv, note = Path(a.uv), None
+         else:
+             uv, note = find_uv(home, comp, key, allow_download=not (a.no_download or a.check))
+         if note:
+             rep["uv_note"] = note
+-        if not a.check:
+-            home.mkdir(parents=True, exist_ok=True)
+-            (home / "models").mkdir(exist_ok=True)
+         try:
+             rep["runtime"] = build(home, comp=comp, key=key, lock_file=ent["file"], rid=rid, by=a.by, check=a.check,
+                                    force=a.force, dev_system_site=a.dev_system_site, uv=uv)
+diff --git a/whynot-cut/tests/test_runtime.py b/whynot-cut/tests/test_runtime.py
+index 9157ae1..040e7bf 100644
+--- a/whynot-cut/tests/test_runtime.py
++++ b/whynot-cut/tests/test_runtime.py
+@@ -1455,9 +1455,60 @@ class TestSetupWarnsNonAsciiHome(TempHome):
+         self.assertEqual(len(rep["warnings"]), 1, rep)
+         self.assertIn("non-ASCII", rep["warnings"][0]["item"])
+         self.assertIn("setx WHYNOT_HOME", rep["warnings"][0]["fix"])
++        # BL-16: an ASCII folder on a local drive, never a folder at the root of C:\ named whynot
++        self.assertRegex(rep["warnings"][0]["fix"], r"setx WHYNOT_HOME [A-Z]:\\WhyNotCut")
++        self.assertNotRegex(rep["warnings"][0]["fix"], r"(?i)c:\\whynot(?!cut)")
+         self.assertIn("non-ASCII", r.stderr)
+         self.assertFalse(home.exists())
+ 
+ 
++class TestSetupLocksANewHome(TempHome):
++    """BL-16: reel setup prepares the engine home through home_acl.prepare_home (a new one outside the profile is
++    locked to the user, an open one refused) BEFORE anything is written there, uv's download included; a refusal
++    stops setup before anything is installed."""
++
++    def run_main(self, prepare):
++        import contextlib
++        home = self.t / "WhyNotCut"
++        out, order = io.StringIO(), []
++
++        def find_uv(*a, **k):
++            order.append("find_uv")
++            return None, None
++
++        def prep(h):
++            order.append("prepare")
++            return prepare(h)
++        with mock.patch.object(SETUP.home_acl, "prepare_home", side_effect=prep) as made, \
++                mock.patch.object(SETUP, "build", return_value={"id": "r-x"}) as build, \
++                mock.patch.object(SETUP, "find_uv", side_effect=find_uv), \
++                mock.patch.object(SETUP.plat, "adobe_report", return_value={"all": []}), \
++                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
++            rc = SETUP.main(["--home", str(home)])
++        made.assert_called_once_with(home)
++        return home, build, rc, json.loads(out.getvalue()), order
++
++    def test_the_home_is_prepared_before_uv_is_looked_for(self):
++        home, build, _, rep, order = self.run_main(lambda h: h.mkdir() or True)
++        self.assertEqual(order, ["prepare", "find_uv"])                   # uv's download goes into the home
++        self.assertTrue((home / "models").is_dir())
++        build.assert_called_once()
++        self.assertNotIn("error", rep)
++
++    def test_a_refused_home_stops_setup(self):
++        how = 'run in a terminal: icacls "X" /inheritance:r ...  then reel setup again'
++        err = SETUP.home_acl.HomeAclError("مقدرناش نقفل فولدر المحرك / could not lock the engine home", how)
++
++        def refuse(h):
++            raise err
++        home, build, rc, rep, order = self.run_main(refuse)
++        self.assertEqual(rc, 1)
++        self.assertEqual(order, ["prepare"])
++        build.assert_not_called()
++        self.assertFalse(home.exists())
++        self.assertTrue(rep["error"].startswith("مقدرناش"), rep)
++        self.assertEqual(rep["how"], how)
++
++
+ if __name__ == "__main__":
+     unittest.main()

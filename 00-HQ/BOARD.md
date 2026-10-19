@@ -1,0 +1,56 @@
+# BOARD — the only task list (edited by the MASTER only)
+
+Updated 2026-10-20 02:00 (Cairo, Command Center: ENV/OPS/API rows). Stage 1 = Gate 4 (≈ 55%).
+Machine view (generated, read-only): `TASK_QUEUE.yaml`. Owner view: `..\PROJECT_PLAN_AR.md`.
+
+**Transition rule.** The chats already running on Yunus's account keep their charters until they END (TRACKS.md).
+New work goes to H1, H2 or LANE through this board. No new track chat opens on Yunus's account. While the old
+system still runs, every item a helper takes also gets a claim file `D:\ClaudeData\claude-api-lane\claims\<ID>.claim`,
+so the old builders and lanes see the fence.
+
+Status words: NOT READY · READY · IN PROGRESS · FIX · ACCEPTED · MERGED · BLOCKED · PARKED · RUNNING (old-system track).
+
+## Helpers and lanes (new system)
+**Queue rule:** every helper always holds 3 READY cards that don't depend on each other. A helper works through
+them one after another until its own limit, and never waits for a review. Reviews are peer reviews (H1 reviews
+H2's code and the other way round, PLAYBOOK §3c). The master intake decides each one and refills the queue.
+
+| ID | Title | Assigned | Status | Card | Next |
+|---|---|---|---|---|---|
+| SETUP-H1 | First login (mayar@) + full suite baseline | H1 (Mayar) | IN PROGRESS | `tasks/SETUP-H1.md` | — |
+| BL-16 | Safe ASCII engine home for a non-ASCII Windows user (Gate 4, high) | H1 | READY · fallback executor 25 Oct | `tasks/BL-16.md` | — |
+| BL-02 | Licence files, notices generator, SPDX tool (tool only) (Gate 4, high) | H1 | READY | `tasks/BL-02.md` | — |
+| BL-17 | Second install must not overwrite the first install's pointer files (Gate 5) | H1 | READY | `tasks/BL-17.md` | — |
+| SETUP-H2 | First login (marketing@) + full suite baseline | H2 (marketing@) | IN PROGRESS | `tasks/SETUP-H2.md` | — |
+| BL-03 | GPL-compliance + trademark notice templates (AR + EN) (Gate 4) | H2 | READY | `tasks/BL-03.md` | — |
+| BL-04 | run-state.json + resume, preflight-first in `reel next` (Gate 4) | H2 | READY · fallback executor 25 Oct | `tasks/BL-04.md` | — |
+| BL-18 | Two wrong fix lines in installer/onboarding (Gate 4) | H2 | READY | `tasks/BL-18.md` | — |
+| BL-14 | Portable client copy | EXECUTOR | handed over 10-19 (`tracks\API-200-BL-14-HANDOVER.md`) | — | not a card |
+| (lane 1) | API lane 1 | — | STOPPED (owner budget ruling 10-19 10:03); BL-16 and BL-04 moved to cards above | — | — |
+| S6b | Gate 4 eval cases for the Phase 4 skills | H1 | NOT READY (ask the executor which skills are frozen) | — | master writes the card |
+| STAGE3-DRAFTS | Stage 3 task specs (F1, F10, F11 skeleton) as drafts | MASTER | NOT READY (after the Gate 4 tag / 1 Nov) | — | becomes H1/H2/LANE cards |
+| ENV-01 | Engine runtime for unsandboxed processes (helper suites: 563 env errors) | MASTER | IN PROGRESS | `tasks/ENV-01.md` | then SETUP-H1/H2 re-run |
+| OPS-01 | Status generator, Arabic reports, ops/hq GitHub mirror (pilot task) | MASTER | IN PROGRESS | `tasks/OPS-01.md` | OPS-02 |
+| OPS-02 | Schedule the 4 daily PRIMARY reports + delivery receipt test | MASTER | NOT READY (needs OPS-01) | `tasks/OPS-02.md` | — |
+| OPS-03 | Fold the release-preview refresh check into the report run; retire lane-watch | MASTER | READY | `tasks/OPS-03.md` | — |
+| OPS-04 | After the tag: move 00-HQ into the repo; fix 3 repo references to archived docs | EXECUTOR | NOT READY (after the v3.0.0-p4 tag) | `tasks/OPS-04.md` | — |
+| OPS-05 | First observed cross-account cycle: H1 DONE → H2 peer review → intake verdict | MASTER (observe) | NOT READY (needs ENV-01) | `tasks/OPS-05.md` | — |
+| OPS-06 | Effort per tier in helper runs (HIGH → high, LIGHT/setup → medium); owner rule 10-19 21:00 | MASTER | READY | `tasks/OPS-06.md` | — |
+| API-500 | The single paid API job (Stage 3 mechanical part) | LANE | PLANNED_NOT_AUTHORIZED (waits for «نفذ خطة الـ API») | `BUDGET-API.md` | — |
+
+## Old-system tracks still running on Yunus's account (no change until their END)
+| Track | Chat | Holds | Expected END |
+|---|---|---|---|
+| EXEC-G4 | Executor local_22b44953 | Tasks 25/26, T4.8, T4.15, manual verse slot, S1 reachability, gate review, push of the 25 commits, tag `v3.0.0-p4` | Gate 4 tag (~1–3 Nov) |
+| BLD-A | K+M local_b32f950e | Tasks 50, 52–60, 53 non-verse, Task 29 | Gate 4 |
+| BLD-B | L local_913e8afa | BL-15 r4, T4.3 final round, BL-01 | soon |
+| ADOBE-G4 | Adobe local_f9018851 | T4.1, T4.6, .ccx rebuild, live checklist | Gate 4 |
+| UI-P4 | UI local_4c3a07e5 | Phase 4 screen batch | ~70% done |
+| REL-PREVIEW | Release local_0004e483 | try card + update-try test | nearly done |
+| API-200 | local_53f2edec | October API plan (lanes 1 + 5) | guard stop (25 USD left) |
+
+When a track ENDs, its leftovers come to this board as cards for H1/H2/LANE, not to a new chat.
+
+## Lanes 2, 3, 4
+On HOLD (2026-10-19 00:30, `BUDGET-API.md` pre-flight item 1). They restart only from LANE cards on this board, on
+1 Nov or later.
