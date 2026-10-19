@@ -234,6 +234,220 @@ WNCPP.placeStill = function (seq, trackIdx, projItem, g, log) {
     return {id: g.id, track: trackIdx + 1, start: it.start.seconds, end: it.end.seconds, anim: a};
 };
 
+/* 3.0 T4.1 smooth zoom: a punch-in eases in and out with bezier keys on Motion Scale and Position of its V1 clips.
+   The job's camera_keys are the timeline spec's runs (lib/camera_ease.py); each side carries segment values
+   (scale_factor, offset_x/y in sequence pixels), applied RELATIVE to the clip's own Motion values from the XML, so
+   normalised and pixel Position coordinates both work. Keys already on the property are dropped first (a re-run adds
+   none twice). Each clip's own Scale / Position are read ONCE, before any key is written on it (getValue is not
+   reliable on a time-varying parameter), and kept in `orig` for every run of the build. ExtendScript has no
+   interpolation getter: the read-back says "bezier (set, not read back)", never verified (Gate 4 live check). */
+WNCPP.KF_BEZIER = 5;                    // kfInterpMode_Bezier (0 linear, 4 hold, 5 bezier, 6 time)
+WNCPP.seqHeight = function (seq) {
+    var h = 0;
+    try { h = Number(seq.frameSizeVertical) || 0; } catch (e) { h = 0; }
+    if (!(h > 0)) { try { h = Number(seq.getSettings().videoFrameHeight) || 0; } catch (e2) { h = 0; } }
+    return h > 0 ? h : 1920;
+};
+WNCPP.keyCount = function (prop) {
+    if (!prop) { return 0; }
+    var k = null;
+    try { k = prop.getKeys(); } catch (e) { k = null; }
+    return k ? (k.length || 0) : 0;
+};
+WNCPP.bezierKey = function (prop, t, value) {     // one key; true when its interpolation was set to bezier
+    prop.addKey(t);
+    prop.setValueAtKey(t, value, true);
+    if (typeof prop.setInterpolationTypeAtKey !== "function") { return false; }
+    try { prop.setInterpolationTypeAtKey(t, WNCPP.KF_BEZIER, true); return true; } catch (e) { return false; }
+};
+WNCPP.EASE_SET = "bezier (set, not read back)";
+WNCPP.restoreClip = function (clip, o) {   // review 2 M-d: a clip whose keys failed goes back to its imported values
+    var motion = WNCPP.compByMatch(clip, WNCPP.MATCH.motion) || WNCPP.comp(clip, "Motion");
+    var sc = WNCPP.prop(motion, "Scale"), pos = WNCPP.prop(motion, "Position");
+    try { if (sc) { sc.setTimeVarying(false); sc.setValue(o.S, true); } } catch (e1) {}
+    try { if (pos) { pos.setTimeVarying(false); pos.setValue([o.P[0], o.P[1]], true); } } catch (e2) {}
+};
+// round 5 MIN-3: any throw in a move (the V1 lookup, a side, the key-count read-back) rolls back every clip it touched
+WNCPP.easeRun = function (seq, r, orig, log) {
+    var touched = [];
+    try { return WNCPP.easeRunInner(seq, r, orig, log, touched); }
+    catch (ex) {
+        var v1r = null;
+        try { v1r = seq.videoTracks[0]; } catch (ev) { v1r = null; }
+        for (var k = 0; v1r && k < touched.length; k++) {
+            if (orig[touched[k]]) { WNCPP.restoreClip(v1r.clips[touched[k]], orig[touched[k]]); }
+        }
+        log.push("smooth zoom " + r.decision_id + ": clips " + touched.join(", ") + " restored after an error: " + ex);
+        return {decision_id: r.decision_id, pieces: r.pieces, scale_keys: 0, position_keys: 0, interpolation: "none",
+                interpolation_verified: false, ok: false, error: "clips " + touched.join(", ") + " restored: " + ex};
+    }
+};
+WNCPP.easeRunInner = function (seq, r, orig, log, touched) {
+    var v1 = seq.videoTracks[0], W = WNCPP.seqWidth(seq), H = WNCPP.seqHeight(seq), F = WNCPP.F;
+    var out = {decision_id: r.decision_id, pieces: r.pieces, scale_keys: 0, position_keys: 0,
+               interpolation: WNCPP.EASE_SET, interpolation_verified: false, ok: true};
+    var sides = [], want = 0, interpOk = true, clips = touched, i, c;
+    if (r.ease_in) { sides.push({e: r.ease_in, other: r.ease_in.from, atStart: true}); }
+    if (r.ease_out) { sides.push({e: r.ease_out, other: r.ease_out.to, atStart: false}); }
+    for (i = 0; i < sides.length; i++) {
+        var sd = sides[i], pi = sd.e.piece, clip = (pi >= 0 && pi < v1.clips.numItems) ? v1.clips[pi] : null;
+        want += 2;
+        if (!clip) { log.push("smooth zoom " + r.decision_id + ": no V1 clip " + pi); out.ok = false; continue; }
+        try {                           // round 4 M-3: every host call of this side, the reads included, is guarded
+            var motion = WNCPP.compByMatch(clip, WNCPP.MATCH.motion) || WNCPP.comp(clip, "Motion");
+            var sc = WNCPP.prop(motion, "Scale"), pos = WNCPP.prop(motion, "Position");
+            if (!sc || !pos) { log.push("smooth zoom " + r.decision_id + ": Motion Scale/Position not found"); out.ok = false; continue; }
+            if (!orig[pi]) {            // first touch of this clip: its values as imported, then stale keys go
+                var P0 = pos.getValue();
+                orig[pi] = {S: Number(sc.getValue()), P: [Number(P0[0]), Number(P0[1])]};
+                try { sc.setTimeVarying(false); pos.setTimeVarying(false); } catch (ec) { log.push("smooth zoom clear: " + ec); }
+            }
+            var seen = false;
+            for (c = 0; c < clips.length; c++) { if (clips[c] === pi) { seen = true; } }
+            if (!seen) { clips.push(pi); }
+            var S = orig[pi].S, P = orig[pi].P, norm = (P[0] <= 2 && P[1] <= 2);
+            var k = sd.e.value.scale_factor ? sd.other.scale_factor / sd.e.value.scale_factor : 1;
+            var dx = (sd.other.offset_x || 0) - (sd.e.value.offset_x || 0), dy = (sd.other.offset_y || 0) - (sd.e.value.offset_y || 0);
+            if (norm) { dx = dx / W; dy = dy / H; }
+            var base = clip.inPoint.seconds, dur = clip.end.seconds - clip.start.seconds, n = sd.e.frames * F;
+            var tOther = sd.atStart ? base : base + dur, tSelf = sd.atStart ? base + n : base + dur - n;
+            sc.setTimeVarying(true);
+            pos.setTimeVarying(true);
+            interpOk = WNCPP.bezierKey(sc, tOther, S * k) && interpOk;
+            interpOk = WNCPP.bezierKey(sc, tSelf, S) && interpOk;
+            interpOk = WNCPP.bezierKey(pos, tOther, [P[0] + dx, P[1] + dy]) && interpOk;
+            interpOk = WNCPP.bezierKey(pos, tSelf, [P[0], P[1]]) && interpOk;
+        } catch (ek) {
+            // review 2 M-d: never leave a half-keyed clip: every clip of this move goes back to its imported values
+            for (c = 0; c < clips.length; c++) { if (orig[clips[c]]) { WNCPP.restoreClip(v1.clips[clips[c]], orig[clips[c]]); } }
+            log.push("smooth zoom " + r.decision_id + ": clip " + pi + " restored after an error: " + ek);
+            out.error = "clip " + pi + ": " + ek;
+            out.ok = false;
+            break;
+        }
+    }
+    for (c = 0; c < clips.length; c++) {
+        var m2 = WNCPP.compByMatch(v1.clips[clips[c]], WNCPP.MATCH.motion) || WNCPP.comp(v1.clips[clips[c]], "Motion");
+        out.scale_keys += WNCPP.keyCount(WNCPP.prop(m2, "Scale"));
+        out.position_keys += WNCPP.keyCount(WNCPP.prop(m2, "Position"));
+    }
+    if (!interpOk) { out.interpolation = "linear (fallback)"; out.ok = false; }
+    if (out.scale_keys !== want || out.position_keys !== want) { out.ok = false; }
+    return out;
+};
+/* 3.0 T4.1 fades. Picture (review 2 IMP-2): ONE black matte still on its own top track (job fades.matte: the engine's
+   frame-size PNG and the empty lane the base XML made for it) over each fade window, Opacity 100 -> 0 at the start
+   and 0 -> 100 at the end, so the whole picture fades as one (per-layer opacity would ghost where layers overlap).
+   No track: reported, never a per-layer fallback. Sound: Volume Level keys on the audio items of the job's
+   `audio_tracks` (dialogue, music, the muted originals; never the SFX); a key already inside the window (the music
+   bed's fade-out) is multiplied by the fade, never overwritten. fd times in sequence seconds, end_s = the end. */
+WNCPP.fadeGain = function (t, fd, kind) {
+    var fin = fd[kind + "_in_s"] || 0, fout = fd[kind + "_out_s"] || 0, g = 1;
+    if (fin > 0 && t < fin) { g = Math.min(g, Math.max(0, t / fin)); }
+    if (fout > 0 && t > fd.end_s - fout) { g = Math.min(g, Math.max(0, (fd.end_s - t) / fout)); }
+    return g;
+};
+WNCPP.fadeItem = function (prop, item, fd, kind) {   // keys written (0 = the item is outside both windows)
+    var s = item.start.seconds, e = item.end.seconds, base = item.inPoint.seconds, eps = 1e-6;
+    var fin = fd[kind + "_in_s"] || 0, fout = fd[kind + "_out_s"] || 0, wins = [], pts = [], vals = [], i, j;
+    if (fin > 0 && s < fin - eps) { wins.push([Math.max(s, 0), Math.min(e, fin)]); }
+    if (fout > 0 && e > fd.end_s - fout + eps) { wins.push([Math.max(s, fd.end_s - fout), Math.min(e, fd.end_s)]); }
+    if (!wins.length || !prop) { return 0; }
+    var old = null;
+    try { old = prop.getKeys(); } catch (ek) { old = null; }
+    for (i = 0; i < wins.length; i++) {
+        pts.push(wins[i][0]);
+        pts.push(wins[i][1]);
+        for (j = 0; old && j < old.length; j++) {
+            var ta = (typeof old[j] === "object" ? old[j].seconds : Number(old[j])) - base + s;
+            if (ta > wins[i][0] + eps && ta < wins[i][1] - eps) { pts.push(ta); }
+        }
+    }
+    var varying = false;
+    try { varying = !!(old && old.length); } catch (evy) { varying = false; }
+    for (i = 0; i < pts.length; i++) {   // read the curve as it is BEFORE any key is written
+        var v;
+        try { v = varying ? prop.getValueAtTime(base + (pts[i] - s)) : prop.getValue(); } catch (ev) { v = prop.getValue(); }
+        vals.push(Number(v));
+    }
+    prop.setTimeVarying(true);
+    for (i = 0; i < pts.length; i++) {
+        var t2 = base + (pts[i] - s);
+        prop.addKey(t2);
+        prop.setValueAtKey(t2, vals[i] * WNCPP.fadeGain(pts[i], fd, kind), true);
+    }
+    return pts.length;
+};
+/* Volume > Level of an audio clip: by display name, else by match name ("Internal Volume ..." in Premiere's audio
+   effects list: NOT measured live, Gate 4) with the level as the second parameter (after Bypass). Round 4 M-5. */
+WNCPP.VOLUME_MATCH = ["Internal Volume Stereo", "Internal Volume Mono", "Internal Volume 5.1", "Internal Volume"];
+WNCPP.levelParam = function (it) {
+    var comp = WNCPP.comp(it, "Volume"), p = comp ? WNCPP.prop(comp, "Level") : null;
+    if (p) { return p; }
+    comp = comp || WNCPP.compByMatch(it, WNCPP.VOLUME_MATCH);
+    if (!comp) { return null; }
+    p = WNCPP.prop(comp, "Level");
+    if (!p && comp.properties.numItems > 1) { p = comp.properties[1]; }
+    return p;
+};
+WNCPP.placeMatte = function (seq, track, item, s, e, pairs, log) {   // one matte clip, or null (nothing left behind)
+    track.overwriteClip(item, s);
+    var it = WNCPP.itemAt(track, s);
+    if (!it) { log.push("fade to black: the matte at " + s + " s was not placed"); return null; }
+    try {
+        it.end = WNCPP.secTime(e);
+        var op = WNCPP.prop(WNCPP.compByMatch(it, WNCPP.MATCH.opacity) || WNCPP.comp(it, "Opacity"), "Opacity");
+        if (!op) { throw new Error("no Opacity on the matte"); }
+        WNCPP.keyframes(op, it.inPoint.seconds, pairs);
+        return {start: it.start.seconds, end: it.end.seconds, keys: WNCPP.keyCount(op)};
+    } catch (em) {
+        // review 2 M-d: a half-placed matte is removed, and the fade reported as not applied
+        try { it.remove(false, false); } catch (er) { log.push("fade to black: the matte at " + s + " s could not be removed: " + er); }
+        log.push("fade to black: matte at " + s + " s removed after an error: " + em);
+        return null;
+    }
+};
+WNCPP.applyFades = function (seq, fd, log) {
+    var res = {matte: [], audio: [], ok: true}, t, c, it, n, i;
+    var fin = fd.video_in_s || 0, fout = fd.video_out_s || 0;
+    var aOn = (fd.audio_in_s || 0) > 0 || (fd.audio_out_s || 0) > 0;
+    if (fin > 0 || fout > 0) {
+        var m = fd.matte || {}, ti = m.track_index, track = (ti >= 0 && ti < seq.videoTracks.numTracks) ? seq.videoTracks[ti] : null;
+        if (!track || !m.png) {
+            log.push("fade to black: no free top track for the black matte (track " + ti + "): the picture is not faded");
+            res.ok = false;
+        } else {
+            var bin = WNCPP.bin("02 Graphics");
+            app.project.importFiles([m.png], true, bin, false);
+            var pi = WNCPP.findItemByPath(bin, m.png);
+            if (!pi) { log.push("fade to black: the black matte still was not imported: " + m.png); res.ok = false; }
+            var wins = [];
+            if (fin > 0) { wins.push([0, fin, [[0, 100], [fin, 0]]]); }
+            if (fout > 0) { wins.push([fd.end_s - fout, fd.end_s, [[0, 0], [fout, 100]]]); }
+            for (i = 0; pi && i < wins.length; i++) {
+                var r = WNCPP.placeMatte(seq, track, pi, wins[i][0], wins[i][1], wins[i][2], log);
+                if (r) { res.matte.push(r); } else { res.ok = false; }
+            }
+        }
+    }
+    var named = {};                     // round 4 M-9: only the named tracks; none named = no audio faded (never an SFX)
+    for (i = 0; fd.audio_tracks && i < fd.audio_tracks.length; i++) { named[fd.audio_tracks[i]] = true; }
+    for (t = 0; aOn && t < seq.audioTracks.numTracks; t++) {
+        if (!named[t + 1]) { continue; }
+        for (c = 0; c < seq.audioTracks[t].clips.numItems; c++) {
+            it = seq.audioTracks[t].clips[c];
+            var lv = WNCPP.levelParam(it);
+            n = 0;
+            try { n = WNCPP.fadeItem(lv, it, fd, "audio"); }
+            catch (e2) { log.push("sound fade A" + (t + 1) + " clip " + c + ": " + e2); res.ok = false; }
+            if (n > 0) { res.audio.push({track: t + 1, clip: c, keys: n}); }
+            else if (!lv) { log.push("sound fade: no Volume Level on A" + (t + 1) + " clip " + c); }
+        }
+    }
+    if (aOn && !res.audio.length) { res.ok = false; }
+    return res;
+};
+
 WNCPP.actions.build_project = function (d) {
     var log = [], ev = {};
     // 1. project
@@ -312,6 +526,23 @@ WNCPP.actions.build_project = function (d) {
                 ev.sharpened.push(rec);
             } catch (es) { log.push("sharpen clip " + si + ": " + es); }
         }
+    }
+    // 4d. T4.1 smooth zoom: eased keys on the punch-ins' V1 clips (job camera_keys), read back per punch-in
+    var orig = {};
+    if (d.camera_keys && d.camera_keys.length) { ev.eased = []; }    // review 2 M-f: nothing asked, nothing reported
+    for (var ri = 0; d.camera_keys && ri < d.camera_keys.length; ri++) {
+        var run = d.camera_keys[ri];
+        try { ev.eased.push(WNCPP.easeRun(seq, run, orig, log)); }
+        catch (ee) {
+            log.push("smooth zoom " + run.decision_id + ": " + ee);
+            ev.eased.push({decision_id: run.decision_id, pieces: run.pieces, scale_keys: 0, position_keys: 0,
+                           interpolation: "none", interpolation_verified: false, ok: false});
+        }
+    }
+    // 4e. T4.1 fades of picture (one black matte on the top track) and sound (the named tracks) at the start / end
+    if (d.fades) {
+        try { ev.faded = WNCPP.applyFades(seq, d.fades, log); }
+        catch (ef) { log.push("fades: " + ef); ev.faded = {matte: [], audio: [], ok: false}; }   // the schema's shape
     }
     // 5. native captions from SRT
     if (d.srt_path && d.native_caption_track) {

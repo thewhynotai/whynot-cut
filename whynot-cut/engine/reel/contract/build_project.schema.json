@@ -153,6 +153,80 @@
         "duration_s": {
           "type": "number",
           "description": "planned sequence duration in seconds"
+        },
+        "camera_keys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ease_run"
+          },
+          "description": "T4.1 smooth zoom: bezier keys on Motion Scale/Position of these V1 clips; absent = none"
+        },
+        "fades": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "video_in_s": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "video_out_s": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "audio_in_s": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "audio_out_s": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "end_s": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "audio_tracks": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "description": "1-based audio tracks the sound fade keys (dialogue, music, muted originals; never the SFX)"
+                },
+                "matte": {
+                  "type": "object",
+                  "properties": {
+                    "png": {
+                      "type": "string"
+                    },
+                    "track_index": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "png",
+                    "track_index"
+                  ],
+                  "additionalProperties": false,
+                  "description": "the frame-size black still and its own top video track (0-based) for the picture fade"
+                }
+              },
+              "required": [
+                "video_in_s",
+                "video_out_s",
+                "audio_in_s",
+                "audio_out_s",
+                "end_s"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "T4.1 fades: the picture as one black matte on the top track (review 2 IMP-2), the sound as Volume Level keys on the named audio tracks; absent = none"
         }
       },
       "required": [
@@ -300,6 +374,119 @@
             "type": "string"
           },
           "description": "non-fatal notes (effect not found, property missing ...)"
+        },
+        "eased": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "decision_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "pieces": {
+                "type": "array",
+                "items": {
+                  "type": "integer"
+                }
+              },
+              "scale_keys": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "position_keys": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "interpolation": {
+                "type": "string",
+                "description": "\"bezier (set, not read back)\": bezier SET on every key; ExtendScript cannot read it back, so it is never reported as verified (\"linear (fallback)\" when it could not be set)"
+              },
+              "ok": {
+                "type": "boolean"
+              },
+              "interpolation_verified": {
+                "type": "boolean",
+                "description": "always false on the CEP bridge (no interpolation getter); a UXP adapter can read it back (uxp-parity.md K6)"
+              },
+              "error": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "decision_id",
+              "pieces",
+              "scale_keys",
+              "position_keys",
+              "interpolation",
+              "ok"
+            ]
+          },
+          "description": "T4.1: one entry per camera_keys run (absent when the job asked for none); ppro_build.ease_checks needs 2 Scale + 2 Position keys per eased side, \"bezier (set, not read back)\", ok; `error` names a clip restored after a failure"
+        },
+        "faded": {
+          "type": "object",
+          "properties": {
+            "matte": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "start": {
+                    "type": "number"
+                  },
+                  "end": {
+                    "type": "number"
+                  },
+                  "keys": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "start",
+                  "end",
+                  "keys"
+                ]
+              }
+            },
+            "audio": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "track": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "clip": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "keys": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "track",
+                  "clip",
+                  "keys"
+                ]
+              }
+            },
+            "ok": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "matte",
+            "audio",
+            "ok"
+          ],
+          "description": "T4.1: the black matte clips placed for the picture fade and the audio items keyed by the sound fade (only when the job asked for fades); ppro_build.ease_checks needs a matte over each window with its keys, and the first / last A1 clip"
         }
       },
       "required": [
@@ -497,6 +684,135 @@
         "audio"
       ],
       "description": "Track layout of a sequence: V1.. and A1.. with their clip counts. Read by ppro_build.build check dialogue_on_A1_A2 (the first two audio tracks must hold clips)."
+    },
+    "ease_values": {
+      "type": "object",
+      "properties": {
+        "scale_factor": {
+          "type": "number"
+        },
+        "offset_x": {
+          "type": "number"
+        },
+        "offset_y": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "scale_factor",
+        "offset_x",
+        "offset_y"
+      ],
+      "additionalProperties": false,
+      "description": "Segment values (main_segments units): scale factor, offsets in sequence pixels"
+    },
+    "ease_run": {
+      "type": "object",
+      "description": "T4.1: one eased punch-in (timeline-spec camera_ease.runs, lib/camera_ease.py ease_keys)",
+      "properties": {
+        "decision_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "camera": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pieces": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "ease_in": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "piece": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "V1 clip index (= main_segments index)"
+                },
+                "frames": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "from": {
+                  "$ref": "#/$defs/ease_values"
+                },
+                "value": {
+                  "$ref": "#/$defs/ease_values"
+                }
+              },
+              "required": [
+                "piece",
+                "frames",
+                "from",
+                "value"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ease_out": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "piece": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "V1 clip index (= main_segments index)"
+                },
+                "frames": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "to": {
+                  "$ref": "#/$defs/ease_values"
+                },
+                "value": {
+                  "$ref": "#/$defs/ease_values"
+                }
+              },
+              "required": [
+                "piece",
+                "frames",
+                "to",
+                "value"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "interpolation": {
+          "enum": [
+            "bezier"
+          ]
+        }
+      },
+      "required": [
+        "decision_id",
+        "pieces",
+        "ease_in",
+        "ease_out",
+        "interpolation"
+      ],
+      "additionalProperties": false
     }
   }
 }

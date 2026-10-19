@@ -71,7 +71,10 @@ file.
   - Does After Effects accept −60 dB, or does it clamp the value?
   - Does it keep the keys linear?
 
-  If it clamps, the read-back reports a mismatch.
+  The read-back accepts any planned key at or below −48 dB, so a clamp to −48 does NOT show up as a read-back
+  mismatch. Keys where speech is (at the ducked level, which is ≥ −40 dB) still need an exact match. If After Effects
+  clamps, the approved animatic fades start at −60 while the delivery starts at −48. The fix is then to make −48 the
+  default floor.
 - **Gate 4 check.** Do one live motion build with a licensed track. Read the MUSIC layer's keys back on both channels,
   then listen to the render at a dip.
 
@@ -91,3 +94,13 @@ file.
   - A punch-in that starts on a shot or speaker change stays hard: there is no whip-pan.
   - On a 4:5 reel with B-roll, a 50% fade shows no ghosting. The fade comes from one black matte on the top track.
   - A cue under the fade-out is kept up to the 0.5 point, and the build warns about it.
+  - Round 4 additions:
+    - The ease-out ends with a key at the clip's out point; the last frame shown is one frame before it. Check that
+      the zoom-out lands with no visible jump into the next clip.
+    - At 29.97 fps, the matte clips start and end on the fade windows, and the `qc_frames` times (frame centres)
+      export the intended frame, not the one before.
+    - Volume > Level is found by display name, then by match name (`Internal Volume Stereo` / `Mono` / `5.1`, **not
+      measured**) with Level as the second parameter. Confirm this on a Premiere in another language, or one that
+      names the component differently.
+    - Two story moves on different shots (a speaker change) meet hard, and a punch-in never eases out into a story
+      reframe or punch-out.

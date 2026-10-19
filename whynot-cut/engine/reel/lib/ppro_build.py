@@ -19,15 +19,16 @@ SETTINGS = {  # user's sequence spec; verified field names/values from Premiere 
 }
 LANE_NAMES = {"broll": "B-roll (full screen)", "gfx_bar": "Graphic bars (sweep)", "card": "Cards (closing glass)",
               "gfx_text": "Graphic text", "cap_bar": "Caption bars (sweep)", "cap_text": "Captions (animated)",
-              "fx": "Transitions"}
+              "fx": "Transitions", "fade": "Fade to black (T4.1 matte)"}
 BAR_T = {"hook_title", "term_callout", "statement_highlight"}
 
 
 def premiere_captions(paths: Paths, spec: dict, ed: dict) -> Path:
-    """captions-short.srt minus words a graphic already shows (reference behaviour) -> native caption track."""
+    """captions-short.srt minus words a graphic already shows (reference behaviour) -> native caption track. T4.2: the
+    hook title hides captions unless the compiled spec says `style.captions_during_hook: "show"`."""
     from .timemap import TimeMap
     g = ed.get("global", {})
-    hide_t = set(g.get("captions_hidden_during") or caption_hide_default())
+    hide_t = set(g.get("captions_hidden_during") or caption_hide_default(spec))
     blocked = [(e["start_ms"], e["end_ms"]) for e in spec["events"] if e["template"] in hide_t]
     # events are on the SEQUENCE clock; hidden ranges are authored in SOURCE time -> map them, and read the
     # sequence-clock captions (captions-short-seq.srt after pause removal)
@@ -91,6 +92,10 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False, f
     F = 1 / seq_fps()
     n_items = max([len(e["params"].get("items", [])) for e in spec["events"] if e["template"] == "checklist"] or [0])
     lanes = ["broll", "gfx_bar", "card", "gfx_text"] + [f"item{k + 1}" for k in range(n_items)] + ["cap_bar", "cap_text", "fx"]
+    fd = spec.get("fades") if isinstance(spec.get("fades"), dict) else {}
+    pic_fade = bool(fd.get("video_in_ms") or fd.get("video_out_ms"))
+    if pic_fade:            # T4.1 (review 2 IMP-2): the black matte's own empty track, above everything
+        lanes.append("fade")
     base = build_xml(paths, native_graphics=True, lanes=lanes)
     cut_off = 1 if (base.get("cutaways") or {}).get("track") else 0   # V2 = source cutaways (whole) when the source has them
     lane_idx = {ln: i + 1 + cut_off for i, ln in enumerate(lanes)}   # 0 = V1 main footage
@@ -126,7 +131,7 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False, f
 
     # animated captions (sequence clock); hide where a graphic already carries the words
     g = ed.get("global", {})
-    hide_t = set(g.get("captions_hidden_during") or caption_hide_default())
+    hide_t = set(g.get("captions_hidden_during") or caption_hide_default(spec))   # T4.2: the compiled hook mode
     hidden = [(e["start_ms"], e["end_ms"]) for e in spec["events"] if e["template"] in hide_t]
     tm = spec.get("time_map")
     remap = TimeMap(tm["keep_ms"]) if tm else None
@@ -160,6 +165,10 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False, f
                 "comment": f"{e['template']} | {(e.get('evidence') or '')[:200]}"} for e in spec["events"]]
     windowed = "window" in str(spec.get("framing", ""))
     vnames = ["V1 Main Footage" + (" (blurred fill)" if windowed else " (+ blurred fill under cutaways)" if cut_off else "")] +         (["V2 Speaker in window + source cutaways" if windowed else "V2 Source cutaways (whole)"] if cut_off else []) +         [f"V{i + 2 + cut_off} {LANE_NAMES.get(ln, 'Checklist item ' + ln[4:])}" for i, ln in enumerate(lanes)]
+    srt_path = paths.p("02_transcription/subtitles-seq.srt")
+    if pic_fade and g.get("native_caption_track", False):     # T4.1 IMP-3: no native caption over the dark half
+        srt_path = fade_caption_srt(paths, spec, srt_path, font_warns)
+    matte = {"png": str(fade_matte(paths)), "track_index": lane_idx["fade"]} if pic_fade else None
     dlg = "Dialogue (clean)" if paths.p("06_audio/dialogue/dialogue_clean.wav").exists() else "Dialogue (camera, not cleaned)"
     anames = [f"A1 {dlg} L", f"A2 {dlg} R"]
     for k in base["tracks"]["audio"][1:]:
@@ -168,13 +177,171 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False, f
     return {"project_path": str(paths.p(f"07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj")),
             "overwrite_existing": overwrite, "xml_path": base["xml"], "sequence_name": base["sequence_name"],
             "settings": dict(SETTINGS, **dict(zip(("previewFrameWidth", "previewFrameHeight"), frame_size(paths)))),
-            "graphics": g_out, "srt_path": str(paths.p("02_transcription/subtitles-seq.srt")),
+            "graphics": g_out, "srt_path": str(srt_path),
             "native_caption_track": bool(g.get("native_caption_track", False)),
             "markers": markers, "track_names": {"video": vnames, "audio": anames}, "_missing": missing,
             "blur_v1_clips": (base.get("cutaways") or {}).get("blur_v1_clip_indices") or [],
             "sharpen_v1": sharpen_settings(spec),
             "_lanes": lanes, "_warnings": font_warns, "_stills_redrawn": fresh["redrawn"],
-            "duration_s": spec["duration_frames"] * F}
+            "duration_s": spec["duration_frames"] * F, "_qc_frames": ease_qc_frames(spec),
+            **ease_job_fields(spec, audio_tracks=fade_audio_tracks(base["tracks"]["audio"]), matte=matte)}
+
+
+FADE_JOB_KEYS = ("video_in", "video_out", "audio_in", "audio_out")
+EASE_SET = "bezier (set, not read back)"      # the CEP bridge's honest read-back of the interpolation (no getter)
+SFX_TRACK_IDS = {"A03", "A04", "A05"}         # sound effects: never faded (round 3 item 3: the hook's sound at frame 0)
+
+
+def ease_job_fields(spec: dict, audio_tracks: list | None = None, matte: dict | None = None) -> dict:
+    """T4.1: what the bridge needs for smooth zoom and fades, straight from the compiled spec. Nothing asked = nothing
+    added (review 2 M-f: a plain client's job is the job of before): `camera_keys` only when a move is eased, `fades`
+    (seconds + the sequence end) only when one is on, with `audio_tracks` (the 1-based audio tracks the sound fade
+    keys: dialogue, music, the muted originals; never the SFX) and `matte` (the black still and its top track)."""
+    out = {}
+    runs = list((spec.get("camera_ease") or {}).get("runs") or [])
+    if runs:
+        out["camera_keys"] = runs
+    fd = spec.get("fades")
+    if isinstance(fd, dict) and any(fd.get(f"{k}_ms") for k in FADE_JOB_KEYS):
+        fps = float(spec.get("fps") or seq_fps())
+        fades = {f"{k}_s": round(float(fd.get(f"{k}_ms") or 0) / 1000, 6) for k in FADE_JOB_KEYS}
+        fades["end_s"] = spec["duration_frames"] / fps
+        if audio_tracks is not None and (fades["audio_in_s"] or fades["audio_out_s"]):
+            fades["audio_tracks"] = list(audio_tracks)
+        if matte is not None and (fades["video_in_s"] or fades["video_out_s"]):
+            fades["matte"] = dict(matte)
+        out["fades"] = fades
+    return out
+
+
+def fade_audio_tracks(base_audio: list) -> list[int]:
+    """The 1-based Premiere audio tracks a sound fade keys, from the base XML's track map (premiere_xml): every
+    mono-pair track except the sound effects (A03-A05)."""
+    out = []
+    for t in base_audio or []:
+        if t.get("id") in SFX_TRACK_IDS:
+            continue
+        for x in str(t.get("xml_index") or "").split("-"):
+            if x.strip().isdigit():
+                out.append(int(x))
+    return sorted(set(out))
+
+
+def fade_matte(paths: Paths) -> Path:
+    """The frame-size black still the picture fade puts on its own top track (review 2 IMP-2: one fade for the whole
+    picture, never an Opacity fade per layer). Drawn here, once per frame size; Premiere may hold it open."""
+    from PIL import Image
+    W, H = frame_size(paths)
+    f = paths.p(f"07_premiere/media/fade-black-{W}x{H}.png")
+    if not f.exists():
+        f.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (W, H), (0, 0, 0)).save(f)
+    return f
+
+
+def fade_caption_srt(paths: Paths, spec: dict, src: Path, warnings: list) -> Path:
+    """Review 2 IMP-3: the native caption track sits above every video track, so the black matte cannot cover it: its
+    cues are trimmed where the picture is past half way to black (fade gain below 0.5), into a copy under
+    07_premiere/media (the transcript files stay as they are). An editor line (EN, AR) says how many changed."""
+    fd = spec.get("fades") or {}
+    fin, fout = float(fd.get("video_in_ms") or 0), float(fd.get("video_out_ms") or 0)
+    if not (fin or fout) or not Path(src).exists():
+        return Path(src)
+    end_ms = spec["duration_frames"] * 1000 / float(spec.get("fps") or seq_fps())
+    dark = ([(0.0, fin / 2)] if fin else []) + ([(end_ms - fout / 2, end_ms + 1)] if fout else [])
+    out, changed = [], 0
+    for c in srtlib.read_srt(src):
+        s, e = c["start_ms"], c["end_ms"]
+        for a, b in dark:
+            if a <= s < b:
+                s = b
+            elif s < a < e:
+                e = a
+        if (s, e) != (c["start_ms"], c["end_ms"]):
+            changed += 1
+        if e - s >= 250:
+            out.append({"start_ms": int(round(s)), "end_ms": int(round(e)), "text": c["text"]})
+    if not changed:
+        return Path(src)
+    dst = paths.p("07_premiere/media/captions-faded.srt")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    srtlib.write_srt(dst, out)
+    warnings.append(f"{changed} caption(s) shortened or removed so no caption shows over the fade to black "
+                    "(the caption track cannot fade with the picture)")
+    warnings.append(f"اتقصّر أو اتشال {changed} كابشن عشان مايظهرش كلام فوق الشاشة السودا في أول أو آخر الريل")
+    return dst
+
+
+def ease_qc_frames(spec: dict) -> list[dict]:
+    """Round 3 item 4: the sequence frame in the middle of every ease, for QC to export exactly there (ppro-frames
+    adds them to its default times; ppro-build writes them as `qc_frames`)."""
+    segs = spec.get("main_segments") or []
+    fps = float(spec.get("fps") or seq_fps())
+    out = []
+    for r in (spec.get("camera_ease") or {}).get("runs") or []:
+        for side, why in (("ease_in", "mid push" if r.get("camera") == "slow_push" else "mid ease-in"),
+                          ("ease_out", "mid ease-out")):
+            e = r.get(side)
+            if not e or not (0 <= int(e["piece"]) < len(segs)):
+                continue
+            seg = segs[int(e["piece"])]
+            n = int(e["frames"])
+            f = int(seg["start_frame"]) + n // 2 if side == "ease_in" else int(seg["end_frame"]) - n + n // 2
+            # the frame's CENTRE (round 4 M-6): at 29.97 a time at the frame's start can snap to the frame before
+            out.append({"decision_id": r.get("decision_id"), "piece": int(e["piece"]), "frame": f,
+                        "t_s": round((f + 0.5) / fps, 3), "why": why})
+    return out
+
+
+def ease_checks(job: dict, result: dict) -> dict:
+    """T4.1 read-back checks, only for what the job asked (review 2 M-f). punch_ins_eased: every eased run has its
+    read-back entry (same decision and pieces) with 2 Scale + 2 Position keys per eased side, interpolation EASE_SET
+    ("bezier (set, not read back)": the CEP bridge cannot read it back, so it never claims a verified curve) and ok.
+    fades_applied: the bridge says ok; a picture fade has its black matte over each window (from 0 to the fade-in end,
+    from the fade-out start to the end) with its opacity keys; a sound fade keyed the first A1 clip for a fade in and
+    the last one for a fade out (`tracks` read-back gives the clip count)."""
+    out = {}
+    runs = job.get("camera_keys") or []
+    if runs:
+        eased = result.get("eased") if isinstance(result, dict) else None
+        pool = list(eased) if isinstance(eased, list) else None
+        ok_e = pool is not None
+        for r in runs if pool is not None else []:
+            want = 2 * (bool(r.get("ease_in")) + bool(r.get("ease_out")))
+            hit = next((e for e in pool if isinstance(e, dict) and e.get("decision_id") == r.get("decision_id")
+                        and list(e.get("pieces") or []) == list(r.get("pieces") or [])), None)
+            if hit is None:
+                ok_e = False
+                continue
+            pool.remove(hit)
+            if not (hit.get("scale_keys") == want and hit.get("position_keys") == want
+                    and hit.get("interpolation") == EASE_SET and hit.get("ok") is True):
+                ok_e = False
+        out["punch_ins_eased"] = ok_e
+    fd = job.get("fades")
+    if fd:
+        faded = result.get("faded") if isinstance(result, dict) else None
+        tracks = result.get("tracks") if isinstance(result, dict) else None
+        ok_f = isinstance(faded, dict) and faded.get("ok") is True and isinstance(tracks, dict)
+        if ok_f:
+            end, tol = float(fd.get("end_s") or 0), 0.05
+            mattes = [m for m in faded.get("matte") or [] if isinstance(m, dict) and (m.get("keys") or 0) >= 2]
+
+            def has(a, b):
+                return any(abs(float(m.get("start", -9)) - a) <= tol and abs(float(m.get("end", -9)) - b) <= tol
+                           for m in mattes)
+            if fd.get("video_in_s") and not has(0.0, float(fd["video_in_s"])):
+                ok_f = False
+            if fd.get("video_out_s") and not has(end - float(fd["video_out_s"]), end):
+                ok_f = False
+            n_clips = (tracks.get("audio") or [{}])[0].get("clips") or 0      # A1: the dialogue
+            keyed = {(x.get("track"), x.get("clip")) for x in faded.get("audio") or [] if isinstance(x, dict)}
+            if fd.get("audio_in_s") and (1, 0) not in keyed:
+                ok_f = False
+            if fd.get("audio_out_s") and (n_clips < 1 or (1, n_clips - 1) not in keyed):
+                ok_f = False
+        out["fades_applied"] = ok_f
+    return out
 
 
 def sharpen_settings(spec: dict) -> dict | None:
@@ -255,7 +422,11 @@ def approval_refusal(paths: Paths) -> dict | None:
     """The CLI's Gate 1 check (cli.require_plan_approval) for callers that are not the CLI (reel serve): the CURRENT
     plan must be approved; a re-plan after approval, a stale record or no compiled plan refuses. A record from before
     3.0 says so plainly (plan.OLDER_APPROVAL, 3.0 F2)."""
+    from . import plan as _plan
     from .plan import OLDER_APPROVAL, approved_before_3, plan_fingerprint
+    # T4.1: in the executor's plan.py with T41-plan-style.patch (which lands together with T41-cli.patch); a plan.py
+    # without it gives the plain refusal below, as before
+    ease_only_reapproval = getattr(_plan, "ease_only_reapproval", None)
     appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
     try:
         now = plan_fingerprint(paths)
@@ -266,6 +437,13 @@ def approval_refusal(paths: Paths) -> dict | None:
     if now and approved_before_3(appr):
         return {"status": "REFUSED", "ok": False, "blocked": OLDER_APPROVAL["en"],
                 "error": OLDER_APPROVAL["en"] + " Nothing was built.", "editor_message": dict(OLDER_APPROVAL),
+                "how": "Show the editor 01_analysis/edit-plan.md; after they approve it (`reel approve-plan --by "
+                       "editor`), build again."}
+    if now and ease_only_reapproval and ease_only_reapproval(paths, appr):      # T4.1: only the smooth zoom keys were added since the approval
+        from .camera_ease import EASE_REAPPROVE
+        return {"status": "REFUSED", "ok": False, "blocked": f"edit plan not approved since this change: "
+                f"{EASE_REAPPROVE['en']}", "error": EASE_REAPPROVE["en"] + " Nothing was built.",
+                "editor_message": dict(EASE_REAPPROVE),
                 "how": "Show the editor 01_analysis/edit-plan.md; after they approve it (`reel approve-plan --by "
                        "editor`), build again."}
     return {"status": "REFUSED", "ok": False, "blocked": "edit plan not approved (or changed since approval)",
@@ -476,6 +654,7 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
                         if data.get("sharpen_v1") else True,
         "caption_track_ok": bool(res.get("captionTrack")) if data["native_caption_track"] else True,
         "dialogue_on_A1_A2": all(a["clips"] > 0 for a in (res.get("tracks", {}).get("audio") or [])[:2]) if res.get("tracks") else False,
+        **ease_checks(data, res),                    # T4.1: eased punch-ins and fades, as Premiere reports them
     }
     out = {"status": "PRPROJ_BUILT" if all(checks.values()) else ("PRPROJ_BUILT_WITH_ISSUES" if saved_now else "FAILED"),
            "checks": checks, "project": str(prproj), "bridge": {k: r.get(k) for k in ("ok", "elapsed_s", "job", "error")},
@@ -490,6 +669,15 @@ def _build_locked(paths: Paths, prproj: Path, overwrite: bool, replace_edited: b
         out["warnings"] = data["_warnings"]
     if data.get("_stills_redrawn"):     # 3.0 F1: graphics drawn from an older plan, redrawn before they were placed
         out["stills_redrawn"] = data["_stills_redrawn"]
+    if data.get("_qc_frames"):          # T4.1 round 3: the mid-ease frames QC exports (ppro-frames adds them too)
+        out["qc_frames"] = data["_qc_frames"]
+        out["qc_frames_note"] = ("check the smooth zoom in Premiere's own frames at " +
+                                 ", ".join(f"{q['t_s']:.3f} s ({q['decision_id']} {q['why']})" for q in data["_qc_frames"]))
+    if checks.get("fades_applied") is False:     # review 2 IMP-2: said plainly, never a silent per-layer fallback
+        out.setdefault("warnings", []).extend([
+            "the fade to black or the sound fade at the start or end of this reel did not go in fully: add it by hand "
+            "in Premiere, or build the project again",
+            "الفيد للأسود أو فيد الصوت في أول أو آخر الريل ده مادخلش كامل: اعمله بإيدك في بريمير أو ابني المشروع تاني"])
     if parked:                          # --force over a parked project: it stays a backup; say where
         out["parked_previous"] = parked
     from .verify import prproj_signature
@@ -589,6 +777,8 @@ def _export_frames(paths: Paths, times, retries: int, wait_s: float, media_wait_
             if m.get("decision_id") and m["end_frame"] - m["start_frame"] >= 6:
                 t = round((m["start_frame"] + m["end_frame"]) / 2 / seq_fps(), 3)
                 labels.setdefault(t, f"{m['decision_id']} {m['camera']}")
+        for q in ease_qc_frames(spec):          # T4.1 round 3: the middle of every smooth zoom, exactly
+            labels[q["t_s"]] = f"{q['decision_id']} {q['why']}"
         end = spec["duration_frames"] / seq_fps()
         times = sorted(t for t in set(labels) | {2.5, end * 0.15, end * 0.5, end - 0.5} if 0 <= t < end)
         times = sorted({round(t, 3) for t in times})

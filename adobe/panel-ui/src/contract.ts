@@ -164,7 +164,26 @@ export interface BuildProjectData {
   blur_v1_clips?: number[];
   sharpen_v1?: { amount: number; grain: number } | null;
   duration_s?: number;
+  camera_keys?: BuildEaseRun[];
+  fades?: BuildFades | null;
 }
+// 3.0 T4.1 smooth zoom (timeline-spec camera_ease.runs) and fades, as the engine sends them to the host.
+export interface BuildEaseValues { scale_factor: number; offset_x: number; offset_y: number }
+export interface BuildEaseRun {
+  decision_id: string | null;
+  camera?: string | null;
+  pieces: [number, number];
+  ease_in: { piece: number; frames: number; from: BuildEaseValues; value: BuildEaseValues } | null;
+  ease_out: { piece: number; frames: number; value: BuildEaseValues; to: BuildEaseValues } | null;
+  interpolation: "bezier";
+}
+export interface BuildFades {
+  video_in_s: number; video_out_s: number; audio_in_s: number; audio_out_s: number; end_s: number;
+  audio_tracks?: number[];
+  matte?: { png: string; track_index: number };
+}
+export interface BuildFadedItem { track: number; clip: number; keys: number }
+export interface BuildMatteItem { start: number; end: number; keys: number }
 export interface BuildTrack { i: number; name: string; clips: number }
 export interface BuildProjectReadback {
   project: string;
@@ -181,6 +200,8 @@ export interface BuildProjectReadback {
   };
   placed: { id: string; track: number; start: number; end: number; anim: string }[];
   sharpened: { clip: number; ok: boolean; amount?: number; grain?: number }[];
+  eased?: { decision_id: string | null; pieces: number[]; scale_keys: number; position_keys: number; interpolation: string; interpolation_verified?: boolean; ok: boolean; error?: string }[];
+  faded?: { matte: BuildMatteItem[]; audio: BuildFadedItem[]; ok: boolean };
   tracks: { video: BuildTrack[]; audio: BuildTrack[] };
   [key: string]: unknown;
 }

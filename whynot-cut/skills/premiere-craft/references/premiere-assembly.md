@@ -20,6 +20,23 @@ The build runs these steps:
 2. Import the base XML (`*_base.xml`). It holds the footage pieces (pause-tightened, jump cuts masked with alternating zoom), the cleaned dialogue on A1/A2 linked to V1, SFX on A3–A6, the original camera audio muted on A7/A8, and empty named graphic tracks.
 3. `setSettings`: preview codec "apcs" (ProRes 422 LT) 1080×1920, max bit depth OFF, max render quality OFF, composite in linear colour ON. Every value is read back.
 4. Place the brand stills on lanes and animate them with Premiere keyframes. The lanes are: B-roll, Graphic bars, Cards, Graphic text, one lane per checklist item, Caption bars, Caption text, Transitions.
+   - **Smooth zoom (T4.1).** Every move in the spec's `camera_ease.runs` gets 2 Scale + 2 Position keys per eased
+     side on its V1 clip, relative to the clip's own Motion values from the XML (read once, before any key), with
+     bezier interpolation (`setInterpolationTypeAtKey(t, 5)`). A punch_in eases over `camera.ease_ms` (default
+     250 ms); a slow_push has one ease across its first piece. A key that fails puts the clip back and is reported.
+     - Not eased: punch_out, reframe, jump-cut masks, source cutaways, shot framing, any move in 4:5 window framing
+       (the speaker is its own windowed clip there; V1 is the blurred cover copy), and never across another shot.
+     - A punch that starts or ends on a pause/word cut stays hard on that side.
+     - A punch split by a cut eases in on its first piece and out on its last.
+     - A plan written before T4.1 has no `camera_ease`: it builds with hard punches, as before.
+   - **Fades (T4.1).** `fades` from style.json (default off; under one frame = off):
+     - picture: ONE frame-size black still on its own top track ("Fade to black"), over each window, Opacity
+       100 -> 0 at the start and 0 -> 100 at the end (no per-layer fades: they would ghost);
+     - sound: Volume › Level keys on the dialogue, music and muted-original tracks (`audio_tracks`), never the SFX,
+       so the hook's sound at frame 0 keeps its level; the music bed's own fade-out keys are multiplied.
+
+     The native caption track sits above the matte, so its cues are trimmed where the fade is past half way to black
+     (a copy of the SRT in `07_premiere/media`; a warning says how many).
 5. Rename the tracks, tidy the bins, add markers (one per event, with its evidence), then save.
 6. Read back into `07_premiere/ppro-build-result.json` and check:
    - the project was saved this run
@@ -27,6 +44,11 @@ The build runs these steps:
    - linear colour, bit depth and render quality
    - all graphics placed
    - dialogue on A1/A2
+   - only when the plan asked: `punch_ins_eased` (the `eased[]` read-back has, per move, the expected Scale/Position
+     key counts and "bezier (set, not read back)": set on every key; ExtendScript has no getter, so the curve is a
+     live check) and `fades_applied` (`faded.matte` covers each picture-fade window with its keys; `faded.audio`
+     keyed the first / last A1 clip)
+   - `qc_frames`: the mid-ease frame times; `reel ppro-frames` adds them to its default frames
 
 **Animation presets** (`NHPP.placeStill`, in `templates/premiere/nh_ppro_lib.jsx`, at 24 fps):
 

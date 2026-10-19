@@ -1,6 +1,7 @@
 """Watchable preview of the planned edit, rendered by the engine alone (no Premiere, macOS or Windows).
 
-It mirrors what `ppro-build` gives Premiere: the same footage pieces (pause cuts, jump-cut zoom masks, punch-ins), the
+It mirrors what `ppro-build` gives Premiere: the same footage pieces (pause cuts, jump-cut zoom masks, punch-ins with
+their T4.1 smooth zoom, the picture and sound fades of the spec), the
 same graphic and caption layers from `ppro_build.job_data()` with the same keyframe presets (bar_sweep, text_pop,
 slide, push, card, flash, fade), the cleaned dialogue and the SFX cues. Use it at Gate 1 so the editor can WATCH the edit
 before approving, and to review revisions quickly. It is a proxy (540x960 H.264), not the deliverable: the editor still
@@ -130,14 +131,6 @@ def build_audio(paths: Paths, spec: dict, out: Path, src_video: Path) -> Path:
             piece[:fade] *= np.linspace(0, 1, fade)
             piece[-fade:] *= np.linspace(1, 0, fade)
         mix[a:a + len(piece)] += piece[:max(0, n - a)]
-    for c in read_json(paths.p("06_audio/audio-cue-sheet.json"), {"cues": []})["cues"]:
-        f = paths.p(c["source_file"])
-        if not f.exists():
-            continue
-        x = _mono(f) * (10 ** (c.get("gain_db", -14) / 20))
-        a = round(c["start_frame"] * SR / seq_fps())
-        if a < n:
-            mix[a:a + len(x)] += x[:n - a]
     mu = spec.get("music") or {}
     if mu.get("status") == "PLACED" and mu.get("file") and (paths.root / mu["file"]).exists():
         # the licensed bed under the dialogue, as placed on A06: from frame 0, recipe level, linear fade-out
@@ -146,6 +139,22 @@ def build_audio(paths: Paths, spec: dict, out: Path, src_video: Path) -> Path:
         if fo:
             x[-fo:] *= np.linspace(1, 0, fo)
         mix[:len(x)] += x
+    fd = spec.get("fades") or {}
+    if len(mix) and (fd.get("audio_in_ms") or fd.get("audio_out_ms")):
+        # T4.1 sound fades at the reel's start / end on the dialogue and music only (Premiere: Volume Level keys on the
+        # job's audio_tracks), linear; the SFX below are mixed after it, never faded (the hook's sound at frame 0)
+        from .camera_ease import fade_gain
+        fr = np.arange(spec["duration_frames"] + 1)
+        gains = np.array([fade_gain(spec, int(f_), "audio") for f_ in fr], dtype=np.float32)
+        mix *= np.interp(np.arange(n) * seq_fps() / SR, fr, gains).astype(np.float32)
+    for c in read_json(paths.p("06_audio/audio-cue-sheet.json"), {"cues": []})["cues"]:
+        f = paths.p(c["source_file"])
+        if not f.exists():
+            continue
+        x = _mono(f) * (10 ** (c.get("gain_db", -14) / 20))
+        a = round(c["start_frame"] * SR / seq_fps())
+        if a < n:
+            mix[a:a + len(x)] += x[:n - a]
     peak = float(np.max(np.abs(mix))) if len(mix) else 0
     if peak > 0.99:
         mix *= 0.99 / peak
@@ -354,6 +363,11 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
     _sh = sharpen_settings(spec)
     sharp = ImageFilter.UnsharpMask(radius=1.2, percent=int(_sh["amount"] * 4), threshold=2) if _sh else None
     segs = spec["main_segments"]
+    # T4.1: the punch-ins' smooth zoom and the picture fades, from the same spec keys Premiere gets (camera_ease)
+    from .camera_ease import fade_gain, value_at
+    eased = bool((spec.get("camera_ease") or {}).get("runs"))
+    fades = spec.get("fades") or {}
+    pic_fade = bool(fades.get("video_in_ms") or fades.get("video_out_ms"))
     brolls = [e for e in spec["events"] if e["template"] == "broll_video"]
     total = spec["duration_frames"]
     fps_n, fps_s = seq_fps(), fps_arg()               # read once, here: the workers below never ask the Context
@@ -476,9 +490,10 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
                     src_idx += 1
                     dec_read += 1
                 # Premiere: output = (source - centre) * scale + frame centre + offset  ->  invert for the source window
-                sc = seg.get("scale_factor", 1.0) or 1.0
-                ox = (box + (seg.get("offset_x") or 0.0)) * k
-                oy = (boy + (seg.get("offset_y") or 0.0)) * k
+                cv = value_at(spec, si, f - seg["start_frame"]) if eased else seg     # T4.1: the eased value
+                sc = cv.get("scale_factor", 1.0) or 1.0
+                ox = (box + (cv.get("offset_x") or 0.0)) * k
+                oy = (boy + (cv.get("offset_y") or 0.0)) * k
                 x0, x1 = cw_ / 2 - (W / 2 + ox) / sc, cw_ / 2 + (W / 2 - ox) / sc
                 y0, y1 = ch_ / 2 - (H / 2 + oy) / sc, ch_ / 2 + (H / 2 - oy) / sc
                 win = seg.get("window") if seg.get("decision_id") != "AUTO_CUTAWAY" else None
@@ -514,6 +529,10 @@ def render(paths: Paths, width: int = 540, label: bool = True, workers: int | No
                         im = _apply(stills.get(g["png"]), anim_state(g, t - g["start_s"]), k)
                         if im is not None:
                             frame.alpha_composite(im)
+                if pic_fade:                            # T4.1 picture fade: every layer over black (Premiere Opacity)
+                    gv = fade_gain(spec, f, "video")
+                    if gv < 0.999:
+                        frame = Image.blend(Image.new("RGBA", frame.size, (0, 0, 0, 255)), frame, gv)
                 if tag is not None:
                     frame.alpha_composite(tag)
                 enc.stdin.write(frame.convert("RGB").tobytes())
