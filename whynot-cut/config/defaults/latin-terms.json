@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "provenance": "Built only from WhyNot Cut's own review lexicons (config/review-domains/lexicons/*.json) and the client medical glossary (config/defaults/medical-glossary.json): every Latin term is a term of the lexicon named in `source`, and every Arabic spelling is that same lexicon's own Arabic spelling of the term. No third-party word list was copied or adapted (K0 rule 5 licence check: nothing to attribute).",
+  "licence": "GPL-3.0-or-later, as part of WhyNot Cut",
+  "_use": "Task 55 (Addendum M2-T3). A word written in Arabic letters whose spelling is listed here may be PROPOSED in Latin letters by lib/latin_backmap.py (02_transcription/latin-proposals.json), only when the word's audio probability and its context agree; a proposal is never applied by the engine: the editor accepts it through transcript-corrections.json. Kalam reads the same file (6B). Spellings are compared in the plan.norm form (diacritics, tatweel and invisible characters dropped, alef forms, ى and ة folded), so أنسولين also matches انسولين and إنسولين, and one joined clitic (و ف ب ل ك ال and their pairs) is kept in Arabic in front of the Latin word («بالـ insulin»). A name is never a candidate: a profile person's name word is skipped. A client who keeps English terms in Arabic letters sets `latin_backmap: false` in profile.json. A new entry needs its Latin term and its Arabic spelling in one of our lexicons first (tests/test_latin_backmap.py checks it).",
+  "terms": [
+    {"latin": "insulin", "arabic": ["أنسولين"], "domain": "medical", "source": "lexicons/medical.json#treatment"},
+    {"latin": "vitamin", "arabic": ["فيتامين"], "domain": "medical", "source": "lexicons/medical.json#treatment"},
+    {"latin": "cholesterol", "arabic": ["كوليسترول"], "domain": "medical", "source": "lexicons/medical.json#condition"},
+    {"latin": "ChatGPT", "arabic": ["شات جي بي تي"], "domain": "ai", "source": "lexicons/ai.json#ai-term"},
+    {"latin": "GPT", "arabic": ["جي بي تي"], "domain": "ai", "source": "lexicons/ai.json#ai-term"},
+    {"latin": "AI", "arabic": ["إيه آي"], "domain": "ai", "source": "lexicons/ai.json#ai-term"},
+    {"latin": "cash back", "arabic": ["كاش باك"], "domain": "business", "source": "lexicons/business.json#pricing"}
+  ]
+}
