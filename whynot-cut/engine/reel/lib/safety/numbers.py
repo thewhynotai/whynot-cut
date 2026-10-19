@@ -603,6 +603,26 @@ def _unit_tail(toks: list, k: int, unit: str) -> tuple:
     return unit, n
 
 
+# 1–3 letters right after a number written in digits are its unit, even one no list knows ("5 m" / "5 h", "2 d", «٥ د» /
+# «٥ س», "5h"): compared by what is written, so "5 m" ≠ "5 h" (executor ruling, review e4ed4c6 P2-1). Never a word that
+# only links («٢ او ٣», "2 or 3", "5 a day"), a pronoun or an ordinal ending ("1st"). «vitamin D», "D3", "B12": the
+# letter comes before the digit, so they are never read so.
+_NOT_A_UNIT = {fold(w) for w in (
+    "و", "او", "أو", "ولا", "في", "فى", "من", "عن", "على", "علي", "الى", "إلى", "مع", "بس", "ده", "دي", "دا", "يا", "لو",
+    "ان", "إن", "أن", "انا", "هو", "هي", "كل", "كام", "لا", "مش", "ما", "ثم", "بعد", "قبل", "لكل", "عشان",
+    "or", "and", "to", "of", "in", "on", "at", "by", "for", "is", "are", "was", "be", "it", "its", "x", "so", "as", "if",
+    "no", "not", "a", "an", "the", "per", "each", "or", "nor", "but", "yet", "up", "off", "out", "via", "vs",
+    "i", "me", "my", "we", "us", "our", "you", "he", "him", "his", "she", "her", "they", "all", "any", "few",
+    "st", "nd", "rd", "th")} | LINK | ARTICLES | PER_WEIGHT
+_UNIT_LETTERS = re.compile(r"[^\W\d_]{1,3}")
+
+
+def digit_unit(tok) -> str | None:
+    """The 1–3 letters (folded) that are a digit number's unit, written apart or onto it; None otherwise."""
+    t = str(tok or "")
+    return t if _UNIT_LETTERS.fullmatch(t) and t not in _NOT_A_UNIT else None
+
+
 def _time_name(tok: str) -> str:
     """Which period a time word counts (TIME_CLASS: «أيام» and "days" are "day")."""
     return next((TIME_CLASS[s] for s in stems(tok) if s in TIME_CLASS), tok)
@@ -647,6 +667,12 @@ def quantities(toks: list) -> list:
                 if k < len(toks) and is_time(toks[k]) and (k == end or toks[end] in LINK):
                     kind, unit, end = "duration", _time_name(toks[k]), k + 1
                     break
+        if kind == "number" and n["kind"] == "digits" and n["value"] is not None:
+            tag = digit_unit(n["unit_in_token"]) if n["unit_in_token"] else None
+            if not n["unit_in_token"] and end < len(toks) and digit_unit(toks[end]):
+                tag, end = toks[end], end + 1
+            if tag:
+                unit = "?" + tag                    # a unit no list knows: compared by its letters ("?m" ≠ "?h")
         if kind == "number" and n["ambiguous"]:
             continue
         if kind == "dose":

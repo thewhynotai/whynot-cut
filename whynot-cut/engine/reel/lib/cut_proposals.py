@@ -23,7 +23,8 @@ Rules (R-4.3 "Our version"; every number is a starting value of ours with its ba
   in «ش» is a negation, never the rest of a cut-off word), are left unticked, and so is a later take longer than
   12 words that the cut would stop inside; a medical or religious client, one whose domain is not set, or one whose settings cannot be read never
   gets a retake ticked (`retake_rule`);
-- false starts: a short or unsure cut-off word restarted within 400 ms;
+- false starts: a short or unsure cut-off word restarted within 400 ms, always shown unticked (it may be a negation:
+  «مش مشكلة», "not noticeable");
 - fillers: pure hesitation sounds always; «امم» only stretched; context words («يعني», «بص», «طب», «إيه», «اه», "like",
   "so", "you know") only stretched, with a pause of 250 ms on both sides, not before a question or a sentence end;
   bare «اه» is a real "yes": soft (left unticked); written laughter («هه») is never a filler; "er" only in English;
@@ -83,6 +84,8 @@ STOP = {"و", "في", "من", "على", "علي", "عن", "ال", "ان", "إن"
 _DIGITS = str.maketrans({**{chr(0x660 + i): str(i) for i in range(10)}, **{chr(0x6F0 + i): str(i) for i in range(10)}})
 _SENT_END = re.compile(r"[.!?؟…]\s*$")
 _QUESTION = re.compile(r"[?؟]\s*$")
+
+FALSE_START_LINE = ("؛ بداية مقطوعة: راجعها قبل ما تشيلها", "; false start: check it before removing")
 
 LABEL = {"pause": ("سكتة", "pause"), "retake": ("إعادة", "retake"), "false_start": ("بداية مقطوعة", "false start"),
          "filler": ("حشو", "filler"), "repeat_word": ("كلمة متكررة", "repeated word")}
@@ -149,12 +152,14 @@ _CLOSING = re.compile(r"[.!?؟…؛:;]$")                          # a take the 
 _TRAILING_QUOTES = re.compile(r"[\s\"'»”’›)\]}」』]+$")          # quotes and brackets after the mark («آمنة.»»)
 _CUT_MARK = re.compile(r"\w[-‐‑–—]$")                           # a word written as cut off ("am-", «آمـ-»)
 _NUMBER_CLITICS = ("و", "ب", "ف", "ل", "ك")                   # written onto a number: «بربع», «ب٥», «لعشرة», «كتسعة»
-_NEGATED_TAIL = ("n't", "nt", "'t", "not")                    # "do" + "n't" is "don't": a negation, never a cut-off
+# "do" + "n't" is "don't", "harm" + "less" is "harmless": a negation, never a cut-off (review e4ed4c6 P3-2)
+_NEGATED_TAIL = ("n't", "nt", "'t", "not", "less")
 # An Egyptian negation without «م» closes the word on «ش» / «شي», whatever comes before it: «بيقلل» + «ش», «عنده» + «وش»,
 # «بيقلل» + «وش», «عندها» + «ش», «ينفع» + «كش», «بيجي» + «ليش», «تاخد» + «وهاش». An added ending that ends so is a
 # negation, never the rest of a cut-off word (executor ruling, review a31ae0c P1-1). The cost, on the safe side: a cut-off
 # word whose whole form ends in «ش» («بيم» / «بيمشي», «قما» / «قماش») is not taken as cut off, so the retake is unticked.
-_NEGATED_ENDING = ("ش", "شي")
+# The same in Latin letters ("byakol" / "byakolsh", review e4ed4c6 P3-3); on the safe side too: "fini" / "finish".
+_NEGATED_ENDING = ("ش", "شي", "sh", "shi")
 
 
 def _closed(raw) -> bool:
@@ -592,7 +597,10 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
         # a later take longer than the cap (retake_max_words) is cut only up to the cap: the cut stops inside it and
         # leaves the rest of that take in the reel («… مش آمنة خالص. آمنة خالص.»). Shown, never ticked, never extended
         # on its own: the editor sets the cut (executor ruling, review a31ae0c P2-1)
-        capped = drop[0] > keep[0] and not sentence_end(drop[0] + drop[1] - 1)
+        # (a pause alone is no sentence end at the cap: a take of cap length the transcript did not close is capped
+        # too, review e4ed4c6 P3-1)
+        capped = drop[0] > keep[0] and (not sentence_end(drop[0] + drop[1] - 1) or drop[1] >= hi and
+                                        not _SENT_END.search(ws[drop[0] + drop[1] - 1]["word"]))
         if capped:
             number_ar += "؛ الإعادة أطول من الحد: راجع القص يدويًا"
             number_en += "; the retake is longer than the limit: check the cut by hand"
@@ -659,12 +667,16 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
             bonus = V["conf_unsure_bonus"] if short and prob(i) < V["false_start_max_p"] else 0
             # «50» before «500», «خمس» before «خمسمية»: a number is never ticked, the editor hears it
             number = _holds_number(ws[i]["word"], ws[i + 1]["word"])
-            add("false_start", i, i, V["conf_on_purpose"] if number else V["conf_false_start"] + bonus,
+            # a false start is never ticked (executor ruling, review e4ed4c6 P1-1): a short whole word that starts
+            # the next one may be a negation («مش مشكلة», «ما ماشيش», «لا لازم», "not noticeable", "no normal"), and
+            # no list knows every one. Shown with its reason; the editor ticks it in one click
+            add("false_start", i, i, min(V["conf_on_purpose"] if number else V["conf_false_start"] + bonus,
+                                         V["conf_on_purpose"]),
                 f"بداية كلمة اتقطعت واتقالت تاني: «{ws[i + 1]['word'].strip()}»"
-                + ("؛ بس فيها رقم، فسايبينها لحد ما تسمعها" if number else ""),
+                + ("؛ بس فيها رقم، فسايبينها لحد ما تسمعها" if number else "") + FALSE_START_LINE[0],
                 f"a cut-off start, said again: \"{ws[i + 1]['word'].strip()}\""
-                + ("; it holds a number, so it is left unticked" if number else ""),
-                default="keep" if number else None)
+                + ("; it holds a number, so it is left unticked" if number else "") + FALSE_START_LINE[1],
+                default="keep")
             used.add(i)
 
     # fillers ---------------------------------------------------------------------------------------------------------

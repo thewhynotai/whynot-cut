@@ -228,7 +228,7 @@ class TestFillers(unittest.TestCase):
 class TestOtherKinds(unittest.TestCase):
     def test_false_start(self):
         spec = [("الدكت", 150, 100, 0.4), ("الدكتورة", 400, 60), ("قالت.", 300, 60)]
-        self.assertEqual(kinds(C.compute(words(spec))), [("false_start", ["الدكت"])])
+        self.assertEqual(kinds(C.compute(words(spec)), "keep"), [("false_start", ["الدكت"])])   # never ticked (round 6)
 
     def test_repeated_word_but_not_intensifiers_or_numbers(self):
         self.assertEqual(kinds(C.compute(words([("في", 200, 60), ("في", 200, 60), ("البيت.", 300, 60)]))),
@@ -366,7 +366,7 @@ class TestAcceptanceFollowUps(unittest.TestCase):
                 self.assertEqual([p["default"] for p in fs], ["keep"])
                 self.assertIn("رقم", fs[0]["reason"])
         spec = [("الدكت", 150, 100, 0.4), ("الدكتورة", 400, 60), ("قالت.", 300, 60)]
-        self.assertEqual(kinds(C.compute(words(spec))), [("false_start", ["الدكت"])])
+        self.assertEqual(kinds(C.compute(words(spec)), "keep"), [("false_start", ["الدكت"])])   # never ticked (round 6)
 
     def test_p2_spelled_number_said_twice_is_never_ticked(self):
         res = C.compute(words([("خدي", 300, 60), ("خمسة", 300, 60), ("خمسة", 300, 60), ("مجم.", 300, 60)]))
