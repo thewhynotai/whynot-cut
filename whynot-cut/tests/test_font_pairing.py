@@ -216,7 +216,7 @@ class Tmp(unittest.TestCase):
 
     def tearDown(self):
         FP.clear_cache()
-        shutil.rmtree(self.tmp, ignore_errors=False)
+        _isolation.rmtree_retry(self.tmp)
 
 
 def traits(**kw):
@@ -488,7 +488,7 @@ class TestLatinScale(unittest.TestCase):
             self.assertAlmostEqual(r["latin_scale"], 560 / 470, places=2)
         finally:
             FP.clear_cache()
-            shutil.rmtree(tmp)
+            _isolation.rmtree_retry(tmp)
 
 
 # --------------------------------------------------------------------------- D. pair resolution
@@ -689,7 +689,9 @@ class TestTable(unittest.TestCase):
             if not any(r["class"]["arabic"] == cls for r in self.t["rows"]):
                 fams = [n for n, f in self.t["families"].items() if f["class"] == cls and f["use"]]
                 self.assertTrue(fams and all(n in cands for n in fams), cls)
-        self.assertIn("cannot draw ٫ ٬", cands["Aref Ruqaa"]["reason"])   # the decimal separator gate (review P2-2)
+        aref = [r for r in self.t["rows"] if r["arabic"]["family"] == "Aref Ruqaa"]    # back for Western digits
+        self.assertTrue(aref and all(r["arabic_indic_missing"] == ["٫", "٬"] for r in aref))
+        self.assertTrue(all(isinstance(r["arabic_indic_missing"], list) for r in self.t["rows"]))
 
     def test_candidates_are_never_picked(self):
         poisoned = {"rows": [table_row(100, ar=c["family"], status="candidate-unmeasured")
@@ -714,7 +716,7 @@ class TestTable(unittest.TestCase):
             self.assertEqual(out.read_bytes(), self.raw)
         finally:
             FP.clear_cache()
-            shutil.rmtree(tmp)
+            _isolation.rmtree_retry(tmp)
 
     def test_rows_sorted_deterministically(self):
         rows = self.t["rows"]
@@ -800,7 +802,7 @@ class TestBuilder(Tmp):
             self.assertEqual(row["status"], "measured")
         finally:
             FP.clear_cache()
-            shutil.rmtree(ext)
+            _isolation.rmtree_retry(ext)
 
     def test_a_one_file_family_serves_every_role_weight(self):
         # display faces ship one heavy file labelled 400: a headline (900) must still find the display pair
@@ -1075,13 +1077,65 @@ class TestPickFixRound(Tmp):
         self.assertEqual((r["pair"]["latin"]["family"], r["pair"]["source"]), ("Own La", "client-fonts"))  # ...own wins
 
     def test_a_client_latin_role_face_gets_an_arabic_measured_against_it(self):
-        la = self.brand_la()
-        typ = typography({"Brand La": [("Bold", la, "BrandLa-Bold", 700)]})
-        typ["roles"] = {"caption": "BrandLa-Bold"}
+        inter = FONTS / "inter" / "Inter-Bold.ttf"
+        typ = typography({"Inter": [("Bold", inter, "Inter-Bold", 700)]})
+        typ["roles"] = {"caption": "Inter-Bold"}
         r = FP.pick("caption", typ, FP.load_table(), locate=locate_repo)
-        if r["pair"] is not None:
-            self.assertEqual(r["pair"]["latin"]["family"], "Brand La")
-            self.assertGreaterEqual(r["pair"]["score"], 50)
+        p = r["pair"]
+        self.assertIsNotNone(p, r["reason"])                       # the repo Arabic faces give one
+        self.assertEqual((p["latin"]["family"], p["kind"]), ("Inter", "client-latin"))
+        self.assertGreaterEqual(p["score"], 50)
+        fresh = FP.measure_pair({"file": p["arabic"]["file"]}, {"file": str(inter)}, 700)
+        self.assertEqual((p["latin_scale"], p["score"]), (fresh["latin_scale"], fresh["score"]))
+
+    # ---- fix round 2 (review ca5f2cb P1-1): the Latin is measured against the Arabic the captions draw
+    def test_a_stored_table_pair_naming_another_arabic_is_measured_afresh(self):
+        ar = self.brand_ar()
+        alex, inter = FONTS / "alexandria" / "Alexandria-Bold.ttf", FONTS / "inter" / "Inter-Bold.ttf"
+        typ = typography({"Brand Ar": [("Bold", ar, "BrandAr-Bold", 700)],
+                          "Alexandria": [("Bold", alex, "Alexandria-Bold", 700)],
+                          "Inter": [("Bold", inter, "Inter-Bold", 700)]},
+                         {"caption": {"arabic": "Alexandria", "latin": "Inter", "source": "table"}})
+        typ["roles"] = {"caption": "BrandAr-Bold"}
+        r = FP.pick("caption", typ, FP.load_table(), locate=locate_repo)
+        self.check_never_another_arabic(r)
+        self.assertTrue(any("measured afresh" in f and "Alexandria + Inter" in f for f in r["findings"]),
+                        r["findings"])
+        if r["pair"] is not None:                                  # the Latin, if any, was measured against Brand Ar
+            fresh = FP.measure_pair({"file": str(ar)}, {"file": r["pair"]["latin"]["file"]}, 700)
+            self.assertEqual(r["pair"]["latin_scale"], fresh["latin_scale"])
+
+    def test_a_stored_table_pair_for_the_drawn_faces_is_used_only_while_it_scores_50(self):
+        alex, inter = FONTS / "alexandria" / "Alexandria-Bold.ttf", FONTS / "inter" / "Inter-Bold.ttf"
+        rows = {"Alexandria": [("Bold", alex, "Alexandria-Bold", 700)], "Inter": [("Bold", inter, "Inter-Bold", 700)]}
+        typ = typography(rows, {"caption": {"arabic": "Alexandria", "latin": "Alexandria", "source": "table"}})
+        p = FP.pick("caption", typ, {"rows": []})["pair"]
+        self.assertEqual((p["source"], p["arabic"]["family"], p["latin"]["family"]), ("table", "Alexandria", "Alexandria"))
+        bad = save(self.tmp / "bad" / "Bad-Bold.ttf", family="Bad", style="Bold", weight=700, xh=300, body=650,
+                   ink=20, stem=20, hair=20, ar_bar=220, ar_stem=40, adv=900)
+        typ = typography({"Bad": [("Bold", bad, "Bad-Bold", 700)]},
+                         {"caption": {"arabic": "Bad", "latin": "Bad", "source": "table"}})
+        r = FP.pick("caption", typ, {"rows": []})
+        self.assertNotEqual((r["pair"] or {}).get("source"), "table")
+        self.assertTrue(any("(table) now scores" in f for f in r["findings"]), r["findings"])
+
+    def test_a_latin_caption_face_is_measured_against_the_arabic_body_face(self):
+        # captions in Inter, body in the client's Arabic brand face; Alexandria (in the folder, no role) scores better
+        # but is never drawn: the pair's Arabic must be the body face, or there is no pair
+        ar = self.brand_ar()
+        alex, inter = FONTS / "alexandria" / "Alexandria-Bold.ttf", FONTS / "inter" / "Inter-Bold.ttf"
+        typ = typography({"Brand Ar": [("Bold", ar, "BrandAr-Bold", 700)],
+                          "Alexandria": [("Bold", alex, "Alexandria-Bold", 700)],
+                          "Inter": [("Bold", inter, "Inter-Bold", 700)]})
+        typ["roles"] = {"caption": "Inter-Bold", "body": "BrandAr-Bold"}
+        alex_score = FP.measure_pair({"file": str(alex)}, {"file": str(inter)}, 700)["score"]
+        r = FP.pick("caption", typ, FP.load_table(), locate=locate_repo)
+        self.assertGreaterEqual(alex_score, 50)                    # what 515ddc7/ca5f2cb handed over
+        self.check_never_another_arabic(r)
+        if r["pair"] is None:
+            self.assertIn("Brand Ar + Inter", r["reason"])
+        else:
+            self.assertEqual(r["pair"]["latin"]["family"], "Inter")
 
     def test_with_no_client_font_the_table_row_is_used(self):
         r = FP.pick("caption", typography({}), FP.load_table(), locate=locate_repo)
@@ -1130,12 +1184,41 @@ class TestRoleWeightsFixRound(Tmp):
 
 
 class TestGateFixRound(Tmp):
-    def test_decimal_and_thousands_separators_tatweel_and_harakat_are_required(self):
-        for ch in ("٫", "٬", "ـ", "َ", "ّ"):
+    def test_tatweel_and_harakat_are_always_required(self):
+        for ch in ("ـ", "َ", "ّ"):
             with self.subTest(char=f"U+{ord(ch):04X}"):
                 self.assertIn(ch, FP.ARABIC_TEST)
                 c = FP.coverage(save(self.tmp / f"{ord(ch):x}" / "f.ttf", drop=(ch,)), "arabic")
                 self.assertEqual((c["ok"], c["missing"]), (False, [ch]))
+
+    def test_decimal_and_thousands_separators_only_for_arabic_indic_digits(self):
+        # looks_captions writes ٫ ٬ only for captions.digits arabic_indic; western (the default) never draws them
+        for ch in ("٫", "٬"):
+            with self.subTest(char=f"U+{ord(ch):04X}"):
+                self.assertNotIn(ch, FP.ARABIC_TEST)
+                f = save(self.tmp / f"{ord(ch):x}" / "f.ttf", drop=(ch,))
+                self.assertEqual(FP.coverage(f, "arabic"), {"ok": True, "missing": []})
+                c = FP.coverage(f, "arabic", digits="arabic_indic")
+                self.assertEqual((c["ok"], c["missing"]), (False, [ch]))
+
+    def test_arabic_indic_clients_never_get_a_row_without_the_separators(self):
+        t = FP.load_table()
+        west = FP.pick("caption", typography({}), {"rows": [r for r in t["rows"] if r["arabic"]["family"] in
+                                                            ("Aref Ruqaa", "Tajawal")]}, digits="western")
+        self.assertIn(west["pair"]["arabic"]["family"], ("Aref Ruqaa", "Tajawal"))
+        indic = FP.pick("caption", typography({}), {"rows": [r for r in t["rows"] if r["arabic"]["family"] in
+                                                             ("Aref Ruqaa", "Tajawal")]}, digits="arabic_indic")
+        self.assertIsNone(indic["pair"])
+        self.assertTrue(any("٫ ٬" in f for f in indic["findings"]), indic["findings"])
+
+    def test_the_digit_setting_is_read_from_the_clients_style(self):
+        from lib import common
+        rows = {"rows": [r for r in FP.load_table()["rows"] if r["arabic"]["family"] == "Aref Ruqaa"]}
+        with mock.patch.object(common, "load_config",
+                               return_value={"captions": {"digits": "arabic_indic"}}):
+            self.assertIsNone(FP.pick("caption", typography({}), rows)["pair"])
+        with mock.patch.object(common, "load_config", return_value={}):          # no setting: western
+            self.assertEqual(FP.pick("caption", typography({}), rows)["pair"]["arabic"]["family"], "Aref Ruqaa")
 
 
 class TestMissingModulesFixRound(Tmp):
@@ -1152,6 +1235,25 @@ class TestMissingModulesFixRound(Tmp):
         self.assertIsNone(r["pair"])
         self.assertTrue(any("uharfbuzz" in f for f in r["findings"]), r["findings"])
         self.assertIn("uharfbuzz", str(cm.exception))
+
+    def test_a_native_library_that_fails_to_load_is_a_clear_refusal(self):
+        # freetype-py raises RuntimeError("Freetype library not found") when its DLL is missing or quarantined
+        real = FP.importlib.import_module
+
+        def broken(name, *a, **kw):
+            if name == "freetype":
+                raise RuntimeError("Freetype library not found")
+            return real(name, *a, **kw)
+        p = save(self.tmp / "sf" / "sf.ttf", family="Both", style="Bold", weight=700)
+        typ = typography({"Both": [("Bold", p, "Both-Bold", 700)]})
+        with mock.patch.object(FP.importlib, "import_module", side_effect=broken):
+            FP.clear_cache()
+            r = FP.pick("caption", typ, {"rows": [table_row(95)]})
+            with self.assertRaises(FP.FontProbeError) as cm:
+                FP.traits(p)
+        self.assertIsNone(r["pair"])
+        self.assertTrue(any("freetype" in f and "RuntimeError" in f for f in r["findings"]), r["findings"])
+        self.assertIn("freetype", str(cm.exception))
 
     def test_without_fonttools_a_clear_refusal(self):
         p = save(self.tmp / "f" / "f.ttf")

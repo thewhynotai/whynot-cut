@@ -5,12 +5,32 @@
 
 | | |
 |---|---|
-| Date | 2026-10-18; fix round 1 (review 515ddc7) 2026-10-19 |
+| Date | 2026-10-18; fix round 1 (review 515ddc7) 2026-10-19; fix round 2 (review ca5f2cb) 2026-10-19 |
 | Engine | `whynot-cut/engine/reel/lib/font_pairing.py` (traits, coverage gate, score, `latin_scale`, `pick`, table builder, specimen sheet) |
 | Table | `whynot-cut/config/defaults/font-pairings.json` (draft: classes are the curator's, every number is measured) |
 | Tests | `whynot-cut/tests/test_font_pairing.py` (tiny fontTools-made fonts with known boxes, plus the committed OFL fonts) |
 | Fonts measured | the repo's `guide-ar/fonts` (5 families, 12 files) and, with the owner's OK, 19 families from the pinned font source of `setup/components.json` (commit `bd8f81dd`), parsed only, never copied into the repo |
 | Not in this task | wiring: the looks track hooks `looks_type.font_chain` and wnc-queue adds `typography.pairing` (patches, not applied); AE/MOGRT use (Phase 6) |
+
+## Fix round 2 (review ca5f2cb), what changed
+- **pick() fixes the faces the caption chain draws first** (looks_type.font_chain), and never swaps them:
+  - Arabic: the role face when it draws Arabic, else the client's Arabic body face;
+  - Latin: the role face when it draws Latin;
+  - both fixed (a face drawing both scripts, or a Latin caption face plus an Arabic body face): those faces are scored
+    together, else no pair;
+  - one fixed: the other script is measured against it.
+
+  A stored `table` pair is used only when it names exactly the fixed faces (review P1-1).
+- **The ٫ ٬ separators** are required only for clients whose captions use Arabic-Indic digits (style.json
+  `captions.digits`; Western is the default and never draws them).
+  - Each row records `arabic_indic_missing`.
+  - Tajawal and Aref Ruqaa are back for Western-digit clients: 153 rows (96 auto, 57 shown), against 143 after round 1.
+  - Handwritten has pairs again; Tajawal is an Arabic face again (no longer a Latin-only partner).
+- **A required native library that fails to load** (freetype-py raises RuntimeError) is a named refusal, like a missing
+  package.
+- **The looks hook (patches, not in this file):** a pair's Latin face keeps `latin_scale` when it is also the role
+  face. The golden stills of phrase-boxed and phrase-highlight change accordingly; before/after sheets go with the
+  patch.
 
 ## Fix round 1 (review 515ddc7), what changed
 - **Arabic letter body (P1-1).**
@@ -30,11 +50,8 @@
   - Another family's table row is never handed over.
 - **Role weights (P2-1):** typography.json roles, brand.json `font_roles_fallback.weights`, then the house default; table
   rows follow that weight.
-- **Coverage gate (P2-2):** the Arabic side also needs ٫ ٬ (decimal and thousands separators), tatweel ـ and the harakat
-  U+064B–0652. Tajawal and Aref Ruqaa lack ٫ ٬:
-  - their Arabic-side rows dropped (27 rows; Tajawal now appears as a Latin partner, 17 rows);
-  - handwritten has no table pair until a handwritten Arabic face with ٫ ٬ is added (Aref Ruqaa and Dancing Script
-    are candidates with the reason).
+- **Coverage gate (P2-2):** the Arabic side also needs tatweel ـ and the harakat U+064B–0652. Round 1 also required
+  ٫ ٬ for everyone; round 2 made that digit-aware (above).
 - **Missing modules (P2-3):** a missing fontTools, uharfbuzz, freetype-py or numpy is a `FontProbeError` naming it.
   `pick()` returns no pair with that finding.
 - **P3:**
@@ -56,7 +73,7 @@
   - Terminal shape: the share of straight segments in a fixed glyph set (stands in for the class when a face is not
     curated, at most 30 of the 40 class points).
 - **Coverage gate**:
-  - **Arabic:** letters with ڤ, ٪ ، ؛ ؟, Arabic-Indic digits with ٫ ٬, tatweel, harakat, and the lam-alef ligature.
+  - **Arabic:** letters with ڤ, ٪ ، ؛ ؟, Arabic-Indic digits, tatweel, harakat, and the lam-alef ligature; ٫ ٬ only for Arabic-Indic caption digits.
   - **Latin:** A-Z a-z 0-9 % & ®.
   - **lam-alef** passes as one glyph or as a lam and an alef that both differ from their plain joining forms (Amiri,
     Noto Naskh Arabic and Noto Sans Arabic build it from two contextual glyphs).
@@ -76,7 +93,7 @@
     gives the committed bytes (`test_rebuilding_from_the_repo_fonts_is_byte_identical`).
 
 ## Results
-rows 143: auto 92, shown 51; kinds: pair 120, superfamily 23
+rows 153: auto 96, shown 57; kinds: pair 124, superfamily 29
 
 ### Arabic body against an independent measure
 
@@ -89,6 +106,8 @@ The module reads the body from the dotless forms (ٮ ں ى, and س) through Harf
 | Alexandria-SemiBold.ttf | static | 0.505 | 0.5050 | +0.00 % |
 | Amiri-Bold.ttf | static | 0.4046 | 0.4055 | -0.22 % |
 | Amiri-Regular.ttf | static | 0.3887 | 0.3890 | -0.08 % |
+| ArefRuqaa-Bold.ttf | static | 0.5385 | 0.5385 | +0.00 % |
+| ArefRuqaa-Regular.ttf | static | 0.5321 | 0.5325 | -0.08 % |
 | Cairo[slnt,wght].ttf | 400 | 0.5 | 0.5000 | +0.00 % |
 | Cairo[slnt,wght].ttf | 500 | 0.5 | 0.5010 | -0.20 % |
 | Cairo[slnt,wght].ttf | 700 | 0.502 | 0.5020 | +0.00 % |
@@ -107,10 +126,14 @@ The module reads the body from the dotless forms (ٮ ں ى, and س) through Harf
 | ReadexPro[HEXP,wght].ttf | 400 | 0.438 | 0.4380 | +0.00 % |
 | ReadexPro[HEXP,wght].ttf | 500 | 0.4485 | 0.4490 | -0.11 % |
 | ReadexPro[HEXP,wght].ttf | 700 | 0.4695 | 0.4695 | +0.00 % |
+| Tajawal-Black.ttf (no ں: module and independent both on «س ب ي») | static | 0.455 | 0.4550 | +0.00 % |
+| Tajawal-Bold.ttf (no ں: module and independent both on «س ب ي») | static | 0.444 | 0.4440 | +0.00 % |
+| Tajawal-Medium.ttf (no ں: module and independent both on «س ب ي») | static | 0.434 | 0.4340 | +0.00 % |
+| Tajawal-Regular.ttf (no ں: module and independent both on «س ب ي») | static | 0.428 | 0.4280 | +0.00 % |
 
-Largest difference: 0.24 % over 23 Arabic faces.
-3 % check against the independent body: 143 rows; unclamped rows outside 3 %: 0 []
-Readex Pro 400 «س»: module body top 0.4380, contour classes 0.4380, glyph box 0.4380 (515ddc7 measured the bowl's horn, 0.342).
+Largest difference: 0.24 % over 29 Arabic faces.
+3 % check against the independent body: 153 rows; unclamped rows outside 3 %: 0 []
+Readex Pro 400 «س»: module body top 0.4380, contour classes 0.4380, glyph control box 0.4380 (515ddc7 measured the bowl's horn, 0.342).
 
 ### Best pair per Arabic family and weight
 
@@ -133,6 +156,12 @@ Readex Pro 400 «س»: module body top 0.4380, contour classes 0.4380, glyph box
 | Readex Pro (geometric) | 400 | Readex Pro (geometric) (superfamily) | 87.26 | auto | 0.8343 |
 | Readex Pro (geometric) | 500 | Readex Pro (geometric) (superfamily) | 88.13 | auto | 0.851 |
 | Readex Pro (geometric) | 700 | Readex Pro (geometric) (superfamily) | 89.23 | auto | 0.8842 |
+| Tajawal (geometric) | 400 | Montserrat (geometric) | 87.7 | auto | 0.8152 |
+| Tajawal (geometric) | 500 | Montserrat (geometric) | 88.3 | auto | 0.8189 |
+| Tajawal (geometric) | 700 | Tajawal (geometric) (superfamily) | 88.32 | auto | 0.978 |
+| Tajawal (geometric) | 900 | Tajawal (geometric) (superfamily) | 88.23 | auto | 1.0022 |
+| Aref Ruqaa (handwritten) | 400, 500 | Aref Ruqaa (handwritten) (superfamily) | 81.44 | auto | 1.1468 |
+| Aref Ruqaa (handwritten) | 700 | Aref Ruqaa (handwritten) (superfamily) | 77.47 | auto | 1.0967 |
 | IBM Plex Sans Arabic (humanist) | 400 | Noto Sans (humanist) | 82.34 | auto | 0.7 |
 | IBM Plex Sans Arabic (humanist) | 500, 700 | IBM Plex Sans Arabic (humanist) (superfamily) | 85.52 | auto | 0.7682 |
 | Noto Sans Arabic (humanist) | 400 | Inter (humanist) | 81.13 | auto | 0.7382 |
@@ -152,14 +181,17 @@ Clamped (the heights stay apart, so at most shown):
 | Noto Naskh Arabic + Noto Serif | 400 | 70.42 | shown | 0.7 | 1.104 |
 | Noto Naskh Arabic + Noto Naskh Arabic | 500 | 69.39 | shown | 0.7 | 1.058 |
 | Noto Naskh Arabic + Noto Naskh Arabic | 400 | 69.25 | shown | 0.7 | 1.104 |
+| Aref Ruqaa + Dancing Script | 400 | 67.88 | shown | 1.4 | 0.874 |
+| Aref Ruqaa + Dancing Script | 500 | 67.64 | shown | 1.4 | 0.874 |
+| Aref Ruqaa + Dancing Script | 700 | 61.02 | shown | 1.4 | 0.863 |
 
 Refused (< 50, kept in the table, never used):
 
 - none
 
-Candidates (no row; never picked): Aref Ruqaa (handwritten): Arabic coverage gate: ArefRuqaa-Regular.ttf cannot draw ٫ ٬; Dancing Script (handwritten): no partner family of a matching class in the measured folders
+Candidates (no row; never picked): 
 
-Findings: IBM Plex Mono: not used (monospace: not a caption face); Aref Ruqaa: Arabic coverage gate: ArefRuqaa-Regular.ttf cannot draw ٫ ٬; Markazi Text: Arabic coverage gate: MarkaziText[wght].ttf cannot draw ٪; Tajawal: Arabic coverage gate: Tajawal-Regular.ttf cannot draw ٫ ٬
+Findings: IBM Plex Mono: not used (monospace: not a caption face); Markazi Text: Arabic coverage gate: MarkaziText[wght].ttf cannot draw ٪; Aref Ruqaa: cannot draw ٫ ٬ (ArefRuqaa-Regular.ttf): its rows are not used for clients with Arabic-Indic digits; Tajawal: cannot draw ٫ ٬ (Tajawal-Regular.ttf): its rows are not used for clients with Arabic-Indic digits
 
 ### Downloaded set (pinned font source of setup/components.json)
 
@@ -243,27 +275,30 @@ Findings: IBM Plex Mono: not used (monospace: not a caption face); Aref Ruqaa: A
 | Syne | OFL.txt (LF line endings) | `cc43cdce6f91c57989af8459341c276655e34224e954fa69c2ad700831a742d8` |
 
 ## How it is held
-- **`tests/test_font_pairing.py`: 95 tests.**
+- **`tests/test_font_pairing.py`: 102 tests.**
   - Traits on made fonts with known boxes: dots, a dot dipping into the tooth box, a tooth touching only a middle
     stroke, dotless forms, split base+dot clusters, a variable font, a collection face, 20 000 glyphs, an Arabic path
     with spaces.
   - The repo noon dots (IBM Plex Sans Arabic SemiBold, Alexandria Bold).
   - The repo Arabic bodies and table rows against the independent FreeType ink measure.
-  - The coverage gate, including ٫ ٬ tatweel harakat and contextual lam-alef.
+  - The coverage gate, including tatweel, harakat, contextual lam-alef and the digit-aware ٫ ٬.
+  - `pick()` on the faces the chain draws: a stored table pair naming another Arabic, a Latin caption face with an Arabic body face (review ca5f2cb P1-1).
   - Score parts and bands, `latin_scale` and the 3 % bound.
   - `pick()`: the reviewer's cases A, B, B2 and H, the Latin role face, role weights from typography.json roles and
     brand.json, a validated pairing entry, missing modules.
   - The licence refusals (also a truncated name table), the specimen geometry, and the table itself: structure, a
     wrong band, italic files, OFL shas, sorted rows, byte-identical rebuild.
-- **Mutation (scratch copy, one heavy.sh job each round):** 84 mutants: the round-0 47, the reviewer's 24 and 20 fix-round behaviours. Round 1 killed 79; one test per survivor was added; round 2 killed 84 of 84.
+- **Mutation (fix round 1 only; fix round 2 is LIGHT, no mutation run):** 84 mutants (the round-0 47, the reviewer's
+  24, 20 fix-round behaviours): the first run killed 79, one test per survivor was added, the second run killed all 84.
+  The review of ca5f2cb found 7 further code mutants that survive; they are listed as known limits in the close-out.
 - **Readex Pro 400 «س»** (not in the suite: the downloaded fonts never enter the repo): measured in the independent
   check above. The suite pins the same geometry with a made font, a tooth that touches only a middle stroke.
 
 ## What is not measured, and why
-- **Handwritten:** no Arabic face of the measured set passes the gate (Aref Ruqaa lacks ٫ ٬), so the class has no
-  table pair. Aref Ruqaa and Dancing Script are listed as candidates with the reason.
+- **Arabic-Indic digit clients:** Tajawal and Aref Ruqaa lack ٫ ٬, so their 27 rows are left out for such clients
+  (and so is the handwritten class, until a handwritten face with ٫ ٬ is added).
 - **Markazi Text** fails the Arabic gate (no ٪): it serves only as a Latin partner of the formal Arabic families.
-- **Tajawal** fails the Arabic gate (no ٫ ٬, no ں): it serves only as a Latin partner.
+- **Tajawal** has no ں: its noon body comes from contour classes (checked letter by letter in round 2's review).
 - **IBM Plex Mono** is left out (monospace, not a caption face).
 - **Weights out of reach** get no row (IBM Plex Sans Arabic has no face within 150 of 900 in the repo; Noto Naskh Arabic
   stops at 700).
@@ -272,8 +307,8 @@ Findings: IBM Plex Mono: not used (monospace: not a caption face); Aref Ruqaa: A
   sets the instance (written in the patch README).
 
 ## Not verified
-- **Specimen sheet verdict (H29):** the sheets were re-drawn after this fix round, outside the repo in Builder A's work
-  folder `lane4\work\task56-fu1\specimen\`. They show the Arabic as one right-to-left line, with guides measured afresh.
+- **Specimen sheet verdict (H29):** the sheets were re-drawn after fix round 2, outside the repo in Builder A's work
+  folder `lane4\work\task56-fu2\specimen\`. They show the Arabic as one right-to-left line, with guides measured afresh.
   The brand-systems-designer verdict and Yunus's approval (HM-4) are pending. The classes in the table are the
   curator's draft until then.
 - **Rendered frames:** pairing on Premiere/AE frames is M2-T5 (Phase 6). Only our own stills were inspected.
