@@ -10,7 +10,8 @@ its database is relative to the client root (lib/client_db.py), and bringing it 
     the reference-style fingerprint uses them), then a check (file list, sizes, the database by hash), then, under the
     new folder's writer lock, the database's paths made relative (client_db.migrate) and every other place under
     output/ that names the old folder pointed at the new one (rebase: JSON values, .md reports, interchange XMLs). The
-    old folder is LEFT in place: the editor deletes it after checking the new one.
+    old folder is LEFT in place: the editor deletes it after checking the new one (and, while a kept file may still
+    be opened by the old folder's path, after running its step again: `old_folder` names it).
   * clone(src, dest): a new, independent client with the same brand database: output/client_database without media
     (no assets/ or data/ files, no derivatives, no asset manifest, no reference-analysis cache), empty assets/ and data/,
     a fresh `.whynot-client`. Never the lease, lock files or the client's settings file.
@@ -75,7 +76,15 @@ REBASE_JSON = {INVENTORY, "01_analysis/edit-decisions.json", "00_inputs/input-ma
                "06_audio/sfx/sfx-library.json", "07_premiere/base-manifest.json", "07_premiere/ppro-build-result.json",
                "07_premiere/timeline-manifest.json", "08_quality_control/preview/preview-result.json",
                "08_quality_control/project-status.json", "08_quality_control/qc-results.json",
-               "08_quality_control/visual-verification.json", "01_analysis/reference_analysis/reference-measurements.json"}
+               "08_quality_control/visual-verification.json", "01_analysis/reference_analysis/reference-measurements.json",
+               # opened later by the absolute path they store (review 7fcbc1d P3-2): `reel verify --record` stats the
+               # sheet, motion-render / motion-qc probe `main`; no fingerprint, check or sign-off hashes their bytes
+               "08_quality_control/verify/verify-build.json", "04_after_effects/motion-render-result.json",
+               "01_analysis/motion-plan.json"}
+# the step that writes an item's files, by the item's subfolder: named first in the delete advice while a kept file
+# there may still be opened by the old folder's path (else: "the step that wrote <file>")
+STEP_OF = {"00_inputs": "reel preflight", "02_transcription": "reel transcribe", "06_audio": "reel audio-clean",
+           "07_premiere": "reel ppro-build", "08_quality_control": "reel qc", "09_handoff": "reel handoff"}
 # inside the client database only these (besides client_db.migrate's own files) are rewritten: everything else there is
 # bound to its bytes (the reference style every video's copy is checked against, the sealed rules registry) or written
 # by the editor or Claude, and none of it is opened as media
@@ -1209,14 +1218,39 @@ def _copy_client(src, dest, mode: str, apply: bool) -> dict:
         doc["warnings"] = [f"{len(times)} file(s) lost part of their modification time on this drive (FAT/exFAT keeps "
                            "times to 2 s): `reel next` may ask to redo a step there. Prefer an NTFS / APFS drive."]
     if mode == "move":
-        doc["old_folder"] = (f"left in place at {src}: check the new folder (`reel next --root \"{dest}\"`), then "
-                             "delete the old one yourself")
+        doc["old_folder"] = _old_folder(src, dest, outside["kept"])
         doc["next"] = (f"close the Premiere and After Effects projects you have open at {src} first (an open project "
                        f"keeps saving to the old folder), then work from {dest} from now on" + _then(outside))
     else:
         doc["next"] = (f"a new client at {dest} with this client's brand database and no media: add its assets/ and "
                        "data/, then `reel discover` and `reel client-db` there")
     return doc
+
+
+def _old_folder(src: Path, dest: Path, kept: list[dict]) -> str:
+    """The delete advice for the old folder. A kept file a step may still open by the path it stores (the old folder's)
+    makes it name that step first, Arabic first (review 7fcbc1d P3-2); a log (history), the client database's citations
+    (never opened), the takes history (an undo refuses either way) and the editor's sealed revise comments (a path in
+    them is text) don't."""
+    from .rules_loop import NOTES_REL
+    from .safety.takes import HISTORY
+    delete = (f"left in place at {src}: check the new folder (`reel next --root \"{dest}\"`), then delete the old one "
+              "yourself")
+    due = [k["file"] for k in kept if os.path.splitext(k["file"])[1].casefold() not in LOG_EXT
+           and not k["file"].startswith("output/client_database/") and not k["file"].endswith(("/" + HISTORY,
+                                                                                               "/" + NOTES_REL))]
+    if not due:
+        return delete
+    steps: dict = {}
+    for rel in due:
+        parts = rel.split("/")
+        verb = STEP_OF.get(parts[3]) if len(parts) > 4 and parts[:2] == ["output", "projects"] else None
+        cmd = f"`{verb} --root \"{dest}\" --video-id {parts[2]}`" if verb else None
+        steps.setdefault(cmd or rel, (cmd or f"الخطوة اللي كتبت {rel}", cmd or f"the step that wrote {rel}"))
+    shown = list(steps.values())[:5]                     # every one of them is in outside_database.kept
+    files = ", ".join(due[:5]) + (f" and {len(due) - 5} more" if len(due) > 5 else "")
+    return (f"قبل ما تمسح الفولدر القديم: شغّل {'، و'.join(a for a, _e in shown)} تاني. Before you delete the old "
+            f"folder: run {' and '.join(e for _a, e in shown)} again ({files} still name it). The old folder is {delete}")
 
 
 def _to_redo(root: Path, voided: list[dict]) -> list[dict]:

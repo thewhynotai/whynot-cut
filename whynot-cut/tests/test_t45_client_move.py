@@ -837,27 +837,48 @@ class TestBoundDatabaseFiles(Base):
         self.assertEqual(cli.next_doc(Paths(self.dest, "R01"))["stale"], [])
 
     def test_the_sealed_rules_file_is_kept_and_still_reads(self):
-        from lib import rules_loop
-        prof = self.src / "output/client_database/reel-profile"
-        rules = [{"id": "R-1", "status": "active", "text": "logo from " + str(self.src / "assets" / "Brand" / "logo.png"),
-                  "from": ["N-1"]}]
-        f = prof / rules_loop.RULES_FILE
-        f.write_bytes(rules_loop._registry_bytes({"schema": rules_loop.SCHEMA, "rules": rules}))
-        self.assertEqual(rules_loop._State(self.src).registry()["rules"][0]["id"], "R-1")
+        """The rules file is made by `reel rules`' own record / propose / add (a knob rule and a T4.3 preference), so
+        the test follows the writer's row format, whatever it becomes. A move and an "already moved" run leave it
+        byte for byte and `registry()` still reads it at the new place. Since T4.3 (7cadf05) a rule row holds the
+        engine's vocabulary, never the editor's words, so it names no folder; should a rules file ever name the old
+        one, it is kept with the sealed reason, never rewritten (a rewrite breaks the seal)."""
+        from lib import rules_loop as RL
+        from lib.common import Context, use_context
+        logo = str(self.src / "assets" / "Brand" / "logo.png")
+        up = {"knob": "caption_size_px", "direction": "up"}
+        (self.src / "output/projects/R02").mkdir(parents=True)
+        with use_context(Context(self.src)):
+            RL.record(self.src, "R01", [{"text": "الكابشن صغير", "intent": up},
+                                        {"text": f"اللوجو في الآخر ({logo})", "scope": "standing",
+                                         "intent": {"topic": "logo_end", "area": "ending", "phrase": "logo_end"}}])
+            RL.record(self.src, "R02", [{"text": "captions too small", "intent": up}])
+            for p in RL.propose(self.src)["proposals"]:
+                RL.add(self.src, p["id"])
+        f = self.src / "output/client_database/reel-profile" / RL.RULES_FILE
+        ids = lambda root: [r["id"] for r in RL._State(root).registry()["rules"]]
+        self.assertEqual(ids(self.src), ["R1", "R2"])
         raw = f.read_bytes()
+        self.assertNotIn(json.dumps(str(self.src))[1:-1], raw.decode("utf-8"))   # no path in a T4.3 row
         hand = self.tmp / "by hand"
         shutil.copytree(self.src, hand, copy_function=shutil.copy2)
         doc = self.moved()
-        g = self.dest / "output/client_database/reel-profile" / rules_loop.RULES_FILE
+        g = self.dest / "output/client_database/reel-profile" / RL.RULES_FILE
         self.assertEqual(g.read_bytes(), raw)
-        self.assertEqual(rules_loop._State(self.dest).registry()["rules"][0]["id"], "R-1")
-        self.assertIn("sealed by `reel rules`", self.kept(doc)["output/client_database/reel-profile/rules.json"])
+        self.assertEqual(ids(self.dest), ["R1", "R2"])
+        rel = "output/client_database/reel-profile/rules.json"
+        self.assertNotIn(rel, [r["file"] for r in doc["outside_database"]["rewritten"]])
+        self.assertIn("sealed by `reel rules`", CM._rewritable(rel, ".json"))  # if it ever names a folder: kept
+        notes = "output/projects/R01/01_analysis/revision-notes.json"      # the editor's comment names the logo
+        self.assertIn(notes, self.kept(doc))
+        self.assertEqual((self.dest / notes).read_bytes(), (self.src / notes).read_bytes())   # its seal holds
+        self.assertNotIn("revision-notes", doc["old_folder"])               # nothing re-runs a comment
         self.hold(hand)                                                         # moved by hand, then repaired
         am = CM.already_moved(hand, apply=True)
         self.assertNotIn("error", am)
-        self.assertEqual((hand / "output/client_database/reel-profile" / rules_loop.RULES_FILE).read_bytes(), raw)
-        self.assertEqual(rules_loop._State(hand).registry()["rules"][0]["id"], "R-1")
-        self.assertIn("output/client_database/reel-profile/rules.json", self.kept(am))
+        self.assertEqual((hand / "output/client_database/reel-profile" / RL.RULES_FILE).read_bytes(), raw)
+        self.assertEqual(ids(hand), ["R1", "R2"])
+        with use_context(Context(self.dest)):
+            self.assertEqual([p["id"] for p in RL.propose(self.dest)["proposals"]], [])    # the notes still count
 
     def test_the_editors_own_writing_is_kept_and_the_status_file_is_still_rewritten(self):
         prof = self.src / "output/client_database/profile/client-profile.md"
@@ -1057,7 +1078,7 @@ class TestReviewR1Copy(Base):
         self.hold()
         doc = CM.move(self.src, self.dest, apply=True)
         self.assertIn(f"close the Premiere and After Effects projects you have open at {self.src} first", doc["next"])
-        self.assertIn("delete the old one yourself", doc["old_folder"])     # nothing in the new folder reads the old
+        self.assertIn("delete the old one yourself", doc["old_folder"])     # after re-running delivery.json's step
         self.assertNotIn("keep it until", doc["old_folder"])
         plain = make_client(self.tmp, "Plain", steps=False)
         self.hold(plain)
@@ -1065,6 +1086,109 @@ class TestReviewR1Copy(Base):
         self.assertTrue(doc2.get("applied"), doc2)
         self.assertIn("delete the old one yourself", doc2["old_folder"])
         self.assertNotIn("keep it until", doc2["old_folder"])
+
+
+class TestReview7fcbc1dP32(Base):
+    """Review 7fcbc1d P3-2: the verification sheet, the motion render result and the motion plan are opened later by
+    the absolute path they store; nothing hashes their bytes (plan/motion/review fingerprints, the transcript check,
+    cut proposals, reels: none reads them), so a move points them at the new folder. Whatever is still kept and may be
+    opened later makes the delete advice name the step to run again first, Arabic first."""
+    BEFORE_AR = "قبل ما تمسح الفولدر القديم: شغّل"
+
+    def add_late_files(self, root: Path):
+        a = lambda r: str(root.joinpath(*r.split("/")))
+        p, m = Paths(root, "R01"), Paths(root, "R02")
+        sheet = p.p("08_quality_control/verify/verify_sheet.jpg")
+        sheet.parent.mkdir(parents=True, exist_ok=True)
+        sheet.write_bytes(b"jpg")
+        write_json(p.p("08_quality_control/verify/verify-build.json"),
+                   {"sheet": str(sheet), "checklist": str(sheet.with_name("verify-checklist.md")), "tiles": 1,
+                    "rows": [{"tile": 1, "image": a("output/projects/R01/03_broll/x.png")}]})
+        write_json(m.p("00_inputs/source.json"), {"kind": "motion_reel", "format": "9x16"})
+        write_json(m.p("01_analysis/motion-plan.json"), {"scenes": [], "fingerprint": "f" * 40,
+                                                         "audio": {"dialogue": a("output/projects/R02/06_audio/d.wav")}})
+        write_json(m.p("04_after_effects/motion-render-result.json"),
+                   {"status": "RENDERED", "main": a("output/projects/R02/04_after_effects/renders/R02.mov")})
+        for f in (sheet, p.p("08_quality_control/verify/verify-build.json"), m.p("01_analysis/motion-plan.json"),
+                  m.p("04_after_effects/motion-render-result.json"), m.p("00_inputs/source.json")):
+            os.utime(f, (T0 + 950, T0 + 950))           # newer than the fixture's .prproj (the newest render)
+
+    def moved(self, root=None) -> dict:
+        root = root or self.src
+        self.hold(root)
+        doc = CM.move(root, self.dest, apply=True)
+        self.assertTrue(doc.get("applied"), doc)
+        return doc
+
+    def test_the_late_files_point_under_the_new_root(self):
+        self.add_late_files(self.src)
+        doc = self.moved()
+        d = self.dest
+        rewritten = {r["file"] for r in doc["outside_database"]["rewritten"]}
+        kept = {k["file"] for k in doc["outside_database"]["kept"]}
+        for rel in ("output/projects/R01/08_quality_control/verify/verify-build.json",
+                    "output/projects/R02/04_after_effects/motion-render-result.json",
+                    "output/projects/R02/01_analysis/motion-plan.json"):
+            self.assertIn(rel, rewritten)
+            self.assertNotIn(rel, kept)
+        vb = read_json(d / "output/projects/R01/08_quality_control/verify/verify-build.json")
+        self.assertEqual(vb["sheet"], str(d / "output/projects/R01/08_quality_control/verify/verify_sheet.jpg"))
+        self.assertTrue(Path(vb["sheet"]).is_relative_to(d))
+        self.assertEqual(vb["rows"][0]["image"], str(d / "output/projects/R01/03_broll/x.png"))
+        rr = read_json(d / "output/projects/R02/04_after_effects/motion-render-result.json")
+        self.assertEqual(rr["main"], str(d / "output/projects/R02/04_after_effects/renders/R02.mov"))
+        mp = read_json(d / "output/projects/R02/01_analysis/motion-plan.json")
+        self.assertEqual(mp["audio"]["dialogue"], str(d / "output/projects/R02/06_audio/d.wav"))
+        self.assertEqual(mp["fingerprint"], "f" * 40)                   # a value, never a path: as it was
+
+    def test_verify_record_at_the_new_place_never_reads_the_old_folder(self):
+        from lib import verify
+        self.add_late_files(self.src)
+        self.moved()
+        gone = self.tmp / "deleted old folder"
+        os.rename(self.src, gone)                                     # the editor deleted the old folder
+        rec = verify.record(Paths(self.dest, "R01"), "pass", "every tile checked", by="editor")
+        self.assertEqual(rec["sheet"], str(self.dest / "output/projects/R01/08_quality_control/verify/verify_sheet.jpg"))
+        self.assertFalse(self.src.exists())
+        self.assertEqual(read_json(self.dest / "output/projects/R01/08_quality_control/visual-verification.json")
+                         ["verdict"], "pass")
+
+    def test_the_delete_advice_names_the_step_first_while_a_file_is_kept(self):
+        doc = self.moved()                                    # the fixture's 09_handoff/delivery.json: not on the list
+        self.assertIn("output/projects/R01/09_handoff/delivery.json",
+                      [k["file"] for k in doc["outside_database"]["kept"]])
+        adv = doc["old_folder"]
+        self.assertTrue(adv.startswith(self.BEFORE_AR), adv)                    # Arabic first
+        self.assertIn(f'reel handoff --root "{self.dest}" --video-id R01', adv)
+        self.assertIn("تاني", adv)
+        self.assertLess(adv.index("تاني"), adv.index("Before you delete the old folder"))
+        self.assertIn("output/projects/R01/09_handoff/delivery.json", adv)
+        self.assertIn("then delete the old one yourself", adv)
+        self.assertNotIn("pipeline.log", adv)                                   # a log is history, never opened
+
+    def test_the_delete_advice_is_plain_when_nothing_kept_is_opened_later(self):
+        """Kept but never opened by a stored path: a log, the client reference style's citation, the takes history."""
+        (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
+        write_json(self.src / "output/client_database/reference_style/editing-style.json",
+                   {"cited": str(self.src / "data/References/ref.mp4")})
+        write_json(Paths(self.src, "R01").p("01_analysis/takes-history.json"),
+                   {"schema": 1, "steps": [{"before": "e30=", "after_sha1": "x"}]})
+        doc = self.moved()
+        self.assertEqual(sorted(k["file"] for k in doc["outside_database"]["kept"]),
+                         ["output/client_database/reference_style/editing-style.json",
+                          "output/projects/R01/01_analysis/takes-history.json",
+                          "output/projects/R01/logs/pipeline.log"])
+        self.assertEqual(doc["old_folder"], f"left in place at {self.src}: check the new folder (`reel next --root "
+                                            f"\"{self.dest}\"`), then delete the old one yourself")
+        self.assertNotIn(self.BEFORE_AR, doc["old_folder"])
+
+    def test_an_unknown_kept_file_names_the_step_that_wrote_it(self):
+        write_json(self.src / "output/discovery/extra-notes.json", {"seen": str(self.src / "data/Raw/clip 1.mp4")})
+        (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
+        adv = self.moved()["old_folder"]
+        self.assertTrue(adv.startswith(self.BEFORE_AR), adv)
+        self.assertIn("الخطوة اللي كتبت output/discovery/extra-notes.json", adv)
+        self.assertIn("the step that wrote output/discovery/extra-notes.json", adv)
 
 
 class TestFileUrls(unittest.TestCase):

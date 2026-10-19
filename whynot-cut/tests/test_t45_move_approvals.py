@@ -72,6 +72,13 @@ class Approved(Base):
                 fp = fingerprint(m)
             write_json(m.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor", "kind": "motion",
                                                                 "format": PL.APPROVAL_FORMAT, "plan_fingerprint": fp})
+            if vid == "R03":         # review 7fcbc1d P3-1: a content review on a motion item, voided by the brand only
+                write_json(m.p("01_analysis/motion-plan.json"), {"scenes": [], "fps": 30, "fingerprint": fp})
+                with use_context(Context(self.src)):
+                    kind, _index, rfp = RF._current(m)
+                    write_json(RF.path(m), {"schema": RF.SCHEMA, "plan_kind": kind, "plan_fingerprint": rfp,
+                                            "domain": RF._domain(), "checked": 0, "lines_total": 0, "ok": [],
+                                            "items": []})
         ep = EpisodePaths(self.src, "EP01")
         write_json(ep.p("01_analysis/reels-plan.json"), {"episode": a("data/Raw/clip 1.mp4"), "reels": []})
         write_json(ep.p("02_transcription/words.json"), {"words": []})
@@ -85,7 +92,7 @@ class Approved(Base):
     ALL = [("episodes", "EP01", "reels-plan"),
            ("projects", "R01", "cut-proposals"), ("projects", "R01", "plan"), ("projects", "R01", "review"),
            ("projects", "R01", "transcript"),
-           ("projects", "R02", "plan"), ("projects", "R03", "plan"),
+           ("projects", "R02", "plan"), ("projects", "R03", "plan"), ("projects", "R03", "review"),
            ("projects", "R04", "transcript")]
 
     def keys(self, lst) -> list:
@@ -113,6 +120,23 @@ class TestMoveVoidsAndLists(Approved):
         self.assertEqual(self.keys(dry["approvals_to_redo"]), self.ALL)
         doc = self.move()
         self.assertEqual(self.keys(doc["approvals_to_redo"]), self.ALL)
+
+    def test_a_motion_review_voided_by_the_brand_tokens_alone_is_forecast_and_listed(self):
+        """Review 7fcbc1d P3-1 (mutant K2: `("plan", "review")` -> `("plan",)` in _bound_hit): R03's own files name no
+        path, so only the rewritten brand tokens void its content review. The dry run's forecast must say so too."""
+        key = ("projects", "R03", "review")
+        self.assertIs(self.held[key], True)
+        dry = CM.move(self.src, self.dest)
+        self.assertNotIn("output/projects/R03/01_analysis/motion-script.json",
+                         [r["file"] for r in dry["outside_database"]["rewritten"]])
+        self.assertIn(CM.BRAND_TOKENS, [r["file"] for r in dry["outside_database"]["rewritten"]])
+        self.assertIn(key, self.keys(dry["approvals_to_redo"]))
+        doc = self.move()
+        self.assertIn(key, self.keys(doc["approvals_to_redo"]))
+        self.assertIn(key, self.keys(CM.still_void(self.dest)))
+        from lib import review_flags as RF
+        with use_context(Context(self.dest)):
+            self.assertIsNone(RF.load(Paths(self.dest, "R03")))
 
     def test_per_kind_the_media_is_under_the_new_root_and_the_approval_is_void(self):
         doc = self.move()
