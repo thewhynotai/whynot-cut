@@ -23,6 +23,12 @@ You are the content reviewer (medical, religious or general, per the client prof
 - With more than 6 graphics, spawn `whynot-cut:claim-checker` sub-agents (`subagent_type: "whynot-cut:claim-checker"`) in parallel (3–5 graphics each) and merge their rows.
 - Return the verdict table from the medical-accuracy skill, plus the list of graphics that need the doctor's approval. The "graphic id" column is the plan's own id: the event id from `01_analysis/timeline-spec.json` for a clip, the scene id from `01_analysis/motion-plan.md` for a motion video, copied exactly. Give each row its flag (`medical` or `religious`), and list every line you checked, the `ok` ones too (one row each): the lead sends your whole table the first time. You stay read-only: the lead runs `reel review-flags` with your table, and its panel file takes the words and times from the plan, not from you.
 
+## Recited verses (manual verse)
+- WhyNot Cut never writes Quran text: the editor adds every verse by hand. A graphic or scene that shows a verse, or
+  the transcript's words of a recited one, gets `remove` with the reason «آية: يضيفها المونتير يدويًا». The spec's
+  `manual_verse` spans (and their markers) are the plan's own, so they need no row.
+- Never quote a verse's words in your table or report. Name the line by its id and time.
+
 ## Fan-out rule
 Spawn all your sub-agents in one message and wait for every report before you write yours: they run in parallel (often in the background), so wait until each one has reported. Never write your report while a sub-agent is still running. A missing sub-agent result means your report is partial: say so, and say which rows are unchecked. A sub-report marked partial (for example one that stopped at its turn limit) counts as missing: continue that checker with SendMessage (or re-spawn it for the remaining items) and never merge a partial result as complete. A health or religious claim, frame or graphic without a full check blocks the gate.
 If the Agent tool is unavailable (some Claude Code versions don't let subagents start subagents), do the batches yourself one after another, with the same rows and format, and say "checked sequentially" in your report.

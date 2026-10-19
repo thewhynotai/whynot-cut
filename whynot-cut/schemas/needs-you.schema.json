@@ -52,7 +52,9 @@
       "additionalProperties": false,
       "properties": {
         "id": {"type": "string", "pattern": "^[0-9a-f]{12}$", "description": "stable: from (source, kind, ref)"},
-        "kind": {"enum": ["pick", "words","medical", "religious", "music", "fonts", "logo", "website", "final"]},
+        "kind": {"enum": ["pick", "words", "verse", "medical", "religious", "business", "ai", "music", "fonts", "logo",
+                          "website", "final"],
+                 "description": "every item is for the editor (this file lists what only the editor can do), so no `who` field; verse = a recited Quran verse the editor adds by hand (manual verse), never with its words"},
         "text": {"type": "string", "minLength": 1, "maxLength": 600, "description": "English, one sentence"},
         "text_ar": {"type": "string", "minLength": 1, "maxLength": 600},
         "why": {"type": "string", "maxLength": 1200},
@@ -61,7 +63,22 @@
                 "description": "a client-root-relative path (forward slashes) or a plan id (graphic or scene id)"},
         "ref_exists": {"type": "boolean", "description": "path refs only: the path exists now"},
         "item": {"type": ["string", "null"], "description": "the video, reel or episode id; null = the whole client"},
-        "source": {"type": "string", "minLength": 1, "description": "the client-root-relative state file it came from"}
+        "source": {"type": "string", "minLength": 1, "description": "the client-root-relative state file it came from"},
+        "span": {
+          "type": "object",
+          "description": "verse items only: the recited span (ms; start/end on the reel's timeline, src_* in the source clip), its cue as shown and whether its end is a guess (no pause within 12 s). `ref` is the span id in the timeline spec's manual_verse list",
+          "required": ["start_ms", "end_ms", "src_start_ms", "src_end_ms", "cue_ar", "cue_en", "guessed_end"],
+          "additionalProperties": false,
+          "properties": {
+            "start_ms": {"type": "integer", "minimum": 0},
+            "end_ms": {"type": "integer", "minimum": 0},
+            "src_start_ms": {"type": "integer", "minimum": 0},
+            "src_end_ms": {"type": "integer", "minimum": 0},
+            "cue_ar": {"type": "string", "minLength": 1, "maxLength": 120},
+            "cue_en": {"type": "string", "minLength": 1, "maxLength": 120},
+            "guessed_end": {"type": "boolean"}
+          }
+        }
       }
     }
   }

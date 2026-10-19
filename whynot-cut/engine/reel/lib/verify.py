@@ -295,7 +295,9 @@ def build(paths: Paths) -> dict:
     cap = paths.p("04_after_effects/compositions/CAPTIONS.mov")
     if cap.exists():
         from . import srt as srtlib
-        cues = srtlib.read_srt(paths.p("02_transcription/captions-short.srt"))
+        # the captions the build drew (spec caption_source: after pause removal, cut words or a recited verse the plan
+        # wrote them without; manual verse: never a verse's words as "expected text")
+        cues = srtlib.read_srt(paths.p(spec.get("caption_source") or "02_transcription/captions-short.srt"))
         picks = [cues[i] for i in sorted({0, len(cues) // 3, (2 * len(cues)) // 3, len(cues) - 1})] if cues else []
         for c in picks:
             t = (c["start_ms"] + c["end_ms"]) / 2000

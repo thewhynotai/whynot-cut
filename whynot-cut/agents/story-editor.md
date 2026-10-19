@@ -31,6 +31,20 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 - Apply the client's standing style decisions exactly. If feedback changes a standing rule, say so, so the lead can record it in the profile.
 - Return a short plan summary (hook, each graphic with timecode and words, cuts, what you left out and why) for the lead's approval playback.
 
+## Recited verses (manual_verse)
+- WhyNot Cut never writes Quran text: not in a caption, a graphic, a card, the evidence or your summary. The editor
+  adds every verse by hand from a trusted Mushaf.
+- `reel plan` finds a recited verse after «قال تعالى» (and «قال الله تعالى», «يقول تعالى», «قوله تعالى»), from the
+  basmala or the full isti'adha and, for a religious client, from the religious lexicon's common verse phrases. The
+  captions are empty there, a graphic over the verse is shortened or dropped, and the timeline gets a marker
+  «آية: يضيفها المونتير يدويًا». «آية», «سورة …» or «في الآية» alone never count.
+- Your decision wins. In `edit-decisions.json` (top level), `"manual_verse": [{"start_ms", "end_ms", "note"?}]` adds a
+  recited span the plan missed. `"manual_verse_off": [{"start_ms", "end_ms"}]` removes a detected span that is not a
+  recitation: a hadith after «قال الله تعالى», or a paraphrase. Times are source ms (or clocks). The note stays in the
+  plan only, so never quote the verse in it.
+- Never put a verse, or the transcript's words of one, on a graphic. Never cite them as evidence. In your summary,
+  name a span by its id and time (MV01 at 0:12), never by its words.
+
 ## Podcast reels (video id `<EP>_<RID>`)
 - Read `00_inputs/source.json`: `content_type`, `recipe` (pacing, camera, captions, graphics, sfx, music, copy) and
   `context_line`. Follow the recipe; when you deviate (more graphics, a bigger zoom, an avoided template), add

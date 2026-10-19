@@ -56,6 +56,19 @@
       "items": {"type": "object", "required": ["text"],
                 "properties": {"text": {"type": "string", "minLength": 1}, "at": {"anyOf": [{"$ref": "#/$defs/time"}, {"type": "null"}]}}}
     },
+    "manual_verse": {
+      "type": "array",
+      "description": "manual verse: recited-verse spans the plan missed (source time); the plan leaves their captions empty and marks them for the editor, who adds the verse by hand. A detected span this one overlaps is replaced by it. `note` stays in the timeline spec only (never quote the verse in it)",
+      "items": {"type": "object", "required": ["start_ms", "end_ms"],
+                "properties": {"start_ms": {"$ref": "#/$defs/time"}, "end_ms": {"$ref": "#/$defs/time"},
+                               "note": {"type": "string", "maxLength": 300}}}
+    },
+    "manual_verse_off": {
+      "type": "array",
+      "description": "manual verse: removes each detected recited-verse span this range overlaps (a hadith after «قال الله تعالى», a paraphrase)",
+      "items": {"type": "object", "required": ["start_ms", "end_ms"],
+                "properties": {"start_ms": {"$ref": "#/$defs/time"}, "end_ms": {"$ref": "#/$defs/time"}}}
+    },
     "music": {
       "type": "object",
       "properties": {

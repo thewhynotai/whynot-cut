@@ -4,11 +4,12 @@ For talks on faith, ethics and spirituality (e.g. a sheikh, preacher or scholar)
 (ok / reword-to-match / needs-approval / remove); "approval" here means the speaker or the client's content owner.
 
 ## What to check on every on-screen element
-1. **Quran (آيات):** text on screen must be the exact Mushaf wording, not the transcript's spoken approximation.
-   Shown between ﴿ ﴾, ideally with the surah and ayah (e.g. ﴿الَّذِينَ آمَنُوا وَعَمِلُوا الصَّالِحَاتِ﴾ — البقرة: ٢٥).
-   Whisper often drops or alters words in recitation: never copy a verse from the transcript. If the exact verse and
-   reference can't be confirmed from the client's own material, mark `needs-approval` and keep it off screen.
-   A line of the speaker's own that *echoes* a verse (e.g. «آمنوا الأول وعملوا الصالحات» from «الَّذِينَ آمَنُوا وَعَمِلُوا
+1. **Quran (آيات):** WhyNot Cut never writes Quran text (owner decision 2026-10-18). Not in a caption, a graphic, a
+   card or a statement bar. The editor adds every verse by hand from a trusted Mushaf and checks the diacritics.
+   `reel plan` finds a recited verse, empties its captions, drops or shortens any graphic over it, and puts a marker
+   «آية: يضيفها المونتير يدويًا» on the timeline plus a NEEDS-YOU line. A graphic that shows a verse is `remove`.
+   Whisper often drops or alters words in recitation, so never copy a verse from the transcript, nor quote it in a
+   report. A line of the speaker's own that *echoes* a verse (e.g. «آمنوا الأول وعملوا الصالحات» from «الَّذِينَ آمَنُوا وَعَمِلُوا
    الصَّالِحَاتِ») is not a citation: on a graphic it is the speaker's words (no ﴿ ﴾, no reference), marked
    `needs-approval` so the content owner confirms that framing. Captions keep it as spoken.
 2. **Hadith (أحاديث):** only if the speaker cites it; show the speaker's words with attribution as the speaker gave it
@@ -24,8 +25,8 @@ For talks on faith, ethics and spirituality (e.g. a sheikh, preacher or scholar)
    allows it (many religious channels use none or a soft pad without beat or lyrics).
 
 ## Typography
-- Verses in a Mushaf-style face if the client supplies one (else the brand font, never a casual display face).
-- Keep diacritics (تشكيل) of verses intact: check the still shows every mark (shaping engines drop none; fonts can).
+- Verses are never drawn by WhyNot Cut. The editor sets them by hand in Premiere, in a Mushaf-style face if the
+  client supplies one (else the brand font), with every diacritic (تشكيل).
 
 Return the same table as the medical review: graphic id | on-screen text | evidence | verdict | reason, plus the list
 of items that need the speaker's or content owner's approval.

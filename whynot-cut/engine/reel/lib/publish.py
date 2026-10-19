@@ -381,8 +381,22 @@ def check(ep) -> dict:
         errors.extend(e)
         warnings.extend(w)
 
+    # manual verse: the episode's recited verses (lib/manual_verse) are never quoted in the copy nor uploaded as captions
+    from . import manual_verse as mv
+    ep_words = (read_json(ep.p("02_transcription/words.json"), {}) or {}).get("words") or []
+    vcfg = mv.config(load_config("profile.json"))
+    verses = mv.detect(ep_words, vcfg)
+    warnings += vcfg["warnings"]
+    verse_words = mv.span_words(verses, ep_words)
+
+    def no_verse(where: str, text: str):
+        if verse_words and mv.repeats(text or "", verse_words):
+            errors.append(f"{where}: repeats the words of a recited verse in the episode — WhyNot Cut never writes Quran "
+                          "text: leave the verse out of the copy (the editor adds verses by hand)")
+
     def facts(where: str, text: str):
         gender(where, text)
+        no_verse(where, text)
         for m in QUOTE.finditer(text or ""):
             q = next(g for g in m.groups() if g)
             if norm(q) and norm(q) not in spoken:
@@ -407,6 +421,7 @@ def check(ep) -> dict:
     errors += [f"chapters: {e}" for e in validate_chapters(chs, total, yl)]
     for k, (_a, t) in enumerate(chs, 1):
         gender(f"chapter {k}", t)
+        no_verse(f"chapter {k}", t)
     desc = assemble_description(pub, chs, lang)
     if len(desc) > yl["description_max"]:
         errors.append(f"description: {len(desc)} characters (YouTube allows {yl['description_max']})")
@@ -435,6 +450,7 @@ def check(ep) -> dict:
         gender(f"tag {t}", str(t))
     for k, dsg in enumerate((pub.get("thumbnail") or {}).get("designs") or [], 1):
         gender(f"thumbnail {k}", str(dsg.get("text") or ""))
+        no_verse(f"thumbnail {k}", str(dsg.get("text") or ""))
 
     reels = []
     for f in sorted(ep.p("publish/reels").glob("*.json")):
@@ -475,7 +491,11 @@ def check(ep) -> dict:
     srt_src = ep.p("02_transcription/subtitles.srt")
     if srt_src.exists():
         dst = out / f"{ep.episode_id}.srt"
-        shutil.copyfile(srt_src, dst)
+        if verses:             # the upload SRT without a word of any recited verse (an empty gap, never a placeholder)
+            srtlib.write_srt(dst, mv.filter_cues(srtlib.read_srt(srt_src),
+                                                 [(s["src_start_ms"], s["src_end_ms"]) for s in verses], ep_words))
+        else:
+            shutil.copyfile(srt_src, dst)
         errs = srtlib.validate_cues(srtlib.read_srt(dst), total)
         if errs:
             errors.append(f"{dst.name}: " + "; ".join(errs[:3]))

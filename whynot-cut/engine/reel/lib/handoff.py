@@ -154,6 +154,9 @@ def build(paths: Paths) -> dict:
     no_music = isinstance(style.get("music"), str) and style["music"].lower().startswith("none")
     from .stamps import read_compiled
     spec = read_compiled(paths.p("01_analysis/timeline-spec.json"), {}) or {}
+    # manual verse: with a recited verse the CC track comes from the SRT the plan wrote without it (never the
+    # transcript's subtitles.srt, which holds Whisper's words of the verse)
+    srt = "subtitles-seq.srt" if spec.get("manual_verse") else "subtitles.srt"
     ae = read_json(paths.p("04_after_effects/ae-build-result.json"), {})
     aer = read_json(paths.p("04_after_effects/ae-render-result.json"), {})
     ps = read_json(paths.p("05_photoshop/ps-build-result.json"), {})
@@ -192,11 +195,11 @@ def build(paths: Paths) -> dict:
         cap_row = ("Animated captions are brand stills on the Caption lanes of the sequence" +
                    (f" ({', '.join(cap_lanes)})" if cap_lanes else "") + ", placed by the bridge" +
                    ("; an editable caption track (C01) is also on the sequence" if native_caps else
-                    "; SRT (`02_transcription/subtitles.srt`) for an optional CC track"))
+                    f"; SRT (`02_transcription/{srt}`) for an optional CC track"))
     else:
         prem_row = "FCP7 XML interchange (automated) → **you import + save as .prproj**"
         cap_row = ("Animated captions rendered from AE on C02 (automated); SRT for optional CC track" if ae_captions else
-                   "SRT only (`02_transcription/subtitles.srt`): the XML carries no animated captions — build natively "
+                   f"SRT only (`02_transcription/{srt}`): the XML carries no animated captions — build natively "
                    "(`reel ppro-build`) for those")
     table = ["| Component | Status |", "|---|---|",
              "| Transcription (Whisper large-v3, word timing) | Automated — **needs your verification** (`02_transcription/subtitle-review.md`) |",
@@ -220,6 +223,11 @@ def build(paths: Paths) -> dict:
                  f"speed (no interpretation change), so dialogue sync is exact; base scale {tm.get('base_scale_percent')}%. "
                  "Punch-ins are separate V1 clips with Scale/Position in Motion.") if tm.get("source_fps") else ""
     markers_line = "Every graphic and decision also appears as a **sequence marker** (ID + transcript evidence)."
+    mvs = spec.get("manual_verse") or []
+    if mvs:              # manual verse: the verses the editor adds by hand (never their words)
+        markers_line += (f" **{len(mvs)} recited verse(s)** have a marker «آية: يضيفها المونتير يدويًا» and empty captions: "
+                         "add each verse by hand from a trusted Mushaf and check the diacritics (أضف الآية يدويًا من مصحف "
+                         "موثوق ودقّق التشكيل): " + ", ".join(f"{s.get('id')} at {s.get('start_tc')}" for s in mvs) + ".")
     if native:
         all_checks = rec.get("checks") or {}
         ok_checks = [k for k, v in all_checks.items() if v]
@@ -258,10 +266,10 @@ def build(paths: Paths) -> dict:
         vtr = "\n".join(f"| V{t['xml_index']} | {t['id']} — {t['name']} | {t['clips']} |" for t in tm.get("tracks", {}).get("video", []))
         atr = "\n".join(f"| A{t['xml_index']} | {t['id']} — {t['name']} | {t['clips']} |" for t in tm.get("tracks", {}).get("audio", []))
         cap_step = ("3. Burned-in animated captions are **already on the C02 track** (AE render). Optionally **File › Import…** "
-                    "`02_transcription/subtitles.srt` → drag onto the sequence to get an editable caption track (C01) for closed "
+                    f"`02_transcription/{srt}` → drag onto the sequence to get an editable caption track (C01) for closed "
                     "captions/sidecar export — **turn its visibility off** so captions don't appear twice. If you correct caption text, "
                     "fix it in AE (CAPTIONS comp) or re-run the pipeline after editing the SRT." if ae_captions else
-                    "3. The XML carries no animated captions. **File › Import…** `02_transcription/subtitles.srt` → drag onto the sequence "
+                    f"3. The XML carries no animated captions. **File › Import…** `02_transcription/{srt}` → drag onto the sequence "
                     "to get an editable caption track (C01), or ask for the native build (`reel ppro-build`, Premiere open with the WhyNot "
                     "Cut Bridge) which places the animated captions.")
         sec1 = ["## 1. Open in Premiere Pro (≈3 min)", "", f"This clip was {pb['why']}. The preferred path is `reel ppro-build` "
@@ -322,8 +330,8 @@ def build(paths: Paths) -> dict:
     else:
         prem_chk = [f"- [ ] Import XML, open sequence `{seq_name}`",
                     f"- [ ] Sequence Settings: Custom · {_fps_label} TC · Audio Samples · QuickTime ProRes 422 LT previews {_fw}×{_fh} · Max bit depth OFF · Max render quality OFF · Composite in linear color ON",
-                    ("- [ ] Animated captions (C02) checked against audio; optional `subtitles.srt` caption track kept hidden (CC export only)"
-                     if ae_captions else "- [ ] Captions: import `subtitles.srt` as the caption track (or build natively with `reel ppro-build`)"),
+                    (f"- [ ] Animated captions (C02) checked against audio; optional `{srt}` caption track kept hidden (CC export only)"
+                     if ae_captions else f"- [ ] Captions: import `{srt}` as the caption track (or build natively with `reel ppro-build`)"),
                     "- [ ] Rename tracks per README table", "- [ ] Check no offline media (red frames)",
                     "- [ ] Check punch-ins framing (face/eyes not cropped)",
                     "- [ ] Add frosted backdrop blur under glass cards (optional, reference style)",

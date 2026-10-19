@@ -871,6 +871,9 @@ def render_captions(paths: Paths, hidden_ms: list, avoid: list | None = None,
     from .stamps import read_compiled
     spec = read_compiled(paths.p("01_analysis/timeline-spec.json"))
     ed = read_json(paths.p("01_analysis/edit-decisions.json"), {})
+    # manual verse: no caption inside a recited-verse span, whatever the caption file or look says (the plan already
+    # wrote the captions without them; this keeps a hand-edited or stale caption file off the verse too)
+    hidden_ms = list(hidden_ms) + [(s["start_ms"], s["end_ms"]) for s in spec.get("manual_verse") or []]
     # Task 23 (R-4.1): a client's saved caption look, or this reel's global.caption_look, draws the captions in that
     # look (lib/looks_captions). No look (the default) = today's captions below, byte for byte; the clip's words are
     # read only when there is a look. [] = every caption hidden by graphics (returned as is); None = no text engine

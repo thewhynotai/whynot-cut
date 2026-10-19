@@ -22,12 +22,16 @@ Two kinds of source:
                 profile's low_confidence_threshold (02_transcription/words.json + verification.json; only a check
                 recorded `by: "editor"` is the editor's ear, an allow-list). A reel cut from an episode defers to its
                 episode's item. Motion plans' `approvals` (numbers written from spoken words) too, one per scene
-      medical / religious
+      verse     one line per recited-verse span of the timeline spec (manual verse, lib/manual_verse.py): WhyNot Cut
+                never writes Quran text, the editor adds it by hand; the span's words are never quoted (nor listed
+                under `words`). The item's `span` holds its times, cue and whether its end is a guess
+      medical / religious / business / ai
                 review-flags.json rows that are not `ok` (the CURRENT plan's review only: review_flags.load), and
                 graphics with approval_required in the timeline spec (kind religious for a religious client); a
                 graphic already flagged in the review is listed once, from the review. For a medical or religious
                 client a review that is missing, stale or damaged while the plan has on-screen words is one line of
-                its own ("the review is not current"): it never vanishes silently
+                its own ("the review is not current"): it never vanishes silently. A business or ai row names the
+                approver from the review-domain registry; an unknown flag fails closed to medical
       music     a timeline spec whose music is not placed (unless the client's style says none); a motion plan with no
                 music and no producer key
       fonts     no font files at all (discovery), or font files not installed (client_db typography.json)
@@ -49,7 +53,8 @@ from pathlib import Path
 
 from .common import Context, Paths, check_project_id, read_json, use_context
 
-KINDS = ("pick", "words", "medical", "religious", "music", "fonts", "logo", "website", "final")
+KINDS = ("pick", "words", "verse", "medical", "religious", "business", "ai", "music", "fonts", "logo", "website",
+         "final")
 MD_REL = "output/NEEDS-YOU.md"
 JSON_REL = "output/needs-you.json"
 SCHEMA_VERSION = 1
@@ -69,8 +74,11 @@ _LATIN_RUN = re.compile(_TOKEN + r"(?: (?=[A-Za-z0-9#])" + _TOKEN + r")*")
 
 HEAD = {"pick": ("اختار الريلز", "Pick the reels"),
         "words":("كلمات تتأكد منها بالسمع", "Words to confirm by ear"),
+        "verse": ("آيات يضيفها المونتير يدويًا", "Verses to add by hand"),
         "medical": ("موافقات طبية", "Medical approvals"),
         "religious": ("موافقات على المحتوى الديني", "Religious content approvals"),
+        "business": ("موافقات على كلام البيزنس", "Business claims approvals"),
+        "ai": ("موافقات على كلام الذكاء الاصطناعي", "AI claims approvals"),
         "music": ("الموسيقى", "Music"),
         "fonts": ("الخطوط", "Fonts"),
         "logo": ("اللوجو", "Logo"),
@@ -192,7 +200,7 @@ class _Collector:
                 self._unread_keys.add((rel, item))
                 self.unread.append({"source": rel, "item": item, "why": type(e).__name__})
 
-    def add(self, kind, text, text_ar, why, why_ar, ref, item, source):
+    def add(self, kind, text, text_ar, why, why_ar, ref, item, source, span=None):
         key = (source, kind, ref)
         if key in self.keys:
             return
@@ -207,6 +215,8 @@ class _Collector:
         if _is_path(ref):
             it["ref_exists"] = (self.root / ref).exists()
         it["item"], it["source"] = item, source
+        if span is not None:                                 # a verse line: its times, cue and guessed end (the panel)
+            it["span"] = span
         self.items.append(it)
 
     def norm_ref(self, ref) -> str | None:
@@ -299,12 +309,15 @@ class _Config:
     def __init__(self, c: _Collector):
         from .common import content_domain, load_config
         self.threshold, self.no_music, self.domain = 0.5, False, "general"
+        self.verse = {"religious": False, "phrases": [], "warnings": []}
         with c.source("output/client_database/reel-profile", None):
             t = load_config("transcription.json").get("low_confidence_threshold", 0.5)
             self.threshold = float(t) if isinstance(t, (int, float)) and not isinstance(t, bool) else 0.5
             m = load_config("style.json").get("music")
             self.no_music = isinstance(m, str) and m.strip().lower().startswith("none")
             self.domain = content_domain()
+            from . import manual_verse
+            self.verse = manual_verse.config(load_config("profile.json"))
 
     @property
     def approval_kind(self) -> str:
@@ -340,6 +353,12 @@ def _words(c: _Collector, cfg: _Config, p: Paths, item: str, label: tuple[str, s
                and isinstance(w.get("probability"), (int, float)) and not isinstance(w.get("probability"), bool)
                and w["probability"] < cfg.threshold]
         todo = [w for w in flagged + low if isinstance(w.get("word"), str) and w["word"].strip()]
+        verse = _verse_ranges(p, words, cfg)          # manual verse: a recited verse's words are never quoted here
+        if verse:
+            from .manual_verse import overlaps
+            todo = [w for w in todo if not (isinstance(w.get("start_ms"), (int, float))
+                                            and isinstance(w.get("end_ms"), (int, float))
+                                            and overlaps(w["start_ms"], w["end_ms"], verse))]
         from .safety.risk_words import needs_you_order    # K-T1: risk first (behind its switch)
         todo = needs_you_order(todo, p)
         if not todo:
@@ -365,12 +384,78 @@ def _words(c: _Collector, cfg: _Config, p: Paths, item: str, label: tuple[str, s
     return added
 
 
+def _verse_ranges(p: Paths, words: list, cfg: "_Config") -> list:
+    """Manual verse: the source ranges of this transcript's recited verses: the compiled plan's (the story-editor's
+    overrides included) when there is one, else what lib/manual_verse finds in the words (an episode, or a clip not
+    planned yet). [] when none (or the plan cannot be read: its own line says so)."""
+    from . import manual_verse
+    sp = p.p("01_analysis/timeline-spec.json")
+    if sp.exists():
+        try:
+            spec = read_json(sp)
+            if isinstance(spec, dict) and spec.get("events") is not None:
+                return [(s["src_start_ms"], s["src_end_ms"]) for s in spec.get("manual_verse") or []
+                        if isinstance(s, dict)]
+        except Exception:  # noqa: BLE001 — named in `unread` by the timeline-spec's own read
+            pass
+    return [(s["src_start_ms"], s["src_end_ms"]) for s in manual_verse.detect(words, cfg.verse)]
+
+
+VERSE_WHY = ("WhyNot Cut never writes Quran text: the captions stay empty there and a marker on the timeline shows the "
+             "place.",
+             "WhyNot Cut عمره ما بيكتب نص قرآن: الكابشن فاضي في المكان ده، وفي ماركر على التايملاين بيوضّح مكانه.")
+
+
+def _verses(c: _Collector, spec: dict, vid: str, src: str):
+    """Manual verse: one line per recited-verse span of the compiled plan: its timecodes and cue, the fixed line,
+    whether its end is a guess. Never the span's words."""
+    from . import manual_verse as mv
+    for s in spec.get("manual_verse") or []:
+        if not isinstance(s, dict) or not isinstance(s.get("id"), str):
+            continue
+        tc, tc2, stc, stc2 = (_tc(s.get(k)) for k in ("start_ms", "end_ms", "src_start_ms", "src_end_ms"))
+        cue_ar, cue_en = clean(s.get("cue_ar") or mv.label(s.get("cue"))), clean(s.get("cue_en") or
+                                                                                   mv.label(s.get("cue"), "en"))
+        guessed = s.get("guessed_end") is True
+        ar = (f"{vid}: آية مقروءة عند {tc}–{tc2} على التايملاين ({cue_ar}، في المصدر {stc}–{stc2}): {mv.LINE_AR}"
+              + ("؛ ونهاية الآية متخمّنة (وقفنا بعد 12 ثانية)، فحدّد نهايتها بالسمع" if guessed else ""))
+        en = (f"{vid}: a recited verse at {tc}-{tc2} on the timeline ({cue_en}; source {stc}-{stc2}): {mv.LINE_EN}"
+              + ("; the end of the verse is a guess (cut at 12 s): find the real end by ear" if guessed else ""))
+        span = {"start_ms": int(s.get("start_ms") or 0), "end_ms": int(s.get("end_ms") or 0),
+                "src_start_ms": int(s.get("src_start_ms") or 0), "src_end_ms": int(s.get("src_end_ms") or 0),
+                "cue_ar": cue_ar, "cue_en": cue_en, "guessed_end": guessed}
+        c.add("verse", en, ar, *VERSE_WHY, s["id"], vid, src, span=span)
+
+
 APPROVER = {"medical": ("the doctor's approval", "موافقة طبية"),
             "religious": ("the speaker's approval", "موافقة صاحب المحتوى")}
 NEVER_AUTO = {"medical": ("Health claims on screen are never approved automatically.",
                           "الكلام الطبي اللي على الشاشة عمره ما بيتوافق عليه تلقائي."),
               "religious": ("Religious content on screen is never approved automatically.",
-                            "المحتوى الديني اللي على الشاشة عمره ما بيتوافق عليه تلقائي.")}
+                            "المحتوى الديني اللي على الشاشة عمره ما بيتوافق عليه تلقائي."),
+              "business": ("Business claims on screen are never approved automatically.",
+                           "كلام البيزنس اللي على الشاشة عمره ما بيتوافق عليه تلقائي."),
+              "ai": ("AI claims and disclosures on screen are never approved automatically.",
+                     "الكلام عن الذكاء الاصطناعي والإفصاح عنه على الشاشة عمره ما بيتوافق عليه تلقائي.")}
+REGISTRY_KINDS = ("business", "ai")       # review domains whose approver comes from the registry (review_domains)
+
+
+def _review_kind(flag) -> tuple[str, tuple[str, str], bool]:
+    """(kind, (approver en, approver ar), unknown) of a review row's flag. medical / religious as before; business and
+    ai with the approver the review-domain registry names; anything else (or a registry that cannot be read) fails
+    closed to medical, the strictest approval, with `unknown` set so the line says why."""
+    if flag in APPROVER:
+        return flag, APPROVER[flag], False
+    if flag in REGISTRY_KINDS:
+        try:
+            from . import review_domains
+            a = review_domains.registry()[flag]["approver"]
+            if isinstance(a.get("en"), str) and isinstance(a.get("ar"), str) and a["en"].strip() and a["ar"].strip():
+                return flag, (f"the approval of {clean(a['en'])}", f"موافقة {clean(a['ar'])}"), False
+        except Exception:  # noqa: BLE001 — fail closed below
+            pass
+        return "medical", APPROVER["medical"], False
+    return "medical", APPROVER["medical"], True
 
 
 def _review_rows(p: Paths) -> list[dict] | None:
@@ -403,10 +488,9 @@ def _approvals(c: _Collector, cfg: _Config, p: Paths, item: str, spec: dict | No
             rows = _review_rows(p)
             current = rows is not None
             for it in rows or []:
-                kind = it["flag"] if it["flag"] in ("medical", "religious") else "medical"
+                kind, (who_en, who_ar), unknown = _review_kind(it["flag"])
                 gid, tc, words = it["event_id"], _tc(round(float(it.get("start_s") or 0) * 1000)), it.get("text", "")
                 flagged_events.add(gid)
-                who_en, who_ar = APPROVER[kind]
                 v = it.get("verdict")
                 if v == "reword-to-match":
                     en = f"{item}: graphic {gid} at {tc} does not match what was said: approve new wording for «{words}»"
@@ -419,6 +503,11 @@ def _approvals(c: _Collector, cfg: _Config, p: Paths, item: str, spec: dict | No
                     ar = f"{item}: الجرافيك {gid} عند {tc} محتاج {who_ar}: «{words}»"
                 reason = clean(it.get("reason") or "")
                 why_en, why_ar = NEVER_AUTO[kind]
+                if unknown:
+                    f = _clip(clean(it["flag"]), 60)
+                    why_en += (f" The review used a review type WhyNot Cut does not know ({f}), so it needs the "
+                               "strictest approval.")
+                    why_ar += f" المراجعة استخدمت نوع مراجعة WhyNot Cut ما يعرفوش ({f})، فمحتاج أشد موافقة."
                 c.add(kind, en, ar, why_en + (f" Review note: {reason}" if reason else ""),
                       why_ar + (f" ملاحظة المراجعة: {reason}" if reason else ""), gid, item, src)
     if cfg.domain in ("medical", "religious") and has_words and plan_src and not current:
@@ -503,6 +592,7 @@ def _project(c: _Collector, cfg: _Config, vid: str, episode_words: set):
                     raise TypeError("the timeline spec has the wrong shape")
                 plan_src = src
                 has_words = any(isinstance(e, dict) and _event_words(e.get("params")) for e in spec.get("events") or [])
+                _verses(c, spec, vid, src)
                 music = spec.get("music") if isinstance(spec.get("music"), dict) else {}
                 if music.get("status") != "PLACED" and not cfg.no_music and "music" not in owned:
                     c.add("music", f"{vid}: add a licensed music track (the timeline has markers where it goes)",

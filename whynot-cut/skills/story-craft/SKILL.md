@@ -32,7 +32,8 @@ Then run `reel plan` and fix **every** error it reports (evidence not verbatim, 
   `gender: unknown` → «د.» or the name alone until the editor says. `reel plan` errors on «الدكتورة <name>» for a man
   (and الأستاذ/ة, الشيخ/ة, المهندس/ة), and warns on a gendered honorific for an `unknown` person.
 - Any claim the profile's `domain` makes sensitive gets `approval_required: true`: a medical claim; for a religious
-  client a verse, hadith, ruling, or the speaker's words that echo a verse. `reel plan` refuses words flagged as
+  client a hadith, a ruling, or the speaker's words that echo a verse. A verse itself is never on screen: the editor
+  adds it by hand, and `reel plan` empties a recited verse's captions and marks it. `reel plan` refuses words flagged as
   uncertain on any graphic.
 - Fillers the editor or the client's plan asks to cut (a repeated «يعني», "um", a false start) go in
   `global.cut_words` (word ids + reason): picture, sound and captions lose them together; edit-plan.md lists them.
