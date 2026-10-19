@@ -52,9 +52,9 @@
       "additionalProperties": false,
       "properties": {
         "id": {"type": "string", "pattern": "^[0-9a-f]{12}$", "description": "stable: from (source, kind, ref)"},
-        "kind": {"enum": ["pick", "words", "verse", "medical", "religious", "business", "ai", "music", "fonts", "logo",
+        "kind": {"enum": ["moved", "pick", "words", "verse", "medical", "religious", "business", "ai", "music", "fonts", "logo",
                           "website", "final"],
-                 "description": "every item is for the editor (this file lists what only the editor can do), so no `who` field; verse = a recited Quran verse the editor adds by hand (manual verse), never with its words"},
+                 "description": "every item is for the editor (this file lists what only the editor can do), so no `who` field; verse = a recited Quran verse the editor adds by hand (manual verse), never with its words; moved = an approval a client move voided on purpose (client_move.still_void)"},
         "text": {"type": "string", "minLength": 1, "maxLength": 600, "description": "English, one sentence"},
         "text_ar": {"type": "string", "minLength": 1, "maxLength": 600},
         "why": {"type": "string", "maxLength": 1200},

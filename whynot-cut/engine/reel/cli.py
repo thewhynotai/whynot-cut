@@ -621,6 +621,31 @@ def cmd_episode_sheet(a):
     out(init(a.root, a.init, force=a.force))
 
 
+def cmd_client_move(a):
+    """T4.5: the client folder to another place (lib/client_move.py; the old one is left in place), or
+    --already-moved: rewrite the database of a folder the editor moved by hand. A dry run unless --apply."""
+    from lib import client_move
+    root = Path(a.root).expanduser()
+    if a.already_moved and a.to or a.from_root and not a.already_moved:
+        out({"refused": "--to is for moving the folder; --already-moved (with --from) is for a folder already moved "
+                        "by hand: use one of them",
+             "how": "reel client-move --root <client> --to <new folder>   or   reel client-move --root <where it is "
+                    "now> --already-moved [--from <where it was>]"})
+    elif a.already_moved:
+        out(client_move.already_moved(root, a.from_root, apply=a.apply))
+    elif not a.to:
+        out({"refused": "say where the client goes: --to <new folder> (or --already-moved after moving it by hand)",
+             "how": "reel client-move --root <client> --to <new folder>   (then the same with --apply)"})
+    else:
+        out(client_move.move(root, a.to, apply=a.apply))
+
+
+def cmd_client_clone(a):
+    """T4.5: a new client folder with this client's brand database and no media. A dry run unless --apply."""
+    from lib import client_move
+    out(client_move.clone(Path(a.root).expanduser(), a.to, apply=a.apply))
+
+
 def cmd_verify(a):
     from lib import verify
     from lib.motion_config import is_motion
@@ -1035,6 +1060,13 @@ def writes(a) -> bool:
 WRITES_IF["needs-you"] = lambda a: bool(getattr(a, "write", False))
 CORE_WRITES = CORE_WRITES | {"auto-approve"}
 NO_ID = NO_ID | {"needs-you"}
+# T4.5 part B: a dry run only reads. --apply holds the client's lock: while it is copied (another session's writes would
+# make the copy inconsistent), or while its database is rewritten in place (--already-moved)
+WRITES_IF["client-move"] = lambda a: bool(getattr(a, "apply", False))
+WRITES_IF["client-clone"] = lambda a: bool(getattr(a, "apply", False))
+NO_ID = NO_ID | {"client-move", "client-clone"}
+# the commands that still run in a copied client nobody migrated yet: the repair itself, the lock's escape hatch, doctor
+COPY_CHECK_EXEMPT = NO_ROOT | {"client-move", "client-clone", "lock", "doctor"}
 
 
 def mark_legacy_client(root: Path):
@@ -1545,6 +1577,9 @@ CORE_COMMANDS: dict[str, str] = {
     "client-init": "create the client's reel-profile from a shipped profile or the blank template",
     "discover": "inventory of the client folder: inputs, footage, brand files, environment",
     "client-db": "client database: brand colours, fonts, photos and assets",
+    "client-move": "take the client folder to another place (a dry run until --apply; the old folder is left in "
+                   "place), or --already-moved: make the database of a folder moved by hand portable",
+    "client-clone": "start a new client from this one's brand database (no media; a dry run until --apply)",
     "ref-analyze": "measure the client's reference edits",
     "ref-style": "show, record or apply the client's reference editing style",
     "preflight": "inspect the raw footage (streams, frame rate, audio) before editing",
@@ -1797,6 +1832,15 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--force", action="store_true",
                             help="write a fresh template even when the episode already has a sheet in data/Episodes, "
                                  "or replace an edited template in output/")
+        if name in ("client-move", "client-clone"):
+            sp.add_argument("--to", required=name == "client-clone", metavar="FOLDER",
+                            help="the new folder (new or empty; never inside a client folder)")
+            sp.add_argument("--apply", action="store_true", help="do it (without it: a dry run that writes nothing)")
+        if name == "client-move":
+            sp.add_argument("--already-moved", action="store_true",
+                            help="the folder was moved by hand: rewrite its database for where it is now")
+            sp.add_argument("--from", dest="from_root", metavar="OLD",
+                            help="with --already-moved: where it was before (default: read off the database)")
         if name == "preview-video":
             sp.add_argument("--width", type=int, default=540)
             sp.add_argument("--no-label", action="store_true")
@@ -1874,6 +1918,12 @@ def start(a):
             raise SystemExit("--root required (client folder containing assets/ and data/)"
                              + (f"; client folders in {clients_root()}: {', '.join(known)}" if known else ""))
     a.ctx = set_context(a.root, a.profile)      # the request's Context, passed down where practical (T2.17)
+    if a.root and a.cmd not in COPY_CHECK_EXEMPT:
+        from lib.client_move import unmigrated   # T4.5: a copied client whose files still point at the folder it came
+        copied = unmigrated(Path(a.root))        # from: refused before any read (preflight would read the ORIGINAL clip)
+        if copied:
+            out(copied)
+            raise SystemExit(2)
     lock = take_writer_lock(a)
     try:
         run(a)

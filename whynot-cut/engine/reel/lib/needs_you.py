@@ -37,6 +37,8 @@ Two kinds of source:
       fonts     no font files at all (discovery), or font files not installed (client_db typography.json)
       logo      no logo file (discovery role) and none classified as a logo (asset-manifest.json)
       final     a video that passed QC and is not delivered: the final mix and render are the editor's
+      moved     an approval a client move voided on purpose (lib/client_move.py, executor ruling (c) on BL-14 Q1: the
+                move points the files it hashes at the new folder), one per item and kind, until it holds again
 A DELIVERED video adds nothing. Dedupe key: (source, kind, ref), first one wins. A state file that cannot be read is
 named in `unread` (the list may be missing items); a producer item that cannot be shown in `skipped`.
 """
@@ -53,7 +55,7 @@ from pathlib import Path
 
 from .common import Context, Paths, check_project_id, read_json, use_context
 
-KINDS = ("pick", "words", "verse", "medical", "religious", "business", "ai", "music", "fonts", "logo", "website",
+KINDS = ("moved", "pick", "words", "verse", "medical", "religious", "business", "ai", "music", "fonts", "logo", "website",
          "final")
 MD_REL = "output/NEEDS-YOU.md"
 JSON_REL = "output/needs-you.json"
@@ -83,7 +85,8 @@ HEAD = {"pick": ("اختار الريلز", "Pick the reels"),
         "fonts": ("الخطوط", "Fonts"),
         "logo": ("اللوجو", "Logo"),
         "website": ("من موقع العميل", "From the client's website"),
-        "final": ("المكس والرندر النهائي", "Final mix and render")}
+        "final": ("المكس والرندر النهائي", "Final mix and render"),
+        "moved": ("موافقات تتعمل تاني بعد نقل العميل", "Approvals to give again after the client moved")}
 
 
 # --------------------------------------------------------------------------- small helpers
@@ -681,6 +684,18 @@ def _brand(c: _Collector):
                       "Premiere و After Effects هيعرضوا خط تاني لحد ما الخط يتنزّل.", ref, None, src)
 
 
+def _moved(c: _Collector):
+    """The approvals a client move voided on purpose (client_move.VOIDED_REL), each until it holds again."""
+    from .client_move import VOIDED_REL, still_void
+    f = c.root / VOIDED_REL
+    if not f.exists():
+        return
+    src = c.rel(f)
+    with c.source(src, None):
+        for v in still_void(c.root):
+            c.add("moved", v["text"], v["text_ar"], v["why"], v["why_ar"], v["file"], v["item"], src)
+
+
 def collect(root, profile: str | None = None) -> dict:
     """The client's checklist (the document of schemas/needs-you.schema.json). Reads only; never raises on damaged
     state (named in `unread` / `skipped`)."""
@@ -691,6 +706,7 @@ def collect(root, profile: str | None = None) -> dict:
         cfg = _Config(c)
         for rel in CLIENT_PRODUCERS:
             c.producer(real / rel, None)
+        _moved(c)
         _brand(c)
         episode_words = set()
         for ep in _children(real / "output" / "episodes", "episode id"):

@@ -775,8 +775,9 @@ class TestContract(unittest.TestCase):
         self.assertEqual(check_schema(schemas.bundled("needs-you")), [])
         s = schemas.bundled("needs-you")
         self.assertEqual(tuple(s["$defs"]["item"]["properties"]["kind"]["enum"]), NY().KINDS)
-        # manual verse adds `verse`; the executor's review-kind fix adds `business` and `ai` (2026-10-18)
-        self.assertEqual(NY().KINDS, ("pick", "words", "verse", "medical", "religious", "business", "ai", "music",
+        # manual verse adds `verse`; the executor's review-kind fix adds `business` and `ai` (2026-10-18); a client
+        # move adds `moved` (BL-14 ruling (c), 2026-10-19: hooks/BL-14/test_t45_needs_you_moved.py)
+        self.assertEqual(NY().KINDS, ("moved", "pick", "words", "verse", "medical", "religious", "business", "ai", "music",
                                       "fonts", "logo", "website", "final"))
         self.assertIn("pick", NY().__doc__)
         self.assertEqual(schemas.kind_for("output/needs-you.json"), "needs-you")
