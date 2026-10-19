@@ -20,7 +20,8 @@ START, END = "<!-- AUTO:STATUS START -->", "<!-- AUTO:STATUS END -->"
 CHARTER = {"NOT READY": "BACKLOG", "READY": "READY", "IN PROGRESS": "IN_PROGRESS", "FIX": "IN_PROGRESS",
            "BLOCKED": "BLOCKED", "PARKED": "BLOCKED", "ACCEPTED": "ACCEPTED", "MERGED": "DONE_ARCHIVED",
            "RUNNING": "IN_PROGRESS", "STOPPED": "BLOCKED", "DONE": "IN_REVIEW", "IN_PROGRESS": "IN_PROGRESS",
-           "IN_REVIEW": "IN_REVIEW", "DONE_ARCHIVED": "DONE_ARCHIVED", "BACKLOG": "BACKLOG"}
+           "IN_REVIEW": "IN_REVIEW", "DONE_ARCHIVED": "DONE_ARCHIVED", "BACKLOG": "BACKLOG",
+           "PLANNED_NOT_AUTHORIZED": "BACKLOG"}
 SLOTS = {9: "تقرير الصبح", 13: "تقرير الضهر", 17: "تقرير العصر", 21: "تقرير الليل"}
 
 
@@ -88,7 +89,11 @@ def sync_label(local, remote, ahead, behind):
 
 
 def _git(cwd, *a, timeout=60):
-    r = subprocess.run(["git", "-C", str(cwd), *a], capture_output=True, text=True, timeout=timeout)
+    try:
+        r = subprocess.run(["git", "-C", str(cwd), *a], capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=timeout)
+    except (subprocess.SubprocessError, OSError):
+        return None
     return r.stdout.strip() if r.returncode == 0 else None
 
 
@@ -278,10 +283,11 @@ def sync_mirror(worktree, files, message, branch="ops/hq"):
             dst = wt / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
-        tracked = (_git(wt, "ls-files") or "").splitlines()
-        gone = [t for t in tracked if t not in files]
+        ls = subprocess.run(["git", "-C", str(wt), "-c", "core.quotepath=off", "ls-files", "-z"],
+                            capture_output=True, check=True, env=env).stdout.decode("utf-8")
+        gone = [t for t in ls.split("\0") if t and t not in files]
         if gone:
-            subprocess.run(["git", "-C", str(wt), "rm", "-q", "--", *gone], check=True, capture_output=True, env=env)
+            subprocess.run(["git", "-C", str(wt), "rm", "-q", "-f", "--", *gone], check=True, capture_output=True, env=env)
         subprocess.run(["git", "-C", str(wt), "add", "--", *files.keys()], check=True, capture_output=True, env=env)
         res["committed"] = subprocess.run(["git", "-C", str(wt), "diff", "--cached", "--quiet"]).returncode != 0
         if res["committed"]:
@@ -296,7 +302,9 @@ def sync_mirror(worktree, files, message, branch="ops/hq"):
         res["remote"] = out.split()[0] if out else None
         res["state"] = "SYNCED" if res["remote"] and res["remote"] == res["local"] else "PUSH_FAILED"
     except (subprocess.SubprocessError, OSError) as e:
-        res["error"] = f"{type(e).__name__}: {e}"[-300:]
+        err = getattr(e, "stderr", b"") or b""
+        err = err.decode("utf-8", "replace") if isinstance(err, bytes) else str(err)
+        res["error"] = f"{type(e).__name__}: {e} {err.strip()}"[-300:]
     return res
 
 
@@ -348,7 +356,7 @@ def render_report(s, prev, slot_title, sync=None):
     L += [f"- {r['id']} — {r['owner']} — {r['status']}" for r in s["rows"]
           if charter_status(r["status"]) in ("IN_PROGRESS", "IN_REVIEW")]
     tag, prev_tag = s.get("tag"), (prev or {}).get("tag")
-    new_tag = bool(prev and tag and tag != prev_tag)
+    new_tag = bool(prev_tag and tag and tag != prev_tag)  # no earlier tag on record = nothing to compare
     L += ["", "## 3. حالة المنتج (المصدر: git tags + `PROJECT_PLAN_AR.md` §5)",
           f"- آخر tag على release/3.0: {tag or '—'}"
           + (" — **tag جديد من آخر تقرير** (محتاج تأكيد التجربة في Premiere قبل ما يتسمّى verified)"

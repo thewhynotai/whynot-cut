@@ -219,5 +219,65 @@ class FixRound1(unittest.TestCase):
             self.assertFalse(hs.mark_sent(p, "R-9", "x"))
 
 
+class FixRound2(unittest.TestCase):
+    """Review OPS-01-r2 findings."""
+
+    def _repo(self, d):
+        remote = Path(d, "remote.git")
+        git(d, "init", "--bare", str(remote))
+        wt = Path(d, "wt")
+        git(d, "init", str(wt))
+        git(wt, "config", "user.email", "t@t")
+        git(wt, "config", "user.name", "t")
+        git(wt, "checkout", "-b", "ops/hq")
+        git(wt, "remote", "add", "origin", str(remote))
+        return wt
+
+    def test_arabic_file_names_sync_twice(self):
+        with tempfile.TemporaryDirectory() as d:
+            wt = self._repo(d)
+            src = Path(d, "كارت.md")
+            src.write_text("x", encoding="utf-8")
+            files = {"00-HQ/كارت-جرّب.md": src}
+            self.assertEqual(hs.sync_mirror(wt, files, "m")["state"], "SYNCED")
+            r = hs.sync_mirror(wt, files, "m")
+            self.assertEqual(r["state"], "SYNCED", r["error"])
+            self.assertFalse(r["committed"])
+
+    def test_a_removed_source_is_removed_from_the_mirror(self):
+        with tempfile.TemporaryDirectory() as d:
+            wt = self._repo(d)
+            a, b = Path(d, "a.md"), Path(d, "b.md")
+            a.write_text("a", encoding="utf-8")
+            b.write_text("b", encoding="utf-8")
+            hs.sync_mirror(wt, {"x/a.md": a, "x/b.md": b}, "m")
+            r = hs.sync_mirror(wt, {"x/a.md": a}, "m")
+            self.assertEqual(r["state"], "SYNCED", r["error"])
+            self.assertFalse((wt / "x" / "b.md").exists())
+
+    def test_failures_carry_gits_own_message(self):
+        with tempfile.TemporaryDirectory() as d:
+            wt = self._repo(d)
+            a = Path(d, "a.md")
+            a.write_text("a", encoding="utf-8")
+            git(wt, "remote", "set-url", "origin", str(Path(d, "nowhere.git")))
+            r = hs.sync_mirror(wt, {"x/a.md": a}, "m")
+            self.assertEqual(r["state"], "PUSH_FAILED")
+            self.assertTrue(r["error"])
+
+    def test_no_new_tag_claim_without_a_previous_tag(self):
+        s = {"time": "t", "rows": [], "tasks": {}, "verdicts": {}, "reports": {}, "helpers": [], "api": "X",
+             "api_month": {}, "ram": 10, "requests": [], "tag": "v1", "git": {"branch": "b", "local": "1",
+                                                                              "remote": "1", "label": "SYNCED", "dirty_files": 0}}
+        self.assertIn("NO NEW VERIFIED BUILD", hs.render_report(s, {"tasks": {}}, "t"))
+        self.assertIn("tag جديد", hs.render_report(s, {"tasks": {}, "tag": "v0"}, "t"))
+
+    def test_planned_api_row_is_not_an_unknown_status(self):
+        self.assertEqual(hs.charter_status("PLANNED_NOT_AUTHORIZED"), "BACKLOG")
+
+    def test_git_timeout_is_not_a_crash(self):
+        self.assertIsNone(hs._git(".", "rev-parse", "HEAD", timeout=0.000001))
+
+
 if __name__ == "__main__":
     unittest.main()
