@@ -1,0 +1,12 @@
+{
+  "generated": "2026-10-01T10:00:00+03:00",
+  "colors": 9,
+  "fonts": 28,
+  "images": 28,
+  "issues": [
+    "Fonts not installed (install them from assets/fonts): ['assets/fonts/Amiri-Regular.ttf', 'assets/fonts/Amiri-Bold.ttf']",
+    "5 images not yet visually classified (write assets/asset-classification.json).",
+    "Camera RAW skipped: assets/photos/raw-01.cr3: camera RAW not converted (no RAW converter on this OS)"
+  ],
+  "ready": false
+}

@@ -1,0 +1,28 @@
+{
+  "generated": "2026-10-01T10:00:00+03:00",
+  "families": {
+    "Cairo": {
+      "weights": [
+        {
+          "style": "Regular",
+          "postscript_name": "Cairo-Regular",
+          "weight_class": 400,
+          "file": "assets/fonts/Cairo-Regular.ttf",
+          "installed": true
+        },
+        {
+          "style": "Bold",
+          "postscript_name": "Cairo-Bold",
+          "weight_class": 700,
+          "file": "assets/fonts/Cairo-Bold.ttf",
+          "installed": true
+        }
+      ],
+      "supports_arabic": true,
+      "supports_latin": true
+    }
+  },
+  "roles": {},
+  "missing_or_uninstalled": [],
+  "notes": []
+}

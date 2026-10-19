@@ -1,0 +1,14 @@
+{
+  "id": "fixture-basic",
+  "display_name": "Basic Test Studio",
+  "domain": "general",
+  "people": [
+    {
+      "name": "Mariam Fathy",
+      "role": "host",
+      "gender": "female",
+      "honorific_ar": "أ.",
+      "honorific_en": "Ms."
+    }
+  ]
+}

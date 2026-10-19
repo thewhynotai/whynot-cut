@@ -1,0 +1,112 @@
+{
+  "generated": "2026-10-01T10:00:00+03:00",
+  "official_colors": [
+    {
+      "hex": "#0A3D62",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "source": "data/brand/guide.pdf"
+    },
+    {
+      "hex": "#F5A623",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "source": "data/brand/guide.pdf"
+    },
+    {
+      "hex": "#F2F2F2",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "source": "data/brand/guide.pdf"
+    },
+    {
+      "hex": "#1B998B",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "source": "data/brand/guide.pdf"
+    },
+    {
+      "hex": "#E84855",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "source": "data/brand/guide.pdf"
+    },
+    {
+      "hex": "#2E294E",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "source": "data/brand/guide.pdf"
+    },
+    {
+      "hex": "#FFFD82",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "source": "data/brand/guide.pdf"
+    },
+    {
+      "hex": "#3D5A80",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "source": "data/brand/guide.pdf"
+    },
+    {
+      "hex": "#98C1D9",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "source": "data/brand/guide.pdf"
+    }
+  ],
+  "measured_palettes": [],
+  "roles": {
+    "primary": {
+      "hex": "#0A3D62"
+    },
+    "accent": {
+      "hex": "#F5A623"
+    },
+    "neutral_light": {
+      "hex": "#F2F2F2"
+    },
+    "secondary": {
+      "hex": "#1B998B"
+    }
+  },
+  "derived": {
+    "paper_tint": {
+      "hex": "#E6EEF8"
+    },
+    "ink": {
+      "hex": "#1E2A3B"
+    }
+  },
+  "notes": [
+    "Only 'official_colors' come from client files."
+  ]
+}

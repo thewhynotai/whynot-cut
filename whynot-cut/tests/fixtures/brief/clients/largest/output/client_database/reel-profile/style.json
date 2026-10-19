@@ -1,0 +1,15 @@
+{
+  "caption_size_px": 72,
+  "captions_during_hook": "show",
+  "hook_title_sfx": false,
+  "highlight_colour": "accent",
+  "captions": {
+    "look": "box",
+    "digits": "arabic_indic"
+  },
+  "remove_pauses": {
+    "min_pause_ms": 300,
+    "pad_ms": 90
+  },
+  "note": "house style from the reference reels R01-R04 (synthetic fixture)"
+}

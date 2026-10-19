@@ -1,0 +1,22 @@
+{
+  "generated": "2026-10-01T10:00:00+03:00",
+  "official_colors": [
+    {
+      "hex": "#123456",
+      "rgb": [
+        18,
+        52,
+        86
+      ],
+      "source": "data/brand.txt"
+    }
+  ],
+  "measured_palettes": [],
+  "roles": {
+    "primary": {
+      "hex": "#123456"
+    }
+  },
+  "derived": {},
+  "notes": []
+}

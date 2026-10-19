@@ -1,0 +1,383 @@
+{
+  "schema": 1,
+  "rules": [
+    {
+      "id": "R1",
+      "status": "active",
+      "area": "music",
+      "phrase": "no_music",
+      "added": "2026-10-01",
+      "subject": "music:no_music",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R2",
+      "status": "active",
+      "area": "captions",
+      "phrase": "emoji_off",
+      "added": "2026-10-01",
+      "subject": "captions:emoji_off",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R3",
+      "status": "active",
+      "area": "captions",
+      "phrase": "no_animation",
+      "added": "2026-10-01",
+      "subject": "captions:no_animation",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R4",
+      "status": "active",
+      "area": "transitions",
+      "phrase": "straight_cuts",
+      "added": "2026-10-01",
+      "subject": "transitions:straight_cuts",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R5",
+      "status": "active",
+      "area": "sound",
+      "phrase": "no_sfx",
+      "added": "2026-10-01",
+      "subject": "sound:no_sfx",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R6",
+      "status": "active",
+      "area": "captions",
+      "phrase": "position_bottom",
+      "added": "2026-10-01",
+      "subject": "captions:position_bottom",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R7",
+      "status": "active",
+      "area": "captions",
+      "phrase": "white_text",
+      "added": "2026-10-01",
+      "subject": "captions:white_text",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R8",
+      "status": "active",
+      "area": "captions",
+      "phrase": "one_line",
+      "added": "2026-10-01",
+      "subject": "captions:one_line",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R9",
+      "status": "active",
+      "area": "cuts",
+      "phrase": "tight_jump_cuts",
+      "added": "2026-10-01",
+      "subject": "cuts:tight_jump_cuts",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R10",
+      "status": "active",
+      "area": "cuts",
+      "phrase": "remove_ums",
+      "added": "2026-10-01",
+      "subject": "cuts:remove_ums",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R11",
+      "status": "active",
+      "area": "pacing",
+      "phrase": "shorter_intro",
+      "added": "2026-10-01",
+      "subject": "pacing:shorter_intro",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R12",
+      "status": "active",
+      "area": "ending",
+      "phrase": "logo_end",
+      "added": "2026-10-01",
+      "subject": "ending:logo_end",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R13",
+      "status": "active",
+      "area": "logo",
+      "phrase": "bottom_right",
+      "added": "2026-10-01",
+      "subject": "logo:bottom_right",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R14",
+      "status": "active",
+      "area": "logo",
+      "phrase": "small",
+      "added": "2026-10-01",
+      "subject": "logo:small",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R15",
+      "status": "active",
+      "area": "cards",
+      "phrase": "name_card_early",
+      "added": "2026-10-01",
+      "subject": "cards:name_card_early",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R16",
+      "status": "active",
+      "area": "cards",
+      "phrase": "small_name_card",
+      "added": "2026-10-01",
+      "subject": "cards:small_name_card",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R17",
+      "status": "active",
+      "area": "graphics",
+      "phrase": "brand_colour",
+      "added": "2026-10-01",
+      "subject": "graphics:brand_colour",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R18",
+      "status": "active",
+      "area": "broll",
+      "phrase": "more",
+      "added": "2026-10-01",
+      "subject": "broll:more",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R19",
+      "status": "active",
+      "area": "broll",
+      "phrase": "own_location",
+      "added": "2026-10-01",
+      "subject": "broll:own_location",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R20",
+      "status": "active",
+      "area": "colour",
+      "phrase": "warm",
+      "added": "2026-10-01",
+      "subject": "colour:warm",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R21",
+      "status": "active",
+      "area": "colour",
+      "phrase": "light_background",
+      "added": "2026-10-01",
+      "subject": "colour:light_background",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R22",
+      "status": "active",
+      "area": "fonts",
+      "phrase": "bold",
+      "added": "2026-10-01",
+      "subject": "fonts:bold",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R23",
+      "status": "active",
+      "area": "framing",
+      "phrase": "less_zoom",
+      "added": "2026-10-01",
+      "subject": "framing:less_zoom",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R24",
+      "status": "active",
+      "area": "wording",
+      "phrase": "friendly_tone",
+      "added": "2026-10-01",
+      "subject": "wording:friendly_tone",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R25",
+      "status": "active",
+      "area": "thumbnail",
+      "phrase": "big_text",
+      "added": "2026-10-01",
+      "subject": "thumbnail:big_text",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R26",
+      "status": "active",
+      "area": "thumbnail",
+      "phrase": "brand_colours",
+      "added": "2026-10-01",
+      "subject": "thumbnail:brand_colours",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R27",
+      "status": "active",
+      "area": "publish_text",
+      "phrase": "few_hashtags",
+      "added": "2026-10-01",
+      "subject": "publish_text:few_hashtags",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R28",
+      "status": "active",
+      "area": "publish_text",
+      "phrase": "short",
+      "added": "2026-10-01",
+      "subject": "publish_text:short",
+      "videos": [
+        "C0001",
+        "C0002"
+      ]
+    },
+    {
+      "id": "R29",
+      "status": "active",
+      "knob": "caption_size_px",
+      "value": 72,
+      "added": "2026-10-02",
+      "subject": "knob:caption_size_px",
+      "videos": [
+        "C0003"
+      ]
+    },
+    {
+      "id": "R30",
+      "status": "active",
+      "knob": "hook_title_sfx",
+      "value": false,
+      "added": "2026-10-02",
+      "subject": "knob:hook_title_sfx",
+      "videos": [
+        "C0003"
+      ]
+    },
+    {
+      "id": "R31",
+      "status": "removed",
+      "area": "music",
+      "phrase": "calm",
+      "added": "2026-09-01",
+      "removed": "2026-09-20",
+      "subject": "music:calm"
+    },
+    {
+      "id": "R32",
+      "status": "replaced",
+      "knob": "caption_size_px",
+      "value": 64,
+      "added": "2026-09-01",
+      "replaced": "2026-10-02",
+      "replaced_by": "R29",
+      "subject": "knob:caption_size_px"
+    }
+  ],
+  "seal": "6e702f0c9966417bd8c965692a78f00f28bfaece2049c747f118cf9c7d5f8a14"
+}

@@ -1,0 +1,24 @@
+{
+  "roles": {
+    "primary": {
+      "hex": "#0A3D62"
+    },
+    "accent": {
+      "hex": "#E84855"
+    },
+    "neutral_light": {
+      "hex": "#F2F2F2"
+    },
+    "secondary": {
+      "hex": "#1B998B"
+    }
+  },
+  "derived": {
+    "paper_tint": {
+      "hex": "#E6EEF8"
+    },
+    "ink": {
+      "hex": "#1E2A3B"
+    }
+  }
+}

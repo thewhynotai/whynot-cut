@@ -1,0 +1,124 @@
+{
+  "id": "fixture-largest",
+  "display_name": "عيادة النخبة التجريبية · Elite Test Clinic",
+  "prefix": "ETC",
+  "languages": [
+    "ar",
+    "en"
+  ],
+  "rtl": true,
+  "speciality": "dermatology",
+  "domain": "medical",
+  "review_domains": [
+    "business",
+    "religious"
+  ],
+  "review_detect": "review",
+  "phone": "+20 2 5555 0199",
+  "email": "owner@example.test",
+  "notes": "PRIVATE-NOTE-PROFILE owner's home address",
+  "people": [
+    {
+      "name": "كريم عبد الرحمن السيد",
+      "role": "مقدم البرنامج / host",
+      "gender": "male",
+      "honorific_ar": "د.",
+      "honorific_en": "Dr.",
+      "pronouns": "he/him",
+      "phone": "+20 100 555 0101",
+      "email": "karim@example.test",
+      "notes": "PRIVATE-NOTE-1 lives near the clinic"
+    },
+    {
+      "name": "سارة محمود الشريف",
+      "role": "استشارية جلدية",
+      "gender": "female",
+      "honorific_ar": "الدكتورة",
+      "honorific_en": "Dr.",
+      "pronouns": "she/her",
+      "phone": "01005550102"
+    },
+    {
+      "name": "Yasmin Adel",
+      "role": "guest dentist",
+      "gender": "unknown",
+      "honorific_ar": "د.",
+      "honorific_en": "Dr."
+    },
+    {
+      "name": "عمر خالد",
+      "role": "ضيف",
+      "honorific_ar": "أ.",
+      "honorific_en": "Mr."
+    },
+    {
+      "name": "منى حسن",
+      "role": "مديرة العيادة",
+      "gender": "female",
+      "honorific_ar": "أ.",
+      "honorific_en": "Ms."
+    },
+    {
+      "name": "Hany Fawzy",
+      "role": "nutritionist",
+      "gender": "male",
+      "honorific_ar": "د.",
+      "honorific_en": "Dr.",
+      "pronouns": "he/him"
+    },
+    {
+      "name": "ليلى إبراهيم",
+      "role": "أخصائية علاج طبيعي",
+      "gender": "female",
+      "honorific_ar": "د.",
+      "honorific_en": "Dr."
+    },
+    {
+      "name": "Nour El-Din Samir",
+      "role": "pharmacist",
+      "gender": "unknown",
+      "honorific_en": "Ph."
+    },
+    {
+      "name": "رانيا فتحي",
+      "role": "ممرضة",
+      "gender": "female",
+      "honorific_ar": "أ."
+    },
+    {
+      "name": "طارق مصطفى",
+      "role": "جراح تجميل",
+      "gender": "male",
+      "honorific_ar": "الدكتور",
+      "honorific_en": "Dr."
+    },
+    {
+      "name": "Dalia Ashraf",
+      "role": "content producer",
+      "gender": "female",
+      "honorific_en": "Ms.",
+      "email": "dalia@example.test"
+    },
+    {
+      "name": "يوسف عادل",
+      "role": "ضيف حلقة",
+      "gender": "male",
+      "honorific_ar": "م.",
+      "honorific_en": "Eng."
+    },
+    {
+      "name": "هبة سليمان",
+      "role": "أخصائية تغذية",
+      "gender": "female",
+      "honorific_ar": "د.",
+      "honorific_en": "Dr."
+    },
+    {
+      "name": "Ahmed Zaki",
+      "role": "guest",
+      "gender": "male",
+      "honorific_ar": "أ.",
+      "honorific_en": "Mr."
+    }
+  ]
+}
