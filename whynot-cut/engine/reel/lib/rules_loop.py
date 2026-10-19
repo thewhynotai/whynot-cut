@@ -286,13 +286,13 @@ REFUSED_EN = ("This touches something the review protects (the doctor or sheikh,
 # preference is {area, phrase id} from the engine's own vocabulary (config/defaults/preference-phrases.json, read from
 # the plugin only: a client folder cannot override it). The lead picks the phrase id when it labels a comment; the
 # brief prints the ENGINE's phrase, never the editor's words, so no wording can carry a gate change into it. A wish
-# with no phrase (or a phrase of another area) is never a rule: --propose lists a recurring one under `by_hand`.
+# with no phrase (or a phrase of another area) is never a rule, and is not listed anywhere (owner decision 2026-10-19,
+# after review 7cadf05): learned preferences are only the phrase vocabulary and the four knob rules; no editor words
+# are stored in a rule or shown by `reel rules`.
 PHRASES_FILE = "preference-phrases.json"
 _PHRASE_ID = re.compile(r"[a-z][a-z0-9_]{1,40}")
 _PHRASE_BAD = re.compile(r"[{}<>`\n\r]|<!--|-->")
 PHRASE_MAX = 160
-BY_HAND_AR = "اتقال في {n} فيديوهات: طبّقه يدوي في كل فيديو"
-BY_HAND_EN = "said on {n} videos: apply by hand per video"
 _VOCAB: dict = {}
 
 
@@ -888,7 +888,8 @@ def _used(rules: list) -> set:
 
 def propose(root) -> dict:
     """The proposals for the editor: recurring or standing comments grouped by meaning, with conflicts, refusals and
-    the active rules. Writes nothing."""
+    the active rules. Writes nothing. The editor's own words never appear: only ids, videos and the engine's phrases.
+    A comment with no phrase of its own area is neither proposed nor listed (owner decision 2026-10-19)."""
     st = _State(root)
     notes, warnings = history(st.root)
     reg = st.registry()
@@ -900,7 +901,6 @@ def propose(root) -> dict:
             tuple(x) for x in d["from"] if isinstance(x, list) and len(x) == 2)
     groups: dict = {}
     refused = []
-    hand: dict = {}                                     # free-text wishes: listed, never a proposal
     live = [n for n in notes if not (n["scope"] == "this_clip" or this_clip_only(n["text"])
                                      or (n["video_id"], n["id"]) in used)]
     bad = {norm(n["text"]) for n in live if weakens_safety(n["text"], _label(n)[0])}
@@ -912,14 +912,7 @@ def propose(root) -> dict:
             continue
         if _notes_only(label):
             ph = phrase_of(label)
-            if ph is None:                                 # free text: never a rule (option A)
-                key = (label or {}).get("topic") or (label or {}).get("knob") or _core(n["text"])
-                h = hand.setdefault(key, {"topic": key, "area": (label or {}).get("area"), "videos": [],
-                                          "standing": False, "text": n["text"]})
-                if n["video_id"] not in h["videos"]:
-                    h["videos"].append(n["video_id"])
-                h["standing"] = h["standing"] or n["scope"] == "standing" or standing_word(n["text"])
-                h["text"] = n["text"]
+            if ph is None:                                 # free text: never a rule, never listed
                 continue
             area, pid = ph
             subject, polarity, value = f"phrase:{area}.{phrases()[area][pid]['group']}", pid, pid
@@ -989,15 +982,19 @@ def propose(root) -> dict:
                           "ar": "التعليقات دي متعارضة: المحرر يختار واحدة (أو ولا واحدة)",
                           "en": "these comments disagree: the editor picks one (or neither)"})
     out_props = sorted([p for p in proposals if p["qualifies"]], key=lambda p: p["id"])
-    by_hand = [{"topic": h["topic"], "area": h["area"], "videos": h["videos"], "text": h["text"],
-                "ar": BY_HAND_AR.format(n=len(h["videos"])), "en": BY_HAND_EN.format(n=len(h["videos"]))}
-               for h in hand.values() if h["standing"] or len(h["videos"]) >= 2]
     rules = [_public(r) for r in active]
-    return {"ok": True, "proposals": out_props, "conflicts": conflicts, "refused": refused, "by_hand": by_hand,
-            "active": rules,
+    out = {"ok": True, "proposals": out_props, "conflicts": conflicts, "refused": refused, "active": rules}
+    for x in out_props:                                    # the output carries no editor words at all
+        x.pop("text", None)
+        for c in x["comments"]:
+            c.pop("text", None)
+    for x in refused:
+        x.pop("text", None)
+    out.update({
             "summary": [{"id": r["id"], "ar": r["ar"], "en": r["en"]} for r in rules] +
                        [{"id": p["id"], "ar": "مقترح: " + p["ar"], "en": "proposed: " + p["en"]} for p in out_props],
-            "warnings": warnings}
+            "warnings": warnings})
+    return out
 
 
 def _public(r: dict) -> dict:

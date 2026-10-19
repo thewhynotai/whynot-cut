@@ -6,7 +6,7 @@ Executor design (binding): only the T4.2 knob allowlist ever changes compiled ou
 STRUCTURED preference, {area, phrase id} from the engine's own vocabulary (config/defaults/preference-phrases.json,
 read from the plugin only), printed in notes.md as the vocabulary's text under a fixed header that says it never
 overrides approvals, review, QC or disclaimers (and a K1 line); the editor's words never reach the brief; a wish with
-no phrase of its own area is only listed under `by_hand`; no gate module reads a rule; rules.json and every
+no phrase of its own area is neither proposed nor listed (owner decision 2026-10-19); no gate module reads a rule; rules.json and every
 revision-notes.json are sealed (a hand edit is caught), and a notes-only rule without a valid phrase is shown as refused.
 Plan rulings (round 2): an unlabelled comment never counts; the over-block is accepted and widened (a comment that
 NAMES anything a gate protects is refused, whatever the verb); `--dismiss` remembers the editor's no.
@@ -115,8 +115,7 @@ class TestOnlyTheAllowlistChangesOutput(Client):
         for i, text in enumerate(texts):
             self.rec(f"C000{1 + i % 5}", {"text": "always: " + text, "intent": label(i), "scope": "standing"})
         r = self.props()
-        self.assertEqual(r["proposals"], [], [p["text"] for p in r["proposals"]])
-        self.assertEqual(r["by_hand"], [])
+        self.assertEqual(r["proposals"], [], [p["id"] for p in r["proposals"]])
         self.assertEqual(len(r["refused"]), len(texts))
         self.assertEqual(style.read_bytes(), before)
         self.assertEqual(sorted(self.files()), ["style.json"])          # no rules.json, no notes.md
@@ -479,7 +478,7 @@ class TestReviewSurvivors(Client):
         self.rec("C0002", {"text": text, "intent": {"topic": "handover", "area": "other_style"}})
         self.rec("C0003", {"text": text, "intent": {"topic": "handover", "area": "ending", "phrase": "logo_end"}})
         r = self.props()
-        self.assertEqual((r["proposals"], r["by_hand"]), ([], []))
+        self.assertEqual(r["proposals"], [])
         self.assertEqual(len(r["refused"]), 3)
 
     def test_the_summary_lists_the_active_rules_and_the_proposals(self):
@@ -581,7 +580,8 @@ class Surfaces(Client):
         return {"notes.md": md_path.read_text(encoding="utf-8") if md_path.exists() else "",
                 "rules.json": reg_path.read_text(encoding="utf-8") if reg_path.exists() else "",
                 "list_rules": dump(RL.list_rules(self.root)), "applied": dump(RL.applied(self.root, {"style": {}})),
-                "summary": dump(r["summary"]), "active": dump(r["active"])}
+                "summary": dump(r["summary"]), "active": dump(r["active"]),
+                "propose (the lead's view)": dump(r)}
 
     def add_all(self) -> int:
         """Add every open proposal; a proposal that contradicts an active rule (two phrases of one group) is added
@@ -612,19 +612,17 @@ class TestHeldOut71(Surfaces):
         for vid in ("C0001", "C0002"):
             RL.record(self.root, vid, [{"text": x["text"], "intent": label_of(i, x)} for i, x in enumerate(leaks)])
 
-    def test_i_labelled_with_a_free_topic_never_a_proposal_listed_by_hand(self):
+    def test_i_labelled_with_a_free_topic_never_a_proposal_and_never_shown(self):
         leaks = self.leaks()
         self.record_on_two_videos(leaks, lambda i, x: {"topic": f"free_{i}", "area": x["area"]})
         r = self.props()
         self.assertEqual((r["proposals"], r["conflicts"]), ([], []))
-        by_hand = {h["text"]: h for h in r["by_hand"]}
-        refused = {x["text"] for x in r["refused"]}
-        for x in leaks:                                  # by hand, or (the safety class) refused: never a rule
-            self.assertTrue(x["text"] in by_hand or x["text"] in refused, x["text"])
-            if x["text"] in by_hand:
-                self.assertEqual(by_hand[x["text"]]["ar"], RL.BY_HAND_AR.format(n=2))
-                self.assertEqual(by_hand[x["text"]]["en"], RL.BY_HAND_EN.format(n=2))
-        self.assertGreaterEqual(len(by_hand), 1)
+        self.assertEqual([k for k in r if "hand" in k], [])
+        out = json.dumps(r, ensure_ascii=False)           # not one wording or topic key, in any form
+        for i, x in enumerate(leaks):
+            self.assertNotIn(x["text"], out, x["text"])
+            self.assertNotIn(json.dumps(x["text"], ensure_ascii=False)[1:-1], out, x["text"])
+            self.assertNotIn(f"free_{i}", out)
         self.assertEqual(self.files(), {})               # nothing was written by looking at them
 
     def test_ii_labelled_with_a_valid_phrase_the_rule_is_added_and_the_wording_appears_nowhere(self):
@@ -693,11 +691,10 @@ class TestGeneratedSet(Surfaces):
                     RL.record(self.root, vid, items)
                 r = self.props()
                 self.assertEqual((r["proposals"], r["conflicts"]), ([], []))
-                seen = {h["text"] for h in r["by_hand"]} | {x["text"] for x in r["refused"]}
-                counted = {t for t in batch if not RL.this_clip_only(t)}    # "only once a week" reads as "this clip only"
-                self.assertEqual(counted - seen, set())         # each one is by hand or refused
-                for h in r["by_hand"]:
-                    self.assertEqual(h["ar"], RL.BY_HAND_AR.format(n=2))
+                out = json.dumps(r, ensure_ascii=False)           # none of them, in any form
+                for t in batch:
+                    self.assertNotIn(t, out)
+                self.assertEqual([k for k in r if "hand" in k], [])
         self.assertEqual(self.files(), {})
 
     def test_the_text_of_a_proposal_is_always_the_vocabularys(self):
@@ -757,7 +754,8 @@ class TestAPhraseIdCannotCarryFreeText(Client):
             RL.record(self.root, vid, [{"text": "calm music please", "intent": {"topic": "t", "area": "music",
                                                                                  "phrase": "unknown_phrase_id"}}])
         r = self.props()
-        self.assertEqual((r["proposals"], len(r["by_hand"])), ([], 1))
+        self.assertEqual(r["proposals"], [])
+        self.assertNotIn("calm music please", json.dumps(r, ensure_ascii=False))
 
     def test_a_phrase_of_another_area_is_never_a_rule(self):
         vocab = RL.phrases()
@@ -774,7 +772,8 @@ class TestAPhraseIdCannotCarryFreeText(Client):
             RL.record(self.root, vid, [{"text": "keep the music low", "intent": {"topic": "t", "area": "captions",
                                                                                 "phrase": "low_under_speech"}}])
         r = self.props()
-        self.assertEqual((r["proposals"], len(r["by_hand"])), ([], 1))
+        self.assertEqual(r["proposals"], [])
+        self.assertNotIn("keep the music low", json.dumps(r, ensure_ascii=False))
 
     def test_a_client_folder_cannot_change_the_vocabulary(self):
         plugin = {a: {pid: dict(ph) for pid, ph in items.items()} for a, items in RL.phrases().items()}
@@ -793,7 +792,7 @@ class TestAPhraseIdCannotCarryFreeText(Client):
                     {"text": "evil please", "intent": {"topic": "e", "area": "music", "phrase": "evil_one"}}])
             r = self.props()
             self.assertEqual([p["phrase"] for p in r["proposals"]], ["calm"])      # evil_one is not a phrase
-            self.assertEqual([h["topic"] for h in r["by_hand"]], ["e"])
+            self.assertNotIn("evil please", json.dumps(r, ensure_ascii=False))     # the evil one: nowhere
             RL.add(self.root, r["proposals"][0]["id"])
         md = self.md()
         self.assertIn("calm, soft music / مزيكا هادية (preference only)", md)
@@ -1068,12 +1067,12 @@ class TestPlainWishesFindAPhrase(Client):
             self.assertEqual((p["ar"], p["en"]), (item["ar"], item["en"]))
         self.assertTrue(all(c["subject"].startswith("phrase:") for c in r["conflicts"]))
 
-    def test_a_wish_with_no_fitting_phrase_is_done_by_hand(self):
+    def test_a_wish_with_no_fitting_phrase_is_never_a_rule(self):
         for vid in ("C0001", "C0002"):
             RL.record(self.root, vid, [{"text": "7ot el logo fel a5er", "intent": {"topic": "logo_at_end", "area": "logo"}}])
         r = self.props()
         self.assertEqual(r["proposals"], [])
-        self.assertEqual([(h["topic"], h["videos"]) for h in r["by_hand"]], [("logo_at_end", ["C0001", "C0002"])])
+        self.assertNotIn("logo_at_end", json.dumps(r, ensure_ascii=False))
 
 
 class TestTwoPhrasesOfOneGroup(Client):
@@ -1211,6 +1210,7 @@ class TestFrequencyIsNotThisClip(unittest.TestCase):
                 self.assertTrue(RL.this_clip_only(text))
 
 
+
 SKILLS = SK / "skills"
 AGENTS = SK / "agents"
 RULES_VERB = "def cmd_rules" in CLI.read_text(encoding="utf-8")
@@ -1222,6 +1222,16 @@ class TestTheTextTheEditorAndAgentsRead(unittest.TestCase):
 
     def text(self, p):
         return " ".join(p.read_text(encoding="utf-8").split())      # markdown wraps long lines
+
+    def test_the_lead_never_applies_an_old_comment_on_its_own(self):
+        """Owner decision 2026-10-19: there is no by-hand list; no skill tells the lead to carry a comment to another
+        video."""
+        for skill in ("revise", "edit"):
+            with self.subTest(skill=skill):
+                t = self.text(SKILLS / skill / "SKILL.md")
+                self.assertRegex(t, r"[Nn]ever apply an old comment")
+                for gone in ("by_hand", "--hand", "do them by hand", "apply by hand per video"):
+                    self.assertNotIn(gone, t)
 
     def test_revise_and_edit_show_the_rules_block(self):
         for skill in ("revise", "edit"):
@@ -1240,8 +1250,7 @@ class TestTheTextTheEditorAndAgentsRead(unittest.TestCase):
         t = self.text(SKILLS / "revise" / "SKILL.md")
         self.assertRegex(t, r"reel rules --root \S+ --phrases")
         self.assertIn('"phrase"', t)
-        self.assertIn("by_hand", t)
-        self.assertIn("by hand per video", t)
+        self.assertNotIn("by_hand", t)
         self.assertNotIn("ده مش تفضيل ستايل ثابت", t)                 # the round-3 refusal line is gone
         self.assertNotIn("Only short look-and-feel requests", t)
 
