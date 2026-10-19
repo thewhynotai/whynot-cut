@@ -7,8 +7,10 @@ display) and in visual weight and size. This module MEASURES each face from its 
 
 Traits (per face, at the role's weight; cached by the file's sha256):
   x_height      Latin: ink height of "x" per em, else OS/2 sxHeight, else None
-  arabic_body   Arabic: median tooth height of the isolated «س ب ن ي» per em. Only the glyph's body counts: the contours
-                that touch the largest contour's box; dots and marks floating free of it are dropped
+  arabic_body   Arabic: median tooth height of the isolated «س ب ن ي» per em, read from their dotless forms (ٮ ں ى;
+                س has no dots) so a dot can never be the body. A font without a dotless form: ب and ي carry their dots
+                below the body, so their full top counts; ن is classified by contours (_body: the contours joined to
+                the largest one, minus small marks whose centre lies outside its height)
   contrast_*    1 - thin/thick stroke from scanlines through the middle of a FreeType raster. Latin: the sides vs the
                 top/bottom of "o"; Arabic: the alef stem vs the base stroke of ب. 0 = even strokes
   density_*     ink coverage of a fixed string / (its advance x the script's body height): the visual weight
@@ -18,9 +20,11 @@ A static family serves a weight with its file of the nearest usWeightClass (ties
 every weight, its weight is then judged by its measured ink); a variable font is instanced at that weight (fontTools
 instancer, other axes at their defaults), never measured at its default master.
 
-Coverage gate: ARABIC_TEST (the letters with ڤ, ٪ ، ؛ ؟, Arabic-Indic digits) plus the lam-alef ligature (one glyph,
-or a lam and an alef that both differ from their plain joining forms), and LATIN_TEST (A-Z a-z 0-9 % & ®). A face
-missing any of them never enters a table pair; the misses are named.
+Coverage gate: ARABIC_TEST (the letters with ڤ, ٪ ، ؛ ؟, Arabic-Indic digits with the decimal and thousands
+separators ٫ ٬, tatweel ـ and the harakat U+064B-0652) plus the lam-alef ligature (one glyph, or a lam and an alef
+that both differ from their plain joining forms), and LATIN_TEST (A-Z a-z 0-9 % & ®). A face missing any of them
+never enters a table pair; the misses are named. A miss on the client's own face is a finding, never a switch to
+another family.
 
 Score = class 40 + weight 20 + height 15 + contrast 15 + width/rhythm 10 (WEIGHTS), every part bounded. >= 70: used
 automatically; 50-69: shown to the editor with explain() as the reason; < 50: never used, except the client's own
@@ -28,8 +32,13 @@ pair, which always wins with its score shown. latin_scale = TARGET_RATIO x arabi
 SCALE_RANGE: drawn at that scale, the Latin x-height sits on the Arabic letter body (heights_aligned: within ALIGN_TOL,
 3 %, of the target ratio).
 
-Sources, in order (pick): the client's pairing in typography.json; a superfamily of the client's (one family that
-passes both coverage gates); the curated table config/defaults/font-pairings.json. The table is built by
+Sources, in order (pick): the client's pairing in typography.json; then, when the role's face (font_roles.resolve,
+which honours typography.json roles and brand.json fallback weights) is the client's own: its own family when that
+family passes both gates (a superfamily), else the other script measured against that very face (the client's other
+families, then the installed table faces), best >= 50; with no client face, the curated table
+config/defaults/font-pairings.json. A Latin is never handed over that was scored against another Arabic face (nor an
+Arabic against another Latin). A missing fontTools, uharfbuzz, freetype-py or numpy is a FontProbeError naming it
+(pick returns no pair with that finding). The table is built by
 build_table() from folders of OFL font families (each family folder holds its OFL.txt): the repo's guide-ar/fonts and,
 when given, a downloaded folder. Every face carries its licence proof (nameID 13/14, OFL.txt sha256, file sha256).
 A family measured from a folder outside the repo keeps its rows when the table is rebuilt without that folder.
@@ -53,7 +62,7 @@ from .font_roles import faces as typography_faces
 
 DEFAULT_TABLE = Path(__file__).resolve().parents[3] / "config" / "defaults" / "font-pairings.json"
 TABLE_VERSION = 1
-TRAITS_VERSION = 1
+TRAITS_VERSION = 2          # 2: the Arabic body from the dotless forms (fix round 1)
 
 CLASSES = ("formal", "geometric", "humanist", "handwritten", "display")
 WEIGHTS = {"class": 40, "weight": 20, "height": 15, "contrast": 15, "width": 10}
@@ -73,10 +82,14 @@ _PAIR_CLASS = {frozenset(("geometric", "humanist")): 20, frozenset(("geometric",
                frozenset(("humanist", "formal")): 12, frozenset(("formal", "handwritten")): 12,
                frozenset(("humanist", "display")): 8}
 
-ARABIC_TEST = "ابتثجحخدذرزسشصضطظعغفقكلمنهويءآأؤإئةىڤ٪،؛؟٠١٢٣٤٥٦٧٨٩"
+ARABIC_TEST = "ابتثجحخدذرزسشصضطظعغفقكلمنهويءآأؤإئةىڤ٪،؛؟٠١٢٣٤٥٦٧٨٩٫٬ـ" + "".join(chr(c) for c in range(0x064B, 0x0653))
 ARABIC_LIGATURES = ("لا",)
 LATIN_TEST = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789%&®"
 ARABIC_BODY = "سبني"
+DOTLESS = {"ب": "ٮ", "ن": "ں", "ي": "ى"}   # the same letter bodies without dots (س has none)
+DOT_ABOVE = "ن"                          # without its dotless form, only this letter needs contour classes
+SMALL_MARK = 0.15                        # a contour under this share of the largest contour's area is a mark
+REQUIRED_MODULES = ("fontTools", "uharfbuzz", "freetype", "numpy")
 LATIN_DENSITY, ARABIC_DENSITY = "noxeacsmuvwrz", "سببنسبس"
 LATIN_WIDTH, ARABIC_WIDTH = "hamburgefonstiv", "مستشفيات"
 LATIN_SHAPES, ARABIC_SHAPES = "acegsoR", "عسجهوص"
@@ -124,7 +137,15 @@ def cache_info() -> dict:
     return {"hits": _STATS["hits"], "misses": _STATS["misses"], "size": len(_CACHE)}
 
 
+def _require(names=None) -> None:
+    """Raise FontProbeError naming every required package that cannot be imported (a clear refusal, never a crash)."""
+    miss = missing_modules(names)
+    if miss:
+        raise FontProbeError(f"font pairing needs {', '.join(miss)}, which cannot be imported here (run reel setup)")
+
+
 def _open(data: bytes, index: int, name: str):
+    _require(("fontTools",))
     from fontTools.ttLib import TTFont, TTLibError
     try:
         return TTFont(io.BytesIO(data), fontNumber=int(index or 0))
@@ -137,6 +158,7 @@ class _Face:
     and its glyph set."""
 
     def __init__(self, path, index: int = 0, weight=None, instance: bool = True):
+        _require()
         from fontTools.ttLib import TTFont, TTLibError
         self.path = Path(path)
         try:
@@ -244,15 +266,55 @@ def _area(ops) -> float:
     return abs(p.value)
 
 
+def _touch(a, b) -> bool:
+    return a[0] <= b[2] and a[2] >= b[0] and a[1] <= b[3] and a[3] >= b[1]
+
+
 def _body(contours: list[list]) -> list[list]:
-    """The body of a letter: the contours whose box touches the largest contour's box (dots and marks dropped)."""
-    cs = [c for c in contours if _bounds(c)]
+    """The body of a letter, by contour classes: the contours joined to the largest one through touching boxes (a
+    tooth that touches only a middle stroke stays), minus small marks (under SMALL_MARK of the largest area) whose
+    vertical centre lies outside the largest contour's height (a dot stays out even when its box dips into the
+    bowl's). Order kept."""
+    cs = [(i, c, _bounds(c), _area(c)) for i, c in enumerate(contours) if _bounds(c)]
     if not cs:
         return []
-    main = _bounds(max(cs, key=_area))
-    def touches(b):
-        return b[0] <= main[2] and b[2] >= main[0] and b[1] <= main[3] and b[3] >= main[1]
-    return [c for c in cs if touches(_bounds(c))]
+    main = max(cs, key=lambda x: x[3])
+    comp, rest = [main], [x for x in cs if x is not main]
+    grew = True
+    while grew:
+        grew = False
+        for x in list(rest):
+            if any(_touch(x[2], y[2]) for y in comp):
+                comp.append(x)
+                rest.remove(x)
+                grew = True
+    lo, hi = main[2][1], main[2][3]
+    keep = [x for x in comp if not (x[3] < SMALL_MARK * main[3] and not lo <= (x[2][1] + x[2][3]) / 2 <= hi)]
+    return [x[1] for x in sorted(keep, key=lambda x: x[0])]
+
+
+def _letter_top(face, letter: str):
+    """Font units from the baseline to the top of `letter`'s body (see DOTLESS / DOT_ABOVE), None when not drawn."""
+    stand_in = DOTLESS.get(letter)
+    if stand_in and ord(stand_in) in face.cmap and face.char_contours(stand_in):
+        cs = face.char_contours(stand_in)
+    elif letter in DOT_ABOVE:
+        cs = _body(face.char_contours(letter))
+    else:
+        cs = face.char_contours(letter)                    # no dots, or dots below: the full top is the body
+    top = max((b[3] for b in (_bounds(c) for c in cs) if b), default=0)
+    return top if top > 0 else None
+
+
+def body_tops(path, index: int = 0, weight=None) -> dict:
+    """{letter: body top per em} for the letters of ARABIC_BODY the face draws (a variable font at `weight`)."""
+    face = _Face(path, index, weight)
+    out = {}
+    for letter in ARABIC_BODY:
+        top = _letter_top(face, letter)
+        if top:
+            out[letter] = round(top / face.upm, 4)
+    return out
 
 
 def _raster(face: _Face, items):
@@ -336,12 +398,7 @@ def _measure(face: _Face) -> dict:
     else:
         t["x_height"], t["x_height_source"] = None, None
         reasons.append("x-height: no 'x' glyph and no OS/2 sxHeight")
-    heights = []
-    for ch in ARABIC_BODY:
-        body = _body(face.char_contours(ch))
-        top = max((_bounds(c)[3] for c in body), default=0)
-        if top > 0:
-            heights.append(top)
+    heights = [h for h in (_letter_top(face, ch) for ch in ARABIC_BODY) if h]
     t["arabic_body"] = round(statistics.median(heights) / upm, 4) if heights else None
     if not heights:
         reasons.append("Arabic body: none of «س ب ن ي» is drawn")
@@ -358,7 +415,9 @@ def _measure(face: _Face) -> dict:
     if cl is None:
         reasons.append("Latin contrast: no measurable 'o'")
     ca = None
-    ac, bc = face.char_contours("ا"), _body(face.char_contours("ب"))
+    dotless_beh = DOTLESS["ب"]
+    ac = face.char_contours("ا")
+    bc = face.char_contours(dotless_beh) if ord(dotless_beh) in face.cmap else _body(face.char_contours("ب"))
     if ac and bc:
         a_arr, b_arr = _raster(face, [(ac, 0, 0)]), _raster(face, [(bc, 0, 0)])
         abox, bbox = _ink_box(a_arr), _ink_box(b_arr)
@@ -401,6 +460,7 @@ def traits(path, index: int = 0, weight=None) -> dict:
     """The measured traits of a face (see the module docstring). A variable font is instanced at `weight` (clamped to
     its axis; None = its default); a static file is measured as it is. Cached by (file sha256, index, weight of a
     variable font). Raises FontProbeError for a file that is not a readable font."""
+    _require()
     p = Path(path)
     try:
         data = p.read_bytes()
@@ -622,11 +682,21 @@ def licence(path, index: int = 0) -> dict:
     out = {"name13": None, "name14": None, "ofl_sha256": None, "file_sha256": None, "ok": False, "reason": ""}
     try:
         data = p.read_bytes()
-        nm = _open(data, index, p.name)["name"]
-    except (FontProbeError, OSError, KeyError) as e:
-        out["reason"] = f"{p.name}: not a readable font ({type(e).__name__})"
+    except OSError as e:
+        out["reason"] = f"{p.name}: cannot be read ({type(e).__name__})"
         return out
-    out.update(name13=nm.getDebugName(13), name14=nm.getDebugName(14), file_sha256=hashlib.sha256(data).hexdigest())
+    try:
+        font = _open(data, index, p.name)
+        from fontTools.ttLib import TTLibError
+        try:
+            nm = font["name"]
+            n13, n14 = nm.getDebugName(13), nm.getDebugName(14)
+        except (TTLibError,) + _READ_ERRORS as e:          # a truncated or damaged name table
+            raise FontProbeError(f"{p.name}: its name table cannot be read ({type(e).__name__})") from e
+    except FontProbeError as e:
+        out["reason"] = str(e)
+        return out
+    out.update(name13=n13, name14=n14, file_sha256=hashlib.sha256(data).hexdigest())
     ofl = p.parent / "OFL.txt"
     text = ""
     if ofl.is_file():
@@ -642,8 +712,21 @@ def licence(path, index: int = 0) -> dict:
 
 
 # --------------------------------------------------------------------------- pairs from the client and the table
-def role_weight(role: str) -> int:
-    return WEIGHT[DEFAULT_ROLE_STYLE.get(role, "regular")]
+PAIRING_SOURCES = ("client", "table")
+LATIN_SCALE_RANGE = (0.5, 2.0)        # a latin_scale set by hand (the client database's range)
+
+
+def missing_modules(names=None) -> list[str]:
+    """The required packages that cannot be imported here (a broken install): fontTools, uharfbuzz, freetype-py,
+    numpy. Empty on a healthy engine runtime (all are pinned in every lock)."""
+    import importlib
+    out = []
+    for name in names or REQUIRED_MODULES:
+        try:
+            importlib.import_module(name)
+        except ImportError:
+            out.append(name)
+    return out
 
 
 def _families(typography: dict) -> dict:
@@ -661,11 +744,37 @@ def _families(typography: dict) -> dict:
     return fams
 
 
+def _brand_weights() -> dict:
+    """brand.json font_roles_fallback.weights of the active profile (what font_roles.resolve's callers pass)."""
+    from .common import font_role_fallback
+    w = (font_role_fallback() or {}).get("weights")
+    return w if isinstance(w, dict) else {}
+
+
+def _resolved(typography: dict, role: str, fallback_weights: dict | None, fams: dict) -> tuple:
+    """(the client's face for the role or None, the role's weight): font_roles.resolve, the one resolver every renderer
+    uses (typography.json roles, brand.json font_roles_fallback, the house default)."""
+    from .font_roles import resolve
+    r = resolve(typography or {}, role, fallback_weights or {})
+    face = next((f for fs in fams.values() for f in fs if r.get("file") and f["file"] == r["file"]), None)
+    if face:
+        return face, int(face["weight_class"])
+    wanted = str(r.get("wanted") or "")
+    if wanted in WEIGHT:
+        return None, WEIGHT[wanted]
+    return None, int(wanted) if wanted.isdigit() else WEIGHT[DEFAULT_ROLE_STYLE.get(role, "regular")]
+
+
+def role_weight(role: str, typography: dict | None = None, fallback_weights: dict | None = None) -> int:
+    """The weight `role` is drawn at, as a usWeightClass number (see _resolved)."""
+    return _resolved(typography or {}, role, fallback_weights, _families(typography or {}))[1]
+
+
 def _client_face(fams: dict, spec, weight: int) -> dict | None:
     """A face named by a pairing entry: a family name (its face nearest the role weight), a PostScript name or a font
     file name (case folded where the file system folds it)."""
     name = (spec or {}).get("family") if isinstance(spec, dict) else spec
-    if not name:
+    if not name or not isinstance(name, str):
         return None
     if name in fams:
         return nearest_face(fams[name], weight)
@@ -675,6 +784,36 @@ def _client_face(fams: dict, spec, weight: int) -> dict | None:
         return hit
     key = _fold(name)
     return next((f for f in allf if _fold(Path(str(f["file"])).name) == key or _fold(f["file"]) == key), None)
+
+
+def _pairing_entry(typography: dict, role: str) -> tuple:
+    """The client's pairing entry for `role`, checked: (entry or None, findings). A source other than client/table
+    drops the entry; a latin_scale that is not a finite number in LATIN_SCALE_RANGE, or a class that is not one of
+    CLASSES, is dropped from it. Each is named in the findings (a hand-edited typography.json reaches here directly)."""
+    pairing = (typography or {}).get("pairing")
+    if pairing is None:
+        return None, []
+    if not isinstance(pairing, dict):
+        return None, ["typography.json pairing is not a mapping: ignored"]
+    e = pairing.get(role)
+    if e is None:
+        return None, []
+    if not isinstance(e, dict):
+        return None, [f"pairing.{role} is not a mapping: ignored"]
+    src = e.get("source", "client")
+    if src not in PAIRING_SOURCES:
+        return None, [f"pairing.{role}: source {src!r} is not client or table: ignored"]
+    out, found = dict(e, source=src), []
+    ls = e.get("latin_scale")
+    lo, hi = LATIN_SCALE_RANGE
+    if ls is not None and not (_num(ls) and lo <= ls <= hi):
+        found.append(f"pairing.{role}: latin_scale {ls!r} is not a number in {lo}-{hi}: the measured scale is used")
+        out.pop("latin_scale")
+    for k in ("class", "latin_class"):
+        if out.get(k) is not None and out[k] not in CLASSES:
+            found.append(f"pairing.{role}: {k} {out[k]!r} is not one of {', '.join(CLASSES)}: ignored")
+            out.pop(k)
+    return out, found
 
 
 def _face_out(f: dict) -> dict:
@@ -706,13 +845,15 @@ def measure_pair(ar_face: dict, lat_face: dict, weight: int, ar_class=None, lat_
     return r
 
 
-def _pair_out(ar: dict, lat: dict, r: dict, source: str, latin_scale_override=None) -> dict:
+def _pair_out(ar: dict, lat: dict, r: dict, source: str, latin_scale_override=None, kind: str | None = None) -> dict:
     out = {"arabic": _face_out(ar), "latin": _face_out(lat), "source": source, "score": r.get("score"),
            "band": band(r.get("score"), r.get("scale_clamped")), "latin_scale": r.get("latin_scale", 1.0),
            "parts": r.get("parts") or {},
            "explain": explain(r) if r.get("parts") else "; ".join(r.get("reasons") or ["not measured"])}
     if latin_scale_override is not None:
         out["latin_scale"] = float(latin_scale_override)
+    if kind:
+        out["kind"] = kind
     out["reason"] = "" if out["band"] == "auto" else out["explain"]
     return out
 
@@ -743,54 +884,106 @@ def row_key(row: dict) -> tuple:
             _row_weights(row))
 
 
-def _latin_for_client_arabic(typography: dict, fams: dict, rows: list, weight: int, locate, role: str) -> dict | None:
-    """A client with its own Arabic face but no Latin one, whose Arabic family is not in the table: each table Latin
-    face found on this computer is measured against the client's Arabic face; the best pair scoring >= 50 wins
-    (source "table", kind "client-arabic")."""
-    from .font_roles import resolve
-    ar_fams = [n for n in sorted(fams) if (f := nearest_face(fams[n], weight))
-               and coverage(f["file"], "arabic", int(f.get("index") or 0))["ok"]]
-    lat_fams = [n for n in sorted(fams) if (f := nearest_face(fams[n], weight))
-                and coverage(f["file"], "latin", int(f.get("index") or 0))["ok"]]
-    if not ar_fams or lat_fams:
-        return None
-    lead = resolve(typography, role).get("family")
-    af = nearest_face(fams[lead if lead in ar_fams else ar_fams[0]], weight)
-    seen, best = set(), None
-    for r in sorted(rows, key=row_key):
-        lat = r["latin"]
-        key = (lat.get("family"), lat.get("file"), lat.get("instance"))
-        if key in seen:
-            continue
-        seen.add(key)
-        file = locate(lat)
-        if not file:
-            continue
-        lf = dict(lat, file=file, index=0)
-        res = measure_pair(af, lf, weight, None, (r.get("class") or {}).get("latin"))
-        if res["score"] is not None and (best is None or res["score"] > best[0]["score"]):
-            best = (res, lf)
-    if not best or band(best[0]["score"]) not in ("auto", "shown"):
-        return None
-    out = _pair_out(af, best[1], best[0], "table")
-    out["kind"] = "client-arabic"
-    return out
+def _rows_for(table: dict | None, weight: int) -> list:
+    """The measured rows serving `weight`: rows listing it, else the rows of the nearest row weight within
+    WEIGHT_REACH (a role resolved to 600 uses the 500/700 rows nearest it)."""
+    rows = [r for r in (table or {}).get("rows") or [] if r.get("status") == "measured"]
+    exact = [r for r in rows if weight in _row_weights(r)]
+    if exact:
+        return exact
+    near = min(ROW_WEIGHTS, key=lambda w: (abs(w - weight), -w))
+    return [r for r in rows if near in _row_weights(r)] if abs(near - weight) <= WEIGHT_REACH else []
 
 
-def pick(role: str = "caption", typography: dict | None = None, table: dict | None = None, *, locate=None) -> dict:
-    """The pair for `role`: {"pair": {...} | None, "findings": [...], "reason": str}. Order: the client's pairing
-    (always wins, its score shown), a superfamily of the client's, then the table: when the client has its own Arabic
-    face only and its family is not in the table, the table's Latin faces found on this computer measured against it;
-    otherwise the measured rows scoring >= 50 that serve the role's weight (the client's own families first, then the
-    score). `locate(face) -> file | None` says which table faces are on this computer (without it, table rows are
-    taken as they are). None when nothing qualifies: the caller keeps today's font chain."""
-    typography = typography or {}
+def _row_pair(r: dict) -> dict:
+    res = {"score": r["score"], "latin_scale": r.get("latin_scale", 1.0), "parts": r.get("parts") or {},
+           "scale_clamped": bool(r.get("scale_clamped")), "values": _row_values(r), "reasons": r.get("reasons") or []}
+    if not res["parts"]:
+        res["parts"] = {k: 0 for k in WEIGHTS}
+    return _pair_out(r["arabic"], r["latin"], res, "table")
+
+
+def _draws(face: dict, findings: list) -> tuple:
+    """(draws Arabic letters, draws Latin letters, passes the Arabic gate, passes the Latin gate) for a client face. A
+    gate miss on a script the face does draw is a finding, never a reason to leave the client's face."""
+    idx, name = int(face.get("index") or 0), face.get("family") or Path(str(face["file"])).name
+    ca, cl = coverage(face["file"], "arabic", idx), coverage(face["file"], "latin", idx)
+    for c in (ca, cl):
+        if c.get("error") and c["error"] not in findings:
+            findings.append(c["error"])
+    ar = not ca.get("error") and "ا" not in ca["missing"] and "ب" not in ca["missing"]
+    la = not cl.get("error") and "a" not in cl["missing"] and "A" not in cl["missing"]
+    for script, drawn, c in (("arabic", ar, ca), ("latin", la, cl)):
+        if drawn and not c["ok"]:
+            findings.append(f"{name} ({script}) cannot draw: " + " ".join(c["missing"]))
+    return ar, la, ca["ok"], cl["ok"]
+
+
+def _partner(anchor: dict, anchor_script: str, fams: dict, rows: list, weight: int, locate, findings: list):
+    """The best partner measured against the client's own face `anchor` (drawn in `anchor_script`): the client's own
+    families of the other script first, then the table faces of the other script found on this computer. Every
+    candidate passes its own script's gate; the anchor's gate misses are findings. Returns a pair dict (>= 50) or
+    None."""
+    other = "latin" if anchor_script == "arabic" else "arabic"
+    own, table = [], []
+    for name in sorted(fams):
+        if name == anchor.get("family"):
+            continue
+        f = nearest_face(fams[name], weight)
+        if f and coverage(f["file"], other, int(f.get("index") or 0))["ok"]:
+            own.append((f, None))
+    if locate is not None:
+        seen = set()
+        for r in sorted(rows, key=row_key):
+            side = r[other]
+            key = (side.get("family"), side.get("file"), side.get("instance"))
+            if key in seen or side.get("family") in fams:
+                continue
+            seen.add(key)
+            file = locate(side)
+            if file:
+                table.append((dict(side, file=file, index=0), (r.get("class") or {}).get(other)))
+    for group, source in ((own, "client-fonts"), (table, "table")):
+        best = None
+        for f, cls in group:
+            ar, la = (anchor, f) if anchor_script == "arabic" else (f, anchor)
+            r = measure_pair(ar, la, weight, cls if other == "arabic" else None, cls if other == "latin" else None)
+            if r["score"] is not None and (best is None or r["score"] > best[0]["score"]):
+                best = (r, ar, la)
+        if best and band(best[0]["score"], best[0]["scale_clamped"]) in ("auto", "shown"):
+            findings += [x for x in best[0]["findings"] if x not in findings]
+            kind = None if source == "client-fonts" else f"client-{anchor_script}"
+            return _pair_out(best[1], best[2], best[0], source, kind=kind)
+    return None
+
+
+def pick(role: str = "caption", typography: dict | None = None, table: dict | None = None, *, locate=None,
+         fallback_weights: dict | None = None) -> dict:
+    """The pair for `role`: {"pair": {...} | None, "findings": [...], "reason": str}. The role's face and weight come
+    from font_roles.resolve (typography.json roles, then `fallback_weights`, by default brand.json
+    font_roles_fallback.weights, then the house default). Order:
+      1. the client's pairing (typography.json `pairing.<role>`, checked): source client always wins with its score
+         shown; a stored table pair is used while it still scores >= 50;
+      2. when the role's face is the client's own: a superfamily only when that face's own family passes both gates;
+         otherwise the other script is measured against that very face (the client's own families first, then the
+         installed table faces) and the best >= 50 wins; table rows for the face's own family are taken as they are
+         when nothing can be measured (no locate). Another family's pair is never handed over;
+      3. no client face: the table rows serving the role's weight, best score first.
+    `locate(face) -> file | None` says which table faces are on this computer. None when nothing reaches 50: the
+    caller keeps today's font chain. A broken install (a required package missing) returns None with that finding."""
+    miss = missing_modules()
+    if miss:
+        why = f"font pairing unavailable: {', '.join(miss)} cannot be imported (run reel setup): today's chain is kept"
+        return {"pair": None, "findings": [why], "reason": why}
+    typography = typography if isinstance(typography, dict) else {}
     table = load_table() if table is None else table
-    weight, fams, findings = role_weight(role), _families(typography), []
-    pairing = typography.get("pairing") if isinstance(typography.get("pairing"), dict) else {}
-    entry = pairing.get(role)
-    if isinstance(entry, dict) and entry.get("source", "client") in ("client", "table"):
-        src = entry.get("source", "client")
+    fams, findings = _families(typography), []
+    fallback = _brand_weights() if fallback_weights is None else fallback_weights
+    anchor, weight = _resolved(typography, role, fallback, fams)
+    entry, notes = _pairing_entry(typography, role)
+    findings += notes
+    if entry:
+        src = entry["source"]
         ar, lat = _client_face(fams, entry.get("arabic"), weight), _client_face(fams, entry.get("latin"), weight)
         for side, f in (("arabic", ar), ("latin", lat)):
             if f is None:
@@ -799,39 +992,42 @@ def pick(role: str = "caption", typography: dict | None = None, table: dict | No
             r = measure_pair(ar, lat, weight, entry.get("class"), entry.get("latin_class"),
                              superfamily=ar.get("family") == lat.get("family"))
             findings += r["findings"]
-            if src == "client" or band(r["score"]) in ("auto", "shown"):
+            if src == "client" or band(r["score"], r["scale_clamped"]) in ("auto", "shown"):
                 return {"pair": _pair_out(ar, lat, r, src, entry.get("latin_scale")), "findings": findings,
                         "reason": ""}
             findings.append(f"pairing.{role} (table) now scores {r['score']}: not used")
-    for name in sorted(fams):
-        if is_superfamily(fams[name], weight):
-            f = nearest_face(fams[name], weight)
-            r = measure_pair(f, f, weight, superfamily=True)
-            if band(r["score"]) in ("auto", "shown"):
-                return {"pair": _pair_out(f, f, r, "superfamily"), "findings": findings + r["findings"], "reason": ""}
-            findings.append(f"{name}: a superfamily scoring {r['score']}: not used")
-    own = set(fams)
-    rows = [r for r in (table or {}).get("rows") or [] if r.get("status") == "measured"
-            and band(r.get("score")) in ("auto", "shown") and weight in _row_weights(r)]
-    if locate is not None and not any(r["arabic"].get("family") in own for r in rows):
-        got = _latin_for_client_arabic(typography, fams, rows, weight, locate, role)
-        if got:
-            return {"pair": got, "findings": findings, "reason": ""}
-    rows.sort(key=lambda r: ((r.get("arabic") or {}).get("family") not in own,
-                             (r.get("latin") or {}).get("family") not in own, -r["score"]) + row_key(r))
-    for r in rows:
+    rows = _rows_for(table, weight)
+    usable = [r for r in rows if band(r.get("score"), r.get("scale_clamped")) in ("auto", "shown")]
+    if anchor:
+        draws_ar, draws_la, gate_ar, gate_la = _draws(anchor, findings)
+        name = anchor.get("family")
+        if draws_ar or draws_la:
+            if draws_ar and draws_la and gate_ar and gate_la:
+                r = measure_pair(anchor, anchor, weight, superfamily=True)
+                if band(r["score"], r["scale_clamped"]) in ("auto", "shown"):
+                    return {"pair": _pair_out(anchor, anchor, r, "superfamily"), "findings": findings, "reason": ""}
+                findings.append(f"{name}: one family for both scripts scoring {r['score']}: not used")
+            script = "arabic" if draws_ar else "latin"
+            got = _partner(anchor, script, fams, rows, weight, locate, findings)
+            if got:
+                return {"pair": got, "findings": findings, "reason": ""}
+            if locate is None:
+                same = sorted((r for r in usable if r[script].get("family") == name), key=lambda r: (-r["score"],)
+                              + row_key(r))
+                if same:
+                    return {"pair": _row_pair(same[0]), "findings": findings, "reason": ""}
+            why = (f"nothing scores >= {BAND_SHOWN:.0f} against the client's {script} face {name} for {role} "
+                   f"({weight}): today's font chain is kept")
+            return {"pair": None, "findings": findings, "reason": why}
+    usable.sort(key=lambda r: (-r["score"],) + row_key(r))
+    for r in usable:
         if locate is not None:
             gone = [r[s]["family"] for s in ("arabic", "latin") if not locate(r[s])]
             if gone:
                 findings.append(f"table pair {r['arabic']['family']} + {r['latin']['family']}: "
                                 f"{', '.join(gone)} not on this computer")
                 continue
-        res = {"score": r["score"], "latin_scale": r.get("latin_scale", 1.0), "parts": r.get("parts") or {},
-               "scale_clamped": bool(r.get("scale_clamped")),
-               "values": _row_values(r), "reasons": r.get("reasons") or []}
-        if not res["parts"]:
-            res["parts"] = {k: 0 for k in WEIGHTS}
-        return {"pair": _pair_out(r["arabic"], r["latin"], res, "table"), "findings": findings, "reason": ""}
+        return {"pair": _row_pair(r), "findings": findings, "reason": ""}
     return {"pair": None, "findings": findings,
             "reason": f"no pair scoring >= {BAND_SHOWN:.0f} serves {role} ({weight}): today's font chain is kept"}
 
@@ -1089,6 +1285,16 @@ def write_table(path, table: dict) -> Path:
 SPECIMEN_AR, SPECIMEN_LAT = "نتيجة التحليل سليمة", "MRI scan box"
 
 
+def _line(face: _Face, text: str) -> list[tuple]:
+    """[(x in font units, cluster)] of each glyph of `text` shaped as one line: HarfBuzz orders an Arabic line right
+    to left (the first word's clusters sit rightmost)."""
+    out, x = [], 0
+    for _name, adv, xo, _yo, cl in face.shape(text):
+        out.append((x + xo, cl))
+        x += adv
+    return out
+
+
 def _ink_top(face: _Face, items) -> float:
     """Font units from the baseline to the top of the ink of `items`."""
     from fontTools.pens.boundsPen import BoundsPen
@@ -1101,9 +1307,11 @@ def _ink_top(face: _Face, items) -> float:
 
 
 def specimen_sheet(table: dict, roots, out, width: int = 1600) -> dict:
-    """An AR+EN specimen PNG for the designer: one band per measured row, the Arabic sample and the Latin sample at
-    latin_scale on one baseline, with the Arabic body line (black) and the scaled x-height line (grey).
-    {"rows", "missing", "file"}; a row whose font files are not under `roots` is listed in "missing"."""
+    """An AR+EN specimen PNG for the designer: one band per measured row, the Arabic sample (shaped as one right-to-left
+    line) and the Latin sample at latin_scale on one baseline, with the Arabic body line (black) and the scaled
+    x-height line (grey), both measured afresh from the drawn faces, never copied from the table.
+    {"rows", "missing", "file", "bands": [{arabic_px, latin_px, arabic_body_em, x_height_em}]}; a row whose font files
+    are not under `roots` is listed in "missing"."""
     import numpy as np
     from PIL import Image, ImageDraw
     files: dict = {}
@@ -1112,7 +1320,7 @@ def specimen_sheet(table: dict, roots, out, width: int = 1600) -> dict:
             if p.suffix.lower() in _FONT_EXT:
                 files.setdefault(p.name, p)
     rows = [r for r in table.get("rows") or [] if r.get("status") == "measured"]
-    em, band_h, base, missing, bands, opened = 64.0, 140, 96, [], [], {}
+    em, band_h, base, missing, bands, opened, geometry = 64.0, 140, 96, [], [], {}, []
     for r in rows:
         pa, pl = files.get(r["arabic"]["file"]), files.get(r["latin"]["file"])
         if not pa or not pl:
@@ -1120,17 +1328,12 @@ def specimen_sheet(table: dict, roots, out, width: int = 1600) -> dict:
             continue
         img = Image.new("L", (width, band_h), 255)
         d = ImageDraw.Draw(img)
-        x, guides = 20, []
+        x, guides, geo = 20, [], {}
         for side, p, text, scale in (("arabic", pa, SPECIMEN_AR, 1.0), ("latin", pl, SPECIMEN_LAT, r["latin_scale"])):
             key = (str(p), r[side].get("instance"))
             face = opened.get(key) or opened.setdefault(key, _Face(p, 0, r[side].get("instance")))
-            items, xpos = [], 0
-            for word in text.split(" "):
-                got = _string(face, word)
-                if not got:
-                    continue
-                items += [(c, gx + xpos, gy) for c, gx, gy in got[0]]
-                xpos += got[1] + face.upm // 4
+            got = _string(face, text)                      # one shaped line: Arabic words run right to left
+            items = got[0] if got else []
             if not items:
                 missing.append(f"{p.name}: cannot draw the sample")
                 continue
@@ -1141,7 +1344,10 @@ def specimen_sheet(table: dict, roots, out, width: int = 1600) -> dict:
             size = (max(1, int(round(ink.width * k))), max(1, int(round(ink.height * k))))
             ink = ink.resize(size)
             img.paste(0, (x, base - int(round(top_px * k))), ink)
-            h = (r.get("traits") or {}).get("arabic_body" if side == "arabic" else "x_height") or 0
+            fresh = traits(p, 0, r[side].get("instance"))
+            h = fresh["arabic_body" if side == "arabic" else "x_height"] or 0
+            geo[f"{side}_px"] = size[1]
+            geo["arabic_body_em" if side == "arabic" else "x_height_em"] = h
             guides.append((base - int(round(em * float(scale) * h)), 0 if side == "arabic" else 140))
             x += size[0] + 40
         for y, shade in guides:
@@ -1152,13 +1358,14 @@ def specimen_sheet(table: dict, roots, out, width: int = 1600) -> dict:
         d.text((min(x + 10, width - 380), 55), f"score {r['score']} ({r['band']}) latin_scale {r['latin_scale']}",
                fill=0)
         bands.append(img)
+        geometry.append(geo)
     sheet = Image.new("L", (width, max(1, band_h * len(bands))), 255)
     for i, b in enumerate(bands):
         sheet.paste(b, (0, i * band_h))
     p = Path(out)
     p.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(p)
-    return {"rows": len(bands), "missing": missing, "file": str(p)}
+    return {"rows": len(bands), "missing": missing, "file": str(p), "bands": geometry}
 
 
 # --------------------------------------------------------------------------- command line (table builder)

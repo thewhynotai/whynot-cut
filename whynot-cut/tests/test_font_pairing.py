@@ -38,7 +38,8 @@ TABLE = SK / "config" / "defaults" / "font-pairings.json"
 OFL_TEXT = ("Copyright (c) test\n\nThis Font Software is licensed under the SIL Open Font License, Version 1.1.\n"
             "SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007\n")
 LATIN = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789%&®"
-ARABIC = "ابتثجحخدذرزسشصضطظعغفقكلمنهويءآأؤإئةىڤ٪،؛؟٠١٢٣٤٥٦٧٨٩"
+ARABIC = "ابتثجحخدذرزسشصضطظعغفقكلمنهويءآأؤإئةىڤ٪،؛؟٠١٢٣٤٥٦٧٨٩٫٬ـ" + "".join(chr(c) for c in range(0x064B, 0x0653))
+DOTLESS = "ںٮ"                                  # dotless noon and beh (alef maksura ى is in ARABIC already)
 
 
 # --------------------------------------------------------------------------- tiny fonts with known boxes
@@ -58,13 +59,17 @@ def _name(ch: str) -> str:
 
 def make_font(*, family="Test", style="Regular", ps=None, weight=400, upm=1000, adv=600, space=250, xh=500,
               with_x=True, sx_height=0, cap=700, ink=80, stem=80, hair=80, latin=True, arabic=True, body=500,
-              ar_stem=80, ar_bar=80, lam_alef=True, drop=(), extra_glyphs=0, ofl=True, split_beh=False):
+              ar_stem=80, ar_bar=80, lam_alef=True, drop=(), extra_glyphs=0, ofl=True, split_beh=False,
+              noon_overlap=False, chain=False, dotless=False, italic=False):
     """A TrueType font made of rectangles. Latin lowercase: a stem `ink` wide and a base bar `ink` high, `xh` tall
     ("x" too unless `with_x` is False); "o" is a ring with sides `stem` and top/bottom `hair`. Arabic letters: a base
     bar `ar_bar` high and a tooth `ar_stem` wide, `body` tall; ب/ي carry dots below, ن a dot above (separate contours);
     alef is a stem `ar_stem` wide, 1.5 x body tall. `lam_alef` adds the rlig lam-alef ligature. `drop`: characters left
     out of the cmap. `extra_glyphs` unmapped glyphs make a large font. `split_beh`: ccmp draws ب as a dotless base
-    glyph plus a separate dot glyph (as some Naskh fonts do)."""
+    glyph plus a separate dot glyph (as some Naskh fonts do). `noon_overlap`: ن's dot sits on the tooth, its box
+    dipping 2 units into the tooth's box. `chain`: س ب ن ي are a wide low bowl, a middle stroke and the tallest tooth,
+    the tooth touching only the middle stroke. `dotless`: ں ٮ in the cmap (the dotless letter bodies). `italic`: the
+    italic bit and style."""
     from fontTools.fontBuilder import FontBuilder
     from fontTools.pens.ttGlyphPen import TTGlyphPen
     ps = ps or f"{family}-{style}".replace(" ", "")
@@ -72,7 +77,7 @@ def make_font(*, family="Test", style="Regular", ps=None, weight=400, upm=1000, 
     if latin:
         chars += [c for c in LATIN if c not in drop]
     if arabic:
-        chars += [c for c in ARABIC if c not in drop]
+        chars += [c for c in ARABIC + (DOTLESS if dotless else "") if c not in drop]
         for c in "لا":
             if c not in chars and c not in drop:
                 chars.append(c)
@@ -109,8 +114,20 @@ def make_font(*, family="Test", style="Regular", ps=None, weight=400, upm=1000, 
         elif c == "ا":
             glyphs[n] = draw(lambda pen: _rect(pen, adv // 2 - ar_stem // 2, 0, adv // 2 - ar_stem // 2 + ar_stem,
                                                int(body * 1.5)))
+        elif chain and c in "سبني":
+            def chained(pen):
+                _rect(pen, 50, 0, 300, body // 2)                  # the largest contour: a wide low bowl
+                _rect(pen, 300, 0, 340, body * 7 // 10)            # a middle stroke touching the bowl
+                _rect(pen, 340, 0, 380, body)                      # the tallest tooth, touching only the middle
+            glyphs[n] = draw(chained)
         elif c in "بي":
             glyphs[n] = draw(arabic_generic(lambda pen: _rect(pen, adv // 2 - 30, -160, adv // 2 + 30, -100)))
+        elif c == "ن" and noon_overlap == "big":
+            glyphs[n] = draw(arabic_generic(lambda pen: _rect(pen, adv - 190 - ar_stem, body - 2, adv - 50,
+                                                              body + 138)))
+        elif c == "ن" and noon_overlap:
+            glyphs[n] = draw(arabic_generic(lambda pen: _rect(pen, adv - 40 - ar_stem, body - 2, adv - 60,
+                                                              body + 58)))
         elif c == "ن":
             glyphs[n] = draw(arabic_generic(lambda pen: _rect(pen, adv // 2 - 30, body + 60, adv // 2 + 30,
                                                               body + 120)))
@@ -143,6 +160,7 @@ def make_font(*, family="Test", style="Regular", ps=None, weight=400, upm=1000, 
     fb.setupGlyf({g: glyphs[g] for g in order})
     fb.setupHorizontalMetrics({g: ((space if g == "space" else 0 if g == "dotb" else adv), 50) for g in order})
     fb.setupHorizontalHeader(ascent=900, descent=-300)
+    style = style + " Italic" if italic and "italic" not in style.lower() else style
     names = {"familyName": family, "styleName": style, "psName": ps, "fullName": f"{family} {style}",
              "uniqueFontIdentifier": ps}
     if ofl:
@@ -154,6 +172,7 @@ def make_font(*, family="Test", style="Regular", ps=None, weight=400, upm=1000, 
                       "licenseInfoURL": "https://example.com/eula"})
     fb.setupNameTable(names)
     fb.setupOS2(version=4, usWeightClass=weight, sxHeight=sx_height, sCapHeight=cap, sTypoAscender=900,
+                fsSelection=0x01 if italic else 0x40,
                 sTypoDescender=-300, usWinAscent=900, usWinDescent=300)
     fb.setupPost()
     if fea:
@@ -620,7 +639,8 @@ class TestPick(Tmp):
         self.assertEqual((p["source"], p["kind"], p["arabic"]["family"], p["latin"]["family"]),
                          ("table", "client-arabic", "Client Ar", "Good L"))
         self.assertGreaterEqual(p["score"], 50)
-        self.assertEqual(FP.pick("caption", typ, {"rows": rows})["pair"]["latin"]["family"], "Bad L")  # no locate
+        # no locate: nothing can be measured against the client's face, and another family's row is never handed over
+        self.assertIsNone(FP.pick("caption", typ, {"rows": rows})["pair"])
         r = FP.pick("caption", typ, {"rows": [table_row(95, ar="Other", la="Bad L")]},
                     locate=lambda f: str(files[f["family"]]) if f.get("family") in files else None)
         self.assertIsNone(r["pair"])                              # Bad L measures < 50 against the client's face
@@ -665,8 +685,11 @@ class TestTable(unittest.TestCase):
         for c in cands.values():
             self.assertEqual(c["status"], "candidate-unmeasured")
             self.assertTrue(c["reason"])
-        for cls in FP.CLASSES:                                    # every class has a measured pair
-            self.assertTrue(any(r["class"]["arabic"] == cls for r in self.t["rows"]), cls)
+        for cls in FP.CLASSES:              # every class has a measured pair, or each of its families says why not
+            if not any(r["class"]["arabic"] == cls for r in self.t["rows"]):
+                fams = [n for n, f in self.t["families"].items() if f["class"] == cls and f["use"]]
+                self.assertTrue(fams and all(n in cands for n in fams), cls)
+        self.assertIn("cannot draw ٫ ٬", cands["Aref Ruqaa"]["reason"])   # the decimal separator gate (review P2-2)
 
     def test_candidates_are_never_picked(self):
         poisoned = {"rows": [table_row(100, ar=c["family"], status="candidate-unmeasured")
@@ -842,10 +865,10 @@ class TestHostile(Tmp):
         got = {}
         for plat_name in ("win32", "darwin"):
             with mock.patch.object(FP.sys, "platform", plat_name):
-                got[plat_name] = (FP.pick("caption", typ, {"rows": []})["pair"]["arabic"]["family"],
-                                  FP.load_table()["rows"])
+                pair = FP.pick("caption", typ, {"rows": []})["pair"]
+                got[plat_name] = (pair["source"], pair["arabic"]["family"], FP.load_table()["rows"])
         self.assertEqual(got["win32"], got["darwin"])
-        self.assertEqual(got["win32"][0], "Brand Ar")             # file names fold case on Windows and macOS
+        self.assertEqual(got["win32"][:2], ("client", "Brand Ar"))   # the editor's pair, file names case-folded
         with mock.patch.object(FP.sys, "platform", "linux"):
             r = FP.pick("caption", typ, {"rows": []})
         self.assertNotEqual((r["pair"] or {}).get("source"), "client")  # exact case elsewhere: no match
@@ -867,6 +890,369 @@ class TestSpecimen(Tmp):
         gone = FP.specimen_sheet({"rows": [dict(t["rows"][0], arabic=dict(t["rows"][0]["arabic"], file="nope.ttf"))]},
                                  [FONTS], self.tmp / "sheet" / "none.png")
         self.assertEqual((gone["rows"], len(gone["missing"])), (0, 1))
+
+
+# --------------------------------------------------------------------------- fix round 1 (review of 515ddc7)
+def _repo_faces() -> dict:
+    """PostScript name -> file of every committed repo font (what a computer with them installed would find)."""
+    from fontTools.ttLib import TTFont
+    out = {}
+    for p in sorted(FONTS.rglob("*.ttf")):
+        with TTFont(str(p), lazy=True) as f:
+            out[f["name"].getDebugName(6)] = str(p)
+    return out
+
+
+REPO_PS = _repo_faces()
+
+
+def locate_repo(face: dict):
+    """The looks hook's locate on a computer with the repo fonts installed: static faces only, by PostScript name."""
+    if face.get("instance") is not None:
+        return None
+    return REPO_PS.get(face.get("ps"))
+
+
+def independent_body(path, wght=None) -> float:
+    """The Arabic letter body by a second method: FreeType rasterises the cmap glyphs of the isolated س ب ي and of the
+    dotless noon ں at one pixel per font unit, and the first inked row of the bitmap is the ink top; median per em. A variable font
+    is set to `wght` through FreeType's own design coordinates. No shaping, no fontTools pens, no contour classes."""
+    import io
+    import statistics
+    import freetype
+    face = freetype.Face(io.BytesIO(Path(path).read_bytes()))
+    if wght is not None:
+        info = face.get_variation_info()
+        face.set_var_design_coords([wght if a.tag == "wght" else a.default for a in info.axes])
+    upm = face.units_per_EM
+    face.set_char_size(upm * 64, 0, 72, 72)
+    tops = []
+    for cp in (0x0633, 0x0628, 0x064A, 0x06BA):
+        face.load_char(chr(cp), freetype.FT_LOAD_NO_HINTING | freetype.FT_LOAD_NO_BITMAP | freetype.FT_LOAD_RENDER)
+        bm = face.glyph.bitmap                              # the frame is the control box: find the first inked row
+        first = next(r for r in range(bm.rows) if any(bm.buffer[r * bm.pitch:r * bm.pitch + bm.width]))
+        tops.append(face.glyph.bitmap_top - first)
+    return statistics.median(tops) / upm
+
+
+REPO_ARABIC = sorted(p for p in FONTS.rglob("*.ttf") if p.parent.name in ("alexandria", "ibmplexsansarabic"))
+
+
+class TestArabicBodyFixRound(Tmp):
+    def top_of(self, contours) -> int:
+        return max(FP._bounds(c)[3] for c in contours)
+
+    def test_a_dot_dipping_into_the_tooth_box_is_not_the_body(self):
+        p = save(self.tmp / "a" / "a.ttf", noon_overlap=True)
+        face = FP._Face(p)
+        self.assertEqual(self.top_of(FP._body(face.char_contours("ن"))), 500)
+        self.assertAlmostEqual(FP.body_tops(p)["ن"], 0.5, places=3)
+
+    def test_a_tooth_touching_only_a_middle_stroke_is_kept(self):
+        p = save(self.tmp / "c" / "c.ttf", chain=True)
+        face = FP._Face(p)
+        self.assertEqual(self.top_of(FP._body(face.char_contours("س"))), 500)
+        self.assertAlmostEqual(FP.traits(p)["arabic_body"], 0.5, places=3)
+
+    def test_the_dotless_noon_is_used_when_the_font_has_it(self):
+        p = save(self.tmp / "d" / "d.ttf", noon_overlap=True, dotless=True)
+        tops = FP.body_tops(p)
+        self.assertEqual(sorted(tops), ["ب", "س", "ن", "ي"])
+        self.assertTrue(all(abs(v - 0.5) < 1e-3 for v in tops.values()), tops)
+
+    def test_a_large_noon_dot_is_never_the_body_when_the_dotless_noon_exists(self):
+        # a heavy Naskh-style dot (half the tooth's area) touching the tooth: contour classes alone would keep it
+        p = save(self.tmp / "big" / "big.ttf", noon_overlap="big", dotless=True)
+        self.assertAlmostEqual(FP.body_tops(p)["ن"], 0.5, places=3)
+        face = FP._Face(p)
+        classified = max(FP._bounds(c)[3] for c in FP._body(face.char_contours("ن")))
+        self.assertGreater(classified, 500)                       # why the dotless form comes first
+
+    def test_the_repo_noon_dots_are_not_the_body(self):
+        # IBM Plex Sans Arabic SemiBold's dot box starts 12 units inside the bowl's box, Alexandria Bold's 2 units
+        from fontTools.ttLib import TTFont
+        for name in ("ibmplexsansarabic/IBMPlexSansArabic-SemiBold.ttf", "alexandria/Alexandria-Bold.ttf"):
+            with self.subTest(font=name):
+                p = FONTS / name
+                with TTFont(str(p)) as f:
+                    noon = f["glyf"][f.getBestCmap()[0x06BA]].yMax / f["head"].unitsPerEm
+                self.assertLess(abs(FP.body_tops(p)["ن"] - noon) / noon, 0.01)
+                face = FP._Face(p)                                 # the dotted noon alone, by contour classes
+                classified = self.top_of(FP._body(face.char_contours("ن"))) / face.upm
+                self.assertLess(abs(classified - noon) / noon, 0.02, classified)
+
+    def test_arabic_body_matches_an_independent_glyph_box_measure(self):
+        for p in REPO_ARABIC:
+            with self.subTest(font=p.name):
+                ind = independent_body(p)
+                self.assertLess(abs(FP.traits(p)["arabic_body"] - ind) / ind, 0.01)
+
+    def test_table_rows_align_against_the_independent_body(self):
+        t = json.loads(TABLE.read_text(encoding="utf-8"))
+        by_file = {p.name: independent_body(p) for p in REPO_ARABIC}
+        rows = [r for r in t["rows"] if r["arabic"]["file"] in by_file]
+        self.assertGreaterEqual(len(rows), 10)
+        for r in rows:
+            with self.subTest(row=(r["arabic"]["file"], r["latin"]["family"], r["weights"])):
+                ind = by_file[r["arabic"]["file"]]
+                self.assertLess(abs(r["traits"]["arabic_body"] - ind) / ind, 0.01)
+                if not r["scale_clamped"]:
+                    self.assertLessEqual(abs(r["latin_scale"] * r["traits"]["x_height"] / ind - 1.0), 0.031)
+
+
+class TestPickFixRound(Tmp):
+    """The pair's Latin is always measured against the Arabic face the captions will be drawn in."""
+
+    def brand_ar(self, **kw):
+        kw.setdefault("family", "Brand Ar")
+        return save(self.tmp / "ar" / "BrandAr-Bold.ttf", style="Bold", weight=700, latin=False, **kw)
+
+    def brand_la(self):
+        return save(self.tmp / "la" / "BrandLa-Bold.ttf", family="Brand La", style="Bold", weight=700, arabic=False)
+
+    def check_never_another_arabic(self, r, arabic="Brand Ar"):
+        if r["pair"] is not None:
+            self.assertEqual(r["pair"]["arabic"]["family"], arabic)
+
+    def test_a_client_arabic_with_its_own_latin_pairs_with_that_latin(self):              # reviewer case A
+        ar, la = self.brand_ar(), self.brand_la()
+        typ = typography({"Brand Ar": [("Bold", ar, "BrandAr-Bold", 700)],
+                          "Brand La": [("Bold", la, "BrandLa-Bold", 700)]})
+        typ["roles"] = {"caption": "BrandAr-Bold"}
+        r = FP.pick("caption", typ, FP.load_table(), locate=locate_repo)
+        self.check_never_another_arabic(r)
+        self.assertEqual(r["pair"]["latin"]["family"], "Brand La")
+        want = FP.latin_scale(FP.traits(la)["x_height"], FP.traits(ar)["arabic_body"])["scale"]
+        self.assertEqual(r["pair"]["latin_scale"], want)
+
+    def test_a_coverage_miss_on_the_client_arabic_is_a_finding_not_a_switch(self):        # reviewer case B
+        ar = self.brand_ar(drop=("ڤ",))
+        typ = typography({"Brand Ar": [("Bold", ar, "BrandAr-Bold", 700)]})
+        typ["roles"] = {"caption": "BrandAr-Bold"}
+        r = FP.pick("caption", typ, FP.load_table(), locate=locate_repo)
+        self.check_never_another_arabic(r)
+        self.assertTrue(any("ڤ" in f for f in r["findings"]), r["findings"])
+
+    def test_nothing_reaching_50_against_the_client_arabic_keeps_todays_chain(self):      # reviewer case B2
+        ar = self.brand_ar(body=950, ar_bar=300, ar_stem=30, adv=1500)
+        typ = typography({"Brand Ar": [("Bold", ar, "BrandAr-Bold", 700)]})
+        typ["roles"] = {"caption": "BrandAr-Bold"}
+        r = FP.pick("caption", typ, FP.load_table(), locate=locate_repo)
+        self.assertIsNone(r["pair"], r["pair"])
+        self.assertTrue(r["reason"])
+
+    def test_an_unrelated_superfamily_does_not_replace_the_role_face(self):               # reviewer case H
+        ar = self.brand_ar()
+        both = save(self.tmp / "both" / "AAABoth-Bold.ttf", family="AAA Both", style="Bold", weight=700)
+        typ = typography({"Brand Ar": [("Bold", ar, "BrandAr-Bold", 700)],
+                          "AAA Both": [("Bold", both, "AAABoth-Bold", 700)]})
+        typ["roles"] = {"caption": "BrandAr-Bold"}
+        r = FP.pick("caption", typ, FP.load_table(), locate=locate_repo)
+        self.check_never_another_arabic(r)
+        self.assertNotEqual((r["pair"] or {}).get("source"), "superfamily")
+
+    def test_a_brand_family_missing_a_latin_sign_is_not_a_superfamily(self):
+        # it draws Latin letters but not ®: its own Latin would draw boxes, so it is no one-family pair
+        both = save(self.tmp / "nr" / "NoReg-Bold.ttf", family="No Reg", style="Bold", weight=700, drop=("®",))
+        typ = typography({"No Reg": [("Bold", both, "NoReg-Bold", 700)]})
+        r = FP.pick("caption", typ, {"rows": []})
+        self.assertNotEqual((r["pair"] or {}).get("source"), "superfamily")
+        self.assertTrue(any("®" in f for f in r["findings"]), r["findings"])
+
+    def test_the_clients_own_latin_beats_a_better_scoring_table_latin(self):
+        ar = self.brand_ar()
+        own = save(self.tmp / "own" / "Own-Bold.ttf", family="Own La", style="Bold", weight=700, arabic=False,
+                   xh=470, ink=95)
+        tab = save(self.tmp / "tab" / "Tab-Bold.ttf", family="Tab La", style="Bold", weight=700, arabic=False)
+        typ = typography({"Brand Ar": [("Bold", ar, "BrandAr-Bold", 700)], "Own La": [("Bold", own, "Own-Bold", 700)]})
+        typ["roles"] = {"caption": "BrandAr-Bold"}
+        rows = [table_row(90, ar="Other", la="Tab La")]
+        loc = lambda f: str(tab) if f.get("family") == "Tab La" else None   # noqa: E731
+        table_score = FP.measure_pair(FP._families(typ)["Brand Ar"][0], {"file": str(tab)}, 700)["score"]
+        r = FP.pick("caption", typ, {"rows": rows}, locate=loc)
+        self.assertGreater(table_score, r["pair"]["score"])       # the table face scores higher...
+        self.assertGreaterEqual(r["pair"]["score"], 50)
+        self.assertEqual((r["pair"]["latin"]["family"], r["pair"]["source"]), ("Own La", "client-fonts"))  # ...own wins
+
+    def test_a_client_latin_role_face_gets_an_arabic_measured_against_it(self):
+        la = self.brand_la()
+        typ = typography({"Brand La": [("Bold", la, "BrandLa-Bold", 700)]})
+        typ["roles"] = {"caption": "BrandLa-Bold"}
+        r = FP.pick("caption", typ, FP.load_table(), locate=locate_repo)
+        if r["pair"] is not None:
+            self.assertEqual(r["pair"]["latin"]["family"], "Brand La")
+            self.assertGreaterEqual(r["pair"]["score"], 50)
+
+    def test_with_no_client_font_the_table_row_is_used(self):
+        r = FP.pick("caption", typography({}), FP.load_table(), locate=locate_repo)
+        self.assertEqual(r["pair"]["source"], "table")
+        self.assertIn(r["pair"]["arabic"]["ps"], REPO_PS)
+
+
+class TestRoleWeightsFixRound(Tmp):
+    def dual(self):
+        med = save(self.tmp / "dual" / "Dual-Medium.ttf", family="Dual", style="Medium", weight=500)
+        bold = save(self.tmp / "dual" / "Dual-Bold.ttf", family="Dual", style="Bold", weight=700)
+        return {"Dual": [("Medium", med, "Dual-Medium", 500), ("Bold", bold, "Dual-Bold", 700)]}
+
+    def test_typography_roles_weight_is_respected(self):
+        typ = typography(self.dual())
+        typ["roles"] = {"caption": "Medium"}
+        self.assertEqual(FP.pick("caption", typ, {"rows": []})["pair"]["arabic"]["ps"], "Dual-Medium")
+
+    def test_a_family_name_pairing_resolves_to_the_role_weight(self):
+        typ = typography(self.dual(), {"caption": {"arabic": "Dual", "latin": "Dual", "source": "client"}})
+        typ["roles"] = {"caption": "Medium"}
+        p = FP.pick("caption", typ, {"rows": []})["pair"]
+        self.assertEqual((p["source"], p["arabic"]["ps"], p["latin"]["ps"]), ("client", "Dual-Medium", "Dual-Medium"))
+
+    def test_brand_fallback_weights_are_respected(self):
+        typ = typography(self.dual())
+        p = FP.pick("caption", typ, {"rows": []}, fallback_weights={"caption": "medium"})["pair"]
+        self.assertEqual(p["arabic"]["ps"], "Dual-Medium")
+
+    def test_the_profile_brand_fallback_is_read_by_default(self):
+        from lib import common
+        typ = typography(self.dual())
+        with mock.patch.object(common, "font_role_fallback", return_value={"weights": {"caption": "medium"}}):
+            p = FP.pick("caption", typ, {"rows": []})["pair"]
+        self.assertEqual(p["arabic"]["ps"], "Dual-Medium")
+
+    def test_an_unknown_role_style_keeps_the_house_weight(self):
+        self.assertEqual(FP.role_weight("caption", {"families": {}, "roles": {"caption": "Condensed"}}), 700)
+        self.assertEqual(FP.role_weight("headline", {"families": {}, "roles": {"headline": "Condensed"}}), 900)
+        self.assertEqual(FP.role_weight("caption", {"families": {}, "roles": {"caption": {"weight": 650}}}), 650)
+
+    def test_table_rows_follow_the_role_weight(self):
+        rows = [table_row(80, la="Body", weight=500), table_row(75, la="Cap", weight=700)]
+        typ = {"families": {}, "roles": {"caption": "Medium"}}
+        self.assertEqual(FP.pick("caption", typ, {"rows": rows})["pair"]["latin"]["family"], "Body")
+
+
+class TestGateFixRound(Tmp):
+    def test_decimal_and_thousands_separators_tatweel_and_harakat_are_required(self):
+        for ch in ("٫", "٬", "ـ", "َ", "ّ"):
+            with self.subTest(char=f"U+{ord(ch):04X}"):
+                self.assertIn(ch, FP.ARABIC_TEST)
+                c = FP.coverage(save(self.tmp / f"{ord(ch):x}" / "f.ttf", drop=(ch,)), "arabic")
+                self.assertEqual((c["ok"], c["missing"]), (False, [ch]))
+
+
+class TestMissingModulesFixRound(Tmp):
+    def test_without_uharfbuzz_a_clear_refusal(self):
+        p = save(self.tmp / "sf" / "sf.ttf", family="Both", style="Bold", weight=700)
+        typ = typography({"Both": [("Bold", p, "Both-Bold", 700)]})
+        with mock.patch.dict(sys.modules, {"uharfbuzz": None}):
+            FP.clear_cache()
+            r = FP.pick("caption", typ, {"rows": [table_row(95)]})
+            with self.assertRaises(FP.FontProbeError) as cm:
+                FP.traits(p)
+            arabic = FP.coverage(p, "arabic")                       # the lam-alef check shapes text
+        self.assertEqual((arabic["ok"], "uharfbuzz" in arabic.get("error", "")), (False, True))
+        self.assertIsNone(r["pair"])
+        self.assertTrue(any("uharfbuzz" in f for f in r["findings"]), r["findings"])
+        self.assertIn("uharfbuzz", str(cm.exception))
+
+    def test_without_fonttools_a_clear_refusal(self):
+        p = save(self.tmp / "f" / "f.ttf")
+        with mock.patch.dict(sys.modules, {"fontTools": None}):
+            c = FP.coverage(p, "latin")
+            lic = FP.licence(p)
+            r = FP.pick("caption", typography({}), {"rows": [table_row(95)]})
+        self.assertFalse(c["ok"])
+        self.assertIn("fontTools", c["error"])
+        self.assertFalse(lic["ok"])
+        self.assertIn("fontTools", lic["reason"])
+        self.assertIsNone(r["pair"])
+
+
+class TestPairingEntryFixRound(Tmp):
+    def entry_pick(self, **entry):
+        ar = save(self.tmp / "ar" / "Ar.ttf", family="Ar", style="Bold", weight=700, latin=False)
+        la = save(self.tmp / "la" / "La.ttf", family="La", style="Bold", weight=700, arabic=False)
+        typ = typography({"Ar": [("Bold", ar, "Ar-Bold", 700)], "La": [("Bold", la, "La-Bold", 700)]},
+                         {"caption": dict({"arabic": "Ar", "latin": "La"}, **entry)})
+        return FP.pick("caption", typ, {"rows": []})
+
+    def test_a_bad_latin_scale_is_a_finding_and_the_measured_scale_is_used(self):
+        measured = self.entry_pick(source="client")["pair"]["latin_scale"]
+        for bad in ("1,1", float("nan"), 9.0, True):
+            with self.subTest(latin_scale=bad):
+                r = self.entry_pick(source="client", latin_scale=bad)
+                self.assertEqual((r["pair"]["source"], r["pair"]["latin_scale"]), ("client", measured))
+                self.assertTrue(any("latin_scale" in f for f in r["findings"]), r["findings"])
+        self.assertEqual(self.entry_pick(source="client", latin_scale=1.1)["pair"]["latin_scale"], 1.1)
+
+    def test_an_unknown_source_is_a_finding_not_silence(self):
+        r = self.entry_pick(source="editor")
+        self.assertNotEqual((r["pair"] or {}).get("source"), "client")
+        self.assertTrue(any("editor" in f for f in r["findings"]), r["findings"])
+
+
+class TestLicenceTruncatedFixRound(Tmp):
+    def test_a_truncated_font_is_refused_never_raised(self):
+        from fontTools.ttLib import TTFont
+        src = FONTS / "inter" / "Inter-Bold.ttf"
+        data = src.read_bytes()
+        with TTFont(str(src), lazy=True) as f:
+            entry = f.reader.tables["name"]
+        cuts = {"inside the name table": entry.offset + entry.length // 2, "header only": 12, "half": len(data) // 2}
+        for label, cut in cuts.items():
+            with self.subTest(cut=label):
+                p = self.tmp / label.replace(" ", "-") / "Inter-Bold.ttf"
+                p.parent.mkdir()
+                p.write_bytes(data[:cut])
+                (p.parent / "OFL.txt").write_bytes(OFL_TEXT.encode("utf-8"))
+                lic = FP.licence(p)                                 # never raises
+                if label == "inside the name table" or cut <= entry.offset:
+                    self.assertFalse(lic["ok"])
+                    self.assertTrue(lic["reason"])
+
+
+class TestSpecimenFixRound(Tmp):
+    def repo_row(self):
+        t = json.loads(TABLE.read_text(encoding="utf-8"))
+        return next(r for r in t["rows"] if r["arabic"]["family"] == "Alexandria"
+                    and r["latin"]["family"] == "Alexandria" and 700 in r["weights"])
+
+    def test_arabic_words_run_right_to_left(self):
+        face = FP._Face(FONTS / "alexandria" / "Alexandria-Bold.ttf")
+        items = FP._line(face, "نتيجة التحليل")
+        first = [x for x, cl in items if cl < 5]                  # «نتيجة» is clusters 0-4
+        second = [x for x, cl in items if cl > 5]
+        self.assertGreater(min(first), max(second))
+
+    def test_guides_come_from_a_fresh_measure_not_the_table(self):
+        row = self.repo_row()
+        bad = dict(row, traits=dict(row["traits"], arabic_body=0.9, x_height=0.9))
+        info = FP.specimen_sheet({"rows": [bad]}, [FONTS], self.tmp / "s.png")
+        fresh = FP.traits(FONTS / "alexandria" / "Alexandria-Bold.ttf")
+        self.assertAlmostEqual(info["bands"][0]["arabic_body_em"], fresh["arabic_body"], places=3)
+        self.assertAlmostEqual(info["bands"][0]["x_height_em"], fresh["x_height"], places=3)
+
+    def test_the_latin_sample_is_drawn_at_latin_scale(self):
+        row = self.repo_row()
+        one = FP.specimen_sheet({"rows": [dict(row, latin_scale=1.0)]}, [FONTS], self.tmp / "a.png")
+        small = FP.specimen_sheet({"rows": [dict(row, latin_scale=0.7)]}, [FONTS], self.tmp / "b.png")
+        ratio = small["bands"][0]["latin_px"] / one["bands"][0]["latin_px"]
+        self.assertAlmostEqual(ratio, 0.7, delta=0.03)
+        self.assertEqual(small["bands"][0]["arabic_px"], one["bands"][0]["arabic_px"])
+
+
+class TestReviewerMutantsFixRound(Tmp):
+    def test_check_table_flags_a_band_that_does_not_match_the_score(self):
+        t = json.loads(TABLE.read_text(encoding="utf-8"))
+        row = next(r for r in t["rows"] if r["band"] == "auto")
+        t["rows"] = [dict(row, band="refused")]
+        self.assertTrue(any("band" in b for b in FP.check_table(t)))
+
+    def test_italic_faces_are_left_out_of_the_table(self):
+        save(self.tmp / "f" / "fam" / "Fam-Bold.ttf", family="Fam", style="Bold", weight=700)
+        save(self.tmp / "f" / "fam" / "Fam-BoldItalic.ttf", family="Fam", style="Bold", weight=700, italic=True)
+        t = FP.build_table([self.tmp / "f"], {"families": {"Fam": {"class": "geometric", "use": True}}},
+                           rel_root=self.tmp)
+        self.assertEqual([f["file"] for f in t["families"]["Fam"]["files"]], ["Fam-Bold.ttf"])
+        self.assertTrue(all("Italic" not in r["arabic"]["file"] for r in t["rows"]))
 
 
 if __name__ == "__main__":
