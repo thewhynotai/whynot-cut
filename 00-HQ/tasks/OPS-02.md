@@ -12,4 +12,6 @@ Create the Claude-app scheduled task `whynot-cut-primary-report` (cron 0 9,13,17
 4. ACKNOWLEDGED only after Yunus replies to one report.
 
 ## Evidence
-(filled at close)
+- 2026-10-20 02:01 first manual run waited on a permission prompt (Q-005).
+- 2026-10-20 02:46 run `local_6b4431c0`: report R-2026-10-20-0247 written, marked **SENT (session local_6b4431c0…)**, ops/hq SYNCED. Delivery channel verified.
+- Still needed to close: two scheduled runs observed (09:00, 13:00), and one ACKNOWLEDGED (Yunus replies to a report).
