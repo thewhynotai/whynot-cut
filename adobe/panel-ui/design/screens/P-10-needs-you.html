@@ -3,17 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="empty,loading,normal,older,focus,error,offline,no-claude,long">
+<meta name="mock-states" content="empty,loading,normal,older,verse,risky,domains,podcast,focus,error,offline,no-claude,long">
 <meta name="mock-keys" content="Cmd/Ctrl+Enter: the first item's button (the violet one); Up/Down: move between items; Enter: the focused item's button; Esc: close the list and go back to where the badge was tapped; Tab order: Back, then each item's button top to bottom, then Open the list in the client folder">
 <meta name="mock-motion" content="Opening from the badge: the list cross-fades in 200 ms ease (static fallback: instant); an item that is done fades out 200 ms and its space closes only after the fade (250 ms, the one allowed height change, at the bottom of the list so nothing above moves); the badge and Edit-tab count change number with a 150 ms colour pulse; skeleton shimmer 1200 ms linear (static fallback: flat bars).">
 <title>P-10 Needs you</title>
 <link rel="stylesheet" href="../mockup.css">
 <link rel="stylesheet" href="../css/premiere-core.css">
+<link rel="stylesheet" href="../css/panel-v1.css">
 <script src="../icons.js"></script>
 <script src="../strings.js"></script>
 <script src="../strings/premiere-core.js"></script>
+<script src="../strings/panel-v1.js"></script>
 <script src="../mockup.js"></script>
 <script src="../js/premiere-core.js"></script>
+<script src="../js/panel-v1.js"></script>
 </head>
 <body>
 <script>
@@ -31,7 +34,17 @@
    - R3 (editor P1-01, fix list S-18, P-5): the older-approval row says WHO approved it, WHEN, with whom the lines were
      confirmed, and how many lines are unchanged ("2 of 3 lines unchanged"), the same facts as P-07 older (previous_approval,
      eng-data-contract §2.5); the claim row names who confirms: "The doctor or the sheikh".
-   - empty is also the success state ("Nothing needs you right now."). Stale: not applicable. */
+   - empty is also the success state ("Nothing needs you right now."). Stale: not applicable.
+   - Phase 4 states (UI track 2026-10-18; coverage map §2.1, wire = gap C-4, Stage 3):
+     verse: the manual verse slot (owner 2026-10-18, executor brief): one row per recited-verse span, with ONLY the
+       timecode, the cue phrase that opened it, the fixed marker name «آية: يضيفها المونتير يدويًا» and, when the engine
+       capped the span at 12 s, "the end was guessed". Never the verse words (a misheard verse must never be copyable).
+       The editor alone does it; "Go to the marker" seeks only, if the UXP lab proves the call (else plain timecode).
+     risky: K-T1 risky words first: the words that change the meaning, as said, each with its reason (negation, how
+       often, drug name, dose); Arabic-Indic digits stay as the speaker said them.
+     domains: Addendum M review domains: one row per domain, each naming its own approver from the registry (the doctor;
+       the content owner; the business owner or their legal adviser; the client), and "never approved automatically".
+     podcast: the engine kinds the old list lacked: pick (the episode's reels, Gate 0) and logo. */
 (function () {
   var t = M.t, D = M.D, P = PC.D;
   function tc(s) { return M.html(M.mono(s)); }
@@ -65,16 +78,61 @@
   }, "p10.b.plan", "circle-check-big"];
   var NUMBERS = ["hash", "p10.k.numbers", function () { return t("p10.d.numbers", { tc: tc("00:00:31:20") }); }, "p10.b.numbers", "circle-check-big"];
 
+  /* ---- Phase 4 rows (UI track 2026-10-18; coverage map §2.1). Each is an engine NEEDS-YOU kind (lib/needs_you.py) or
+     the executor's manual verse slot; the wire is gap C-4 (Stage 3). ---- */
+  var V = V1.D;
+  /* manual verse slot: one row per span. ONLY the timecode, the cue phrase, the fixed marker name and the guessed-end
+     flag: never the span's words (executor brief). "Go to the marker" only moves the playhead (seek), and ships only if
+     the UXP lab proves the call (else the timecode stays plain text, like P-07's seek). Who: the editor, never delegated. */
+  function verseRow(sp) {
+    return ["bookmark-plus", "p10.k.verse", function () {
+      return t(sp.guessed ? "p10.d.verse_guess" : "p10.d.verse", { tc: tc(sp.tc), cue: sp.cue }) +
+        '<div class="mt-1">' + t("p10.d.marker", { name: V.verse.marker }) + "</div>" +
+        '<div class="m-row-top mt-1">' + M.ico("user-check", 12, "ink-muted") + '<div class="ms-1 m-grow">' + t("p10.who.editor") + "</div></div>";
+    }, "p10.b.marker", "map-pin"];
+  }
+  /* risky words first (K-T1): the words as said (Arabic in both UIs, Arabic-Indic digits kept), each with its reason */
+  var RISKY = ["triangle-alert", "p10.k.risky", function () {
+    var chips = V.risky.map(function (r) {
+      return '<span class="m-chip m-chip-neutral me-1 mt-1"><span class="m-block"><bdi dir="rtl" lang="ar">«' + V1.arTxt(r.w) + "»</bdi> · " + t("p10.r." + r.r) + "</span></span>";
+    }).join("");
+    return t("p10.d.risky", { n: M.html(M.ltr(String(V.risky.length))), tc: tc("00:00:31:20") }) + '<div class="m-row m-wrap">' + chips + "</div>";
+  }, "p10.b.listen", "play"];
+  /* review domains (Addendum M): one row per domain, each naming its approver from the registry */
+  function domRow(icon, k) { return [icon, "p10.k." + k, function () { return t("p10.d." + k); }, "p10.b.review", "circle-check-big"]; }
+  var DOMAINS = [domRow("stethoscope", "medical"), domRow("book-open", "religious"), domRow("briefcase", "business"), domRow("bot", "ai")];
+  var PICK = ["list-video", "p10.k.pick", function () { return t("p10.d.pick"); }, "p10.b.pick", "list-video"];
+  var LOGO = ["image", "p10.k.logo", function () { return t("p10.d.logo"); }, "p10.b.logo", "folder-open"];
+
+  /* the groups a state shows (o.verse / o.risky / o.domains / o.podcast add the Phase 4 rows) */
+  function groupsFor(o) {
+    var gs = GROUPS.map(function (g) { return { item: g.item, general: g.general, rows: g.rows.slice() }; });
+    var g0 = gs[0].rows;
+    if (o.long) g0.push(NUMBERS);
+    if (o.older) g0.unshift(PLAN);
+    if (o.risky) g0[0] = RISKY;
+    if (o.domains) g0.splice.apply(g0, [1, 1].concat(DOMAINS));
+    /* every Phase 4 state names one approver per domain: the combined "doctor or sheikh" row is split */
+    else if (o.verse || o.risky || o.podcast) g0.splice.apply(g0, [1, 1].concat(DOMAINS.slice(0, 2)));
+    if (o.verse) { gs[0].note = t("p10.verse.why"); V.verse.spans.forEach(function (sp) { g0.push(verseRow(sp)); }); }
+    if (o.podcast) {
+      gs.splice(1, 0, { item: function () { return V.episode; }, rows: [PICK] });
+      gs.splice(gs.length - 1, 0, { item: function () { return D.client; }, rows: [LOGO] });
+    }
+    return gs;
+  }
+  function total(o) { var n = 0; groupsFor(o || {}).forEach(function (g) { n += g.rows.length; }); return n; }
+
   function list(o) {
     o = o || {};
     var first = true, out = "";
-    GROUPS.forEach(function (g, gi) {
-      var rows = g.rows.slice();
-      if (o.long && gi === 0) rows.push(NUMBERS);
-      if (o.older && gi === 0) rows.unshift(PLAN);
+    groupsFor(o).forEach(function (g, gi) {
+      var rows = g.rows;
       var head = g.general
         ? '<div class="t-label">' + t("p10.general") + "</div>"
         : '<div class="t-label">' + M.ltr(g.item(), "lat code") + "</div>";
+      if (g.note) head += '<div class="t-meta tx-muted mt-1">' + g.note + "</div>";
+      if (o.domains && gi === 0) head += '<div class="t-meta tx-muted mt-1">' + t("p10.never_auto") + "</div>";
       var body = rows.map(function (r, ri) {
         var primary = first && !o.disabled; first = false;
         var dis = o.disabled || (o.noClaude && r[1] === "p10.k.music");
@@ -107,6 +165,11 @@
     loading: function () { return { needs: 6, body: top() + skelCard() + skelCard() }; },
     normal: function () { return { needs: 6, body: top(6) + list() + reveal() }; },
     older: function () { return { needs: 7, body: top(7) + list({ older: true }) + reveal() }; },
+    /* Phase 4 (UI track 2026-10-18): the counts come from the rows themselves, so badge, Edit tab and list agree */
+    verse: function () { var n = total({ verse: true }); return { needs: n, body: top(n) + list({ verse: true }) + reveal() }; },
+    risky: function () { var n = total({ risky: true }); return { needs: n, body: top(n) + list({ risky: true }) + reveal() }; },
+    domains: function () { var n = total({ domains: true }); return { needs: n, body: top(n) + list({ domains: true }) + reveal() }; },
+    podcast: function () { var n = total({ podcast: true }); return { needs: n, body: top(n) + list({ podcast: true }) + reveal() }; },
     focus: function () { return { needs: 6, body: top(6) + list({ focus: true }) + reveal() }; },
     error: function () {
       return { needs: 6, body: top() + '<div class="mt-4">' + M.notice("error", t("p10.failed"), { sub: t("p10.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true } }) + "</div>" + reveal() };
@@ -127,7 +190,7 @@
 
   PC.mount({
     id: "P-10", name: "Needs you",
-    states: ["empty", "loading", "normal", "older", "focus", "error", "offline", "no-claude", "long"], defaultState: "normal",
+    states: ["empty", "loading", "normal", "older", "verse", "risky", "domains", "podcast", "focus", "error", "offline", "no-claude", "long"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.tab = "needs"; /* no tab is selected: the list opens from the badge */

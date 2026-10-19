@@ -1,0 +1,17 @@
+# Panel V1 group (P-23 chat, P-24 episode and reels, P-26 client rules; Phase 4 states on P-05/P-06/P-07/P-10): extra Lucide names
+send-horizontal  # chat: send a message
+sparkles         # chat: suggestions
+bot              # review domain: AI disclosure
+briefcase        # review domain: business
+scale            # approver: business owner or legal adviser
+user-check       # approver role line
+bookmark-plus    # manual verse slot: the Premiere marker
+podcast          # episode
+list-video       # reels plan candidates
+calendar         # episode date
+clipboard-list   # episode sheet
+repeat-2         # client rules: a rule learned from repeats
+brain            # client rules: learning loop
+pause            # chat stopped
+map-pin          # go to the marker
+square-check-big # approved row

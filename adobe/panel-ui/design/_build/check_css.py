@@ -36,7 +36,7 @@ VALUE = re.compile(r'"((?:[^"\\]|\\.)*)"')
 # a WhyNot Cut command in copy (C1.4): lower-case "reel" + one of its sub-commands, as typed; "a 52 s reel on ..." and
 # "Reel edit:" are nouns, not hits
 COMMAND = re.compile(r"\breel\s+(?:setup|doctor|serve|scaffold|client-init|inbox|next|lock|watch|needs-you|brand-[a-z]+)\b")
-DEV_WORD_FILES = {"strings/client-setup.js"}
+DEV_WORD_FILES = {"strings/client-setup.js", "strings/panel-v1.js"}
 DEV_WORDS = re.compile(r"\b(?:JSON|CSS|robots|sha256|token|daemon|CLI)\b", re.I)
 
 

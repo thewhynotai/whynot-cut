@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,streaming,approved,done,focus,stopped,error,error-live,offline,no-claude,no-internet,limited,stale,long">
+<meta name="mock-keys" content="Cmd/Ctrl+Enter: the screen's one primary (Review the lines and approve while a prompt waits; Send when text is typed and nothing waits; Open the sequence when done); Cmd/Ctrl+.: Stop while a turn runs; Esc: close the top notice; Tab order: the conversation's controls top to bottom (Open on a step, the prompt's three buttons), then the message box, then Send or Stop (mirrored in Arabic). Enter in the message box is a new line; it never sends on its own (no single-key shortcuts: Premiere owns them). UXP keydown capture: lab item.">
+<meta name="mock-motion" content="a new turn: fades in 150 ms ease at the bottom, the list scrolls to it only when the editor was already at the bottom (static fallback: instant); streaming text: words append, the caret blinks 1 s (static fallback: a still caret); a step row turning done: the icon cross-fades 150 ms; the approval prompt after the answer collapses to its one-line record without a height animation; Stop: the button shows its busy icon until the turn ends. The pinned composer never moves.">
+<title>P-23 Chat</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<link rel="stylesheet" href="../css/panel-v1.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../strings/panel-v1.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+<script src="../js/panel-v1.js"></script>
+</head>
+<body>
+<script>
+/* P-23 Chat (V1 spec F1, UI track 2026-10-18; coverage map §2.3, gap C-2). Edit tab: the chat IS the Edit tab's main
+   view; P-06 (progress) and P-07 (approval) open from its step cards and its prompt, so nothing there is redone.
+   - The panel only renders what the WhyNot Cut app relays from the editor's own Claude and sends the editor's words and
+     choices back. It never decides an approval, never reads meaning out of Claude's text, never runs a command
+     (spec F1 "no arbitrary-script endpoint"; the contract messages are gap C-2, Stage 3).
+   - Turns: the person's turn at the reading end in a bubble, the assistant's at the start with no bubble. Each message
+     keeps its own language and direction (an Arabic message reads RTL in the English UI), Latin runs isolated. All
+     message text is escaped: no markup from the stream reaches the panel.
+   - The approval prompt is buttons (F1): "Review the lines and approve" (opens P-07 when medical or religious lines are
+     flagged: the tick-each-line gate lives there), Change something, Stop here; plus the trust line: a NEW sequence, the
+     original untouched, one Undo removes the copy.
+   - One primary per screen: the prompt's main button while it waits; else Send once text is typed; else the done card's
+     Open. Send is never violet while a prompt waits (the editor answers the prompt first).
+   - Review focus 1 (error): the link to Claude died mid-turn: what happened, that nothing changed in Premiere and no
+     half-made copy is left, and Try again. stopped: the editor pressed Stop.
+   - Review focus 4: offline / no-claude (guided setup: sign in, or an API key in Settings) / no-internet / limited never
+     hang: the composer is off and says why.
+   - Review focus 2 (long): a long Latin file name inside Arabic, a long Arabic word, a Latin drug name and
+     Arabic-Indic digits as the speaker said them. */
+(function () {
+  var t = M.t, D = M.D, V = V1.D, L = M.lang;
+  function code(s) { return PC.code(s); }
+  function slot(n) { return n + '<div class="mt-4"></div>'; }
+
+  /* the conversation up to the approval prompt */
+  function t1(o) {
+    o = o || {};
+    return V1.you(M.raw("p23.demo.u1"), L) +
+      V1.bot(M.raw("p23.demo.b1"), { steps: V1.steps([
+        ["ok", t("p23.step.transcribed", { n: M.html(M.ltr(String(V.words))) }), "0:42", false],
+        ["ok", t("p23.step.planned", { dur: M.html(M.mono(V.dur)), cuts: M.html(M.ltr(String(V.cuts))) }), "1:10", true]
+      ]) }) +
+      V1.bot(M.raw("p23.demo.b2"), { ask: V1.ask({ flagged: 3, quote: o.quote || V.quoteShort, primary: o.primary, disabled: o.disabled, focus: o.focus, approved: o.approved }) });
+  }
+  /* after the approval: building and checking */
+  function t2(o) {
+    o = o || {};
+    var rows = o.done
+      ? [["ok", t("p23.step.built", { seq: PC.seq() }), "0:58", true], ["ok", t("p23.step.frames_done", { n: M.html(M.ltr("8")), of: M.html(M.ltr("8")) }), "0:07", true]]
+      : [["ok", t("p23.step.built", { seq: PC.seq() }), "0:58", true], ["busy", t("p23.step.frames", { n: M.html(M.ltr("3")), of: M.html(M.ltr("8")) }), "0:04", false]];
+    return V1.bot(M.raw("p23.demo.b3"), { steps: V1.steps(rows) });
+  }
+  function doneCard(o) {
+    o = o || {};
+    return M.card('<div class="m-row-top">' + M.status("ok") + '<div class="m-col ms-2 m-grow"><div class="t-label">' + t("p23.done.title", { item: code(D.item) }) + "</div>" +
+      '<div class="m-row mt-3">' + M.btn(t("p23.done.open", { seq: PC.seq() }), { kind: o.primary === false ? "secondary" : "primary", icon: "external-link", kbd: o.primary !== false }) + "</div>" +
+      '<span class="m-divider mt-3"></span>' +
+      '<div class="m-row-top mt-3">' + M.ico("bookmark-plus", 16, "ink-accent") + '<div class="m-col ms-2 m-grow"><div class="t-body">' + V1.tn("p23.done.verse", V.verse.spans.length) + "</div>" +
+      '<div class="m-row mt-1">' + M.linkbtn(t("p23.done.needs"), M.rtl ? "chevron-left" : "chevron-right") + "</div></div></div></div></div>", "mt-3");
+  }
+  /* the revise turn after done (person types in their own words; a Latin drug name inside Arabic) */
+  function t3(o) {
+    o = o || {};
+    return V1.you(M.raw("p23.demo.u2"), L) + V1.bot(o.streaming ? M.raw("p23.demo.b4").slice(0, Math.round(M.raw("p23.demo.b4").length * 0.55)) : M.raw("p23.demo.b4"),
+      { streaming: !!o.streaming, steps: o.streaming ? V1.steps([["busy", t("p23.step.planning"), "0:12", false]]) : "" });
+  }
+  function compose(o) { return V1.compose(o); }
+
+  var STATES = {
+    empty: function () {
+      return { needs: 0,
+        body: M.empty({ icon: "message-square", title: t("p23.empty.title"), text: t("p23.empty.text") }) +
+          V1.suggs([["p23.sugg.edit", { item: code(D.item) }], ["p23.sugg.reels"], ["p23.sugg.revise"], ["p23.sugg.needs"]]),
+        bar: compose({ primary: true, hint: t("p23.send.hint") }) };
+    },
+    loading: function () {
+      var row = function (w) { return '<div class="v1-turn v1-turn-bot">' + M.skel(30, 16) + M.skel(w) + M.skel(w - 25) + "</div>"; };
+      return { needs: 0, body: '<div class="v1-turn v1-turn-you"><span class="m-skel-block" style="width:60%;height:40px;border-radius:12px"></span></div>' + row(95) + row(85),
+        bar: '<div class="m-col"><span class="m-skel-block" style="height:56px"></span><div class="mt-2"></div>' + M.skel(40, 16) + "</div>" };
+    },
+    /* the plan waits for the editor: the prompt holds the one primary */
+    normal: function () {
+      return { needs: 1, body: t1(), bar: compose({ hint: t("p23.ask.waiting") }) };
+    },
+    streaming: function () {
+      return { needs: V.verse.spans.length, body: t1({ approved: { name: D.editor, time: V.at } }) + t2({ done: true }) + doneCard({ primary: false }) + t3({ streaming: true }),
+        bar: compose({ running: true }) };
+    },
+    approved: function () {
+      return { needs: 0, body: t1({ approved: { name: D.editor, time: V.at } }) + t2(), bar: compose({ running: true }) };
+    },
+    done: function () {
+      return { needs: V.verse.spans.length /* one per verse left: the badge and the card say the same number */, body: t1({ approved: { name: D.editor, time: V.at } }) + t2({ done: true }) + doneCard(), bar: compose({}) };
+    },
+    /* the editor types the next request: Send is the primary (the done card's Open goes secondary) */
+    focus: function () {
+      return { needs: V.verse.spans.length /* one per verse left: the badge and the card say the same number */, body: t1({ approved: { name: D.editor, time: V.at } }) + t2({ done: true }) + doneCard({ primary: false }),
+        bar: compose({ value: M.raw("p23.demo.u2"), focus: true, primary: true }) };
+    },
+    stopped: function () {
+      return { needs: 0, body: t1({ approved: { name: D.editor, time: V.at } }) +
+          V1.bot(M.raw("p23.demo.b3"), { steps: V1.steps([["ok", t("p23.step.built", { seq: PC.seq() }), "0:58", true], ["paused", t("p23.step.stopped"), "", false]]) }) +
+          '<div class="mt-4"></div>' + M.notice("info", t("p23.stopped"), { sub: t("p23.stopped.sub") }),
+        bar: compose({}) };
+    },
+    /* review focus 1: the link to Claude died mid-turn */
+    error: function () {
+      return { needs: 0, body: t1({ approved: { name: D.editor, time: V.at } }) +
+          V1.bot(M.raw("p23.demo.b3"), { steps: V1.steps([["ok", t("p23.step.built", { seq: PC.seq() }), "0:58", true], ["error", t("p23.died"), "", false]]) }) +
+          '<div class="mt-4"></div>' + M.notice("error", t("p23.died"), { sub: t("p23.died.sub", { seq: PC.seq() }), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true }, support: true }),
+        bar: compose({ disabled: true }) };
+    },
+    offline: function () {
+      return { needs: 0, pills: { engine: "off", claude: "unchecked", host: "unlinked" },
+        body: slot(M.offline({ hintKey: "p23.off.hint" })) + t1({ disabled: true, primary: false }),
+        bar: compose({ disabled: true, hint: t("p23.off.hint") }) };
+    },
+    /* review focus 4: no Claude login and no key -> guided setup, never a failure */
+    "no-claude": function () {
+      return { needs: 0, pills: { claude: "signed_out" },
+        body: slot(M.noClaude("signed_out", { text: t("p23.setup.title"), sub: t("p23.setup.text") }) +
+          '<div class="m-row mt-2">' + M.linkbtn(t("p23.setup.key"), "key-round") + "</div>") +
+          M.empty({ icon: "message-square", title: t("p23.empty.title"), text: t("p23.empty.text") }) +
+          V1.suggs([["p23.sugg.edit", { item: code(D.item) }], ["p23.sugg.reels"]], { disabled: true }),
+        bar: compose({ disabled: true }) };
+    },
+    "no-internet": function () {
+      return { needs: 1, pills: { claude: "offline" },
+        body: slot(M.noNet({ text: t("p23.net.hint"), sub: t("net.off.sub") })) + t1({ disabled: true, primary: false }),
+        bar: compose({ disabled: true }) };
+    },
+    limited: function () {
+      var time = M.html(M.mono(PC.D.limitUntil));
+      return { needs: 1, pillx: { claude: ["warn", t("p11.limit.pill")] },
+        body: slot(M.notice("warn", t("p11.limit", { time: time }), { sub: t("p11.limit.sub", { time: time }), dismiss: false,
+          btn: { label: t("plans.link"), icon: "external-link" } })) + t1({ disabled: true, primary: false }),
+        bar: compose({ disabled: true, hint: t("p23.limit.hint", { time: time }) }) };
+    },
+    stale: function () {
+      return { needs: 1, body: slot(M.stale()) + t1(), bar: compose({}) };
+    },
+    long: function () {
+      var u = M.raw("p23.demo.long.u");
+      return { needs: 120, body: V1.you(u, L) +
+          V1.bot(M.raw("p23.demo.long.b"), { extra: '<div class="m-inset mt-2"><div class="m-quote m-quote-ar t-body" dir="rtl" lang="ar"><span class="ar-run">«' + V1.arTxt(V.quote) + "»</span></div></div>" }) +
+          t1({ quote: V.quote }),
+        bar: compose({ hint: t("p23.ask.waiting") }) };
+    }
+  };
+
+  PC.mount({
+    id: "P-23", name: "Chat",
+    states: ["empty", "loading", "normal", "streaming", "approved", "done", "focus", "stopped", "error", "error-live", "offline", "no-claude", "no-internet", "limited", "stale", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "edit";
+      if (v.needs === undefined) v.needs = 0;
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -3,17 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="empty,loading,normal,running-early,focus,waiting,failed,offline,no-claude,no-internet,limited,stale,done,long">
+<meta name="mock-states" content="empty,loading,normal,running-early,autopilot,autopilot-stopped,focus,waiting,failed,offline,no-claude,no-internet,limited,stale,done,done-verse,long">
 <meta name="mock-keys" content="Cmd/Ctrl+Enter: the violet button (Review and approve / Try again / Open project / Open Claude / Make my edit); Cmd/Ctrl+.: Cancel the running step (asks nothing: the steps before it are kept); Esc: dismiss a card; Tab order: card fix, Cancel, then the done card's buttons. The step list is plain text (not focusable).">
 <meta name="mock-motion" content="Progress fill width 250 ms ease per update (static fallback: width jumps); the running segment and the running step icon: loader rotates 900 ms linear (static fallback: still loader); indeterminate bar: shimmer band moves 1200 ms linear (static fallback: the band sits in the middle); a step turning done: icon colour 200 ms; the done card fades in 200 ms into the slot of the progress card (same top edge, no jump). Never animates height.">
 <title>P-06 Pipeline progress</title>
 <link rel="stylesheet" href="../mockup.css">
 <link rel="stylesheet" href="../css/premiere-core.css">
+<link rel="stylesheet" href="../css/panel-v1.css">
 <script src="../icons.js"></script>
 <script src="../strings.js"></script>
 <script src="../strings/premiere-core.js"></script>
+<script src="../strings/panel-v1.js"></script>
 <script src="../mockup.js"></script>
 <script src="../js/premiere-core.js"></script>
+<script src="../js/panel-v1.js"></script>
 </head>
 >
 <body>
@@ -140,26 +143,52 @@
     stale: function () {
       return { body: slot(M.stale()) + head(RUN, 3, "busy") + building() + stepList(RUN) };
     },
-    done: function () {
+    /* Phase 4 (T4.7 autopilot): approval is automatic for this client; medical lines are never covered by it */
+    autopilot: function () {
+      var auto = M.card('<div class="m-row">' + M.chip("info", t("p06.auto.chip"), "circle-check-big") + "</div>" +
+        '<div class="t-meta tx-muted mt-2">' + t("p06.auto.why", { time: M.html(M.mono("14:31")) }) + "</div>" +
+        '<div class="m-row-top mt-2">' + M.status("waiting", 12) + '<div class="t-meta tx-text ms-1 m-grow">' + V1.tn("p06.auto.not_covered", 2) + "</div></div>" +
+        '<div class="m-row mt-2">' + M.linkbtn(t("p06.auto.review"), M.rtl ? "chevron-left" : "chevron-right") + "</div>", "mt-4");
+      return { needs: 2, body: head(RUN, 3, "busy") + building() + auto + stepList(RUN) };
+    },
+    "autopilot-stopped": function () {
+      var s = ["done", "done", "done", "done", "done", "done", "wait"];
+      return { needs: 2, body: head(s, 6, "waiting") +
+        M.card('<div class="m-row-top">' + M.status("waiting") + '<div class="m-col ms-2 m-grow"><div class="t-body">' + V1.tn("p06.auto.stopped", 2, { item: code(D.item) }) + "</div>" +
+          '<div class="t-meta tx-muted mt-1">' + t("p06.auto.stopped.sub") + "</div>" +
+          '<div class="m-row mt-2">' + M.chip("info", t("p06.auto.chip"), "circle-check-big") + "</div></div></div>" +
+          '<div class="m-col mt-3">' + PC.kbtn(t("p06.auto.review"), "enter", { kind: "primary", block: true, icon: "stethoscope" }) + "</div>", "mt-4") + stepList(s) };
+    },
+    done: function () { return doneView(); },
+    /* Phase 4 (manual verse slot): the done summary names the verse left for the editor; never the verse words */
+    "done-verse": function () { return doneView({ verse: true }); },
+    long: function () { return { body: head(RUN, 3, "busy") + building() + stepList(RUN) }; }
+  };
+  function doneView(o) {
+      o = o || {};
+      var needsList = [t("p06.y1", { tc: M.html(M.mono("00:00:31:20")) })];
+      /* every verse span, each with the owner's fixed line; a guessed end says so (never the verse words) */
+      if (o.verse) V1.D.verse.spans.forEach(function (vs) {
+        needsList.push(t("p06.verse.left", { tc: M.html(M.mono(vs.tc)), name: V1.D.verse.marker }) +
+          (vs.guessed ? '<div class="t-meta tx-warn">' + t("p06.verse.guess") + "</div>" : "") + '<div class="t-meta tx-muted">' + t("p06.verse.why") + "</div>");
+      });
       var s = ["done", "done", "done", "done", "done", "done", "done"];
-      return { needs: 1, body: M.steps(s, 6, "ok") +
+      return { needs: needsList.length, body: M.steps(s, 6, "ok") +
         M.card('<div class="m-row-top">' + M.status("ok") + '<div class="t-title ms-2 m-grow">' + t("p06.done.title", { item: code(D.item) }) + "</div></div>" +
           '<div class="t-body tx-muted mt-1">' + t("p06.done.sub") + "</div>" +
           '<div class="mt-3">' + M.saved('<span class="tx-text">' + t("p06.done.saved", { raw: M.html(M.mono(P.rawDur)), reel: M.html(M.mono(P.reelDur)), t: P.savedT[M.lang] }) + "</span>") + "</div>" +
           '<div class="mt-1">' + M.trust(t("p06.done.trust")) + "</div>" +
           '<div class="t-label mt-4">' + t("p06.done.verified") + "</div>" + list(M.status("ok"), [t("p06.v1"), t("p06.v2"), t("p06.v3")]) +
           '<div class="t-label mt-4">' + t("p06.done.not_verified") + "</div>" + list(M.status("pending"), [t("p06.n1")]) +
-          '<div class="t-label mt-4">' + t("p06.done.needs_you") + "</div>" + list(M.status("waiting"), [t("p06.y1", { tc: M.html(M.mono("00:00:31:20")) })]) +
+          '<div class="t-label mt-4">' + t("p06.done.needs_you") + "</div>" + list(M.status("waiting"), needsList) +
           '<div class="m-col mt-4">' + PC.kbtn(t("p06.open"), "enter", { kind: "primary", block: true, icon: "external-link" }) + "</div>" +
           '<div class="t-meta tx-muted mt-2">' + t("p06.open_note") + "</div>" +
           PC.acts([M.btn(t("p06.reveal"), { icon: "folder-open" })]), "mt-4") };
-    },
-    long: function () { return { body: head(RUN, 3, "busy") + building() + stepList(RUN) }; }
-  };
+  }
 
   PC.mount({
     id: "P-06", name: "Pipeline progress",
-    states: ["empty", "loading", "normal", "running-early", "focus", "waiting", "failed", "offline", "no-claude", "no-internet", "limited", "stale", "done", "long"], defaultState: "normal",
+    states: ["empty", "loading", "normal", "running-early", "autopilot", "autopilot-stopped", "focus", "waiting", "failed", "offline", "no-claude", "no-internet", "limited", "stale", "done", "done-verse", "long"], defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
       v.tab = "edit";

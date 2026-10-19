@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,sheet-missing,sheet-made,avoid,audio-only,focus,error,error-live,offline,no-claude,stale,success,long">
+<meta name="mock-keys" content="Cmd/Ctrl+Enter: Make N reels (only when it is on); Space: pick or unpick the focused reel; Up/Down: move between reels; Tab order: the sheet card's button, then each reel top to bottom (Pick, Video/Motion, Preview, Adjust in/out), then Make (mirrored in Arabic). No single-key shortcuts.">
+<meta name="mock-motion" content="picking a reel: the checkbox fills 150 ms and the Video / Motion choice appears below it with no height animation (static fallback: instant); the Make count changes number with a 150 ms colour pulse; loading: skeleton shimmer 1200 ms linear (static fallback: flat bars).">
+<title>P-24 Episode and reels</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<link rel="stylesheet" href="../css/panel-v1.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../strings/panel-v1.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+<script src="../js/panel-v1.js"></script>
+</head>
+<body>
+<script>
+/* P-24 Episode and reels (podcast mode Gate 0; UI track 2026-10-18; coverage map §2.2, wire = gap C-6, Stage 3).
+   Data: the validated reels plan (lib/reels.py reels-plan-validated.json: id, type + Arabic label from
+   config/defaults/recipes.json, in/out, duration, title, hook, the four scores and the total, needs_context, risks,
+   motion_fit, avoid_hits) and the episode sheet (lib/episode_sheet.py). Picking = `reels-select --pick ... --by editor`
+   (a lead step: the editor's own choice, never autopilot, never delegated without the editor's words).
+   - One card per candidate, best first: id, type chip, score, the title and hook AS SAID (Arabic in both UIs), in → out
+     and duration, the sub-scores, the flags (needs a context line / touches a topic to avoid / a risk / good as motion),
+     Pick, Preview (the candidate preview: the whole frame, not the edit), Adjust in / out.
+   - A picked reel shows "Make it as Video / Motion". A picked reel that touches a topic the sheet says to avoid needs its
+     own "Make it anyway" tick (the engine's --confirm-avoid): Make stays off until it is ticked.
+   - The sheet card: filled (who speaks) / missing (Make the sheet: `episode-sheet --init`) / made (fill it in and move it
+     next to the episode: WhyNot Cut never writes in the data folders).
+   - audio-only: the episode has no picture, so every reel is a motion video (the choice is fixed, and says why).
+   - Make N reels (the one primary) creates one project per reel; nothing in the episode or Premiere changes. */
+(function () {
+  var t = M.t, V = V1.D, E = V.podcast, L = M.lang;
+  function slot(n) { return n + '<div class="mt-4"></div>'; }
+  function ar(s) { return '<bdi dir="rtl" lang="ar">' + V1.arTxt(s) + "</bdi>"; }
+  function head(o) {
+    o = o || {};
+    return M.eyebrow(t("p24.eyebrow")) + '<div class="t-title mt-1">' + t("p24.title", { ep: PC.code(E.ep) }) + "</div>" +
+      '<div class="t-body tx-muted mt-1">' + t("p24.sub", { n: M.html(M.ltr(String(E.n))), dur: M.html(M.mono(E.dur)) }) + "</div>";
+  }
+  function sheet(kind, o) {
+    o = o || {};
+    if (kind === "ok") {
+      return M.card('<div class="m-row-top">' + M.ico("clipboard-list", 16, "ink-muted") + '<div class="m-col ms-2 m-grow"><div class="t-label">' + t("p24.sheet") + "</div>" +
+        '<div class="t-meta tx-muted">' + t("p24.sheet.ok", { host: M.html(ar(E.host)), guest: M.html(ar(E.guest)) }) + "</div>" +
+        '<div class="t-meta tx-muted">' + t("p24.avoid", { topics: M.html(ar(o.long ? V.long.topics : E.avoid.join("، "))) }) + "</div>" +
+        /* the action on its own row under the text, so the summary keeps the card's width at 300 px */
+        '<div class="v1-sheet-act">' + M.btn(t("p24.sheet.open"), { kind: "ghost", flush: true, icon: "external-link" }) + "</div></div></div>", "mt-4");
+    }
+    if (kind === "missing") {
+      return M.notice("warn", t("p24.sheet.missing"), { sub: t("p24.sheet.missing.sub"), btn: { label: t("p24.sheet.make"), icon: "clipboard-list" }, dismiss: false });
+    }
+    return M.notice("info", t("p24.sheet.made"), { sub: t("p24.sheet.made.sub"), btn: { label: t("p24.sheet.open"), icon: "external-link" }, dismiss: false });
+  }
+  /* one candidate. o = {picked, as ("video"|"motion"), fixed (motion only), avoidTicked, disabled, focus, longTitle} */
+  function reel(r, i, o) {
+    o = o || {};
+    var flags = "";
+    if (r.context) flags += M.chip("info", t("p24.f.context"), "info");
+    if (r.avoid) flags += M.chip("warn", t("p24.f.avoid"), "triangle-alert");
+    (r.risks || []).forEach(function (k) { flags += M.chip("warn", t("p24.f.risk", { risk: M.html(ar(k)) }), "triangle-alert"); });
+    if (r.motion) flags += M.chip("neutral", t("p24.f.motion"), "sparkles");
+    var picked = !!o.picked;
+    var as = "";
+    if (picked) {
+      as = '<div class="m-row mt-2"><div class="t-meta tx-muted me-2">' + t("p24.as") + "</div>" +
+        M.segmented([t("p24.as.video"), t("p24.as.motion")], o.as === "motion" || o.fixed ? 1 : 0, { disabled: o.disabled || o.fixed }) + "</div>" +
+        (o.fixed ? '<div class="m-row-top mt-1">' + M.ico("lock", 12, "ink-muted") + '<div class="t-meta tx-muted ms-1 m-grow">' + t("p24.audio") + "</div></div>" : "");
+      if (r.avoid) as += '<div class="m-col mt-2">' + PC.checkbox(t("p24.avoid.confirm", { topic: M.html(ar(r.avoid)) }), !!o.avoidTicked, { disabled: o.disabled }) + "</div>";
+    }
+    var title = o.longTitle ? V.long.title : r.title;
+    return M.card(
+      '<div class="m-row">' + M.monoChip(r.id) + '<span class="ms-1"></span>' + M.chip("neutral", t("p24.type." + r.type)) + '<span class="m-spacer"></span>' +
+        M.chip(r.total >= 8 ? "ok" : "neutral", t("p24.score", { n: M.html(M.ltr(r.total.toFixed(1))) })) + "</div>" +
+      '<div class="t-label mt-2 m-quote m-quote-ar" dir="rtl" lang="ar">' + V1.arTxt(title) + "</div>" +
+      '<div class="m-quote m-quote-ar t-body tx-muted mt-1" dir="rtl" lang="ar"><span class="ar-run">«' + V1.arTxt(r.hook) + "»</span></div>" +
+      /* in → out · duration is ONE left-to-right run in both languages, so the arrow never reads backwards */
+      '<div class="m-row mt-2">' + M.ico("clock", 12, "ink-muted") + '<span class="t-meta tx-muted ms-1"><bdi dir="ltr" class="mono nowrap">' + M.esc(r.start + " → " + r.end + " · " + r.dur) + "</bdi></span></div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("p24.scores", { h: r.sc[0], s: r.sc[1], p: r.sc[2], e: r.sc[3] }) + "</div>" +
+      (flags ? '<div class="m-row m-wrap mt-1">' + flags.replace(/<span class="m-chip /g, '<span class="me-1 mt-1 m-chip ') + "</div>" : "") +
+      '<span class="m-divider mt-3"></span>' +
+      '<div class="m-col mt-2">' + PC.checkbox(t("p24.pick"), picked, { disabled: o.disabled, focus: o.focus }) + "</div>" + as +
+      '<div class="m-row m-wrap mt-1"><div class="m-row me-2 mt-1">' + M.btn(t("p24.preview"), { kind: "ghost", icon: "play", flush: true, disabled: o.disabled }) + "</div>" +
+        '<div class="m-row mt-1">' + M.linkbtn(t("p24.adjust"), "sliders-horizontal") + "</div></div>", "mt-" + (i ? 2 : 4));
+  }
+  /* the list. o = {picks: {R01: "video"|"motion"}, avoid: true (R04 picked), avoidTicked, fixed, disabled, focus, longTitle} */
+  function list(o) {
+    o = o || {};
+    return E.reels.map(function (r, i) {
+      var p = o.picks && o.picks[r.id];
+      return reel(r, i, { picked: !!p, as: p, fixed: o.fixed, avoidTicked: o.avoidTicked, disabled: o.disabled, focus: o.focus && i === 0, longTitle: o.longTitle && i === 0 });
+    }).join("") + '<div class="t-meta tx-muted mt-3">' + t("p24.preview.note") + "</div>";
+  }
+  /* the pinned bar: Make N reels (primary), the reason when it is off, and the trust line */
+  function bar(n, o) {
+    o = o || {};
+    var off = o.disabled || !n || o.needAvoid;
+    var label = n === 1 ? t("p24.make.one") : t("p24.make", { n: M.html(M.ltr(String(n || 0))) });
+    var hint = !n ? t("p24.make.none") : o.needAvoid ? t("p24.make.avoid") : "";
+    return '<div class="m-col">' + PC.kbtn(label, "enter", { kind: "primary", block: true, icon: "list-video", disabled: off, focus: o.focus }) + "</div>" +
+      (hint ? '<div class="t-meta tx-muted mt-2">' + hint + "</div>" : "") + M.trust(t("p24.trust"), "mt-2");
+  }
+  var TWO = { R01: "motion", R02: "video" };
+
+  var STATES = {
+    empty: function () {
+      return { needs: 0, body: head() + sheet("ok") + '<div class="mt-4"></div>' +
+        M.empty({ icon: "list-video", title: t("p24.empty"), text: t("p24.empty.text"), btn: M.btn(t("p24.empty.btn"), { kind: "primary", icon: "message-square", kbd: true }) }) };
+    },
+    loading: function () {
+      var sk = function (i) { return M.card(M.skel(40) + M.skel(90, 16) + M.skel(70) + M.skel(50), "mt-" + (i ? 2 : 4)); };
+      return { needs: 1, body: head() + sk(0) + sk(1) + sk(2), bar: '<span class="m-skel-block" style="height:40px"></span>' };
+    },
+    normal: function () { return { needs: 1, body: head() + sheet("ok") + list({ picks: TWO }), bar: bar(2) }; },
+    "sheet-missing": function () { return { needs: 2, body: head() + '<div class="mt-4"></div>' + sheet("missing") + list({ picks: TWO }), bar: bar(2) }; },
+    "sheet-made": function () { return { needs: 2, body: head() + '<div class="mt-4"></div>' + sheet("made") + list({ picks: TWO }), bar: bar(2) }; },
+    /* R04 touches a topic the sheet says to avoid: it needs its own tick before Make turns on */
+    avoid: function () {
+      return { needs: 1, body: head() + sheet("ok") + list({ picks: { R01: "video", R04: "video" } }), bar: bar(2, { needAvoid: true }) };
+    },
+    "audio-only": function () {
+      return { needs: 1, body: head() + sheet("ok") + '<div class="mt-4"></div>' + PC.info(t("p24.audio")) + list({ picks: TWO, fixed: true }), bar: bar(2) };
+    },
+    focus: function () { return { needs: 1, body: head() + sheet("ok") + list({ picks: TWO, focus: true }), bar: bar(2, { focus: true }) }; },
+    error: function () {
+      return { needs: 1, body: slot(M.notice("error", t("p24.failed"), { sub: t("p24.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true }, support: true })) +
+        head() + sheet("ok") + list({ disabled: true }), bar: bar(0, { disabled: true }) };
+    },
+    offline: function () {
+      return { needs: 1, pills: { engine: "off", claude: "unchecked", host: "unlinked" },
+        body: slot(M.offline({ hintKey: "p10.offline_hint" })) + head() + sheet("ok") + list({ picks: TWO, disabled: true }), bar: bar(2, { disabled: true }) };
+    },
+    "no-claude": function () {
+      /* picking needs no Claude: the picks are saved and the reels' plans wait for it */
+      return { needs: 1, pills: { claude: "signed_out" },
+        body: slot(M.noClaude("signed_out", { primary: false })) + head() + sheet("ok") + list({ picks: TWO }), bar: bar(2) };
+    },
+    stale: function () {
+      return { needs: 1, body: slot(M.notice("warn", t("p24.stale"), { btn: { label: t("action.retry"), icon: "refresh-cw", primary: true }, dismiss: false })) +
+        head() + sheet("ok") + list({ picks: TWO, disabled: true }), bar: bar(2, { disabled: true }) };
+    },
+    success: function () {
+      var rows = ["R01", "R02"].map(function (id) {
+        return M.li("circle-check", M.ltr(E.ep + "_" + id, "lat code") + " · " + t("p24.done.status.created"));
+      }).join("");
+      return { needs: 0, body: slot(M.notice("ok", t("p24.done", { n: M.html(M.ltr("2")) }), { sub: t("p24.done.next") })) + head() +
+        M.card('<div class="m-col">' + rows + "</div>", "mt-4") };
+    },
+    long: function () {
+      return { needs: 120, body: head() + sheet("ok", { long: true }) + list({ picks: { R01: "motion", R02: "video", R03: "video" }, longTitle: true }), bar: bar(3) };
+    }
+  };
+
+  PC.mount({
+    id: "P-24", name: "Episode and reels",
+    states: ["empty", "loading", "normal", "sheet-missing", "sheet-made", "avoid", "audio-only", "focus", "error", "error-live", "offline", "no-claude", "stale", "success", "long"], defaultState: "normal",
+    build: function (state) {
+      /* the header names the episode, not a clip (the long state keeps the shell's long values) */
+      if (state !== "long") { M.D.client = E.show; M.D.item = E.ep; }
+      var v = STATES[state]();
+      v.tab = "edit";
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

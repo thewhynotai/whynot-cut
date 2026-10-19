@@ -3,8 +3,9 @@
 Date: 2026-10-18. Owner: UI track (subscription session, owner request 2026-10-18: "design, extension and panel in
 parallel, so every feature gets its place in the UI as it is built"). Status: **draft 2** (fresh Opus review
 PASS-WITH-FIXES; every P1/P2 fixed), written from the sources below on `release/3.0` at a2554ae. The screen columns describe the screens
-COMMITTED at a2554ae (40 screens, 505 states); the UI track's batch-1 screens (P-23 chat and the Phase 4 states of
-P-07 / P-10, in the working tree) update these rows in their own commit, after their renders and review.
+COMMITTED at a2554ae (40 screens, 505 states) plus the UI track's batch 1 (P-23 chat, P-24 episode and reels, P-26
+client rules, and the Phase 4 states of P-05 / P-06 / P-07 / P-10), committed with this update after its renders and
+its designer review (`designed (batch 1)`).
 
 Sources:
 - the `reel` CLI: `whynot-cut/engine/reel/cli.py` `CORE_COMMANDS` (:1532), `lib/podcast_cli.py`, `lib/motion_cli.py` (75 subcommands);
@@ -46,6 +47,10 @@ S7 = F9, S9 = USB + docs, later = Stage 11+. `base` = a 2.x/3.0 flow that alread
 
 ## 1. Headline gaps (read this first)
 
+Written against the screens at a2554ae. **Batch 1 (UI-P4) designs** the screens for gaps 2–6 and part of 8: P-23 chat,
+P-24 episode and reels, the review domains and the verse slot on P-07 / P-10, P-26 client rules, removed-review,
+risky words, autopilot and the intake warnings. Gap 1 (no wire) and gap 7 (the cut review list, NEW P-27, Stage 4) stay.
+
 1. **The panel cannot run anything yet.** No panel-originated contract v4 message runs any of the 75 `reel` commands
    (a `command` / `build_project` sent through `reel serve` does run the engine's build, but only from the CLI side). The
    three panel intents are stubbed. No chat / `claude -p stream-json` message exists, and `connection.claude` is
@@ -55,7 +60,7 @@ S7 = F9, S9 = USB + docs, later = Stage 11+. `base` = a 2.x/3.0 flow that alread
 2. **No chat screen exists.** F1 (in-panel chat, step cards, Approve / Change / Stop buttons, status light) is the
    V1 centrepiece and has no mockup. → NEW P-23.
 3. **No podcast screens exist.** Episode sheet, reels plan (Gate 0 pick), reels preview and the publish package run
-   only through Claude chat today. → NEW P-24 (episode + reels plan) and P-25 (publish package, later).
+   only through Claude chat today. → NEW P-24 (episode + reels plan) and NEW P-25 (publish package, later).
 4. **Review domains beyond medical/religious are not drawn.** P-07 and P-10 show only medical and religious flags with
    "the doctor or the sheikh". Addendum M adds business (owner or legal adviser) and AI disclosure (client), each with
    its own approver role and verdict (`needs-approval`, `needs-evidence`, `needs-disclosure`). → +states on P-07/P-10.
@@ -74,30 +79,30 @@ S7 = F9, S9 = USB + docs, later = Stage 11+. `base` = a 2.x/3.0 flow that alread
 
 | Feature | Engine command | Contract v4 | Panel screen | UI state | Stage | Notes |
 |---|---|---|---|---|---|---|
-| Autopilot + one checklist (T4.7) | `auto-approve` (LEAD), `needs-you --write` | NONE (C-3); approval shows in `state.approval` | P-22 (approval setting), P-06, P-10 | PARTIAL, designed | S1 → S3 | MISSING: a run in `approval: auto` (badge "approved automatically", `by:"auto"`), the stop at QC while a medical/religious line is open. → +states `autopilot`, `autopilot-stopped` on P-06 |
-| NEEDS-YOU list (T4.7) | `needs-you --write` → `output/needs-you.json` | NONE (C-4): no `needs_you` field in `panel_state` | P-10, header badge G3 | PARTIAL, designed | S1 → S3 | engine kinds (`lib/needs_you.py:52`): pick, words, medical, religious, music, fonts, logo, website, final. P-10 draws rows words, claim, music, fonts, render, restart, plus `plan` (in the `older` state only) and `numbers` (in the `long` state only). MISSING rows: `pick` (Gate 0, not plan approval), `logo`, `website`, business, AI, verse (gaps 4, 5). Engine issue (UI track, 2026-10-18), confirmed by the executor: a business or AI review row is filed under `medical` with the doctor as approver (`needs_you.py:406`); its fix and the `verse` / `business` / `ai` kinds in `needs-you.schema` are in the manual-verse build scope |
-| Manual verse slot (replaces K-T8, owner 2026-10-18) | executor-owned engine part, NOT BUILT (`lib/manual_verse.py` + plan/needs_you hunks; brief `D:\ClaudeData\claude-api-lane\work\manual-verse\BRIEF.md`): no captions or graphics in a recited-verse span, a timeline marker, one NEEDS-YOU line per span (`who: editor`) | NONE (C-4) | MISSING → P-10 +state `verse` (UI ticket: UI track, batch 1) | none | S1 engine; panel wire S3 (C-4) | marker name final: «آية: يضيفها المونتير يدويًا»; NEEDS-YOU line «أضف الآية يدويًا من مصحف موثوق ودقّق التشكيل» with the source timecode; a guessed end (12 s cap) says so. The marker comment holds only the source timecodes and the cue phrase that opened the span (e.g. «بعد: قال تعالى»). No surface (marker, NEEDS-YOU, edit-plan, logs, P-10 rows) ever shows the span's transcript words: a misheard verse must never be written where it could be copied. The plugin never writes Quran text, not even in mock data: the P-10 `verse` fixture rows carry only the timecode, the cue phrase, the fixed line and the guessed-end flag. "Go to the marker" seeks only, and only if UXP proves it (else meta text). Until C-4 the editor sees the line in `output/NEEDS-YOU.md` through chat. + a count line on P-06 `done` |
-| Risky words first (K-T1) | `transcript-verify`; with the K1 switch `k_t1_plan_block` on, `plan` refuses a graphic that shows an unconfirmed high-risk word (`lib/plan.py:909-913`; K1 switch off) | NONE | P-10 `words` and `numbers` rows (`numbers` in the `long` state only) | PARTIAL, designed | S1 | MISSING: the "check these first" block with dose / drug / negation / number reasons and Arabic-Indic digits as spoken. → +state `risky` on P-10 |
+| Autopilot + one checklist (T4.7) | `auto-approve` (LEAD), `needs-you --write` | NONE (C-3); approval shows in `state.approval` | P-22 (approval setting), P-06 `autopilot`, `autopilot-stopped`, P-10 | designed (batch 1) | S1 → S3 | MISSING: a run in `approval: auto` (badge "approved automatically", `by:"auto"`), the stop at QC while a medical/religious line is open. → +states `autopilot`, `autopilot-stopped` on P-06 |
+| NEEDS-YOU list (T4.7) | `needs-you --write` → `output/needs-you.json` | NONE (C-4): no `needs_you` field in `panel_state` | P-10 (+ `verse`, `risky`, `domains`, `podcast` states), header badge G3 | designed (batch 1) | S1 → S3 | engine kinds (`lib/needs_you.py:52`): pick, words, medical, religious, music, fonts, logo, website, final. P-10 draws rows words, claim, music, fonts, render, restart, plus `plan` (in the `older` state only) and `numbers` (in the `long` state only). MISSING rows: `pick` (Gate 0, not plan approval), `logo`, `website`, business, AI, verse (gaps 4, 5). Engine issue (UI track, 2026-10-18), confirmed by the executor: a business or AI review row is filed under `medical` with the doctor as approver (`needs_you.py:406`); its fix and the `verse` / `business` / `ai` kinds in `needs-you.schema` are in the manual-verse build scope Batch 1 draws `pick` and `logo` rows (P-10 `podcast`), business / AI rows (`domains`), verse rows (`verse`); `website` stays with the deferred Addendum J. |
+| Manual verse slot (replaces K-T8, owner 2026-10-18) | executor-owned engine part, NOT BUILT (`lib/manual_verse.py` + plan/needs_you hunks; brief `D:\ClaudeData\claude-api-lane\work\manual-verse\BRIEF.md`): no captions or graphics in a recited-verse span, a timeline marker, one NEEDS-YOU line per span (`who: editor`) | NONE (C-4) | P-10 `verse`, P-06 `done-verse` | designed (batch 1); fixture field names provisional until the executor's manual-verse commit | S1 engine; panel wire S3 (C-4) | marker name final: «آية: يضيفها المونتير يدويًا»; NEEDS-YOU line «أضف الآية يدويًا من مصحف موثوق ودقّق التشكيل» with the source timecode; a guessed end (12 s cap) says so. The marker comment holds only the source timecodes and the cue phrase that opened the span (e.g. «بعد: قال تعالى»). No surface (marker, NEEDS-YOU, edit-plan, logs, P-10 rows) ever shows the span's transcript words: a misheard verse must never be written where it could be copied. The plugin never writes Quran text, not even in mock data: the P-10 `verse` fixture rows carry only the timecode, the cue phrase, the fixed line and the guessed-end flag. "Go to the marker" seeks only, and only if UXP proves it (else meta text). Until C-4 the editor sees the line in `output/NEEDS-YOU.md` through chat. + a count line on P-06 `done` |
+| Risky words first (K-T1) | `transcript-verify`; with the K1 switch `k_t1_plan_block` on, `plan` refuses a graphic that shows an unconfirmed high-risk word (`lib/plan.py:909-913`; K1 switch off) | NONE | P-10 `risky` (+ the `words` and `numbers` rows) | designed (batch 1) | S1 | MISSING: the "check these first" block with dose / drug / negation / number reasons and Arabic-Indic digits as spoken. → +state `risky` on P-10 |
 | Review flags as data (T4.13) | `review-flags --from -` | `state.approval.flagged` (medical/religious only) | P-07 (flagged lines), P-10 `claim` row | built + unit-tested (render.ts approval card); P-07 designed | S1 | `flagged` spans need `01_analysis/sensitive-review.json` (eng-data-contract §4) |
-| Review domains: medical, religious, business, AI (M1-T1/T2/T3) | `review-scan` **NOT REGISTERED** (`lib/review_domains.py`), `review-flags` | NONE (C-5): no domain, verdict or approver role field | P-07, P-10 | MISSING (only medical/religious drawn) | S1 → S3/S4 | verdicts `needs-approval` / `needs-evidence` / `needs-disclosure`; approver per domain from `config/review-domains/registry.json`. → +states `domains`, `domains-checked` on P-07; +rows on P-10 |
-| Approval with role (M1-T6, T6.6, E-1/E-3) | `approve-plan --by editor\|delegated`; BL-15 lead token | `intent approve` (stub, C-1) | P-07 (`confirmed with`, approval record) | designed (medical/religious); built approval card | S1 → S3 | MISSING: the role per domain ("the business owner or their legal adviser", "the client") and one confirm per domain. Religious sign-off is never delegated, medical never auto |
+| Review domains: medical, religious, business, AI (M1-T1/T2/T3) | `review-scan` **NOT REGISTERED** (`lib/review_domains.py`), `review-flags` | NONE (C-5): no domain, verdict or approver role field | P-07 `domains`, `domains-checked`; P-10 `domains` | designed (batch 1) | S1 → S3/S4 | verdicts `needs-approval` / `needs-evidence` / `needs-disclosure`; approver per domain from `config/review-domains/registry.json`. → +states `domains`, `domains-checked` on P-07; +rows on P-10 |
+| Approval with role (M1-T6, T6.6, E-1/E-3) | `approve-plan --by editor\|delegated`; BL-15 lead token | `intent approve` (stub, C-1) | P-07 `domains`, `domains-checked` (one approver per domain, one "Confirmed with" per group) | designed (batch 1); built approval card (medical/religious) | S1 → S3 | MISSING: the role per domain ("the business owner or their legal adviser", "the client") and one confirm per domain. Religious sign-off is never delegated, medical never auto |
 | Per-domain gate (M1-T4) | `review-gate <item>` NOT BUILT (planned, P6) | NONE | MISSING | none | needs K-T9 (deferred) | stage unclear: depends on the deferred signed decision log. Drawn as P-07 `domains` only; the hard gate line waits |
-| Removed-review clip (K-T2) | `removed-review <item>` (447ea2a) | NONE (C-3) | MISSING | none | S1 → S3 | an MP4 of only what the plan removes, with slates. → secondary button "Watch what's removed" on P-07 + state `removed` (ready / making / failed) |
-| Episode sheet (T4.4) | `episode-sheet --init EP` | NONE (C-6) | MISSING | none | S1 → S3 | → NEW P-24 (episode) |
-| Client rules / learning loop (T4.3, F3b) | `rules --propose\|--add\|--remove\|--list` **NOT REGISTERED** (`lib/rules_loop.py`; CLI hooks held in lane2\hooks\T43; `--add/--remove` LEAD) | NONE (C-7) | MISSING | none | S1 engine → S4 UI | sources `chat` now; `review_list`, `hand_edit` in S4; agency default at 3+ clients needs the owner. Safety rules can't be learned away. → NEW P-26 |
-| Intake early warnings (T4.8) | `inbox` returns `warnings[]` + `warnings_unread` (a2554ae: `lib/onboard.py:557-563` calls `intake_warnings.refresh`; `output/discovery/intake-warnings.json`) | NONE (C-3) | P-05 (no warning state) | MISSING | S1 → S3 | episode in Raw, docs in References, missing logo/HEX/fonts/sheet. → +state `warnings` on P-05 |
-| Intake normalisation (Task 26) | (inbox) | NONE | P-05 | MISSING | S1 → S3 | reported through the T4.8 warnings; same +state |
+| Removed-review clip (K-T2) | `removed-review <item>` (447ea2a) | NONE (C-3) | P-07 `removed` | designed (batch 1) | S1 → S3 | an MP4 of only what the plan removes, with slates. → secondary button "Watch what's removed" on P-07 + state `removed` (ready / making / failed) |
+| Episode sheet (T4.4) | `episode-sheet --init EP` | NONE (C-6) | P-24 `normal`, `sheet-missing`, `sheet-made` | designed (batch 1) | S1 → S3 | → NEW P-24 (episode) |
+| Client rules / learning loop (T4.3, F3b) | `rules --propose\|--add\|--remove\|--list` **NOT REGISTERED** (`lib/rules_loop.py`; CLI hooks held in lane2\hooks\T43; `--add/--remove` LEAD) | NONE (C-7) | P-26 | designed (batch 1) | S1 engine → S4 UI | sources `chat` now; `review_list`, `hand_edit` in S4; agency default at 3+ clients needs the owner. Safety rules can't be learned away. → NEW P-26 "Not now" needs an engine state (C-7); until then it only hides the proposal in the panel. |
+| Intake early warnings (T4.8) | `inbox` returns `warnings[]` + `warnings_unread` (a2554ae: `lib/onboard.py:557-563` calls `intake_warnings.refresh`; `output/discovery/intake-warnings.json`) | NONE (C-3) | P-05 `intake` | designed (batch 1) | S1 → S3 | episode in Raw, docs in References, missing logo/HEX/fonts/sheet. → +state `warnings` on P-05 |
+| Intake normalisation (Task 26) | (inbox) | NONE | P-05 `intake` (the frame-rate row) | designed (batch 1) | S1 → S3 | reported through the T4.8 warnings; same +state |
 | Free up space (T4.15) | `clean` **NOT REGISTERED** (`lib/housekeeping.py`, 36cd6ad) | NONE | PARTIAL: P-21 `remove-confirm` (models only) | designed (models) | S1 → S4 | yes before apply; → +state `space` on P-21 Models (later batch) |
 | Smooth zoom + fades (T4.1) | style.json, `ppro-build` | `host:build_project` (`camera_keys`, `fades`) | P-08 (frames show it) | n/a (no own UI; its live checks are the Adobe track's) | S1 | the K-T3 builder fades are NOT BUILT (only the switch name `k_t3_builder_fades` is reserved); the T4.2 knobs page is later (R-6.6) |
 | Style knobs (T4.2) | style.json | NONE | MISSING | none | later (R-6.6 per-client settings) | |
 | Licensed music in motion (T4.6) | `music --list`, motion-build | `host:ae_build_motion` | A-03 (gates), P-10 (`music`) | designed | S1 | |
 | Adopt an old style (T4.9) | `ref-style --adopt ID --yes` (LEAD) | NONE | MISSING | none | S4 | diff first, then yes |
 | Caption looks + recommender (Task 23, 28) | `caption-looks [--pick --yes]`, `looks recommend` | NONE | P-19 is the Kalam MOGRT gallery, not this | MISSING | S5 (F4) | |
-| Cut proposals + takes (Task 25, K-T7) | plan markers NOT BUILT into the plan yet (Task 25 round 4 in review); `cut-proposals` and `takes --drop --keep --undo` **NOT REGISTERED** (`lib/cut_proposals.py`, `lib/safety/takes.py`) | NONE | MISSING (P-16 is Hush-only) | none | S4 (F3) | meaning-different takes never pre-ticked; K-T7 follow-up open → design after Task 25 r4 closes. → NEW P-27 |
+| Cut proposals + takes (Task 25, K-T7) | plan markers NOT BUILT into the plan yet (Task 25 round 4 in review); `cut-proposals` (lands with the K-T7 hooks, before the tag) and `takes --drop --keep --undo` **NOT REGISTERED** (`lib/cut_proposals.py`, `lib/safety/takes.py`) | NONE | MISSING (P-16 is Hush-only) | none | S4 (F3) | meaning-different takes never pre-ticked; K-T7 follow-up open → design after Task 25 r4 closes. → NEW P-27 |
 | Seam check (K-T3), hook check (K-T6) | `seam-check`, `hook-check` NOT BUILT (no module yet; K-T3 and K-T6 are open) | NONE | P-08 (QC) has no finding row for them | MISSING | S1 engine → S4 | findings with cut id and time; → +state on P-08 later |
 | Safe zones (Task 27, K-T4) | `qc`; `safezone-check` **NOT REGISTERED** (`lib/safety/safezone_gate.py`; the K-T4 hard fail is a K1 switch, off) | NONE | P-08 (QC fail) | PARTIAL | S4 (F10 button) | |
 | Burned-in captions (Task 24) | (plan) | NONE | MISSING | none | S3 | one-line notice; → a P-06 notice line later |
-| Stricter publish-check (Task 30) | `publish-check` | NONE | MISSING | none | later (P-25) | |
+| Stricter publish-check (Task 30) | `publish-check` | NONE | MISSING | none | later (NEW P-25) | |
 | Emphasis punch-ins + ending order (Task 29) | NOT BUILT (waits for T4.1) | NONE | P-08 (frames show it) | none | S1 | no own UI |
 | Arabic integrity QC in motion (K-T5) | (motion-plan / qc; the motion-QC line is behind the K1 switch `k_t5_arabic_qc_in_motion_qc`, off) | `host:ae_*` | A-04 (frames) PARTIAL | designed | S1 | the refusal naming the scene id has no A-03 card yet |
 | Move or clone a client (T4.5 part B) | `client-move`, `client-clone` **NOT REGISTERED** (BL-14, in flight) | NONE | MISSING | none | later | |
@@ -114,7 +119,7 @@ S7 = F9, S9 = USB + docs, later = Stage 11+. `base` = a 2.x/3.0 flow that alread
 | Handoff | `handoff [--delivered]` | `state.pipeline[handoff]` | P-06 `done` | designed | base | `--delivered` is LEAD |
 | Status / board | `status`, `next`, `board --json` | `state` (one item only) | P-03, P-04 | designed | S3 | `board` across clients has no message (C-6) |
 | Transcript words to confirm | `transcript-verify --by` | NONE | P-10 `words` row | designed | S1 | |
-| Podcast: episodes, transcribe, reels plan, preview, pick (Gate 0) | `episodes`, `episode-prep`, `episode-transcribe`, `reels-plan`, `reels-preview`, `reels-select --pick --as video\|motion` (LEAD) | NONE (C-6) | MISSING | none | S3 | → NEW P-24 |
+| Podcast: episodes, transcribe, reels plan, preview, pick (Gate 0) | `episodes`, `episode-prep`, `episode-transcribe`, `reels-plan`, `reels-preview`, `reels-select --pick --as video\|motion` (LEAD) | NONE (C-6) | P-24 | designed (batch 1) | S3 | → NEW P-24 |
 | Podcast publish package | `publish-check`, `publish-thumbnail` | NONE | MISSING | none | later | → NEW P-25 (not in this round) |
 | Motion video (AE) | `motion-plan`, `motion-animatic`, `motion-build`, `motion-render`, `motion-frames`, `ae-probe` | `host:ae_*` | A-01, A-02, A-03, A-04 | designed (+280 px) | base → S3 | A-02 needs medical/religious lines (E-3) |
 | Fix audio only | `audio-clean` | NONE | MISSING | none | S5 (F5) | |
@@ -125,19 +130,19 @@ S7 = F9, S9 = USB + docs, later = Stage 11+. `base` = a 2.x/3.0 flow that alread
 | Writer lock (one session per client) | `lock --status\|--release` (release LEAD) | NONE | P-05 `locked` | designed | base | |
 | Transcribe, correct, re-listen | `transcribe`, `transcript-correct`, `transcript-relisten` | `state.pipeline[transcript]` | P-06 (step), P-10 `words` row | designed (progress only) | base → S5 | the dialect picker (F5) adds the choice before transcription |
 | Client onboarding: discover, database, reference style | `client-init`, `discover`, `client-db`, `ref-analyze`, `ref-style` (show / record / apply; `--adopt` LEAD) | NONE | P-04, J-01…J-05 (J deferred) | PARTIAL | S3 / later | no screen shows the reference-style result |
-| Episode next step | `episode-next` | NONE | MISSING | none | S3 | → P-24 |
+| Episode next step | `episode-next` | NONE | P-24 (the done state names the next step per reel) | designed (batch 1) | S3 | → P-24 |
 | Sound effects map | `sfx` | NONE | none (internal, no UI planned) | n/a | n/a | |
 
 ### 2.3 V1 panel features (F1–F12)
 
 | Feature | Engine command | Contract v4 | Panel screen | UI state | Stage | Notes |
 |---|---|---|---|---|---|---|
-| F1 in-panel chat: streaming, step cards, Approve / Change / Stop | chat bridge (`claude -p --output-format stream-json`), NOT BUILT | NONE (C-2) | MISSING | none | S3 | → NEW P-23 + the F1 shell (§4 A-4) |
+| F1 in-panel chat: streaming, step cards, Approve / Change / Stop | chat bridge (`claude -p --output-format stream-json`), NOT BUILT | NONE (C-2) | P-23 | designed (batch 1); the F1 shell code is Stage 3 (track UI-S3; parked work in `D:\ClaudeData\claude-api-lane\tracks\UI-P4-parked\f1-shell\`) | S3 | → NEW P-23 + the F1 shell (§4 A-4) |
 | F1 auth: own login or API key in the OS credential store; guided setup | `serve/claude_probe.py` NOT BUILT | `state.connection.claude` (hard-coded `unknown`, C-8) | P-01, P-02, P-22 `apikey`/`apikey-saved`, I-05 | designed | S3 | |
 | F1 edit safety: copy sequence, one undo, plan first | T6.6 wrapper | NONE | P-07 trust line, P-09 | designed | S3 | Review focus 1: killed CLI → original untouched + clear error |
 | F2 Kalam / Hush / Tidy tabs | `kalam/hush/tidy` verbs **NOT REGISTERED** (planned) | `host:kalam_*/hush_*/tidy_*` reserved | P-13…P-20 | designed | S4 | ~330 tools-ae keys still NEW/MOCK |
 | F3 cut review list | Task 25 + Hush | NONE | MISSING | none | S4 | → NEW P-27 |
-| F3b client rules card | `rules …` **NOT REGISTERED** | NONE (C-7) | MISSING | none | S4 | → NEW P-26 |
+| F3b client rules card | `rules …` **NOT REGISTERED** | NONE (C-7) | P-26 | designed (batch 1) | S4 | → NEW P-26 |
 | F4 caption look gallery (+ Liquid Glass) | `caption-looks`, `looks recommend` | NONE | MISSING (P-19 is MOGRT) | none | S5 | |
 | F5 audio clean + dialect picker | `audio-clean`, transcribe prompt | NONE | MISSING | none | S5 | |
 | F6 beat sync | `beats` NOT BUILT (planned, K-T20) | NONE | MISSING | none | S6 | |
@@ -191,7 +196,8 @@ the panel is view-only; Claude chat drives the plugin, as in 2.2.1). Stage 3 = C
   a contract column (a message, or NONE + a gap id). The standing rule (§5) keeps it current. Cheap addition: a
   small check in `adobe/panel-ui` that every `P-/A-/I-/J-` ID in this file exists under `design/screens/` and every
   screen file appears here at least once (built with the first design batch). It expands ranges written `X-01…X-09`
-  into each ID, and skips IDs written `NEW P-2x` (proposed, not drawn yet).
+  into each ID, and skips IDs written `NEW P-2x` (proposed, not drawn yet). Built with batch 1:
+  `python adobe/panel-ui/design/_build/check_map.py` (and `--self-test`).
 
 **A-2 Phase 4 screens (batch 1: P-07 domains + removed, P-10 verse + risky + domains, P-06 autopilot + verse line,
 P-05 warnings, NEW P-24 episode/reels, NEW P-26 client rules).**

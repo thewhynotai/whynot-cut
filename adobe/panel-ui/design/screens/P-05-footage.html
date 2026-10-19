@@ -3,17 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="empty,loading,normal,several,focus,error,offline,no-claude,stale,locked,success-live,success-later,long">
+<meta name="mock-states" content="empty,loading,normal,several,intake,focus,error,offline,no-claude,stale,locked,success-live,success-later,long">
 <meta name="mock-keys" content="Cmd/Ctrl+Enter: Make my edit (when it is off, the violet fix of the card on top); Up/Down: choose which new clip to edit; Cmd/Ctrl+O: Open folder; Esc: dismiss the top card (not the service or Claude card); Tab order: Open folder, warning fixes top to bottom, Make my edit">
 <meta name="mock-motion" content="A new clip row fades in 200 ms ease into a reserved row (rows below move only when a file arrives, never while reading); chip colour change New to In progress 200 ms; Make my edit press: fill colour 150 ms, then the label keeps its width while the icon becomes the busy loader (static fallback: loader still); skeleton shimmer 1200 ms linear (static fallback: flat bars). The pinned action bar never moves.">
 <title>P-05 New footage and Make my edit</title>
 <link rel="stylesheet" href="../mockup.css">
 <link rel="stylesheet" href="../css/premiere-core.css">
+<link rel="stylesheet" href="../css/panel-v1.css">
 <script src="../icons.js"></script>
 <script src="../strings.js"></script>
 <script src="../strings/premiere-core.js"></script>
+<script src="../strings/panel-v1.js"></script>
 <script src="../mockup.js"></script>
 <script src="../js/premiere-core.js"></script>
+<script src="../js/panel-v1.js"></script>
 </head>
 >
 <body>
@@ -77,6 +80,19 @@
       (o.hint ? '<div class="t-meta tx-muted mt-2">' + o.hint + "</div>" : "");
   }
   function slot(n) { return n + '<div class="mt-4"></div>'; }
+  /* Phase 4 (T4.8 intake warnings + Task 26): what WhyNot Cut noticed in the new material, informational (amber, never
+     blocking); a check that could not run is said plainly and never counted as fine. Wire: gap C-3/C-6, Stage 3. */
+  var INTAKE = [["film", "episode_in_raw", "raw"], ["captions", "burned_captions", ""], ["clock", "vfr", ""], ["image", "broll_licence", "broll"]];
+  function intake() {
+    var rows = INTAKE.map(function (w) {
+      return '<div class="m-lrow">' + M.status("warn") + '<div class="m-lrow-text"><div class="t-body">' + t("p05.w." + w[1]) + "</div>" +
+        '<div class="t-meta tx-muted">' + t("p05.w." + w[1] + ".why") + "</div>" +
+        (w[2] ? '<div class="m-row mt-2">' + M.btn(t("p05.intake.open." + w[2]), { icon: "folder-open" }) + "</div>" : "") + "</div></div>";
+    }).join("");
+    return M.card('<div class="t-label">' + t("p05.intake.title", { n: M.html(M.ltr(String(INTAKE.length))) }) + "</div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("p05.intake.sub") + '</div><div class="m-col mt-1">' + rows + "</div>" +
+      '<div class="m-row-top mt-2">' + M.status("info", 12) + '<div class="t-meta tx-muted ms-1 m-grow">' + t("p05.intake.unread") + "</div></div>", "mt-4");
+  }
 
   var STATES = {
     empty: function () {
@@ -92,6 +108,7 @@
     },
     normal: function () { return { body: where() + warnings() + clipList(ONE), bar: bar() }; },
     several: function () { return { body: where() + warnings({ both: true }) + clipList(TWO), bar: bar({ all: true }) }; },
+    intake: function () { return { body: where() + intake() + clipList(TWO), bar: bar({ all: true }) }; },
     focus: function () { return { body: where() + warnings() + clipList(ONE), bar: bar({ focus: true }) }; },
     error: function () {
       /* the request never reached Claude: the notice's fix is the violet, Make my edit waits (R2 D-P2-7) */
@@ -131,7 +148,7 @@
 
   PC.mount({
     id: "P-05", name: "New footage and Make my edit",
-    states: ["empty", "loading", "normal", "several", "focus", "error", "offline", "no-claude", "stale", "locked", "success-live", "success-later", "long"],
+    states: ["empty", "loading", "normal", "several", "intake", "focus", "error", "offline", "no-claude", "stale", "locked", "success-live", "success-later", "long"],
     defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();

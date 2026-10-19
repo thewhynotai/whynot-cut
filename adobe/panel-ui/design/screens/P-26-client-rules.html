@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mock-states" content="empty,loading,normal,conflict,refused,agency,focus,added,removed,error,error-live,offline,long">
+<meta name="mock-keys" content="Cmd/Ctrl+Enter: Make it a rule on the first suggestion (the one primary); Up/Down: move between suggestions and rules; Tab order: Back, each suggestion's Make it a rule then Not now, the conflict's choices, then each active rule's Remove (mirrored in Arabic). Remove never carries the keycap. No single-key shortcuts.">
+<meta name="mock-motion" content="confirming: the suggestion fades out 200 ms and the rule appears at the top of Active rules with a 600 ms green tint that settles (static fallback: instant); removing: the rule fades out 200 ms, its space closes after the fade (250 ms) at the bottom of the list; loading: skeleton shimmer 1200 ms linear.">
+<title>P-26 Client rules</title>
+<link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<link rel="stylesheet" href="../css/panel-v1.css">
+<script src="../icons.js"></script>
+<script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../strings/panel-v1.js"></script>
+<script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+<script src="../js/panel-v1.js"></script>
+</head>
+<body>
+<script>
+/* P-26 Client rules (T4.3 learning loop, spec F3b; UI track 2026-10-18; coverage map §2.1, wire = gap C-7, Stage 4).
+   Data: lib/rules_loop.py: active rules {id, the engine's ar / en sentence, added, videos, source comment | review_list |
+   hand_edit}, proposals {id, «مقترح: …», videos, why: said on 2+ videos or once with "always"}, conflicts (same knob,
+   different values: pick one or neither, or it replaces an active rule), refusals (anything touching the doctor's or the
+   sheikh's review, an approval or the QC: never learned).
+   - The header line is the engine's: client preferences never turn off an approval, a review, the QC or a warning.
+   - Confirm = `rules --add` (a lead step: only the editor, never by itself). Remove = `rules --remove`. "Not now" leaves
+     the proposal suggested: the engine has no "not now" state yet (coverage map §2.1, C-7), so it only hides it in the
+     panel until the next proposal run.
+   - agency: the same rule on 3+ clients: the suggestion to make it the agency default goes to the owner (F3b).
+   - The rule sentences are the engine's pair (ar / en), shown in the UI language; video ids as LTR codes. */
+(function () {
+  var t = M.t, D = M.D, R = V1.D.rules, L = M.lang;
+  function slot(n) { return n + '<div class="mt-4"></div>'; }
+  function said(o) { return L === "ar" ? o.ar : o.en; } /* the engine's own sentence, in the UI language */
+  function vids(list) { return M.html(list.map(function (v) { return M.ltr(v, "lat code"); }).join(L === "ar" ? "، " : ", ")); }
+  function srcs(list) { return list.map(function (s) { return M.chip("neutral", t("p26.src." + s)); }).join('<span class="ms-1"></span>'); }
+  function head() {
+    return M.back(t("p02.back")) + M.eyebrow(t("p26.eyebrow")) +
+      '<div class="t-title mt-1">' + t("p26.title", { client: PC.name(D.client, 28) }) + "</div>" +
+      '<div class="m-row-top mt-2">' + M.ico("shield-check", 16, "ink-ok") + '<div class="t-body ms-2 m-grow">' + t("p26.header") + "</div></div>";
+  }
+  /* proposals: the first one's confirm is the screen's one primary (o.primary false hands the violet elsewhere) */
+  function proposals(o) {
+    o = o || {};
+    var rows = R.proposals.map(function (p, i) {
+      var why = p.why === "repeat" ? V1.tn("p26.why.repeat", p.videos.length, { videos: vids(p.videos) })
+        : t("p26.why.standing", { video: M.html(M.ltr(p.videos[0], "lat code")) });
+      var prim = i === 0 && o.primary !== false && !o.disabled;
+      return '<div class="m-lrow">' + M.ico(i === 0 ? "repeat-2" : "brain", 16, o.disabled ? "ink-disabled" : "ink-accent") +
+        '<div class="m-lrow-text"><div class="t-body">' + M.txt(said(p)) + "</div>" +
+        '<div class="t-meta tx-muted">' + why + '</div><div class="m-row m-wrap mt-1">' + srcs(p.source) + "</div>" +
+        '<div class="m-row m-wrap"><div class="m-row me-2 mt-2">' + M.btn(t("p26.confirm"), { kind: prim ? "primary" : "secondary", icon: "circle-check-big", disabled: o.disabled, focus: prim && o.focus, kbd: prim }) + "</div>" +
+        '<div class="m-row mt-2">' + M.btn(t("p26.notnow"), { kind: "ghost", disabled: o.disabled }) + "</div></div></div></div>";
+    }).join("");
+    return M.card('<div class="t-label">' + t("p26.proposals") + '</div><div class="t-meta tx-muted mt-1">' + t("p26.proposals.sub") + "</div>" +
+      '<div class="m-col mt-1">' + rows + "</div>" +
+      '<div class="m-row-top mt-2">' + M.ico("user-check", 12, "ink-muted") + '<div class="t-meta tx-muted ms-1 m-grow">' + t("p26.who") + "</div></div>", "mt-4");
+  }
+  /* active rules; o.first = a rule just added (shown first, with its ok chip) */
+  function active(o) {
+    o = o || {};
+    var list = R.active.slice();
+    if (o.added) list.unshift({ id: "R3", ar: R.proposals[0].ar.replace(/^مقترح: /, ""), en: R.proposals[0].en.replace(/^Suggested: /, ""), date: { en: "18 Oct", ar: "18 أكتوبر" }, videos: R.proposals[0].videos, source: R.proposals[0].source, fresh: true });
+    if (o.removed) list = list.slice(1);
+    var rows = list.map(function (r) {
+      return '<div class="m-lrow">' + M.ico("square-check-big", 16, o.disabled ? "ink-disabled" : "ink-ok") +
+        '<div class="m-lrow-text"><div class="t-body">' + M.txt(L === "ar" ? r.ar : r.en) + "</div>" +
+        '<div class="t-meta tx-muted">' + t("p26.added", { date: r.date[L] }) + " · " + V1.tn("p26.from", r.videos.length, { videos: vids(r.videos) }) + "</div>" +
+        '<div class="m-row m-wrap mt-1">' + srcs(r.source) + (r.fresh ? '<span class="ms-1"></span>' + M.chip("ok", t("p26.added", { date: r.date[L] }), "circle-check") : "") + "</div>" +
+        '<div class="m-row mt-2">' + M.btn(t("p26.remove"), { kind: "ghost", icon: "trash-2", flush: true, disabled: o.disabled }) + "</div></div></div>";
+    }).join("");
+    return M.card('<div class="m-row"><div class="t-label m-grow">' + t("p26.active") + "</div>" + M.chip("neutral", M.ltr(String(list.length))) + "</div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("p26.remove.sub") + "</div>" +
+      '<div class="m-col mt-1">' + rows + "</div>", "mt-4");
+  }
+  /* two suggestions that disagree: pick one, or neither; the first also contradicts an active rule */
+  function conflict(o) {
+    o = o || {};
+    var opts = R.conflict.map(function (p, i) {
+      return (i ? '<div class="mt-1"></div>' : "") + M.radio(M.txt(L === "ar" ? p.ar : p.en), false, { sub: t("p26.why.standing", { video: M.html(M.ltr(p.videos[0], "lat code")) }) });
+    }).join("") + '<div class="mt-1"></div>' + M.radio(t("p26.conflict.none"), false);
+    return M.card('<div class="m-row-top">' + M.status("warn") + '<div class="t-label ms-2 m-grow">' + t("p26.conflict") + "</div></div>" +
+      '<div class="m-col mt-3">' + opts + "</div>" +
+      '<div class="t-meta tx-muted mt-2">' + t("p26.conflict.rule", { rule: M.txt(L === "ar" ? R.active[0].ar : R.active[0].en) }) + "</div>" +
+      '<div class="m-row mt-3">' + M.btn(t("p26.confirm"), { kind: o.primary ? "primary" : "secondary", icon: "circle-check-big", kbd: !!o.primary }) + "</div>", "mt-4");
+  }
+  /* a comment that would weaken safety: never learned, said plainly (information, not an error) */
+  function refused() {
+    return M.card('<div class="m-row-top">' + M.status("info") + '<div class="m-col ms-2 m-grow"><div class="t-label">' + t("p26.refused") + "</div>" +
+      '<div class="m-inset mt-2"><div class="m-quote m-quote-ar t-body" dir="rtl" lang="ar"><span class="ar-run">«' + V1.arTxt(R.refused.text) + "»</span></div>" +
+      '<div class="t-meta tx-muted mt-1">' + M.ltr(R.refused.video, "lat code") + "</div></div>" +
+      '<div class="t-meta tx-muted mt-2">' + t("p26.refused.sub") + "</div></div></div>", "mt-4");
+  }
+  function agency() {
+    return M.card('<div class="m-row-top">' + M.ico("user-check", 16, "ink-accent") + '<div class="m-col ms-2 m-grow"><div class="t-label">' +
+      t("p26.agency", { n: M.html(M.ltr(String(R.agency))) }) + "</div>" + '<div class="t-meta tx-muted mt-1">' + t("p26.agency.sub") + "</div>" +
+      '<div class="t-body mt-2">' + M.txt(L === "ar" ? R.active[1].ar : R.active[1].en) + "</div>" +
+      '<div class="m-row mt-2">' + M.btn(t("p26.agency.btn"), { icon: "message-square" }) + "</div></div></div>", "mt-4");
+  }
+
+  var STATES = {
+    empty: function () {
+      return { needs: 0, body: head() + '<div class="mt-4"></div>' + M.empty({ icon: "brain", title: t("p26.empty"), text: t("p26.empty.text") }) };
+    },
+    loading: function () {
+      var sk = function () { return M.card(M.skel(40) + '<div class="mt-2"></div>' + M.skel(85) + M.skel(60, 16) + '<div class="mt-2"><span class="m-skel-block" style="width:120px;height:32px;display:block"></span></div>', "mt-4"); };
+      return { needs: 0, body: head() + sk() + sk() };
+    },
+    normal: function () { return { needs: 2, body: head() + proposals() + active() }; },
+    conflict: function () { return { needs: 1, body: head() + conflict({ primary: true }) + active() }; },
+    refused: function () { return { needs: 2, body: head() + proposals() + refused() + active() }; },
+    agency: function () { return { needs: 2, body: head() + proposals() + agency() + active() }; },
+    focus: function () { return { needs: 2, body: head() + proposals({ focus: true }) + active() }; },
+    added: function () {
+      return { needs: 1, body: slot(M.notice("ok", t("p26.added.ok"))) + head() + active({ added: true }) };
+    },
+    removed: function () {
+      return { needs: 2, body: slot(M.notice("ok", t("p26.removed.ok"), { btn: { label: t("action.undo"), icon: "undo-2" } })) + head() + proposals({ primary: false }) + active({ removed: true }) };
+    },
+    error: function () {
+      return { needs: 2, body: slot(M.notice("error", t("p26.failed"), { sub: t("p26.failed.sub"), btn: { label: t("action.retry"), icon: "refresh-cw", primary: true }, support: true })) +
+        head() + proposals({ primary: false }) + active() };
+    },
+    offline: function () {
+      return { needs: 2, pills: { engine: "off", claude: "unchecked", host: "unlinked" },
+        body: slot(M.offline({ hintKey: "p10.offline_hint" })) + head() + proposals({ disabled: true }) + active({ disabled: true }) };
+    },
+    long: function () { return { needs: 120, body: head() + proposals() + conflict({ primary: false }) + refused() + agency() + active() }; }
+  };
+
+  PC.mount({
+    id: "P-26", name: "Client rules",
+    states: ["empty", "loading", "normal", "conflict", "refused", "agency", "focus", "added", "removed", "error", "error-live", "offline", "long"], defaultState: "normal",
+    build: function (state) {
+      var v = STATES[state]();
+      v.tab = "home";
+      return v;
+    }
+  });
+})();
+</script>
+</body>
+</html>

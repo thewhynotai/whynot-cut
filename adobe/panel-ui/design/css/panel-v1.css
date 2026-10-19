@@ -1,0 +1,67 @@
+/* WhyNot Cut panel V1 group (UI track, 2026-10-18): P-23 chat and the Phase 4 screens. Loaded after ../mockup.css and
+   ../css/premiere-core.css. Same UXP limits: flexbox only, explicit display on every element, physical margins swapped
+   under .m-rtl, no shadows / effects / opacity / flex spacing, state as classes, radius 8 on controls, 12-16 on cards,
+   999 on <span> only. */
+
+/* ---- P-23 chat turns. The DOM order is the reading order; a person's turn sits at the reading END, the assistant's
+   at the START, so Arabic mirrors through the panel's direction alone. ---- */
+.v1-turn { display: flex; flex-direction: column; margin-top: 16px; }
+.v1-turn:first-child { margin-top: 0; }
+.v1-turn-you { align-items: flex-end; }
+.v1-turn-bot { align-items: flex-start; }
+.v1-who { display: flex; flex-direction: row; align-items: center; min-height: 16px; }
+.v1-who .m-mono { width: 16px; height: 16px; }
+.v1-who-name { display: block; margin-left: 6px; }
+.m-rtl .v1-who-name { margin-left: 0; margin-right: 6px; }
+/* a person's message: a solid control-pressed bubble, at most 85 % of the line */
+.v1-bubble { display: flex; flex-direction: column; max-width: 85%; margin-top: 4px; padding: 8px 12px; border-radius: 12px; background: var(--mk-control-pressed); }
+/* the assistant's message: no bubble, the panel's own surface; full width */
+.v1-say { display: flex; flex-direction: column; align-self: stretch; margin-top: 4px; }
+/* a message in the other language than the UI keeps its own direction (set per message on the element) */
+.v1-msg { display: block; }
+.v1-msg[dir="rtl"] { text-align: right; }
+.v1-msg[dir="ltr"] { text-align: left; }
+/* the streaming caret: a 2 x 14 px violet-text bar at the end of the text being written (static in renders) */
+.v1-caret { display: inline-block; width: 2px; height: 14px; margin-left: 2px; background: #9D6BFF; vertical-align: -2px; }
+.m-rtl .v1-caret { margin-left: 0; margin-right: 2px; }
+
+/* ---- step cards inside the conversation: one row each, status icon + sentence + time + Open ---- */
+.v1-steps { display: flex; flex-direction: column; align-self: stretch; margin-top: 8px; padding: 3px 11px; border: 1px solid var(--twn-border); border-radius: 12px; background: var(--mk-card-solid); }
+.v1-step { display: flex; flex-direction: row; align-items: center; min-height: 36px; }
+.v1-step + .v1-step { border-top: 1px solid var(--mk-divider); }
+.v1-step-text { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; margin-left: 8px; }
+.m-rtl .v1-step-text { margin-left: 0; margin-right: 8px; }
+.v1-step-end { display: flex; flex-direction: row; align-items: center; flex: 0 0 auto; margin-left: 8px; }
+.m-rtl .v1-step-end { margin-left: 0; margin-right: 8px; }
+
+/* ---- the approval prompt: a card with the pink Needs-you edge (waiting for the person, never a problem) ---- */
+.v1-ask { display: flex; flex-direction: column; align-self: stretch; margin-top: 8px; padding: 15px; border: 1px solid #D95C9B; border-radius: 16px; background: var(--mk-accent-tint); }
+.v1-acts { display: flex; flex-direction: row; flex-wrap: wrap; }
+.v1-acts > .m-row { margin-top: 8px; margin-right: 8px; max-width: 100%; min-width: 0; }
+.m-rtl .v1-acts > .m-row { margin-right: 0; margin-left: 8px; }
+
+/* ---- suggestion chips of the empty chat: controls (div role=button), wrap to the next line at 300 px ---- */
+.v1-suggs { display: flex; flex-direction: row; flex-wrap: wrap; margin-top: 8px; }
+.v1-sugg { display: flex; flex-direction: row; align-items: center; min-height: 32px; margin-top: 8px; margin-right: 8px; padding: 5px 11px; border: 1px solid var(--twn-border); border-radius: 8px; background: var(--mk-control); cursor: pointer; }
+.m-rtl .v1-sugg { margin-right: 0; margin-left: 8px; }
+.v1-sugg .m-block { margin-left: 6px; }
+.m-rtl .v1-sugg .m-block { margin-left: 0; margin-right: 6px; }
+
+/* ---- the composer in the pinned bar: the box, then Send / Stop on its own row (280 px safe) ---- */
+.v1-compose { display: flex; flex-direction: column; }
+.v1-compose .m-textarea { height: auto; min-height: 56px; max-height: 112px; overflow-y: auto; }
+.v1-compose-row { display: flex; flex-direction: row; align-items: center; margin-top: 8px; }
+.v1-compose-row .m-grow { min-width: 0; }
+
+/* ---- design review fixes (reviews/ui-p4-batch1-design.md) ---- */
+/* P-07 domains: the verdict chip and the timecode wrap inside the inset group instead of running past it */
+.m-inset .m-flag > .m-row { flex-wrap: wrap; }
+/* P-07 domains: a single-line "Confirmed with" box keeps its text on one line */
+.v1-oneline .m-input .m-block { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+/* P-24 audio-only: the fixed choice stays visibly selected while the control is off */
+.m-segctl-dis .m-segopt-on { background: var(--mk-control-pressed); border-color: var(--mk-control-pressed); }
+.m-segctl-dis .m-segopt-on .m-block { color: #FFFFFF; }
+/* clip codes never split ("C" / "0233") */
+.lat.code { white-space: nowrap; }
+/* P-24 sheet card: the action sits on its own row under the text (300 px safe) */
+.v1-sheet-act { display: flex; flex-direction: row; margin-top: 8px; }

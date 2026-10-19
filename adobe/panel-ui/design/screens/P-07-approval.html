@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="mock-states" content="empty,loading,normal,older,noname,flagged-unchecked,flagged-checked,focus,error,error-live,offline,no-claude-signed-out,no-claude-missing,stale,success-live,success-later,success-changes,long">
+<meta name="mock-states" content="empty,loading,normal,older,noname,flagged-unchecked,flagged-checked,domains,domains-checked,removed,focus,error,error-live,offline,no-claude-signed-out,no-claude-missing,stale,success-live,success-later,success-changes,long">
 <meta name="mock-keys" content="Mod+Enter = Approve (only when it is on) or the notice's fix; Esc = close the top notice; Alt+1 / Alt+2 / Alt+3 = Home / Edit / Tools; Tab / Shift+Tab move through the flagged lines, their seek buttons, the checkbox and the bar in reading order (mirrored in Arabic). No single-key shortcuts. UXP keydown capture: lab item.">
 <meta name="mock-motion" content="trigger | property | token | final static state
 checkbox ticked | background-color, border-color of the box | --mk-dur-fast, --mk-ease | white box with a black check;
@@ -15,9 +15,15 @@ step bar advances | background-color of a segment | --mk-dur-slow | Build segmen
 loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bars when animations do not run">
 <title>P-07 Approval</title>
 <link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="../css/premiere-core.css">
+<link rel="stylesheet" href="../css/panel-v1.css">
 <script src="../icons.js"></script>
 <script src="../strings.js"></script>
+<script src="../strings/premiere-core.js"></script>
+<script src="../strings/panel-v1.js"></script>
 <script src="../mockup.js"></script>
+<script src="../js/premiere-core.js"></script>
+<script src="../js/panel-v1.js"></script>
 </head>
 <body>
 <script>
@@ -42,7 +48,15 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
      wording changed stays empty with "The wording changed, so this line needs a fresh look." Absent = no prefill.
      older (reason older_whynot_cut): line 3 changed, lines 1-2 keep their ticks; stale (reason plan_changed): the
      wording of all three is the same, so all keep their ticks and only "Confirmed with" is asked again.
-   - R3 (editor P1-04): the new sequence is named once, from plan.sequence_name, as one no-break mono run. */
+   - R3 (editor P1-04): the new sequence is named once, from plan.sequence_name, as one no-break mono run.
+   - Phase 4 (UI track 2026-10-18; coverage map §2.1, wires C-1 + C-5, Stage 3):
+     domains / domains-checked: the flagged lines grouped by review domain (Addendum M: medical, religious, business,
+       AI), each group naming its own approver from the review-domains registry (the doctor; the content owner; the
+       business owner or their legal adviser; the client) with the line's verdict chip, a tick per line and one
+       "Confirmed with" per group. Approve stays off until every line is ticked and every group is filled.
+       Medical and religious are never auto; a religious line is never confirmed on the owner's behalf.
+     removed: the K-T2 "what we removed" review clip: a secondary button on the summary card, the words that
+       change the meaning listed first (as said, with the reason). Watching it is not an approval step. */
 (function () {
   var t = M.t, D = M.D;
   function item() { return M.html(M.ltr(D.item, "lat code")); }
@@ -117,11 +131,57 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
       : why === "unticked" ? '<div class="t-meta tx-muted mt-2">' + t("approval.tick_first") + '</div>'
       : why === "noname" ? '<div class="t-meta tx-muted mt-2">' + t("approval.need_name") + '</div>'
       : why === "fix" ? '<div class="t-meta tx-muted mt-2">' + t("approval.fix_first") + '</div>'
-      : why === "needwho" ? '<div class="t-meta tx-muted mt-2">' + t("approval.need_who") + '</div>' : "";
+      : why === "needwho" ? '<div class="t-meta tx-muted mt-2">' + t("approval.need_who") + '</div>'
+      : why === "domneed" ? '<div class="t-meta tx-muted mt-2">' + t("p07.dom.need") + '</div>' : "";
     return top + '<div class="m-col mt-2">' +
       M.btn(t("approval.approve"), { kind: "primary", block: true, icon: "circle-check-big", disabled: !on, focus: focus, kbd: true }) + '</div>' + hint +
       M.trust(t("approval.trust", { seq: M.html('<bdi dir="ltr" class="mono nowrap">' + M.esc(D.seq) + '</bdi>') }), "mt-2") +
       '<div class="m-saved mt-1">' + M.ico("lock", 16, "ink-muted") + '<div class="t-meta tx-muted ms-2 m-grow">' + t("privacy.claude_sees") + '</div></div>';
+  }
+  /* ---- Phase 4: review domains (Addendum M) ---- */
+  var V = V1.D;
+  function domLines(g) {
+    if (g.lines) return g.lines;
+    var out = []; /* a plain loop: check_css reads the array method's name as the CSS property in screen files */
+    D.flagged.forEach(function (f) { if (g.ids.indexOf(f.id) >= 0) out.push(f); });
+    return out;
+  }
+  function domGroup(g, checked) {
+    var lines = domLines(g);
+    var rows = lines.map(function (f) {
+      return '<div class="m-flag"><div class="m-row">' + M.chip("warn", t("p07.v." + g.verdict)) + '<span class="m-spacer"></span>' + M.seek(f.tc) + "</div>" +
+        '<div class="m-quote m-quote-ar mt-2" dir="rtl" lang="ar"><span class="ar-run">«' + V1.arTxt(f.text) + "»</span></div>" +
+        '<div class="m-col mt-1">' + M.checkbox(t("approval.checked"), checked) + "</div></div>";
+    }).join('<span class="m-divider"></span>');
+    return '<div class="m-inset mt-3"><div class="m-row">' + M.ico(g.icon, 16, "ink-accent") + '<div class="t-label ms-2 m-grow">' + t("p07.dom." + g.k) + "</div>" +
+      M.chip("neutral", M.ltr(String(lines.length))) + "</div>" +
+      '<div class="m-row-top mt-1">' + M.ico("user-check", 12, "ink-muted") + '<div class="t-meta tx-muted ms-1 m-grow">' + t("p07.who." + g.k) + "</div></div>" +
+      '<div class="m-col">' + rows + "</div>" +
+      '<div class="t-label mt-2">' + t("p07.dom.who") + "</div>" +
+      '<div class="mt-1 v1-oneline">' + M.input(t("p07.dom.ph." + g.k), { value: checked ? M.txt(g.who[M.lang]) : "" }) + "</div></div>";
+  }
+  /* the edit map of the domains states shows the business and AI lines too (same plan, two more flagged spans) */
+  var PLAN_DOM = { edit_map: { duration_s: D.plan.edit_map.duration_s, spans: D.plan.edit_map.spans.concat([
+    { kind: "flagged", start_s: 38.6, end_s: 41.0, flag: "business" }, { kind: "flagged", start_s: 50.6, end_s: 51.8, flag: "ai" } ])
+    .sort(function (x, y) { return x.start_s - y.start_s; }) } }; /* the edit map lays spans out in time order */
+  function domainsCard(checked) {
+    return M.card('<div class="m-row">' + M.status("warn") + '<div class="t-label ms-2 m-grow">' + t("p07.dom.title") + "</div></div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("p07.dom.hint") + "</div>" +
+      V.domains.map(function (g) { return domGroup(g, checked); }).join("") +
+      '<div class="m-row-top mt-3">' + M.status("info", 12) + '<div class="t-meta tx-muted ms-1 m-grow">' + t("p07.dom.never_auto") + "</div></div>", "mt-4");
+  }
+  /* ---- Phase 4: the K-T2 review clip of what the plan removes ---- */
+  function removedCard() {
+    var R = V.removed;
+    var words = R.meaning.map(function (m) {
+      return '<span class="m-chip m-chip-warn me-1 mt-1"><span class="m-block"><bdi dir="rtl" lang="ar">«' + V1.arTxt(m.w) + "»</bdi> · " + t("p10.r." + m.r) + "</span></span>";
+    }).join("");
+    return M.card('<div class="m-row-top">' + M.ico("file-video", 16, "ink-accent") + '<div class="m-col ms-2 m-grow">' +
+      '<div class="t-label">' + t("p07.removed.ready", { n: M.html(M.ltr(String(R.parts))), dur: M.html(M.mono(R.dur)) }) + "</div>" +
+      '<div class="t-meta tx-muted mt-1">' + t("p07.removed.sub") + "</div>" +
+      '<div class="t-body mt-2">' + V1.tn("p07.removed.meaning", R.meaning.length) + "</div>" +
+      '<div class="m-row m-wrap">' + words + "</div>" +
+      '<div class="m-row mt-3">' + M.btn(t("p07.removed.btn"), { icon: "play" }) + "</div></div></div>", "mt-3");
   }
   var slot = M.slot;
   /* the earlier approval, as one notice: the engine's sentence, then who / when / with whom, then what was kept */
@@ -176,6 +236,11 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
       var prev = D.previous_approval.older;
       return { body: slot(prevNotice("warn", t("approval.older"), prev)) + heading() + summary() + flagged({ all: true, prev: prev }) + changesCard(), bar: bar("unticked") };
     },
+    /* Phase 4: review domains, each with its approver (Addendum M); one "Confirmed with" per group */
+    domains: function () { return { body: heading() + summary({ plan: PLAN_DOM }) + domainsCard(false) + changesCard(), bar: bar("domneed") }; },
+    "domains-checked": function () { return { body: heading() + summary({ plan: PLAN_DOM }) + domainsCard(true) + changesCard(), bar: bar("ok") }; },
+    /* Phase 4: the "what we removed" review clip (K-T2) under the summary */
+    removed: function () { return { body: heading() + summary() + removedCard() + flagged({}) + changesCard(), bar: bar("collapsed") }; },
     noname: function () { return { body: heading() + summary() + flagged({ all: true, checked: true }) + changesCard(), bar: bar("noname") }; },
     focus: function () { return { body: heading() + summary() + flagged({ all: true, checked: true }) + changesCard(), bar: bar("ok", true) }; },
     error: function () {
@@ -233,7 +298,7 @@ loading | skeleton shimmer (loop) | --mk-dur-shimmer linear | static #242424 bar
 
   M.mount({
     id: "P-07", name: "Approval",
-    states: ["empty", "loading", "normal", "older", "noname", "flagged-unchecked", "flagged-checked", "focus", "error", "error-live", "offline", "no-claude-signed-out", "no-claude-missing", "stale", "success-live", "success-later", "success-changes", "long"],
+    states: ["empty", "loading", "normal", "older", "noname", "flagged-unchecked", "flagged-checked", "domains", "domains-checked", "removed", "focus", "error", "error-live", "offline", "no-claude-signed-out", "no-claude-missing", "stale", "success-live", "success-later", "success-changes", "long"],
     defaultState: "normal",
     build: function (state) {
       var v = STATES[state]();
