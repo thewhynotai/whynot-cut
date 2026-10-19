@@ -667,7 +667,8 @@ def unmigrated(root) -> dict | None:
     old = detect_old_root(root)
     if not old:
         return None
-    return {"refused": f"this client folder is a copy of {old}: its files still point there (nothing was read or "
+    return {"refused": f"فولدر العميل ده نسخة من {old} وملفاته لسه بتشاور على هناك، فمش هقرا ولا هكتب فيه حاجة / "
+                       f"this client folder is a copy of {old}: its files still point there (nothing was read or "
                        "written)",
             "how": f"Make the copy use its own files first: `reel client-move --root \"{root}\" --already-moved` "
                    "(a dry run that shows what changes), then the same with --apply.",

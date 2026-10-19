@@ -329,6 +329,8 @@ class TestMove(Base):
         shutil.copytree(self.src, hand, copy_function=shutil.copy2)
         doc = CM.move(hand, self.dest)
         self.assertIn("is a copy of", doc["refused"])
+        self.assertRegex(doc["refused"], r"^فولدر العميل ده نسخة من .+ / this client folder is a copy of .+; nothing was "
+                                         r"written$")
         self.assertIn("--already-moved", doc["how"])
         self.assertFalse(self.dest.exists())
 
@@ -348,6 +350,7 @@ class TestMove(Base):
         shutil.copytree(self.src, hand, copy_function=shutil.copy2)
         r = CM.unmigrated(hand)
         self.assertIn("is a copy of", r["refused"])
+        self.assertTrue(r["refused"].startswith(f"فولدر العميل ده نسخة من {self.src} "), r["refused"])   # Arabic first
         self.assertEqual(r["copied_from"], str(self.src))
         self.assertIn("--already-moved", r["how"])
         self.assertIsNone(CM.unmigrated(self.src))
