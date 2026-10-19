@@ -40,7 +40,8 @@ class Brand:
         self.white = hx(roles.get("neutral_light", {}).get("hex", brand_fallback("neutral_light")))
         self.paper = hx(der.get("paper_tint", {}).get("hex", brand_fallback("paper_tint")))
         self.ink = hx(der.get("ink", {}).get("hex", brand_fallback("ink")))
-        typ = read_json(db / "branding/typography.json", {})
+        from . import client_db
+        typ = client_db.load(db, "branding/typography.json", {})
         self.files, self.ps_names = {}, {}
         for fam in typ.get("families", {}).values():
             for wgt in fam["weights"]:
@@ -579,7 +580,10 @@ def _shared_inputs(paths: Paths, spec: dict, asset_manifest: dict) -> dict:
     """What every still of the reel is drawn from: the drawing code, the frame, the brand (colours, fonts, logo) and the
     footage the readability check looks at."""
     db = paths.client_db
-    typ = read_json(db / "branding/typography.json", {}) or {}
+    import copy
+    from . import client_db
+    typ = client_db.load(paths, "branding/typography.json", {}) or {}
+    keep = lambda v: client_db.to_stored(paths.root, v)      # hashed as stored (root-relative): a move redraws nothing
     fonts = sorted({str(w.get("file")) for fam in (typ.get("families") or {}).values() if isinstance(fam, dict)
                     for w in fam.get("weights", []) if isinstance(w, dict) and w.get("file")})
     logo = next((a.get("display_derivative") for a in asset_manifest.get("assets", [])
@@ -592,9 +596,10 @@ def _shared_inputs(paths: Paths, spec: dict, asset_manifest: dict) -> dict:
     return {"renderer": renderer_version(), "frame": list(frame_size(paths)),
             "legibility": [mc.get("min_contrast"), mc.get("min_contrast_large"), mc.get("large_px")],
             "brand_tokens": _no_timestamps(read_json(db / "branding/brand-tokens.json", {}) or {}),
-            "typography": _no_timestamps(typ), "fonts": {f: _file_sha(f) for f in fonts},
+            "typography": _no_timestamps(client_db.stored(paths.root, "branding/typography.json", copy.deepcopy(typ))),
+            "fonts": {keep(f): _file_sha(f) for f in fonts},
             "brand_fallbacks": [brand_cfg.get("fallback_colors"), brand_cfg.get("font_roles_fallback")],
-            "logo": [logo, _file_sha(logo) if logo else None],
+            "logo": [keep(logo) if logo else None, _file_sha(logo) if logo else None],
             "footage": [main, foot.stat().st_size if foot and foot.exists() else None, spec.get("source_in_ms")]}
 
 
@@ -612,7 +617,8 @@ def _event_inputs(paths: Paths, ev: dict, tpls: dict, shared: dict, assets: dict
 def _drawing_context(paths: Paths, spec: dict) -> tuple[dict, dict, dict, dict]:
     """(templates, assets by rel, the asset manifest, shared inputs): read once per render or check."""
     tpls = load_config("graphics-templates.json")["templates"]
-    man = read_json(paths.client_db / "asset-manifest.json", {"assets": []}) or {"assets": []}
+    from . import client_db
+    man = client_db.load(paths, "asset-manifest.json", {"assets": []}) or {"assets": []}
     assets = {a["rel"]: a for a in man.get("assets", []) if isinstance(a, dict) and "rel" in a}
     return tpls, assets, man, _shared_inputs(paths, spec, man)
 
