@@ -22,3 +22,4 @@ channel state is `NOT_CONFIGURED`, and messages stay `FILED`.
 | ID | Time | From | To | State | Summary | Evidence |
 |---|---|---|---|---|---|---|
 | M-20261020-0130 | 2026-10-20 01:30 | Command Center | PRIMARY | SENT (this chat) | Charter adopted on 00-HQ; baseline; 8 docs archived; paid API held; ENV-01 root cause | `reports/2026-10-20-audit.md` |
+| R-2026-10-20-0136 | 2026-10-20 01:36 | hq_status | PRIMARY | FILED | تقرير حالة: 0 تغيير | `reports/2026-10-20-0136.md` |

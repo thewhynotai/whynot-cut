@@ -1,10 +1,33 @@
 # خطة المشروع التنفيذية — WhyNot Cut (Adobe Premiere Pro Plugin)
 
 <!-- AUTO:STATUS START -->
-> آخر تحديث فعلي: 2026-10-20 — Africa/Cairo (أول نسخة، مكتوبة باليد قبل أول تشغيل للمولّد)
-> مصدر التحديث: Command Center / info@ / release/3.0 @ 4c1e59c
-> حالة التشغيل: RUNNING جزئي (H1 شغال، الباقي واقف بعد الـ limit والـ restart)
-> حالة المزامنة: LOCAL_ONLY لـ release/3.0 (50 commit مش متعملهم push) — نسخة احتياطية على GitHub متأكد منها
+> آخر تحديث فعلي: 2026-10-20 01:36 — Africa/Cairo
+> مصدر التحديث: hq_status.py / info@ / release/3.0 @ 4c1e59c3
+> حالة التشغيل: RUNNING
+> حالة المزامنة: HQ = LOCAL+GITHUB_VERIFIED · release/3.0 = LOCAL_AHEAD 50
+
+| Task | Owner | Status (BOARD) |
+|---|---|---|
+| SETUP-H1 | H1 (Mayar) | IN PROGRESS |
+| BL-16 | H1 | READY |
+| BL-02 | H1 | READY |
+| BL-17 | H1 | READY |
+| SETUP-H2 | H2 (marketing@) | IN PROGRESS |
+| BL-03 | H2 | READY |
+| BL-04 | H2 | READY |
+| BL-18 | H2 | READY |
+| BL-14 | EXECUTOR | handed over 10-19 |
+| (lane 1) | — | STOPPED |
+| S6b | H1 | NOT READY |
+| STAGE3-DRAFTS | MASTER | NOT READY |
+| ENV-01 | MASTER | IN PROGRESS |
+| OPS-01 | MASTER | IN PROGRESS |
+| OPS-02 | MASTER | NOT READY |
+| OPS-03 | MASTER | READY |
+| OPS-04 | EXECUTOR | NOT READY |
+| OPS-05 | MASTER (observe) | NOT READY |
+| OPS-06 | MASTER | READY |
+| API-500 | LANE | PLANNED_NOT_AUTHORIZED |
 <!-- AUTO:STATUS END -->
 
 الملف ده هو اللوحة بتاعتك. أعلاه بيتحدّث أوتوماتيك 4 مرات في اليوم، والباقي بيتحدّث مع كل تاسك بتتقفل.
