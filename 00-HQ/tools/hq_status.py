@@ -37,7 +37,7 @@ def parse_board(text):
         if in_table and line.startswith("|"):
             c = [x.strip() for x in line.strip().strip("|").split("|")]
             if len(c) >= 5:
-                status = re.split(r"\s+·\s+|\s+\(", c[3])[0].strip()
+                status = re.split(r"\s+[·—–]\s+|\s+\(", c[3].replace("**", ""))[0].strip()
                 rows.append({"id": c[0], "title": c[1], "owner": c[2], "status": status,
                              "status_note": c[3], "card": c[4].strip("`").strip() if c[4] not in ("—", "") else ""})
             continue
@@ -55,8 +55,20 @@ def helper_state(accounts, who):
         st = json.loads((auto / "status.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         st = {"state": "missing"}
-    return {"who": who, "state": st.get("state", "?"), "at": st.get("at", ""), "model": st.get("model", ""),
+    beat = ""  # heartbeat = last write to the current run log (status.json only changes with the state)
+    log = st.get("log")
+    if log and os.path.exists(log):
+        beat = datetime.datetime.fromtimestamp(os.path.getmtime(log)).strftime("%Y-%m-%d %H:%M:%S")
+    return {"who": who, "state": st.get("state", "?"), "at": st.get("at", ""), "beat": beat, "model": st.get("model", ""),
             "reason": st.get("reason", ""), "auto_on": (auto / "AUTO-ON").exists(), "stop": (auto / "STOP").exists()}
+
+
+def beat_age_min(h, now=None):
+    t = h.get("beat") or h.get("at")
+    try:
+        return int(((now or datetime.datetime.now()) - datetime.datetime.strptime(t, "%Y-%m-%d %H:%M:%S")).total_seconds() // 60)
+    except (TypeError, ValueError):
+        return None
 
 
 def sync_label(local, remote, ahead, behind):
@@ -64,6 +76,8 @@ def sync_label(local, remote, ahead, behind):
         return "REMOTE_UNREACHABLE"
     if local == remote:
         return "SYNCED"
+    if ahead is None:
+        return "REMOTE_MOVED (not fetched here)"
     if ahead and behind:
         return "DIVERGED"
     if ahead:
@@ -91,9 +105,9 @@ def git_state(repo, branch="release/3.0"):
         counts = _git(repo, "rev-list", "--left-right", "--count", f"{local}...{remote}")
         if counts:
             ahead, behind = (int(x) for x in counts.split())
-        else:  # the remote tip is not fetched here yet: it moved since the last fetch
-            ahead, behind = 0, 1
-    dirty = _git(repo, "status", "--porcelain")
+        else:  # the remote tip is not fetched here: no count can be known
+            ahead = behind = None
+    dirty = _git(repo, "--no-optional-locks", "status", "--porcelain")
     return {"branch": branch, "local": local, "remote": remote, "ahead": ahead, "behind": behind,
             "label": sync_label(local, remote, ahead, behind), "dirty_files": len(dirty.splitlines()) if dirty else 0}
 
@@ -129,16 +143,29 @@ def ram_percent():
 
 
 def intake_verdicts(hq):
-    """{task id: {verdict, at}} from intake/state.json (keys are report paths …/<date>-<ID>[-rN].md)."""
+    """{report path (as intake/state.json keys it): {verdict, at}}."""
     try:
         st = json.loads(Path(hq, "intake", "state.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    out = {}
-    for path, v in st.items():
-        m = re.search(r"\d{4}-\d{2}-\d{2}-(.+?)(?:-r\d+)?\.md$", path)
-        if m:
-            out[m.group(1)] = {"verdict": v.get("verdict", ""), "at": v.get("at", "")}
+    return {k.replace("\\", "/"): {"verdict": v.get("verdict", ""), "at": v.get("at", "")} for k, v in st.items()}
+
+
+def report_verdict(hq, rep):
+    """The intake verdict of exactly this report file ('' when the intake has not recorded it)."""
+    return intake_verdicts(hq).get(rep.get("file", ""), {}).get("verdict", "") if rep else ""
+
+
+def open_requests(inbox):
+    try:
+        t = Path(inbox).read_text(encoding="utf-8")
+    except OSError:
+        return []
+    out = []
+    for line in t.splitlines():
+        c = [x.strip() for x in line.strip().strip("|").split("|")]
+        if len(c) >= 5 and re.fullmatch(r"Q-\d+", c[0]) and c[4].upper().startswith("OPEN"):
+            out.append(f"{c[0]} — {c[2]}")
     return out
 
 
@@ -164,28 +191,53 @@ def status_changes(prev, now):
     if not prev:
         return []
     a, b = prev.get("tasks", {}), now.get("tasks", {})
-    return [(k, a.get(k), b[k]) for k in b if a.get(k) != b[k]]
+    return [(k, a.get(k), b[k]) for k in b if a.get(k) != b[k]] + [(k, a[k], None) for k in a if k not in b]
+
+
+def _read(p):
+    with open(p, encoding="utf-8", newline="") as fh:  # keep the file's own line endings
+        return fh.read()
+
+
+def _write(p, text):
+    with open(p, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
 
 
 def replace_block(text, block):
     i, j = text.find(START), text.find(END)
     if i < 0 or j < 0 or j < i:
         raise ValueError("auto-status markers missing in PROJECT_PLAN_AR.md")
-    return text[:i + len(START)] + "\n" + block.rstrip("\n") + "\n" + text[j:]
+    nl = "\r\n" if "\r\n" in text else "\n"
+    return text[:i + len(START)] + nl + block.rstrip("\n").replace("\n", nl) + nl + text[j:]
+
+
+def write_block(path, block):
+    _write(path, replace_block(_read(path), block))
 
 
 def append_inbox(path, msg_id, summary, link):
     p = Path(path)
-    t = p.read_text(encoding="utf-8") if p.exists() else "# PRIMARY_ACCOUNT_INBOX\n"
+    t = _read(p) if p.exists() else "# PRIMARY_ACCOUNT_INBOX\n"
     if f"| {msg_id} |" in t:
         return False
+    nl = "\r\n" if "\r\n" in t else "\n"
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    row = f"| {msg_id} | {now} | hq_status | PRIMARY | FILED | {summary} | `{link}` |\n"
-    with open(p, "a", encoding="utf-8") as fh:
-        if not t.endswith("\n"):
-            fh.write("\n")
-        fh.write(row)
+    row = f"| {msg_id} | {now} | hq_status | PRIMARY | FILED | {summary} | `{link}` |{nl}"
+    _write(p, t + ("" if t.endswith("\n") else nl) + row)
     return True
+
+
+def mark_sent(path, msg_id, session_id):
+    """FILED → SENT on exactly one inbox row; the session id of the delivering run is the receipt."""
+    t = _read(path)
+    lines = t.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.startswith(f"| {msg_id} |") and "| FILED |" in line:
+            lines[i] = line.replace("| FILED |", f"| SENT (session {session_id}) |", 1)
+            _write(path, "".join(lines))
+            return True
+    return False
 
 
 def _q(v):
@@ -193,41 +245,59 @@ def _q(v):
 
 
 def render_queue_yaml(rows, verdicts, stamp, reports=None):
+    """verdicts: {report path: {verdict}} (intake_verdicts); a task's verdict is its newest report's own one."""
     reports = reports or {}
     out = [f"# GENERATED by 00-HQ/tools/hq_status.py at {stamp}. Do not edit: the source is BOARD.md + tasks/ + "
            "intake/state.json + inbox/.", "tasks:"]
     for r in rows:
         rep = reports.get(r["id"], {})
+        owner = (r["owner"].split() or [""])[0]
         out += [f"  - task_id: {_q(r['id'])}", f"    title: {_q(r['title'])}", f"    owner: {_q(r['owner'])}",
                 f"    status: {_q(r['status'])}", f"    charter_status: {_q(charter_status(r['status']))}",
                 f"    status_note: {_q(r['status_note'])}", f"    card: {_q(r['card'])}",
-                f"    worktree: {_q({'H1': 'D:/WNC-work/h1', 'H2': 'D:/WNC-work/h2'}.get(r['owner'].split()[0], ''))}",
+                f"    worktree: {_q({'H1': 'D:/WNC-work/h1', 'H2': 'D:/WNC-work/h2'}.get(owner, ''))}",
                 f"    latest_report: {_q(rep.get('file'))}", f"    report_status: {_q(rep.get('status'))}",
-                f"    intake_verdict: {_q(verdicts.get(r['id'], {}).get('verdict'))}"]
+                f"    intake_verdict: {_q(verdicts.get(rep.get('file', ''), {}).get('verdict'))}"]
     return "\n".join(out) + "\n"
 
 
+MAX_MIRROR_BYTES = 1_000_000  # no large artefacts in the mirror
+
+
 def sync_mirror(worktree, files, message, branch="ops/hq"):
-    """Copy files (dest-relative path -> source) into the worktree, commit if changed, push, verify remote SHA."""
+    """Copy files (dest-relative path -> source) into the worktree, drop mirrored files that no longer exist, commit
+    if changed, push ONLY `branch`, verify the remote SHA. Never raises: failures come back as the state."""
     wt = Path(worktree)
-    for rel, src in files.items():
-        dst = wt / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-    subprocess.run(["git", "-C", str(wt), "add", "--", *files.keys()], check=True, capture_output=True)
-    changed = subprocess.run(["git", "-C", str(wt), "diff", "--cached", "--quiet"]).returncode != 0
-    if changed:
-        subprocess.run(["git", "-C", str(wt), "commit", "-q", "-m", message], check=True, capture_output=True)
-    local = _git(wt, "rev-parse", "HEAD")
-    push = subprocess.run(["git", "-C", str(wt), "push", "-q", "origin", f"HEAD:refs/heads/{branch}"],
-                          capture_output=True, text=True, timeout=180)
-    remote = None
-    if push.returncode == 0:
+    res = {"state": "PUSH_FAILED", "local": None, "remote": None, "committed": False, "error": ""}
+    if _git(wt, "symbolic-ref", "--short", "HEAD") != branch:  # shares .git with the product repo: never another branch
+        res.update(state="WRONG_BRANCH", error=f"worktree {wt} is not on {branch}")
+        return res
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    try:
+        for rel, src in files.items():
+            dst = wt / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+        tracked = (_git(wt, "ls-files") or "").splitlines()
+        gone = [t for t in tracked if t not in files]
+        if gone:
+            subprocess.run(["git", "-C", str(wt), "rm", "-q", "--", *gone], check=True, capture_output=True, env=env)
+        subprocess.run(["git", "-C", str(wt), "add", "--", *files.keys()], check=True, capture_output=True, env=env)
+        res["committed"] = subprocess.run(["git", "-C", str(wt), "diff", "--cached", "--quiet"]).returncode != 0
+        if res["committed"]:
+            subprocess.run(["git", "-C", str(wt), "commit", "-q", "-m", message], check=True, capture_output=True, env=env)
+        res["local"] = _git(wt, "rev-parse", "HEAD")
+        push = subprocess.run(["git", "-C", str(wt), "push", "-q", "origin", f"HEAD:refs/heads/{branch}"],
+                              capture_output=True, text=True, timeout=180, env=env)
+        if push.returncode != 0:
+            res["error"] = push.stderr.strip()[-300:]
+            return res
         out = _git(wt, "ls-remote", "origin", f"refs/heads/{branch}", timeout=90)
-        remote = out.split()[0] if out else None
-    state = "SYNCED" if remote and remote == local else "PUSH_FAILED"
-    return {"state": state, "local": local, "remote": remote, "committed": changed,
-            "error": "" if push.returncode == 0 else push.stderr.strip()[-300:]}
+        res["remote"] = out.split()[0] if out else None
+        res["state"] = "SYNCED" if res["remote"] and res["remote"] == res["local"] else "PUSH_FAILED"
+    except (subprocess.SubprocessError, OSError) as e:
+        res["error"] = f"{type(e).__name__}: {e}"[-300:]
+    return res
 
 
 def mirror_files(hq, ep):
@@ -235,7 +305,8 @@ def mirror_files(hq, ep):
     files = {}
     for p in Path(hq).rglob("*"):
         rel = p.relative_to(hq)
-        if p.is_file() and not (set(rel.parts) & skip_dirs) and p.suffix in (".md", ".py", ".yaml", ".jsonl", ".txt", ".patch"):
+        if p.is_file() and not (set(rel.parts) & skip_dirs) and p.stat().st_size <= MAX_MIRROR_BYTES \
+                and p.suffix in (".md", ".py", ".yaml", ".jsonl", ".txt", ".patch"):
             files[f"00-HQ/{rel.as_posix()}"] = p
     for name in ("PROJECT_PLAN_AR.md", "CLAUDE.md"):
         files[name] = Path(ep, name)
@@ -248,49 +319,73 @@ def snapshot(hq=HQ, repo=REPO, accounts=ACCOUNTS, api_dir=API_DIR):
     return {"time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), "rows": rows,
             "tasks": {r["id"]: r["status"] for r in rows}, "verdicts": intake_verdicts(hq), "reports": inbox_reports(hq),
             "helpers": [helper_state(accounts, h) for h in ("h1", "h2")], "git": git_state(repo),
-            "api": api_state(Path(hq, "BUDGET-API.md")), "api_month": api_month_estimate(api_dir), "ram": ram_percent()}
+            "tag": _git(repo, "describe", "--tags", "--abbrev=0", "release/3.0"),
+            "api": api_state(Path(hq, "BUDGET-API.md")), "api_month": api_month_estimate(api_dir), "ram": ram_percent(),
+            "requests": open_requests(Path(hq, "PRIMARY_ACCOUNT_INBOX.md"))}
+
+
+STALE_MIN = 330  # a run silent this long is killed by helper_loop (5 h 10 min + slack)
 
 
 def render_report(s, prev, slot_title, sync=None):
     g, ch = s["git"], status_changes(prev, s)
     L = [f"# {slot_title} — {s['time']} (Africa/Cairo)", "",
-         "> مولّد أوتوماتيك من الملفات و git (مش من كلام أي session). كل رقم هنا مقروء من مصدره.", "",
+         "> مولّد أوتوماتيك من الملفات و git (مش من كلام أي session). المصدر مكتوب جنب كل معلومة.", "",
          "## 1. اللي اتعمل من آخر تقرير"]
-    L += [f"- {k}: {a or 'جديد'} ← **{b}**" for k, a, b in ch] or ["- مفيش تغيير في حالة أي تاسك على الـ BOARD."]
-    L += ["", "## 2. شغالين على إيه"]
-    for h in s["helpers"]:
+    if prev is None:
+        L.append("- أول تقرير: مفيش تقرير قبله للمقارنة.")
+    else:
+        L += [f"- {k}: {a or 'جديد'} ← **{b or 'اتشال من الـ BOARD'}**" for k, a, b in ch] \
+            or ["- مفيش تغيير في حالة أي تاسك على الـ BOARD."]
+    L += ["", "## 2. شغالين على إيه (المصدر: helper status.json + آخر كتابة في run log)"]
+    for h in s.get("helpers", []):
         flags = ("AUTO-ON" if h["auto_on"] else "AUTO off") + (" · STOP" if h["stop"] else "")
-        L.append(f"- {h['who'].upper()}: {h['state']} (آخر heartbeat {h['at'] or '—'}, {h['model'] or '—'}, {flags}) {h['reason']}")
-    active = [r for r in s["rows"] if charter_status(r["status"]) in ("IN_PROGRESS", "IN_REVIEW")]
-    L += [f"- {r['id']} — {r['owner']} — {r['status']}" for r in active]
-    L += ["", "## 3. حالة المنتج",
-          "- آخر نسخة متجرّبة جوه Premiere: v2.2.1 (+ 3.0 live round-trip 14–15 أكتوبر). **NO NEW VERIFIED BUILD** "
-          "إلا لو ظهر tag جديد هنا.", f"- آخر tag: {_git(REPO, 'describe', '--tags', '--abbrev=0', 'release/3.0') or '—'}",
-          "", "## 4. حالة Git",
+        age = beat_age_min(h)
+        state = h["state"] + (" (STALE)" if h["state"] == "running" and age is not None and age > STALE_MIN else "")
+        age_txt = "—" if age is None else f"{age} دقيقة"
+        L.append(f"- {h['who'].upper()}: {state} — آخر heartbeat {h.get('beat') or h['at'] or '—'}"
+                 f" ({age_txt}), {h['model'] or '—'}, {flags} {h['reason']}".rstrip())
+    L += [f"- {r['id']} — {r['owner']} — {r['status']}" for r in s["rows"]
+          if charter_status(r["status"]) in ("IN_PROGRESS", "IN_REVIEW")]
+    tag, prev_tag = s.get("tag"), (prev or {}).get("tag")
+    new_tag = bool(prev and tag and tag != prev_tag)
+    L += ["", "## 3. حالة المنتج (المصدر: git tags + `PROJECT_PLAN_AR.md` §5)",
+          f"- آخر tag على release/3.0: {tag or '—'}"
+          + (" — **tag جديد من آخر تقرير** (محتاج تأكيد التجربة في Premiere قبل ما يتسمّى verified)"
+             if new_tag else " — **NO NEW VERIFIED BUILD**"),
+          "- آخر نسخة متجرّبة جوه Premiere وجدول النسخ: `PROJECT_PLAN_AR.md` §5 (بيتحدّث مع كل release متجرّبة).",
+          "", "## 4. حالة Git (المصدر: git rev-parse + ls-remote)",
           f"- `{g['branch']}` محلي {(g['local'] or '—')[:8]} / GitHub {(g['remote'] or '—')[:8]} → **{g['label']}** "
           f"(ملفات مش متعملها commit في شجرة الـ executor: {g['dirty_files']})"]
     if sync:
-        L.append(f"- مرآة الـ HQ (`ops/hq`): **{sync['state']}** {(sync['local'] or '')[:8]}"
+        L.append(f"- مرآة الـ HQ (`ops/hq`) قبل كتابة التقرير ده: **{sync['state']}** {(sync['local'] or '')[:8]}"
                  + (f" — {sync['error']}" if sync.get("error") else ""))
-    blocked = [r for r in s["rows"] if charter_status(r["status"]) == "BLOCKED"]
-    waiting = [(k, v) for k, v in s["reports"].items() if v["status"] in ("DONE", "BLOCKED")
-               and s["verdicts"].get(k, {}).get("verdict") not in ("ACCEPTED", "FIX", "answered")]
     L += ["", "## 5. الأخطاء والعوائق"]
-    L += [f"- {r['id']}: {r['status_note']}" for r in blocked]
-    L += [f"- تقرير {k} ({v['status']}) من {v['who'].upper()} مستني الاستلام: `{v['file']}`" for k, v in waiting]
+    n = len(L)
+    L += [f"- {r['id']}: {r['status_note']}" for r in s["rows"] if charter_status(r["status"]) == "BLOCKED"]
+    L += [f"- {r['id']}: حالة مش مفهومة على الـ BOARD «{r['status_note']}»" for r in s["rows"]
+          if charter_status(r["status"]) == "UNKNOWN"]
+    for k, v in s["reports"].items():
+        verdict = s["verdicts"].get(v["file"], {}).get("verdict", "")
+        if v["status"] in ("DONE", "BLOCKED") and verdict not in ("ACCEPTED", "FIX", "answered", "noted"):
+            extra = f" (intake: {verdict})" if verdict else ""
+            L.append(f"- تقرير {k} ({v['status']}) من {v['who'].upper()} مستني الاستلام{extra}: `{v['file']}`")
     if s["ram"] is not None and s["ram"] >= 85:
         L.append(f"- RAM {s['ram']}%: مفيش heavy job جديد يبدأ (الفرامل 85%).")
-    if len(L) and L[-1] == "## 5. الأخطاء والعوائق":
+    if len(L) == n:
         L.append("- مفيش.")
-    L += ["", "## 6. المطلوب من PRIMARY", "- شوف `PROJECT_PLAN_AR.md` §3 (المحجوب). لو مفيش جديد: لا يوجد.",
-          "", "## 7. الخطوات التالية"]
+    L += ["", "## 6. المطلوب من PRIMARY (المصدر: `00-HQ/PRIMARY_ACCOUNT_INBOX.md`، الطلبات OPEN)"]
+    L += [f"- {q}" for q in s.get("requests", [])] or ["- لا يوجد."]
+    L += ["", "## 7. الخطوات التالية (المصدر: BOARD، الكروت READY بالترتيب)"]
     ready = [r for r in s["rows"] if charter_status(r["status"]) == "READY"]
-    L += [f"- {r['id']} — {r['owner']} — {r['title']}" for r in ready[:6]] or ["- مفيش كروت READY: الـ intake يملا الطابور."]
+    L += [f"- {r['id']} — {r['owner']} — {r['title']}" for r in ready[:8]] or ["- مفيش كروت READY: الـ intake يملا الطابور."]
     m = s["api_month"]
+    spend = ("مفيش صرف مسموح عليها لحد التفعيل" if s["api"] == "PLANNED_NOT_AUTHORIZED"
+             else "الصرف الفعلي في الـ ledger جوه `BUDGET-API.md`")
     L += ["", "## 8. الـ API",
-          f"- خطة الـ 500$: **{s['api']}** (المصدر `00-HQ/BUDGET-API.md`). مصروف عليها: 0 إلا لو اتفعّلت.",
-          f"- الشهر الحالي (تقدير الـ lanes، مش الـ Console): صرف {m.get('spent_est', '—')} / باقي {m.get('left_est', '—')} "
-          f"— {m.get('mode', '—')} ({m.get('time', '—')})",
+          f"- خطة الـ 500$: **{s['api']}** (المصدر `00-HQ/BUDGET-API.md`) — {spend}.",
+          f"- الشهر الحالي (تقدير الـ lanes في budget_status.json، مش الـ Console): صرف {m.get('spent_est', '—')}"
+          f" / باقي {m.get('left_est', '—')} — {m.get('mode', '—')} ({m.get('time', '—')})",
           "", f"RAM الآن: {s['ram'] if s['ram'] is not None else '—'}%"]
     return "\n".join(L) + "\n"
 
@@ -298,10 +393,8 @@ def render_report(s, prev, slot_title, sync=None):
 def plan_block(s, sync=None):
     g = s["git"]
     run = "RUNNING" if any(h["state"] == "running" for h in s["helpers"]) else "IDLE"
-    if sync:
-        sync_txt = "LOCAL+GITHUB_VERIFIED" if sync["state"] == "SYNCED" else "LOCAL_ONLY"
-    else:
-        sync_txt = "UNVERIFIED"
+    sync_txt = ("UNVERIFIED" if not sync else "LOCAL+GITHUB_VERIFIED" if sync["state"] == "SYNCED"
+                else f"LOCAL_ONLY ({sync['state']})")
     rows = "\n".join(f"| {r['id']} | {r['owner']} | {r['status']} |" for r in s["rows"])
     return (f"> آخر تحديث فعلي: {s['time']} — Africa/Cairo\n"
             f"> مصدر التحديث: hq_status.py / info@ / release/3.0 @ {(g['local'] or '—')[:8]}\n"
@@ -314,29 +407,41 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--write", action="store_true")
     ap.add_argument("--sync", action="store_true")
+    ap.add_argument("--mark-sent", nargs=2, metavar=("REPORT_ID", "SESSION_ID"))
     a = ap.parse_args(argv)
+    inbox = Path(HQ, "PRIMARY_ACCOUNT_INBOX.md")
+    if a.mark_sent:
+        ok = mark_sent(inbox, *a.mark_sent)
+        if ok:
+            sync = sync_mirror(OPS_WT, mirror_files(HQ, EP), f"ops: {a.mark_sent[0]} SENT")
+            print(f"{a.mark_sent[0]}: SENT · ops/hq {sync['state']}")
+        else:
+            print(f"{a.mark_sent[0]}: no FILED row found")
+        return 0 if ok else 4
     s = snapshot()
     last = Path(HQ, "reports", ".last-snapshot.json")
     prev = json.loads(last.read_text(encoding="utf-8")) if last.exists() else None
-    hour = datetime.datetime.now().hour
-    slot = SLOTS.get(hour, "تقرير حالة")
+    slot = SLOTS.get(datetime.datetime.now().hour, "تقرير حالة")
     if not a.write:
         print(render_report(s, prev, slot))
         return 0
     stamp = datetime.datetime.now().strftime("%Y-%m-%d-%H%M")
-    Path(HQ, "TASK_QUEUE.yaml").write_text(render_queue_yaml(s["rows"], s["verdicts"], s["time"], s["reports"]), encoding="utf-8")
-    plan = Path(EP, "PROJECT_PLAN_AR.md")
-    rep_rel = f"reports/{stamp}.md"
-    sync = None
-    if a.sync:  # first pass: mirror the current files, so the report can state the verified SHA
-        sync = sync_mirror(OPS_WT, mirror_files(HQ, EP), f"ops: HQ snapshot {stamp}")
-    Path(HQ, rep_rel).write_text(render_report(s, prev, slot, sync), encoding="utf-8")
-    plan.write_text(replace_block(plan.read_text(encoding="utf-8"), plan_block(s, sync)), encoding="utf-8")
-    append_inbox(Path(HQ, "PRIMARY_ACCOUNT_INBOX.md"), f"R-{stamp}", f"{slot}: {len(status_changes(prev, s))} تغيير", rep_rel)
-    last.write_text(json.dumps({"time": s["time"], "tasks": s["tasks"]}, ensure_ascii=False), encoding="utf-8")
-    if a.sync:  # second pass: the report, plan block and inbox entry themselves
-        sync = sync_mirror(OPS_WT, mirror_files(HQ, EP), f"ops: HQ report {stamp}")
-    print(Path(HQ, rep_rel).read_text(encoding="utf-8"))
+    rid, rep_rel = f"R-{stamp}", f"reports/{stamp}.md"
+    _write(Path(HQ, "TASK_QUEUE.yaml"), render_queue_yaml(s["rows"], s["verdicts"], s["time"], s["reports"]))
+    sync = sync_mirror(OPS_WT, mirror_files(HQ, EP), f"ops: HQ snapshot {stamp}") if a.sync else None
+    rep = Path(HQ, rep_rel)
+    _write(rep, render_report(s, prev, slot, sync))
+    write_block(Path(EP, "PROJECT_PLAN_AR.md"), plan_block(s, sync))
+    append_inbox(inbox, rid, f"{slot}: {len(status_changes(prev, s))} تغيير", rep_rel)
+    _write(last, json.dumps({"time": s["time"], "tasks": s["tasks"], "tag": s["tag"]}, ensure_ascii=False))
+    if a.sync:  # second pass: the report, plan block and inbox row themselves
+        sync2 = sync_mirror(OPS_WT, mirror_files(HQ, EP), f"ops: HQ report {stamp}")
+        if sync2["state"] != "SYNCED":  # never leave a "verified" claim that the second push did not earn
+            _write(rep, _read(rep) + f"\n- تحديث: push التقرير نفسه فشل ({sync2['state']}) → LOCAL_ONLY. {sync2['error']}\n")
+            write_block(Path(EP, "PROJECT_PLAN_AR.md"), plan_block(s, sync2))
+        sync = sync2
+    print(_read(rep))
+    print(f"report id: {rid}")
     if sync:
         print(f"ops/hq: {sync['state']} local={sync['local']} remote={sync['remote']} {sync['error']}")
     return 0 if not sync or sync["state"] == "SYNCED" else 3

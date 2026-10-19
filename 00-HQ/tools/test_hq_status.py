@@ -141,5 +141,83 @@ class Sync(unittest.TestCase):
             self.assertEqual(r3["state"], "PUSH_FAILED")
 
 
+class FixRound1(unittest.TestCase):
+    """Review OPS-01-r1 findings."""
+
+    def test_verdict_belongs_to_the_newest_report_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            hq = Path(d)
+            (hq / "inbox" / "h1").mkdir(parents=True)
+            (hq / "intake").mkdir()
+            old = hq / "inbox/h1/2026-10-19-SETUP-H1.md"
+            new = hq / "inbox/h1/2026-10-19-SETUP-H1-r2.md"
+            old.write_text("**Status:** PARTIAL", encoding="utf-8")
+            new.write_text("**Status:** BLOCKED", encoding="utf-8")
+            os.utime(old, (1, 1))
+            (hq / "intake/state.json").write_text(json.dumps(
+                {"inbox/h1/2026-10-19-SETUP-H1.md": {"verdict": "noted"}}), encoding="utf-8")
+            rep = hs.inbox_reports(hq)["SETUP-H1"]
+            self.assertEqual(rep["file"], "inbox/h1/2026-10-19-SETUP-H1-r2.md")
+            self.assertEqual(hs.report_verdict(hq, rep), "")      # r2 has no verdict yet; r1's "noted" is not r2's
+
+    def test_unfetched_remote_tip_is_not_given_a_count(self):
+        self.assertEqual(hs.sync_label("a", "b", None, None), "REMOTE_MOVED (not fetched here)")
+
+    def test_newlines_are_kept(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d, "plan.md")
+            p.write_bytes(b"a\n<!-- AUTO:STATUS START -->\nx\n<!-- AUTO:STATUS END -->\nb\n")
+            hs.write_block(p, "y")
+            self.assertNotIn(b"\r\n", p.read_bytes())
+            inbox = Path(d, "inbox.md")
+            inbox.write_bytes(b"# i\n| a |\n")
+            hs.append_inbox(inbox, "R-1", "s", "l")
+            self.assertNotIn(b"\r\n", inbox.read_bytes())
+
+    def test_parser_tolerates_bold_dash_and_empty_owner(self):
+        rows = hs.parse_board("| ID | T | A | S | C |\n|---|---|---|---|---|\n| X-1 | t |  | **ACCEPTED** | — |\n"
+                              "| X-2 | t | H1 | READY — note | `tasks/X-2.md` |\n")
+        self.assertEqual([r["status"] for r in rows], ["ACCEPTED", "READY"])
+        hs.render_queue_yaml(rows, {}, "now")                  # no IndexError on the empty owner
+
+    def test_removed_tasks_and_first_report_are_reported(self):
+        self.assertEqual(hs.status_changes({"tasks": {"A": "READY"}}, {"tasks": {}}), [("A", "READY", None)])
+        s = {"time": "t", "rows": [], "tasks": {}, "verdicts": {}, "reports": {}, "helpers": [], "api": "X",
+             "api_month": {}, "ram": 10, "requests": [], "git": {"branch": "b", "local": "1", "remote": "1",
+                                                             "label": "SYNCED", "dirty_files": 0}}
+        self.assertIn("أول تقرير", hs.render_report(s, None, "t"))
+
+    def test_open_owner_requests_are_listed(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d, "PRIMARY_ACCOUNT_INBOX.md")
+            p.write_text("| Q-001 | 2026-10-19 | T4.14 transcript | his | OPEN |\n| Q-009 | x | done one | his | CLOSED |\n",
+                         encoding="utf-8")
+            self.assertEqual(hs.open_requests(p), ["Q-001 — T4.14 transcript"])
+
+    def test_sync_refuses_a_worktree_on_another_branch(self):
+        with tempfile.TemporaryDirectory() as d:
+            wt = Path(d, "wt")
+            git(d, "init", str(wt))
+            git(wt, "checkout", "-b", "release/3.0")
+            src = Path(d, "a.md")
+            src.write_text("x", encoding="utf-8")
+            r = hs.sync_mirror(wt, {"hq/a.md": src}, "m", branch="ops/hq")
+            self.assertEqual(r["state"], "WRONG_BRANCH")
+            self.assertFalse((wt / "hq" / "a.md").exists())
+
+    def test_mark_sent_updates_only_that_row(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d, "inbox.md")
+            p.write_text("# i\n", encoding="utf-8")
+            hs.append_inbox(p, "R-1", "s", "l")
+            hs.append_inbox(p, "R-2", "s", "l")
+            self.assertTrue(hs.mark_sent(p, "R-1", "local_abc"))
+            t = p.read_text(encoding="utf-8")
+            self.assertIn("| R-1 |", t)
+            self.assertIn("SENT (session local_abc)", t)
+            self.assertEqual(t.count("SENT"), 1)
+            self.assertFalse(hs.mark_sent(p, "R-9", "x"))
+
+
 if __name__ == "__main__":
     unittest.main()
