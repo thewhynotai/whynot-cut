@@ -16,7 +16,7 @@ channel state is `NOT_CONFIGURED`, and messages stay `FILED`.
 | Q-002 | 2026-10-20 | Say «نفذ خطة الـ API» only when you want the 500 USD job to start (`00-HQ/BUDGET-API.md`) | Money | OPEN (no action needed until then) |
 | Q-003 | 2026-10-20 | Optional: a ChatGPT account is named in the charter but none is connected here (D-002) | His accounts | OPEN |
 | Q-004 | 2026-10-18 | H14: Anthropic's written OK for panel chat on an editor's own Claude login (only matters outside the agency) | Third-party permission | OPEN |
-| Q-005 | 2026-10-20 | Approve the report routine once: open the session «WhyNot Cut — تقرير يونس» in the sidebar and allow its command (or Routines → this task → permission mode). Without it the 4 daily reports wait on a prompt | Permission settings | OPEN |
+| Q-005 | 2026-10-20 | Approve the report routine once: open the session «WhyNot Cut — تقرير يونس» in the sidebar and allow its command (or Routines → this task → permission mode). Without it the 4 daily reports wait on a prompt | Permission settings | CLOSED 02:47 (run local_6b4431c0 succeeded and marked its report SENT) |
 
 ## Messages
 

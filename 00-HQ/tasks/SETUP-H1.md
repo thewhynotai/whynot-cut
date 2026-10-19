@@ -47,3 +47,11 @@ Master decision on the PARTIAL report: the empty helper engine home was the caus
 launcher no longer overrides `WHYNOT_HOME`; helpers use the same engine home as the executor. Re-run the baseline
 with label `h1-setup3` and the card's command unchanged, then write a NEW report with the numbers. If failures
 still name missing packages or ffmpeg, list 3 full tracebacks and stop (do not fix).
+
+## Answer (2026-10-20 02:49)
+Master (Command Center) decision on the BLOCKED report r2: the cause is the environment, not the code, and it is fixed
+(card ENV-01). The engine packages existed only in Claude's sandboxed AppData, so your unsandboxed suite had no
+numpy/PIL/av/imageio-ffmpeg. They are now installed inside the engine venv itself (same 47 pinned versions); the 4
+modules your tracebacks named pass 104/104 from the real environment. Re-run the baseline with label `h1-setup4` and the
+card's command unchanged, then write a NEW report with the numbers. Any remaining failure is now a real one: list it.
+

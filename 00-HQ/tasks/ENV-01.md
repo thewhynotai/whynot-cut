@@ -1,6 +1,6 @@
 # ENV-01 — Engine runtime for unsandboxed processes (helper suites)
 
-- **Assigned:** COMMAND CENTER (master)    **Model:** Opus 5.5    **Size:** S    **Status:** IN_PROGRESS
+- **Assigned:** COMMAND CENTER (master)    **Model:** Opus 5.5    **Size:** S    **Status:** IN_TESTING (waits for H1's h1-setup4 suite)
 - **Tier:** LIGHT (dev workflow)    **Milestone:** M0    **Unblocks:** every helper card (SETUP-H1/H2 baseline, then all ACCEPTs)
 
 ## Goal
@@ -26,5 +26,9 @@ never use a per-user site: the packages must live inside the venv's own site-pac
    SETUP re-run), compared with the executor's 7,307-OK baseline.
 4. The sandboxed sessions' runtime is unchanged in versions (same freeze list).
 
-## Evidence
-(filled at close)
+## Evidence (2026-10-20 02:49)
+- Step 2 done without disturbing H1's running suite: `pip install --target <venv>\Lib\site-packages --no-deps -r freeze` (exit 0); import check with APPDATA redirected → `IMPORTS OK`, numpy and ffmpeg from the venv (`install-into-venv.log`). Acceptance 1 OK.
+- `verify-real-env.ps1` from the real Terminal: **Ran 104 tests — OK** (was 7 failures after step 1). Acceptance 2 OK.
+- Acceptance 3 (full suite from a helper context with no env errors) → H1's `h1-setup4` re-run; Answer written in SETUP-H1 02:49. OPEN until that report.
+- Acceptance 4: same 47 versions (frozen from the sandbox view).
+- Cleanup left: the step-1 per-user copy (~556 MB on C) is now a duplicate; remove it when no suite runs (`pip uninstall` with the venv copy taking precedence).
