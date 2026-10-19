@@ -407,15 +407,22 @@ def source_text(root, rel_path, start, end):
     return norm_code(" ".join(lines[max(start - 1, 0):max(end, start)]))
 
 
+def own_rule(check_id):
+    """Our rule id, or None for a registry rule. Semgrep prefixes our ids with the rules folder's path written in dots
+    (D.ClaudeData.Temp.wnc-p4.snap..semgrep.wnc-raw-innerhtml), and that path may itself hold "wnc-", so only the LAST
+    dotted segment counts (our ids never contain a dot)."""
+    last = str(check_id or "").rsplit(".", 1)[-1]
+    return last if last.startswith("wnc-") else None
+
+
 def parse_semgrep(data, root):
     keyed = []
     for r in data.get("results", []):
-        rule = r["check_id"]
-        if "wnc-" in rule:  # our rule ids come prefixed with the rules folder path
-            rule = rule[rule.index("wnc-"):]
+        own = own_rule(r["check_id"])
+        rule = own or r["check_id"]
         f = rel(r["path"], root)
         text = source_text(root, f, r["start"]["line"], r["end"]["line"]) or "line %s" % r["start"]["line"]
-        msg = (r.get("extra") or {}).get("message", "") if "wnc-" in r["check_id"] else "registry rule (message withheld: it may quote the matched value)"
+        msg = (r.get("extra") or {}).get("message", "") if own else "registry rule (message withheld: it may quote the matched value)"
         keyed.append((finding("semgrep", rule, semgrep_sev(r), f, r["start"]["line"], msg, text), text))
     return number_occurrences(keyed)
 
@@ -427,7 +434,7 @@ def scrub_semgrep(data):
         ex = r.get("extra") or {}
         for k in ("lines", "metavars", "fingerprint", "dataflow_trace", "fix", "fix_regex", "validation_state", "engine_kind"):
             ex.pop(k, None)
-        if "wnc-" not in r.get("check_id", ""):
+        if not own_rule(r.get("check_id", "")):
             ex.pop("message", None)
     for e in data.get("errors", []):
         for k in ("spans", "long_msg", "message"):

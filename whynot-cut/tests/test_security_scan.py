@@ -1290,5 +1290,45 @@ class BaselineTriage(unittest.TestCase):
             self.assertEqual(e["verdict"], "accepted_risk", e["reason"])
 
 
+class RuleIdsDoNotDependOnThePath(unittest.TestCase):
+    """ADOBE-G4 2026-10-19 (work\\secscan-env\\FINDING.md): Semgrep prefixes our rule ids with the rules folder's path in
+    dots; a checkout under a folder named wnc-<x> turned wnc-raw-innerhtml into "wnc-p4.t45..semgrep.wnc-raw-innerhtml",
+    so every planted sample read "not caught", and a registry rule under such a path would have kept its message."""
+
+    def test_only_the_last_segment_is_our_id(self):
+        for cid in ("wnc-raw-innerhtml", ".semgrep.wnc-raw-innerhtml",
+                    "D.ClaudeData.Temp.wnc-p4.t45ab-055404..semgrep.wnc-raw-innerhtml",
+                    "home.u.wnc-dev.wnc-x.repo..semgrep.wnc-raw-innerhtml"):
+            self.assertEqual(scan.own_rule(cid), "wnc-raw-innerhtml", cid)
+        for cid in ("python.lang.security.audit.eval-detected", "D.Temp.wnc-p4.snap.python.lang.eval-detected",
+                    "wnc-p4.x.javascript.browser.security.insecure-innerhtml", "", None):
+            self.assertIsNone(scan.own_rule(cid), cid)
+
+    def _result(self, cid, msg="matched SECRETVALUE"):
+        return {"check_id": cid, "path": "a.js", "start": {"line": 1}, "end": {"line": 1},
+                "extra": {"message": msg, "severity": "WARNING", "lines": "SECRETVALUE"}}
+
+    def test_parse_keeps_our_id_and_withholds_a_registry_message_under_a_wnc_path(self):
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "a.js").write_text("x\n", encoding="utf-8")
+            got = scan.parse_semgrep({"results": [
+                self._result("D.Temp.wnc-p4.snap..semgrep.wnc-raw-innerhtml", "our fixed message"),
+                self._result("D.Temp.wnc-p4.snap.javascript.browser.security.insecure-innerhtml")]}, td)
+        rules = sorted(f["rule"] for f in got)
+        self.assertEqual(rules, ["D.Temp.wnc-p4.snap.javascript.browser.security.insecure-innerhtml",
+                                 "wnc-raw-innerhtml"])
+        by = {f["rule"]: f for f in got}
+        self.assertEqual(by["wnc-raw-innerhtml"]["message"], "our fixed message")
+        self.assertNotIn("SECRETVALUE", json.dumps(got))
+
+    def test_scrub_drops_a_registry_message_under_a_wnc_path(self):
+        data = scan.scrub_semgrep({"results": [
+            self._result("D.Temp.wnc-p4.snap.javascript.browser.security.insecure-innerhtml"),
+            self._result("D.Temp.wnc-p4.snap..semgrep.wnc-raw-innerhtml", "our fixed message")]})
+        self.assertNotIn("message", data["results"][0]["extra"])
+        self.assertEqual(data["results"][1]["extra"]["message"], "our fixed message")
+        self.assertNotIn("SECRETVALUE", json.dumps(data))
+
+
 if __name__ == "__main__":
     unittest.main()
