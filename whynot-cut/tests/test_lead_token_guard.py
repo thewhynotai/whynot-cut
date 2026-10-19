@@ -162,6 +162,41 @@ class TestHookIssue(Tmp):
         self.issue(self.payload("cd x && reel approve-plan --by editor"))
         self.assertEqual(json.loads(seen.read_text(encoding="utf-8"))["result"], "not-plain")
 
+    def test_a_transcript_outside_its_place_is_never_read(self):
+        """Review 8bb853a: Claude Code writes a session's main transcript at exactly <projects>/<project>/<sid>.jsonl.
+        The same file name anywhere deeper (<project>/memory/, a subagent folder) is never read as the transcript."""
+        store = self.claude / "projects" / "D--work-client"
+        for t in (store / "memory" / (SESSION + ".jsonl"), store / SESSION / "subagents" / (SESSION + ".jsonl")):
+            with self.subTest(transcript=str(t.relative_to(self.claude))):
+                t.parent.mkdir(parents=True, exist_ok=True)
+                t.write_text("", encoding="utf-8")
+                p = self.payload("reel lock --release")
+                p["transcript_path"] = str(t)
+                p["tool_use_id"] = record_call(t, "Bash", "reel lock --release")
+                self.assertIsNone(self.issue(p))
+        self.assertEqual(self.tokens(), [])
+        self.assertIsNotNone(self.issue(self.payload("reel lock --release")))     # its real place still works
+
+    def test_a_transcript_through_a_linked_project_folder_is_never_read(self):
+        """The executor's r6 ruling: a link (symlink or junction) as the transcript's project folder is "no
+        transcript", even when its real target is a real project folder."""
+        link = self.claude / "projects" / "D--linked-client"
+        try:
+            if os.name == "nt":
+                r = subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(self.transcript.parent)],
+                                   capture_output=True)
+                if r.returncode:
+                    self.skipTest("junction not available")
+            else:
+                link.symlink_to(self.transcript.parent, target_is_directory=True)
+        except OSError:
+            self.skipTest("links not available")
+        self.addCleanup(lambda: os.rmdir(link) if os.name == "nt" else link.unlink())
+        p = self.payload("reel lock --release")
+        p["transcript_path"] = str(link / self.transcript.name)
+        self.assertIsNone(self.issue(p))
+        self.assertEqual(self.tokens(), [])
+
     def test_no_token_for_a_subagent_or_another_step_or_tool(self):
         self.assertIsNone(self.issue(self.payload("reel lock --release", agent=AGENT)))
         self.assertIsNone(self.issue(self.payload("reel lock --status")))
@@ -423,6 +458,12 @@ class TestGuardIssues(Client):
         p["tool_input"]["command"] = "ls -la"
         self.assertEqual(hook(GUARD, p, env=self.env)[0], 0)                # reading there is fine
         memory = store / "D--work-client" / "memory"
+        for agent in (None, AGENT):                                         # review 8bb853a: never a .jsonl there
+            for tool, ti in (("Write", {"file_path": str(memory / (SESSION + ".jsonl")), "content": "{}"}),
+                             ("Write", {"file_path": str(memory / "x" / (SESSION + ".JSONL")), "content": "{}"}),
+                             ("Bash", {"command": f'cp pack/x.jsonl "{(memory / (SESSION + ".jsonl")).as_posix()}"'})):
+                with self.subTest(memory_jsonl=tool, agent=agent):
+                    self.assertEqual(self.guard(tool, ti, agent, recorded=False)[0], 2)
         for tool, ti in (("Write", {"file_path": str(memory / "MEMORY.md"), "content": "x"}),
                          ("Bash", {"command": f'echo x > "{(memory / "notes.md").as_posix()}"'})):
             with self.subTest(memory=tool):

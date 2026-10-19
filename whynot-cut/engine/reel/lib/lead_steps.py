@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import time
 from pathlib import Path
 
@@ -50,7 +51,8 @@ LEAD_STEPS = (
     ("lock", ("--release",)), ("settings", ("--init",)), ("handoff", ("--delivered",)),
     ("verify", ("--record",)), ("ae-probe", ("--record",)), ("ref-style", ("--adopt", "--yes")),
     ("caption-looks", ("--pick", "--yes")),                 # Task 28: the editor's caption-look swap is recorded
-    ("rules", ("--add",)), ("rules", ("--remove",)))        # T4.3: a client rule is written or dropped
+    ("rules", ("--add",)), ("rules", ("--remove",)),        # T4.3: a client rule is written or dropped
+    ("clean", ("--apply",)))                                # T4.15: the engine-home clean-up removes files
 # transcript-verify is lead-only unless --by names a subagent (agent, claude, or a WhyNot Cut agent; the guard pins a
 # subagent to its own name)
 TRANSCRIPT_VERIFY = "transcript-verify"
@@ -264,15 +266,31 @@ def claude_config_dir() -> Path:
     return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser()
 
 
+def _is_link(p) -> bool:
+    """A symlink, or a junction on Windows (os.path.isjunction, Python 3.12+)."""
+    return os.path.islink(p) or bool(getattr(os.path, "isjunction", lambda _p: False)(p))
+
+
+def _fold_path(p: str) -> str:
+    """normcase, and lower case on macOS too (APFS ignores case), as guard.py's _fold."""
+    p = os.path.normcase(p)
+    return p.lower() if sys.platform == "darwin" else p
+
+
 def in_transcript_store(path: str) -> bool:
-    """The REAL path lies under the real <claude config>/projects folder (links and junctions resolved: on this PC
-    ~/.claude is a junction to another drive). guard.py refuses every hand write there."""
+    """The REAL path (links and junctions resolved: on this PC ~/.claude is a junction to another drive) is exactly
+    <claude config>/projects/<project folder>/<file>: where Claude Code writes a session's main transcript. Never
+    deeper, so never <project>/memory/ or a subagent's folder (review 8bb853a). guard.py refuses hand writes there."""
     try:
-        real = os.path.normcase(os.path.realpath(path))
-        store = os.path.normcase(os.path.realpath(claude_config_dir() / "projects"))
+        if _is_link(path) or _is_link(os.path.dirname(os.path.abspath(path))):
+            return False                                  # a linked file or project folder is never the transcript
+        real = _fold_path(os.path.realpath(path))
+        store = _fold_path(os.path.realpath(claude_config_dir() / "projects"))
     except (OSError, ValueError):
         return False
-    return real.startswith(store.rstrip("\\/") + os.sep)
+    if not real.startswith(store.rstrip("\\/") + os.sep):
+        return False
+    return len([x for x in real[len(store):].replace("\\", "/").split("/") if x]) == 2
 
 
 def _session_env() -> str:
