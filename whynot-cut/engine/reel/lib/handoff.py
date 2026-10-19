@@ -392,11 +392,17 @@ def motion_readme(paths: Paths) -> Path:
         needs.insert(0, f"fonts: this build used the fallback font {br['fallback_font']} because {', '.join(brand)} "
                         f"{are} not installed: install {them} from assets/Fonts, restart After Effects, then "
                         "`reel motion-build` again")
-    if not music:
+    music_needs = [n for n in plan.get("needs_you") or [] if n.get("kind") == "music"]
+    if "needs_you" in plan:         # T4.6: the plan's own music item (no licence / no fitting track), once
+        needs += [f"music: {n['text']}" for n in music_needs]
+    elif not music:                 # a plan compiled before T4.6
         needs.append("music: add a licensed track (the motion video has dialogue and SFX only)")
     needs += ["final look in After Effects, then render/export for posting",
               "post with the reel's captions from publish/reels (attributions included)"]
     L += ["", "## Needs you", ""] + [f"- [ ] {n}" for n in needs]
+    if music_needs:                 # T4.6 (I4): what the music's licence file looks like, for the editor
+        from .motion_audio import licence_template
+        L += ["", "## Music licence file", "", licence_template()]
     if not qc.get("ok"):
         L += ["", "## QC failures", ""] + [f"- {c['check']}: {c['detail']}" for c in qc.get("failed", [])]
     return write_text(paths.p("09_handoff/README.md"), "\n".join(L) + "\n")
