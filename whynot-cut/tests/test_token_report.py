@@ -58,6 +58,15 @@ def rec(mid, usage, content=None, model="claude-opus-5-5", **kw):
     return MF.asst(MF.Seq("t"), "sx", mid, usage, content, model=model, **kw)
 
 
+def dir_link(link: Path, target: Path) -> None:
+    """A directory junction on Windows (no shell: _winapi.CreateJunction), a symlink elsewhere."""
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        os.symlink(target, link, target_is_directory=True)
+
+
 class TmpProject(unittest.TestCase):
     """A temp project folder; files are written with write(name, records)."""
     def setUp(self):
@@ -101,6 +110,65 @@ class TestParsingAndDedupe(TmpProject):
         self.assertEqual(r["totals"]["raw"]["output"], 200)
         self.assertEqual(r["totals"]["raw"]["fresh"], 10)
 
+    def test_a2c_a_stale_replay_never_undercounts_whatever_the_file_order(self):
+        """Review P3-1: a later-sorting file holding a stale copy (out=50) of an id whose final record is out=200.
+        Session file names are random, so the result must not depend on which file sorts first."""
+        for stale_name in ("zz-replay.jsonl", "00-replay.jsonl"):
+            with self.subTest(stale_name=stale_name):
+                shutil.rmtree(self.proj)
+                self.proj.mkdir()
+                self.write("m-main.jsonl", [rec("m", u(fresh=10, read=100, out=50)),
+                                            rec("m", u(fresh=10, read=100, out=200))])
+                self.write(stale_name, [rec("m", u(fresh=10, read=100, out=50))])
+                r = report([self.proj])
+                self.assertEqual(r["totals"]["raw"]["output"], 200)
+                self.assertEqual(r["totals"]["messages"], 1)
+
+    def test_a2d_the_rule_is_the_record_with_the_most_tokens(self):
+        """Review P3-1 pins the rule: per id the record with the largest token total wins (ties by output, then
+        read, 1h write, 5m write, fresh), in any order. Not "last non-zero", not "largest output"."""
+        big = u(fresh=1, read=1000, out=10)       # total 1011
+        late = u(fresh=1, read=0, out=50)         # total 51, larger output, written later
+        for order in ((big, late), (late, big)):
+            with self.subTest(order=[x["output_tokens"] for x in order]):
+                self.write("s.jsonl", [rec("m", order[0]), rec("m", order[1])])
+                r = report([self.proj])
+                self.assertEqual(r["totals"]["raw"], {"fresh": 1, "write_5m": 0, "write_1h": 0, "read": 1000,
+                                                      "output": 10})
+        tie_a, tie_b = u(fresh=5, out=10), u(fresh=10, out=5)            # same total: the larger output wins
+        for order in ((tie_a, tie_b), (tie_b, tie_a)):
+            self.write("s.jsonl", [rec("m", order[0]), rec("m", order[1])])
+            self.assertEqual(report([self.proj])["totals"]["raw"]["output"], 10)
+        tie_c, tie_d = u(read=7, w1=3), u(read=3, w1=7)                  # then read, then the 1h write
+        for order in ((tie_c, tie_d), (tie_d, tie_c)):
+            self.write("s.jsonl", [rec("m", order[0]), rec("m", order[1])])
+            self.assertEqual(report([self.proj])["totals"]["raw"]["read"], 7)
+        tie_e, tie_f = u(w1=4, w5=1), u(w1=1, w5=4)
+        for order in ((tie_e, tie_f), (tie_f, tie_e)):
+            self.write("s.jsonl", [rec("m", order[0]), rec("m", order[1])])
+            self.assertEqual(report([self.proj])["totals"]["raw"]["write_1h"], 4)
+        tie_g, tie_h = u(w5=4, fresh=1), u(w5=1, fresh=4)
+        for order in ((tie_g, tie_h), (tie_h, tie_g)):
+            self.write("s.jsonl", [rec("m", order[0]), rec("m", order[1])])
+            self.assertEqual(report([self.proj])["totals"]["raw"]["write_5m"], 4)
+        tie_i, tie_j = u(out=10, read=5), u(out=5, read=10)                 # output before read (mutant N08)
+        for order in ((tie_i, tie_j), (tie_j, tie_i)):
+            self.write("s.jsonl", [rec("m", order[0]), rec("m", order[1])])
+            self.assertEqual(report([self.proj])["totals"]["raw"]["output"], 10)
+
+    def test_a2e_full_ties_are_order_independent_too(self):
+        """Mutant N06: equal counts. The record carrying the 5m/1h split wins over one without it, then the larger
+        model key; so even a full tie gives one answer in any order."""
+        split, nosplit = u(w5=100, out=1), u(w5=100, out=1, split=False)
+        for order in ((split, nosplit), (nosplit, split)):
+            self.write("s.jsonl", [rec("m", order[0]), rec("m", order[1])])
+            r = report([self.proj])
+            self.assertFalse(any("5-minute" in a for a in r["assumptions"]), r["assumptions"])
+        for order in (("claude-opus-5-5", "claude-sonnet-5-5"), ("claude-sonnet-5-5", "claude-opus-5-5")):
+            self.write("s.jsonl", [rec("m", u(fresh=4), model=order[0]), rec("m", u(fresh=4), model=order[1]),
+                                   rec("x", u(fresh=1)), rec("y", u(fresh=1))])
+            self.assertIn("claude-sonnet-5-5", report([self.proj])["by_model"])
+
     def test_a3_resumed_session_replay_counts_once_across_files(self):
         """Case 3: the same id in the main file and in a resumed session file -> once across the report."""
         self.write("s1.jsonl", [rec("m", u(fresh=7, out=3))])
@@ -112,7 +180,7 @@ class TestParsingAndDedupe(TmpProject):
     def test_a3b_a_replay_keeps_the_stage_of_its_first_file(self):
         """Mutant M07: a resumed session replays a message before any reel command of its own; the message keeps
         the stage and video it had where it was first seen."""
-        self.write("s1.jsonl", [rec("a", u(fresh=1), [MF.bash("reel qc A_1", "t")]), rec("b", u(fresh=5))])
+        self.write("s1.jsonl", [rec("a", u(fresh=1), [MF.bash("reel qc --video-id A_1", "t")]), rec("b", u(fresh=5))])
         self.write("s2.jsonl", [rec("b", u(fresh=5)), rec("c", u(fresh=7))])
         r = report([self.proj], raw_ids=True)
         self.assertEqual(r["by_item"]["A_1"]["by_stage"]["qc"]["raw"]["fresh"], 6)
@@ -125,6 +193,14 @@ class TestParsingAndDedupe(TmpProject):
         r = report([self.proj])
         self.assertTrue(r["partial"])
         self.assertEqual(r["skipped"], [{"file": f.name, "line": 2}])
+        self.assertEqual(r["totals"]["raw"]["fresh"], 11)
+
+    def test_a4d_a_deeply_nested_line_is_skipped_not_a_crash(self):
+        """Review P3-4: 200,000 `[` raise RecursionError in json; the line is skipped, the report still comes."""
+        f = self.write("s.jsonl", [rec("a", u(fresh=5))], raw_lines=["[" * 200_000, json.dumps(rec("b", u(fresh=6)))])
+        r = report([self.proj])
+        self.assertEqual(r["skipped"], [{"file": f.name, "line": 2}])
+        self.assertTrue(r["partial"])
         self.assertEqual(r["totals"]["raw"]["fresh"], 11)
 
     def test_a4b_clean_input_is_not_partial(self):
@@ -272,7 +348,7 @@ class TestSubagents(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "run"
             p.mkdir()
-            spawn = rec("m", u(fresh=1), [MF.bash("reel qc EP05_C0005", "t1"), MF.agent("toolu_S")])
+            spawn = rec("m", u(fresh=1), [MF.bash("reel qc --video-id EP05_C0005", "t1"), MF.agent("toolu_S")])
             child = rec("c", u(fresh=40))
             child["parent_tool_use_id"] = "toolu_S"
             orphan = rec("o", u(fresh=2))
@@ -289,7 +365,7 @@ class TestSubagents(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "proj"
             (p / "s" / "subagents").mkdir(parents=True)
-            spawn = rec("m", u(fresh=1), [MF.bash("reel plan A_1", "t1"),
+            spawn = rec("m", u(fresh=1), [MF.bash("reel plan --video-id A_1", "t1"),
                                           {"type": "tool_use", "id": "toolu_T", "name": "Task", "input": {}}])
             (p / "s.jsonl").write_text(json.dumps(spawn) + "\n", encoding="utf-8")
             (p / "s" / "subagents" / "agent-t.jsonl").write_text(
@@ -313,83 +389,197 @@ class TestSubagents(unittest.TestCase):
 
 # ---------------------------------------------------------------------------------------------------------------- C
 class TestStageMarkers(unittest.TestCase):
-    def m(self, cmd):
-        return tr.reel_markers(cmd)
+    """Command lines are written the way the skills write them: the video id is always `--video-id` (or `--episode`);
+    the reel CLI has no positional video id (review efe8910 P2-1)."""
+    def m(self, cmd, shell="bash"):
+        return tr.reel_markers(cmd, shell)
 
-    def test_c11_the_four_invocation_forms(self):
-        """Case 11."""
-        self.assertEqual(self.m("reel previews EP02_C0238"), [("previews", "EP02_C0238")])
-        self.assertEqual(self.m('bash "$CLAUDE_PLUGIN_ROOT/bin/run_python.sh" -s engine/x reel plan X_1'),
+    def p(self, cmd):
+        return tr.reel_markers(cmd, "powershell")
+
+    def test_c11_the_invocation_forms(self):
+        """Case 11, on real CLI shapes."""
+        self.assertEqual(self.m("reel previews --video-id EP02_C0238"), [("previews", "EP02_C0238")])
+        self.assertEqual(self.m('bash "$CLAUDE_PLUGIN_ROOT/bin/run_python.sh" -s engine/x reel plan --video-id X_1'),
                          [("plan", "X_1")])
-        self.assertEqual(self.m("python -m reel qc EP03_C0101"), [("qc", "EP03_C0101")])
-        self.assertEqual(self.m("reel.cmd ppro-build EP02_C0238"), [("ppro-build", "EP02_C0238")])
+        self.assertEqual(self.m("python -m reel.cli qc --video-id EP03_C0101"), [("qc", "EP03_C0101")])
+        self.assertEqual(self.m("python -m reel qc --video-id EP03_C0101"), [("qc", "EP03_C0101")])
+        self.assertEqual(self.m("reel.cmd ppro-build --video-id EP02_C0238"), [("ppro-build", "EP02_C0238")])
 
     def test_c11b_paths_launchers_and_env(self):
-        self.assertEqual(self.m('& "C:\\Users\\a b\\.whynot-cut\\bin\\reel.cmd" qc C0239'), [("qc", "C0239")])
-        self.assertEqual(self.m("/Users/x/.whynot-cut/bin/reel previews C0239"), [("previews", "C0239")])
-        self.assertEqual(self.m("WHYNOT_ACCEL=off FOO=1 reel audio-clean C0239"), [("audio-clean", "C0239")])
-        self.assertEqual(self.m("python3.12 -B -m reel plan C0239"), [("plan", "C0239")])
-        self.assertEqual(self.m("timeout 600 reel ppro-build C0239"), [("ppro-build", "C0239")])
-        self.assertEqual(self.m("py engine/reel/cli.py motion-plan EP1_C2_MO"), [("motion-plan", "EP1_C2_MO")])
-        self.assertEqual(self.m("bash -c 'reel qc C0239'"), [("qc", "C0239")])
-        self.assertEqual(self.m("cmd /c reel.bat qc C0239"), [("qc", "C0239")])
-        self.assertEqual(self.m("REEL.CMD QC C0239"), [])                  # verbs are lower case
+        self.assertEqual(self.p('& "C:\\Users\\a b\\.whynot-cut\\bin\\reel.cmd" qc --video-id C0239'),
+                         [("qc", "C0239")])
+        self.assertEqual(self.m("/Users/x/.whynot-cut/bin/reel previews --video-id C0239"), [("previews", "C0239")])
+        self.assertEqual(self.m("WHYNOT_ACCEL=off FOO=1 reel audio-clean --video-id C0239"),
+                         [("audio-clean", "C0239")])
+        self.assertEqual(self.m("python3.12 -B -m reel.cli plan --video-id C0239"), [("plan", "C0239")])
+        self.assertEqual(self.m("timeout 600 reel ppro-build --video-id C0239"), [("ppro-build", "C0239")])
+        self.assertEqual(self.m("py engine/reel/cli.py motion-plan --video-id EP1_C2_MO"),
+                         [("motion-plan", "EP1_C2_MO")])
+        self.assertEqual(self.m("bash -c 'reel qc --video-id C0239'"), [("qc", "C0239")])
+        self.assertEqual(self.m("cmd /c reel.bat qc --video-id C0239"), [("qc", "C0239")])
+        self.assertEqual(self.m("REEL.CMD QC --video-id C0239"), [])                  # verbs are lower case
 
-    def test_c11c_item_from_global_options_and_case(self):
-        self.assertEqual(self.m('reel --root "D:\\Fixture Clients\\Zorblax Quentaro" plan c0239'),
+    def test_c11f_engine_script_forms_the_guard_treats_as_reel_runs(self):
+        """Review P3-2 (hooks/guard.py reel_args): interpreter options with values, `-m reel.cli`, `-m cli` and
+        `cli.py` from engine/reel, and an interpreter held in a variable."""
+        self.assertEqual(self.m("python -X utf8 -W ignore engine/reel/cli.py plan --video-id C0239"),
                          [("plan", "C0239")])
-        self.assertEqual(self.m("reel --video-id EP02_C0238 transcribe data/Raw/x.mp4"),
+        self.assertEqual(self.m('$PY "D:/x/engine/reel/cli.py" plan --video-id C0239'), [("plan", "C0239")])
+        self.assertEqual(self.m('"${PY}" engine/reel/cli.py qc --video-id C0239'), [("qc", "C0239")])
+        self.assertEqual(self.p('& $py "D:\\x\\engine\\reel\\cli.py" qc --video-id C0239'), [("qc", "C0239")])
+        self.assertEqual(self.m("cd engine/reel && python cli.py plan --video-id C0239"), [("plan", "C0239")])
+        self.assertEqual(self.m("cd whynot-cut/engine/reel; python -m cli qc --video-id C0239"), [("qc", "C0239")])
+        self.assertEqual(self.m("python cli.py plan --video-id C0239"), [])          # not in engine/reel
+        self.assertEqual(self.m("python -m cli plan --video-id C0239"), [])
+        self.assertEqual(self.m("cd engine/other && python cli.py plan --video-id C0239"), [])
+        self.assertEqual(self.m("python -c 'import reel' plan"), [])
+        self.assertEqual(self.m("$EDITOR notes.md"), [])
+        self.assertEqual(self.m("echo ${HOME} reel plan --video-id A_1"), [])                   # N18
+        self.assertEqual(self.m('python -c "reel plan --video-id A_1"'), [])                   # N25
+
+    def test_c11c_video_only_from_video_id_or_episode(self):
+        """Review P2-1: option values and positional words are never a video."""
+        self.assertEqual(self.m('reel --root "D:\\Fixture Clients\\Zorblax Quentaro" plan --video-id c0239'),
+                         [("plan", "C0239")])
+        self.assertEqual(self.m("reel model-download --model large-v3"), [("model-download", None)])
+        self.assertEqual(self.m("reel transcribe --model large-v3"), [("transcribe", None)])
+        self.assertEqual(self.m("reel range --in 02:04 --out 10 --snap"), [("range", None)])
+        self.assertEqual(self.m("reel perf-report --since 2026-10-18"), [("perf-report", None)])
+        self.assertEqual(self.m("reel plan EP02_C0238"), [("plan", None)])              # no positional id
+        self.assertEqual(self.m("reel caption-looks --video-id C0239 --pick look_2"), [("caption-looks", "C0239")])
+        self.assertEqual(self.m("reel transcribe --root X --video-id EP02_C0238 data/Raw/x.mp4"),
                          [("transcribe", "EP02_C0238")])
-        self.assertEqual(self.m("reel --video-id=EP02_C0238 next"), [("next", "EP02_C0238")])
-        self.assertEqual(self.m("reel --episode EP02 reels-plan"), [("reels-plan", "EP02")])
-        self.assertEqual(self.m("reel --episode EP02 qc C0239"), [("qc", "C0239")])
+        self.assertEqual(self.m("reel next --video-id=EP02_C0238"), [("next", "EP02_C0238")])
+        self.assertEqual(self.m("reel reels-plan --episode EP02"), [("reels-plan", "EP02")])
+        self.assertEqual(self.m("reel --episode EP02 qc --video-id C0239"), [("qc", "C0239")])
+        self.assertEqual(self.m("reel --video-id A_1 plan --episode EP02"), [("plan", "A_1")])
         self.assertEqual(self.m("reel --profile p1 doctor"), [("doctor", None)])
-        self.assertEqual(self.m("reel profile show"), [("profile", None)])  # no digit/underscore: not an id
-        self.assertEqual(self.m("reel transcribe data/Raw/x.mp4"), [("transcribe", None)])
-        self.assertEqual(self.m("reel plan EP02_C0238 --from 3"), [("plan", "EP02_C0238")])
-        self.assertEqual(self.m("reel --json plan EP02_C0238"), [("plan", "EP02_C0238")])
+        self.assertEqual(self.m("reel plan --video-id EP02_C0238 --from 3"), [("plan", "EP02_C0238")])
+        self.assertEqual(self.m("reel --json plan --video-id EP02_C0238"), [("plan", "EP02_C0238")])
+        self.assertEqual(self.m("reel plan --video-id 'bad/id'"), [("plan", None)])
         self.assertEqual(self.m("reel plan 2>&1"), [("plan", None)])
-        self.assertEqual(self.m("reel plan EP02_C0238 > out_1.txt"), [("plan", "EP02_C0238")])
+        self.assertEqual(self.m("reel 2>&1 plan --video-id A_1"), [("plan", "A_1")])   # fd number is no word
+        self.assertEqual(self.m("reel plan --video-id EP02_C0238 > out_1.txt"), [("plan", "EP02_C0238")])
+        self.assertEqual(self.m("reel > out-log plan --video-id A_1"), [("plan", "A_1")])  # redirect target skipped
         self.assertEqual(self.m("reel --version"), [])
         self.assertEqual(self.m("reel --root"), [])
-        self.assertEqual(self.m("reel doctor > LOG_1"), [("doctor", None)])       # M38: a redirect target
-        self.assertEqual(self.m("reel doctor 2> ERR_1"), [("doctor", None)])
-        self.assertEqual(self.m("reel --video-id A_1 plan B_2"), [("plan", "A_1")])  # M48: --video-id wins
 
     def test_c11d_several_commands_in_one_line(self):
-        self.assertEqual(self.m("reel qc A_1 && reel ppro-build B_2; echo done | tee x"),
+        self.assertEqual(self.m("reel qc --video-id A_1 && reel ppro-build --video-id B_2; echo done | tee x"),
                          [("qc", "A_1"), ("ppro-build", "B_2")])
-        self.assertEqual(self.m("cd 'D:/x' && reel plan A_1 || reel doctor"), [("plan", "A_1"), ("doctor", None)])
-        self.assertEqual(self.m("reel qc A_1 &\nreel plan B_2"), [("qc", "A_1"), ("plan", "B_2")])
-        self.assertEqual(self.m("(reel qc A_1)"), [("qc", "A_1")])
+        self.assertEqual(self.m("cd 'D:/x' && reel plan --video-id A_1 || reel doctor"),
+                         [("plan", "A_1"), ("doctor", None)])
+        self.assertEqual(self.m("reel qc --video-id A_1 &\nreel plan --video-id B_2"), [("qc", "A_1"), ("plan", "B_2")])
+        self.assertEqual(self.m("(reel qc --video-id A_1)"), [("qc", "A_1")])
+
+    def test_c11g_compound_commands(self):
+        """Review P3-2: if/then, loops, brace groups, `!`, and PowerShell's `; if ($?) { ... }` chaining."""
+        self.assertEqual(self.m("if reel qc --video-id A_1; then reel plan --video-id B_2; else reel doctor; fi"),
+                         [("qc", "A_1"), ("plan", "B_2"), ("doctor", None)])
+        self.assertEqual(self.m("for f in a b; do reel qc --video-id A_1; done"), [("qc", "A_1")])
+        self.assertEqual(self.m("while true; do reel next; done"), [("next", None)])
+        self.assertEqual(self.m("{ reel qc --video-id A_1; }"), [("qc", "A_1")])
+        self.assertEqual(self.m("! reel qc --video-id A_1"), [("qc", "A_1")])
+        self.assertEqual(self.m("${ROOT}/bin/reel plan --video-id A_1"), [("plan", "A_1")])
+        self.assertEqual(self.p("reel qc --video-id A_1; if ($?) { reel plan --video-id B_2 }"),
+                         [("qc", "A_1"), ("plan", "B_2")])
+        self.assertEqual(self.m("reel qc --video-id A_1; if ($?) { reel plan --video-id B_2 }"),
+                         [("qc", "A_1"), ("plan", "B_2")])
+
+    def test_c11h_powershell_quoting(self):
+        """Review P3-2: PowerShell has no backslash escape, uses the backtick, and has here-strings and <# #>."""
+        self.assertEqual(self.p('Write-Host "C:\\dir\\" ; reel plan --video-id B_2'), [("plan", "B_2")])
+        self.assertEqual(self.p("$t = @'\nit's\nreel plan --video-id B_2\n'@\nreel qc --video-id A_1"),
+                         [("qc", "A_1")])
+        self.assertEqual(self.p('$t = @"\nsay "hi"\nreel plan --video-id B_2\n"@; reel qc --video-id A_1'),
+                         [("qc", "A_1")])
+        self.assertEqual(self.p('Write-Host "a `" b" ; reel qc --video-id A_1'), [("qc", "A_1")])
+        self.assertEqual(self.p("Write-Host a`;b; reel qc --video-id A_1"), [("qc", "A_1")])
+        self.assertEqual(self.p("<# reel plan --video-id B_2 #> reel qc --video-id A_1"), [("qc", "A_1")])
+        self.assertEqual(self.p("<# open comment reel plan --video-id B_2"), [])
+        self.assertEqual(self.p("$t = @'\nreel plan --video-id B_2"), [])                   # unterminated
+        self.assertEqual(self.p("# reel plan --video-id B_2\nreel qc --video-id A_1"), [("qc", "A_1")])
+        self.assertEqual(self.m('echo "C:\\dir\\" ; reel plan --video-id B_2'), [])       # bash: \" is a quote
+        self.assertEqual(tr.reel_markers("reel qc --video-id A_1", "fish"), [("qc", "A_1")])  # unknown -> bash
+        self.assertEqual(self.p("Get-ChildItem C:\\dir\\; reel plan --video-id B_2"), [("plan", "B_2")])  # N11
+        self.assertEqual(self.p("Write-Host 'a''' ; reel qc --video-id A_1"), [("qc", "A_1")])            # N15
+        self.assertEqual(self.p("reel qc --video-id 'A''B'"), [("qc", None)])        # N15: A'B is not an id
+        self.assertEqual(self.m("pwsh -Command 'Write-Host \"C:\\dir\\\" ; reel plan --video-id B_2'"),
+                         [("plan", "B_2")])                                                               # N26
 
     def test_c13_heredoc_echo_comment_and_quotes_are_not_markers(self):
         """Case 13: only the command position counts."""
         self.assertEqual(self.m(MF.HEREDOC), [])
-        self.assertEqual(self.m("echo reel plan A_1"), [])
+        self.assertEqual(self.m("echo reel plan --video-id A_1"), [])
         self.assertEqual(self.m('grep -n "reel plan" notes.md'), [])
-        self.assertEqual(self.m("# reel plan A_1"), [])
-        self.assertEqual(self.m("ls  # reel plan A_1"), [])
-        self.assertEqual(self.m("reel qc A_1 # ; reel plan B_2"), [("qc", "A_1")])   # M33: a comment hides ;
-        self.assertEqual(self.m("echo a#b; reel qc A_1"), [("qc", "A_1")])          # # inside a word
-        self.assertEqual(self.m("cat <<-EOF\n\treel plan A_1\n\tEOF\nreel qc B_2"), [("qc", "B_2")])
-        self.assertEqual(self.m('cat <<"END" | wc\nreel plan A_1\nEND'), [])
-        self.assertEqual(self.m("git commit -m 'reel plan A_1'"), [])
-        self.assertEqual(self.m("python tools/x.py reel plan A_1"), [])
-        self.assertEqual(self.m("reelx plan A_1"), [])
+        self.assertEqual(self.m("# reel plan --video-id A_1"), [])
+        self.assertEqual(self.m("ls  # reel plan --video-id A_1"), [])
+        self.assertEqual(self.m("reel qc --video-id A_1 # ; reel plan --video-id B_2"), [("qc", "A_1")])
+        self.assertEqual(self.m("echo a#b; reel qc --video-id A_1"), [("qc", "A_1")])
+        self.assertEqual(self.m("cat <<-EOF\n\treel plan --video-id A_1\n\tEOF\nreel qc --video-id B_2"),
+                         [("qc", "B_2")])
+        self.assertEqual(self.m('cat <<"END" | wc\nreel plan --video-id A_1\nEND'), [])
+        self.assertEqual(self.m("git commit -m 'reel plan --video-id A_1'"), [])
+        self.assertEqual(self.m("python tools/x.py reel plan --video-id A_1"), [])
+        self.assertEqual(self.m("reelx plan --video-id A_1"), [])
         self.assertEqual(self.m("cat reel"), [])
-        self.assertEqual(self.m("unterminated 'reel plan A_1"), [])
+        self.assertEqual(self.m("unterminated 'reel plan --video-id A_1"), [])
 
     def test_c13b_escapes_and_line_continuation(self):
-        self.assertEqual(self.m("reel \\\n  qc A_1"), [("qc", "A_1")])
-        self.assertEqual(self.m('reel qc "A_1"'), [("qc", "A_1")])
-        self.assertEqual(self.m("echo \\; reel qc A_1"), [])
-        self.assertEqual(self.m('echo "a \\" b" ; reel qc A_1'), [("qc", "A_1")])
+        self.assertEqual(self.m("reel \\\n  qc --video-id A_1"), [("qc", "A_1")])
+        self.assertEqual(self.m('reel qc --video-id "A_1"'), [("qc", "A_1")])
+        self.assertEqual(self.m("echo \\; reel qc --video-id A_1"), [])
+        self.assertEqual(self.m('echo "a \\" b" ; reel qc --video-id A_1'), [("qc", "A_1")])
 
     def test_c13c_odd_inputs(self):
         self.assertEqual(self.m(""), [])
         self.assertEqual(self.m(None), [])
         self.assertEqual(self.m(123), [])
+
+    def test_c13d_verbs_from_the_engine_command_table(self):
+        """Review P3-2: the stage verbs are the `reel` command table (read from the engine source without importing
+        it); read-only verbs never start a stage."""
+        verbs = tr.known_verbs()
+        for v in ("previews", "plan", "ppro-build", "qc", "audio-clean", "motion-plan", "reels-plan", "doctor"):
+            self.assertIn(v, verbs)
+        for v in ("help", "nonsense", "py-x"):
+            self.assertNotIn(v, verbs)
+        self.assertTrue(set(tr.NON_STAGE_VERBS) <= verbs)
+        with tempfile.TemporaryDirectory() as d:
+            self.assertIsNone(tr.known_verbs(Path(d)))                     # no engine there: any verb
+            (Path(d) / "lib").mkdir()
+            (Path(d) / "cli.py").write_text("CORE_COMMANDS = {'alpha': 'x', 'beta-two': 'y'}\n", encoding="utf-8")
+            (Path(d) / "lib" / "podcast_cli.py").write_text("HELP: dict = {'gamma': 'z'}\n", encoding="utf-8")
+            (Path(d) / "lib" / "motion_cli.py").write_text("X = 1\nHELP = {'delta': 'w', 5: 'n'}\n",
+                                                          encoding="utf-8")
+            self.assertEqual(tr.known_verbs(Path(d)), {"alpha", "beta-two", "gamma", "delta"})
+            (Path(d) / "cli.py").write_text("def broken(:\n", encoding="utf-8")
+            self.assertIsNone(tr.known_verbs(Path(d)))
+            (Path(d) / "cli.py").write_text("OTHER = {}\n", encoding="utf-8")
+            self.assertIsNone(tr.known_verbs(Path(d)))
+            with mock.patch.object(tr, "ENGINE", Path(d)):                   # N36: the report says so
+                r = report([PROJ])
+            self.assertTrue(any("command table" in a for a in r["assumptions"]), r["assumptions"])
+        self.assertFalse(any("command table" in a for a in report([PROJ])["assumptions"]))
+
+    def test_c13e_unknown_and_read_only_verbs_in_a_report(self):
+        """`reel help`, a mistyped verb: no stage. `reel next/doctor/status`: the video may change, the stage not."""
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "proj"
+            p.mkdir()
+            recs = [rec("a", u(fresh=1), [MF.bash("reel qc --video-id A_1", "t1")]),
+                    rec("b", u(fresh=2), [MF.bash("reel help plan", "t2")]),
+                    rec("c", u(fresh=4), [MF.bash("reel nonsense --video-id X_9", "t3")]),
+                    rec("d", u(fresh=8), [MF.bash("reel doctor", "t4")]),
+                    rec("e", u(fresh=16), [MF.bash("reel next --video-id B_2", "t5")])]
+            (p / "s.jsonl").write_text("".join(json.dumps(x) + "\n" for x in recs), encoding="utf-8")
+            r = report([p], raw_ids=True)
+        self.assertEqual(sorted(r["by_stage"]), ["qc"])
+        self.assertEqual(r["by_item"]["A_1"]["raw"]["fresh"], 15)
+        self.assertEqual(r["by_item"]["B_2"]["by_stage"]["qc"]["raw"]["fresh"], 16)
+        self.assertNotIn("X_9", r["by_item"])
+        self.assertEqual(r["unknown_verbs"], 2)
 
     def test_c12_usage_before_the_first_reel_command_is_setup(self):
         """Case 12: m1 (4000) runs before any reel command."""
@@ -406,7 +596,7 @@ class TestStageMarkers(unittest.TestCase):
                                "ppro-build": 1002.0, "unattributed-subagent": 30.0})
 
     def test_c14_interleaved_items_add_up_to_the_total(self):
-        """Case 14: EP02 11842 + EP03 1631 + unattributed 4030 = 17503."""
+        """Case 14: EP02 11842 + EP03 1631 + unattributed 4030 = 17503; `--model large-v3` is no video."""
         r = report([PROJ], raw_ids=True)
         got = {k: round(v["weighted"], 6) for k, v in r["by_item"].items()}
         self.assertEqual(got, {"EP02_C0238": 11842.0, "EP03_C0101": 1631.0, "unattributed": 4030.0})
@@ -418,21 +608,22 @@ class TestStageMarkers(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "proj"
             p.mkdir()
-            recs = [rec("a", u(fresh=1), [MF.bash("reel qc A_1", "t1")]),
-                    rec("b", u(fresh=2), [MF.bash("reel doctor", "t2")]),
+            recs = [rec("a", u(fresh=1), [MF.bash("reel qc --video-id A_1", "t1")]),
+                    rec("b", u(fresh=2), [MF.bash("reel model-download --model large-v3", "t2")]),
                     rec("c", u(fresh=4), [MF.text()])]
             (p / "s.jsonl").write_text("".join(json.dumps(x) + "\n" for x in recs), encoding="utf-8")
             r = report([p], raw_ids=True)
         self.assertEqual(r["by_item"]["A_1"]["raw"]["fresh"], 7)
-        self.assertEqual(r["by_item"]["A_1"]["by_stage"]["doctor"]["raw"]["fresh"], 6)
+        self.assertEqual(r["by_item"]["A_1"]["by_stage"]["model-download"]["raw"]["fresh"], 6)
+        self.assertEqual(sorted(r["by_item"]), ["A_1"])                       # no LARGE-V3 phantom video
 
     def test_c14c_marker_order_inside_one_message_and_spawn_after_marker(self):
         """Blocks of one message apply in order: an Agent call after a reel command gets the new stage."""
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "proj"
             (p / "s" / "subagents").mkdir(parents=True)
-            recs = [rec("a", u(fresh=1), [MF.bash("reel qc A_1", "t1"), MF.agent("toolu_Z"),
-                                          MF.bash("reel plan B_2", "t2")])]
+            recs = [rec("a", u(fresh=1), [MF.bash("reel qc --video-id A_1", "t1"), MF.agent("toolu_Z"),
+                                          MF.bash("reel plan --video-id B_2", "t2")])]
             (p / "s.jsonl").write_text("".join(json.dumps(x) + "\n" for x in recs), encoding="utf-8")
             (p / "s" / "subagents" / "agent-z.jsonl").write_text(
                 json.dumps(rec("z", u(fresh=50), sidechain=True)) + "\n", encoding="utf-8")
@@ -445,15 +636,17 @@ class TestStageMarkers(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "proj"
             p.mkdir()
-            (p / "a.jsonl").write_text(json.dumps(rec("a", u(fresh=1), [MF.bash("reel qc A_1", "t")])) + "\n",
-                                       encoding="utf-8")
+            (p / "a.jsonl").write_text(json.dumps(rec("a", u(fresh=1), [MF.bash("reel qc --video-id A_1", "t")]))
+                                       + "\n", encoding="utf-8")
             (p / "b.jsonl").write_text(json.dumps(rec("b", u(fresh=100))) + "\n", encoding="utf-8")
+            (p / "c.jsonl").write_text(json.dumps(rec("c", u(fresh=1000), [MF.bash("reel help", "t")])) + "\n",
+                                       encoding="utf-8")
             r = report([p], marked_only=True)
             full = report([p])
         self.assertEqual(r["totals"]["raw"]["fresh"], 1)
         self.assertEqual(r["sessions"], 1)
-        self.assertEqual(full["totals"]["raw"]["fresh"], 101)
-        self.assertEqual(full["sessions"], 2)
+        self.assertEqual(full["totals"]["raw"]["fresh"], 1101)
+        self.assertEqual(full["sessions"], 3)
 
     def test_c14e_marked_only_ignores_markers_inside_subagent_records(self):
         """Mutant M71: a reel command run only by a subagent (in-file sidechain or stream-json child) does not
@@ -461,14 +654,19 @@ class TestStageMarkers(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "proj"
             p.mkdir()
-            side = rec("a", u(fresh=1), [MF.bash("reel qc A_1", "t")], sidechain=True)
-            child = rec("b", u(fresh=2), [MF.bash("reel qc A_1", "t2")])
+            side = rec("a", u(fresh=1), [MF.bash("reel qc --video-id A_1", "t")], sidechain=True)
+            child = rec("b", u(fresh=2), [MF.bash("reel qc --video-id A_1", "t2")])
             child["parent_tool_use_id"] = "toolu_x"
             (p / "s.jsonl").write_text(json.dumps(side) + "\n" + json.dumps(child) + "\n"
                                        + json.dumps(rec("c", u(fresh=4))) + "\n", encoding="utf-8")
             r = report([p], marked_only=True)
         self.assertEqual(r["sessions"], 0)
         self.assertEqual(r["totals"]["messages"], 0)
+
+    def test_c14f_powershell_tool_commands_use_powershell_quoting(self):
+        """The fixture's m7 (PowerShell tool): `Write-Host "C:\\fixture\\" ; & ...reel.cmd ppro-build` is found."""
+        r = report([PROJ], raw_ids=True)
+        self.assertAlmostEqual(r["by_item"]["EP02_C0238"]["by_stage"]["ppro-build"]["weighted"], 1002.0, places=6)
 
 
 # ---------------------------------------------------------------------------------------------------------------- D
@@ -899,15 +1097,9 @@ class TestPlatformAndPaths(unittest.TestCase):
             root = Path(d) / "root"
             root.mkdir()
             shutil.copytree(FIX / "twin_folder", root / "real")
-            link = root / "link"
             try:
-                if os.name == "nt":
-                    import subprocess
-                    subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(root / "real")], check=True,
-                                   capture_output=True)
-                else:
-                    os.symlink(root / "real", link, target_is_directory=True)
-            except (OSError, Exception) as e:  # noqa: BLE001
+                dir_link(root / "link", root / "real")
+            except OSError as e:
                 self.skipTest(f"cannot make a directory link here: {e}")
             r = report([root])
         self.assertAlmostEqual(r["totals"]["weighted"], 17273.0, places=6)
@@ -989,6 +1181,94 @@ class TestPlatformAndPaths(unittest.TestCase):
         self.assertEqual(r["totals"]["raw"]["fresh"], 3)
         self.assertEqual(r["skipped"], [{"file": "a.jsonl", "line": 2}])
 
+    def test_g27d_an_unreadable_folder_is_listed_and_the_report_is_partial(self):
+        """Review P3-3: a folder that cannot be listed (permission, a path over MAX_PATH) is never dropped
+        silently: it is listed in skipped and the report says partial."""
+        real_scandir = os.scandir
+
+        def fake_scandir(path):
+            if str(path).replace("\\", "/").endswith("s1/subagents"):
+                raise PermissionError("denied")
+            return real_scandir(path)
+        with mock.patch.object(tr.os, "scandir", fake_scandir):
+            r = report([PROJ])
+        self.assertTrue(r["partial"])
+        self.assertIn({"file": "s1/subagents/", "line": 0}, r["skipped"])
+        self.assertEqual(r["subagents"]["messages"], 0)
+
+    def test_g27e_an_entry_that_cannot_be_inspected_is_listed(self):
+        """Review P3-3: an entry whose lstat fails is listed in skipped (not taken for a link and dropped)."""
+        real_lstat = os.lstat
+
+        def fake_lstat(path, *a, **k):
+            if str(path).endswith("s2.jsonl"):
+                raise OSError("cannot stat")
+            return real_lstat(path, *a, **k)
+        with mock.patch.object(tr.os, "lstat", fake_lstat):
+            r = report([PROJ])
+        self.assertTrue(r["partial"])
+        self.assertIn({"file": "s2.jsonl", "line": 0}, r["skipped"])
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "proj"
+            (p / "s9").mkdir(parents=True)
+            (p / "s9" / "subagents").mkdir()
+            (p / "a.jsonl").write_text(json.dumps(rec("a", u(fresh=2))) + "\n", encoding="utf-8")
+
+            def fake_lstat2(path, *a, **k):
+                if str(path).endswith("s9"):
+                    raise OSError("cannot stat")
+                return real_lstat(path, *a, **k)
+            with mock.patch.object(tr.os, "lstat", fake_lstat2):
+                r = report([p])
+        self.assertIn({"file": "(folder)/", "line": 0}, r["skipped"])
+
+    def test_g27g_an_uninspectable_subagents_folder_of_a_file_argument_is_listed(self):
+        """Mutant N52: `token_report s1.jsonl` whose s1/subagents cannot be inspected says so."""
+        real_lstat = os.lstat
+
+        def fake_lstat(path, *a, **k):
+            if str(path).replace("\\", "/").endswith("s1/subagents"):
+                raise OSError("cannot stat")
+            return real_lstat(path, *a, **k)
+        with mock.patch.object(tr.os, "lstat", fake_lstat):
+            r = report([PROJ / "s1.jsonl"])
+        self.assertTrue(r["partial"])
+        self.assertEqual(r["skipped"], [{"file": "s1/subagents/", "line": 0}])
+
+    def test_g27f_nothing_readable_is_a_refusal(self):
+        """Review P3-6: transcripts whose every line is malformed -> exit 2, nothing written."""
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "proj"
+            p.mkdir()
+            (p / "a.jsonl").write_text("{bad\n{worse\n", encoding="utf-8")
+            jp = Path(d) / "r.json"
+            rc, out, err = self.run_main([str(p), "--json", str(jp)])
+            self.assertEqual(rc, 2)
+            self.assertIn("no readable transcript records", err)
+            self.assertFalse(jp.exists())
+            (p / "b.jsonl").write_text(json.dumps({"type": "user", "message": {"content": "x"}}) + "\n",
+                                       encoding="utf-8")
+            rc, out, err = self.run_main([str(p), "--json", str(jp)])
+            self.assertEqual(rc, 0, err)                 # a readable record, even without usage: a report
+            self.assertTrue(jp.exists())
+
+    def test_g25e_non_utf8_stdout_and_an_arabic_report_path(self):
+        """Review P3-5: stdout in cp1252 (PYTHONUTF8 unset, piped) and an Arabic --json path: no crash, the
+        summary comes out as UTF-8."""
+        import subprocess
+        with tempfile.TemporaryDirectory() as d:
+            jp = Path(d) / "تقرير" / "r.json"
+            env = dict(os.environ, PYTHONIOENCODING="cp1252", PYTHONUTF8="0")
+            for args in (["--json", str(jp)], ["--json", "-"]):
+                p = subprocess.run([sys.executable, "-s", "-B", str(ROOT / "tools" / "token_report.py"),
+                                    str(PROJ), "--date", DATE] + args, capture_output=True, env=env, timeout=120)
+                self.assertEqual(p.returncode, 0, p.stderr.decode("utf-8", "replace"))
+                self.assertNotIn(b"Traceback", p.stderr)
+            self.assertTrue(jp.exists())
+            p = subprocess.run([sys.executable, "-s", "-B", str(ROOT / "tools" / "token_report.py"), str(PROJ),
+                                "--date", DATE, "--json", str(jp)], capture_output=True, env=env, timeout=120)
+            self.assertIn(str(jp), p.stdout.decode("utf-8"))
+
 
 # ---------------------------------------------------------------------------------------------------------------- H
 class TestEvalRuns(unittest.TestCase):
@@ -997,10 +1277,11 @@ class TestEvalRuns(unittest.TestCase):
     def make(self, root):
         root.mkdir(parents=True)
         runs = []
-        for case, run, fresh in (("edit-a", "with-run1", 10), ("edit-a", "with-run2", 20), ("motion-b", "with-run1", 5)):
+        for case, run, fresh in (("edit-a", "with-run1", 10), ("edit-a", "with-run2", 20),
+                                 ("motion-b", "with-run1", 5)):
             d = root / case / run
             d.mkdir(parents=True)
-            recs = [rec("same_id", u(fresh=fresh), [MF.bash("reel qc C_1", "t")])]
+            recs = [rec("same_id", u(fresh=fresh), [MF.bash("reel qc --video-id C_1", "t")])]
             (d / "trace.jsonl").write_text("".join(json.dumps(x) + "\n" for x in recs), encoding="utf-8")
             pj = d / "projects" / "D--x"
             pj.mkdir(parents=True)

@@ -22,6 +22,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -49,12 +50,13 @@ class Base(unittest.TestCase):
         t = self.tmp / "runner-temp" / name
         (t / "out").mkdir(parents=True)
         if with_trace:
-            (t / "out" / "trace.jsonl").write_text(json.dumps(rec("m_" + name, fresh, "reel qc C_1")) + "\n",
+            (t / "out" / "trace.jsonl").write_text(json.dumps(rec("m_" + name, fresh, "reel qc --video-id C_1")) + "\n",
                                                    encoding="utf-8")
         if with_projects:
             pj = t / "config" / "projects" / "D--sandbox-case"
             (pj / "s" / "subagents").mkdir(parents=True)
-            (pj / "s.jsonl").write_text(json.dumps(rec("m_" + name, fresh, "reel qc C_1")) + "\n", encoding="utf-8")
+            (pj / "s.jsonl").write_text(json.dumps(rec("m_" + name, fresh, "reel qc --video-id C_1")) + "\n",
+                                        encoding="utf-8")
             (pj / "s" / "subagents" / "agent-a.jsonl").write_text(json.dumps(rec("sub_" + name, 3)) + "\n",
                                                                   encoding="utf-8")
             (pj / "s" / "subagents" / "agent-a.meta.json").write_text('{"toolUseId": "t_x"}', encoding="utf-8")
@@ -200,12 +202,11 @@ class TestCollect(Base):
         link = t1.parent.parent / "config" / "projects" / "linked"
         try:
             if os.name == "nt":
-                import subprocess
-                subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(outside)], check=True,
-                               capture_output=True)
+                import _winapi
+                _winapi.CreateJunction(str(outside), str(link))      # no shell (review efe8910 P3-8)
             else:
                 os.symlink(outside, link, target_is_directory=True)
-        except Exception as e:  # noqa: BLE001
+        except OSError as e:
             self.skipTest(f"cannot make a directory link here: {e}")
         agg = self.aggregate({"c": {"with": [t1]}})
         out = self.tmp / "kept"
@@ -225,6 +226,47 @@ class TestCollect(Base):
         out = self.tmp / "kept"
         self.assertEqual(self.run_main([str(agg), "--out", str(out)])[0], 0)
         self.assertFalse((out / "c" / "with-run1" / "trace.jsonl").exists())
+
+    def test_a_copy_error_is_recorded_and_the_manifest_still_written(self):
+        """Review P3-7: a failing copy (disk full, a locked file) never ends in a traceback without manifest.json."""
+        t1, t2 = self.make_temp_run("r1", 10), self.make_temp_run("r2", 20)
+        agg = self.aggregate({"c": {"with": [t1, t2]}})
+        out = self.tmp / "kept"
+        real_copy = shutil.copyfile
+
+        def flaky(src, dst, *a, **k):
+            if "/runner-temp/r1/" in str(src).replace("\\", "/") and str(src).endswith("s.jsonl"):
+                raise OSError(28, "No space left on device")
+            return real_copy(src, dst, *a, **k)
+        with mock.patch.object(et.shutil, "copyfile", flaky):
+            rc, so, se = self.run_main([str(agg), "--out", str(out)])
+        self.assertEqual(rc, 3)
+        self.assertNotIn("Traceback", se)
+        m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual([r["status"] for r in m["runs"]], ["copy-failed", "collected"])
+        self.assertIn("No space left", m["runs"][0]["reason"])
+        self.assertEqual(m["runs"][1]["files"], 4)
+
+    def test_case_names_that_differ_only_by_case_never_share_a_folder(self):
+        """Review P3-7: `Clip` and `clip` (and `clip.`, which Windows trims) would land in one folder on Windows
+        and default macOS; the second is refused, never mixed into the first."""
+        t1, t2, t3 = self.make_temp_run("r1", 10), self.make_temp_run("r2", 20), self.make_temp_run("r3", 30)
+        agg = self.aggregate({"Clip": {"with": [t1]}, "clip": {"with": [t2]}, "clip.": {"with": [t3]}})
+        out = self.tmp / "kept"
+        rc, so, se = self.run_main([str(agg), "--out", str(out)])
+        self.assertEqual(rc, 3)
+        m = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual([(r["case"], r["status"]) for r in m["runs"]],
+                         [("Clip", "collected"), ("clip", "name-collision"), ("clip.", "unsafe-name")])
+        r = tr.build_report([out], date="2026-10-18", commit="x")
+        self.assertEqual(sorted(r["runs"]), ["Clip/with-run1"])
+        self.assertEqual(r["runs"]["Clip/with-run1"]["raw"]["fresh"], 13)
+
+    def test_a_trailing_dot_or_space_name_is_unsafe(self):
+        self.assertIsNone(et.SAFE_NAME.fullmatch("clip."))
+        self.assertIsNone(et.SAFE_NAME.fullmatch("clip "))
+        self.assertIsNotNone(et.SAFE_NAME.fullmatch("clip.v2"))
+        self.assertIsNone(tr.SAFE_NAME.fullmatch("clip."))
 
     def test_end_to_end_with_token_report(self):
         """Case 28: the collected folder is reported per case and per run (trace + transcript dedupe per run)."""

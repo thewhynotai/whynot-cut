@@ -14,10 +14,11 @@ unless the eval ran with `--keep-temp`.
 
 It COPIES (never moves) trace.jsonl and every *.jsonl / *.meta.json below <temp>/config/projects into
 <out>/<case>/<arm>-run<k>/ and writes <out>/manifest.json (case, run, status, file count). Links and junctions are
-never followed or copied. Case names that are not plain names are recorded as `unsafe-name` and never become folders.
-<out> must be new or empty. Exit 0 when every run was collected, 3 when some were missing (the hint names
---keep-temp), 2 on bad input. Stdlib only. Not verified against a live eval run yet: the location of the run's
-transcripts under <temp>/config/projects is inferred from the runner's leftover temp folders.
+never followed or copied. Case names that are not plain names (`unsafe-name`, a trailing dot included) and a case
+name that differs from an earlier one only by letter case (`name-collision`: one folder on Windows and macOS) never
+become folders. A failed copy is recorded as `copy-failed`; the manifest is always written. <out> must be new or
+empty. Exit 0 when every run was collected, 3 when some were not (the hint names --keep-temp), 2 on bad input.
+Stdlib only. Not verified against a live eval run yet: the location of the run's transcripts under <temp>/config/projects is inferred from the runner's leftover temp folders.
 """
 from __future__ import annotations
 
@@ -30,8 +31,8 @@ import stat
 import sys
 from pathlib import Path
 
-VERSION = "1.0.0"
-SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}")
+VERSION = "1.1.0"
+SAFE_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,119}[A-Za-z0-9_-])?")   # no trailing dot (Windows trims it)
 
 
 def _is_link(path) -> bool:
@@ -82,13 +83,16 @@ def _runs(doc: dict) -> list:
 
 def collect(doc: dict, out: Path) -> list:
     """Copy every run's transcripts into `out`; the manifest rows."""
-    rows = []
+    rows, folders = [], {}
     for case, run, trace in _runs(doc):
         row = {"case": case if isinstance(case, str) else str(case), "run": run, "status": "missing", "files": 0}
         rows.append(row)
         if not (isinstance(case, str) and SAFE_NAME.fullmatch(case) and ".." not in case
                 and SAFE_NAME.fullmatch(run)):
             row["status"] = "unsafe-name"
+            continue
+        if folders.setdefault(case.lower(), case) != case:      # Clip / clip: one folder on Windows and macOS
+            row["status"], row["reason"] = "name-collision", f"same folder as case {folders[case.lower()]!r}"
             continue
         if trace is None:
             row["reason"] = "no tracePath"
@@ -105,10 +109,15 @@ def collect(doc: dict, out: Path) -> list:
             row["reason"] = "the run's temp folder is gone (run the eval with --keep-temp)"
             continue
         dest = out / case / run
-        for src, rel in plan:
-            (dest / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, dest / rel)
-        row["status"], row["files"] = "collected", len(plan)
+        try:
+            for src, rel in plan:
+                (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, dest / rel)
+                row["files"] += 1
+        except OSError as e:                  # disk full, a locked file: recorded, the manifest is still written
+            row["status"], row["reason"] = "copy-failed", f"{type(e).__name__}: {e.strerror or e}"
+            continue
+        row["status"] = "collected"
     return rows
 
 

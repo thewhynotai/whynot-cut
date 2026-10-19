@@ -101,7 +101,8 @@ def noise(seq, sid):
     ]
 
 
-HEREDOC = "cat > notes.md <<'EOF'\nreel qc EP09_C0909\nreel plan EP09_C0909\nEOF\necho \"reel plan EP09_C0909\""
+HEREDOC = ("cat > notes.md <<'EOF'\nreel qc --video-id EP09_C0909\nreel plan --video-id EP09_C0909\nEOF\n"
+           "echo \"reel plan --video-id EP09_C0909\"")
 
 
 def main_records(sid, seq, inline_subagents=False):
@@ -113,7 +114,7 @@ def main_records(sid, seq, inline_subagents=False):
     # m2: `reel previews` -> previews / EP02; progressive output (50 then 200), then an all-zero tail record
     R.append(asst(seq, sid, "msg_m2", usage(fresh=10, w1=1000, read=3000, out=50), [text("Rendering previews.")]))
     R.append(asst(seq, sid, "msg_m2", usage(fresh=10, w1=1000, read=3000, out=200),
-                  [bash('reel previews EP02_C0238 --root "' + PLANTED_PATH + '"', "toolu_m2")]))
+                  [bash('reel previews --root "' + PLANTED_PATH + '" --video-id EP02_C0238', "toolu_m2")]))
     R.append(asst(seq, sid, "msg_m2", usage()))
     R.append(user(seq, sid, [{"type": "tool_result", "tool_use_id": "toolu_m2", "content": PLANTED_PATH}]))
     # m3: spawns subagent aa11 (Agent tool_use toolu_A1) during previews
@@ -121,19 +122,21 @@ def main_records(sid, seq, inline_subagents=False):
     if inline_subagents:
         R += sub_aa11(sid, seq, sidechain_inline=True) + sub_bb22(sid, seq, sidechain_inline=True)
     R.append(user(seq, sid, [{"type": "tool_result", "tool_use_id": "toolu_A1", "content": "done"}]))
-    # m4: run_python.sh form -> plan / EP02
+    # m4: the engine CLI script through an interpreter variable (the guard's reel-run shape) -> plan / EP02
     R.append(asst(seq, sid, "msg_m4", usage(fresh=20, w1=500, read=5000, out=400),
-                  [bash('cd "' + PLANTED_PATH + '" && bash "$CLAUDE_PLUGIN_ROOT/bin/run_python.sh" -s reel plan '
-                        'EP02_C0238 2>&1 | tail -5', "toolu_m4")]))
-    # m5: python -m reel -> qc / EP03 (a second item, interleaved)
+                  [bash('cd "' + PLANTED_PATH + '" && "$PY" -X utf8 "C:/Users/fixture/.whynot-cut/plugin/engine/reel/'
+                        'cli.py" plan --root . --video-id EP02_C0238 2>&1 | tail -5', "toolu_m4")]))
+    # m5: an option value is never a video (model-download --model large-v3), then python -m reel.cli -> qc / EP03
+    # (a second video, interleaved)
     R.append(asst(seq, sid, "msg_m5", usage(fresh=30, read=6000, out=100),
-                  [bash("python -m reel qc EP03_C0101", "toolu_m5")]))
+                  [bash("reel model-download --model large-v3", "toolu_m5a"),
+                   bash("python -m reel.cli qc --video-id EP03_C0101", "toolu_m5")]))
     # m6: heredoc and echo hold the word reel: not stage markers; still qc / EP03
     R.append(asst(seq, sid, "msg_m6", usage(fresh=1, read=7000, out=50), [bash(HEREDOC, "toolu_m6")]))
-    # m7: reel.cmd from the PowerShell tool -> ppro-build / EP02
+    # m7: reel.cmd from the PowerShell tool, after a PowerShell string that ends in a backslash -> ppro-build / EP02
     R.append(asst(seq, sid, "msg_m7", usage(fresh=2, read=8000, out=60),
-                  [bash('& "C:\\Users\\fixture\\.whynot-cut\\bin\\reel.cmd" ppro-build EP02_C0238', "toolu_m7",
-                        name="PowerShell")]))
+                  [bash('Write-Host "C:\\fixture\\" ; & "C:\\Users\\fixture\\.whynot-cut\\bin\\reel.cmd" ppro-build '
+                        '--video-id EP02_C0238', "toolu_m7", name="PowerShell")]))
     # m8: an API error record (synthetic model): reported under errors only
     R.append(asst(seq, sid, "msg_m8", usage(out=7), [text("API Error: rate limited")], error=True))
     # m9: fast mode -> its own model key
@@ -147,8 +150,8 @@ def sub_aa11(sid, seq, sidechain_inline=False):
     R.append(asst(seq, sid, "msg_a1", usage(fresh=100, w5=1000, out=500), model=SONNET, sidechain=True, agent_id=aid))
     # a nested spawn (toolu_B2) and a reel command inside a subagent: subagent markers never move the stage
     R.append(asst(seq, sid, "msg_a2", usage(fresh=10, read=2000, out=100),
-                  [agent("toolu_B2"), bash("reel plan EP77_C7777", "toolu_a2")], model=SONNET, sidechain=True,
-                  agent_id=aid))
+                  [agent("toolu_B2"), bash("reel plan --video-id EP77_C7777", "toolu_a2")], model=SONNET,
+                  sidechain=True, agent_id=aid))
     return R
 
 

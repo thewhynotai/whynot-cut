@@ -15,9 +15,10 @@ What it reads
 
 How it counts
   * Only `assistant` records with message.usage count. Claude Code writes one API response as several records with
-    the same message.id, with growing output_tokens, sometimes an all-zero tail: per id the LAST NON-ZERO record wins,
-    and an id counts once across every file of the report (a resumed session replays earlier ids). Records flagged
-    isApiErrorMessage are reported under `errors`, never in the stage totals.
+    the same message.id, with growing output_tokens, sometimes an all-zero tail. Per id the record with the MOST
+    TOKENS counts (ties: output, read, 1h write, 5m write, fresh), whatever the order of the files, and an id counts
+    once across every file of the report (a resumed session replays earlier ids, sometimes a stale copy). Records
+    flagged isApiErrorMessage are reported under `errors`, never in the stage totals.
   * Raw counts: fresh input, 5-minute cache write, 1-hour cache write (from usage.cache_creation; a total without the
     split counts as 5-minute writes and the report says so), cache read, output.
   * Weighted (M5.2 unit, per model): each category at the model's published price, divided by the lead model's fresh
@@ -26,15 +27,21 @@ How it counts
     An unknown model is `unpriced`: raw tokens only, excluded from every weighted number (the report says so).
     `weighted_m52` is the same with M5.2's fixed multipliers (1 / 1.25 / 2 / 0.1 / 5) for comparison with the
     provisional baseline; the published cache-read price of some models is lower than 0.1x.
-  * Stage and video: the latest `reel <verb> [<ID>]` run from a Bash or PowerShell tool call of the main conversation
-    (`reel`, `reel.cmd`, a path to them, `python -m reel`, `run_python.sh ... reel`, `.../reel/cli.py`), in command
-    position only (not in a heredoc, an echo or a quoted string). The message that issues the command already belongs
-    to the new stage. Before the first command: stage `setup`. The video is --video-id, else the first id-like
-    argument after the verb, else --episode; a command without one keeps the current video. A subagent's usage goes
-    to the stage current when the main conversation started it (nested subagents roll up to the top-level spawn);
-    reel commands inside a subagent move nothing. A subagent whose spawn is not found: `unattributed-subagent`.
+  * Stage and video: the latest `reel <verb>` run from a Bash or PowerShell tool call of the main conversation, in
+    command position only (not in a heredoc, a here-string, an echo, a comment or a quoted string; each tool's own
+    quoting rules). Entry points: `reel`, `reel.cmd`, a path to them, the engine script `.../reel/cli.py` (directly
+    or through python, py, an interpreter variable such as `$PY`), `python -m reel.cli`, and `cli.py` / `-m cli` after
+    a `cd .../engine/reel`. Only verbs of the reel command table (read from engine/reel without importing it) count;
+    read-only verbs (next, status, doctor, ...) may switch the video but keep the stage. The message that issues the
+    command already belongs to the new stage. Before the first command: stage `setup`. The video is the value of
+    --video-id, else of --episode (the CLI has no positional video id, so no other word is ever a video); a command
+    without one keeps the current video. A subagent's usage goes to the stage current when the main conversation
+    started it (nested subagents roll up to the top-level spawn); reel commands inside a subagent move nothing. A
+    subagent whose spawn is not found: `unattributed-subagent`.
   * Lead context per turn: fresh + cache read + cache writes of each main-conversation message; median, p90 (nearest
     rank) and max against the 150,000 guard rail (M5.3).
+  * Nothing is dropped silently: a malformed or hostile line, an unreadable file, a folder that cannot be listed
+    are listed in `skipped` and the report says `partial`.
 
 Privacy: the output names stages, model ids, counts and anonymised video labels (item-01, ... in order of first use;
 --raw-ids prints the real ids). It never prints prompt text, tool inputs, paths or folder names; a file is named by
@@ -43,11 +50,13 @@ its path below its project folder (<session>.jsonl, <session>/subagents/agent-<h
 Usage
   python tools/token_report.py [PATH ...] [--project NAME ...] [--json FILE|-] [--lead-model ID] [--raw-ids]
                                [--marked-only] [--date YYYY-MM-DD]
-  No PATH and no --project: every project folder under the projects folder. Exit 0, or 2 when nothing could be read.
+  No PATH and no --project: every project folder under the projects folder. Exit 0; 2 when nothing can be read
+  (no transcript, or not one readable record), and then nothing is written.
 """
 from __future__ import annotations
 
 import argparse
+import ast
 import datetime as _dt
 import json
 import math
@@ -59,7 +68,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 ROOT = Path(__file__).resolve().parents[1]
 GUARD_RAIL = 150_000
 CATS = ("fresh", "write_5m", "write_1h", "read", "output")
@@ -112,12 +121,20 @@ ENTRY_NAMES = ("reel", "reel.cmd", "reel.bat", "reel.exe", "reel.ps1")
 LAUNCHERS = ("bash", "sh", "zsh", "env", "exec", "time", "nice", "nohup", "command", "call", "cmd", "timeout",
              "py", "uv", "run", "powershell", "pwsh", ".")
 VALUE_OPTS = ("--root", "--video-id", "--profile", "--episode")
+KEYWORDS = ("if", "then", "else", "elif", "do", "while", "until", "!")
+CD_WORDS = ("cd", "pushd", "chdir", "set-location", "sl")
+PY_VALUE_FLAGS = ("-X", "-W")
+VAR_RE = re.compile(r"\$\{?[A-Za-z_][A-Za-z0-9_:]*\}?|%[A-Za-z_][A-Za-z0-9_]*%")
+ENGINE = ROOT / "whynot-cut" / "engine" / "reel"
+# Real `reel` verbs that only read or report: they may name the video, but they never start a stage.
+NON_STAGE_VERBS = ("next", "status", "doctor", "needs-you", "inbox", "board", "episodes", "perf-report", "py",
+                   "serve", "settings")
 ENV_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 PY_RE = re.compile(r"python(\d+(\.\d+)*)?w?")
 NUM_RE = re.compile(r"\d+[smhd]?")
 VERB_RE = re.compile(r"[a-z][a-z0-9-]{1,40}")
 ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,80}")
-SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,120}")
+SAFE_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9._-]{0,119}[A-Za-z0-9_-])?")   # no trailing dot
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 PROJECT_NAME = re.compile(r"[^\\/:*?\"<>|\x00-\x1f]{1,255}")
@@ -162,9 +179,12 @@ def nearest_rank(values, p: float):
 
 
 # --- Shell parsing: `reel` commands in command position ------------------------------------------------------------
-def _segments(cmd: str) -> list:
-    """Simple commands of a shell line as token lists. Quotes, escapes, comments, heredoc bodies and redirection
-    targets never produce command words; ; & | && || newlines and parentheses separate commands."""
+def _segments(cmd: str, shell: str = "bash") -> list:
+    """Simple commands of a command line as token lists. Quotes, escapes, comments, heredoc / here-string bodies and
+    redirection targets never produce command words; ; & | && || newlines, parentheses and braces separate commands.
+    shell "powershell": no backslash escape (the backtick escapes), '' inside single quotes, @'...'@ / @"..."@
+    here-strings and <# ... #> comments; "bash" otherwise."""
+    ps = shell == "powershell"
     segs, toks, cur = [], [], None
     heredocs = []
     skip_word = False
@@ -188,28 +208,57 @@ def _segments(cmd: str) -> list:
 
     while i < n:
         c = cmd[i]
+        if ps and c == "@" and cmd[i + 1:i + 2] in ("'", '"'):
+            j = i + 2
+            while j < n and cmd[j] in " \t\r":
+                j += 1
+            if j < n and cmd[j] == "\n":                     # a here-string: one word, its body never a command
+                end = cmd.find("\n" + cmd[i + 1] + "@", j)
+                if end < 0:
+                    end_seg()
+                    return segs
+                cur = (cur if cur is not None else []) + ["<here-string>"]
+                i = end + 3
+                continue
         if c == "'" or c == '"':
             cur = cur if cur is not None else []
             j = i + 1
-            while j < n and cmd[j] != c:
-                if c == '"' and cmd[j] == "\\" and j + 1 < n and cmd[j + 1] in '"\\$`':
+            while j < n:
+                ch = cmd[j]
+                if ch == c:
+                    if ps and c == "'" and cmd[j + 1:j + 2] == "'":
+                        cur.append("'")
+                        j += 2
+                        continue
+                    break
+                if c == '"' and ps and ch == "`" and j + 1 < n:
+                    j += 1
+                elif c == '"' and not ps and ch == "\\" and j + 1 < n and cmd[j + 1] in '"\\$`':
                     j += 1
                 cur.append(cmd[j])
                 j += 1
             if j >= n:                     # unterminated quote: the rest is not a command
                 return segs
             i = j + 1
-        elif c == "\\":
+        elif (c == "\\" and not ps) or (c == "`" and ps):
             if i + 1 < n and cmd[i + 1] == "\n":
                 i += 2
                 continue
             cur = cur if cur is not None else []
-            if i + 1 < n and cmd[i + 1] in ESCAPABLE:
+            if ps and i + 1 < n:
+                cur.append(cmd[i + 1])
+                i += 2
+            elif i + 1 < n and cmd[i + 1] in ESCAPABLE:
                 cur.append(cmd[i + 1])
                 i += 2
             else:
                 cur.append(c)
                 i += 1
+        elif c == "$" and cmd[i + 1:i + 2] == "{":
+            j = cmd.find("}", i)
+            j = n - 1 if j < 0 else j
+            cur = (cur if cur is not None else []) + list(cmd[i:j + 1])
+            i = j + 1
         elif c in " \t\r":
             end_tok()
             i += 1
@@ -224,13 +273,20 @@ def _segments(cmd: str) -> list:
                     if (line.lstrip("\t") if dash else line) == delim:
                         break
             heredocs = []
+        elif ps and c == "<" and cmd.startswith("<#", i):
+            end_tok()
+            j = cmd.find("#>", i + 2)
+            if j < 0:
+                end_seg()
+                return segs
+            i = j + 2
         elif c == "#" and cur is None:
             j = cmd.find("\n", i)
             i = n if j < 0 else j
-        elif c in ";&|()":
+        elif c in ";&|(){}":
             end_seg()
             i += 2 if cmd[i:i + 2] in ("&&", "||") else 1
-        elif c == "<" and cmd.startswith("<<", i) and not cmd.startswith("<<<", i):
+        elif not ps and c == "<" and cmd.startswith("<<", i) and not cmd.startswith("<<<", i):
             end_tok()
             i += 2
             dash = i < n and cmd[i] == "-"
@@ -270,16 +326,20 @@ def _is_launcher(tok: str) -> bool:
     b = _base(tok)
     b = b[:-4] if b.endswith(".exe") else b
     return b in LAUNCHERS or bool(PY_RE.fullmatch(b)) or bool(NUM_RE.fullmatch(tok)) or tok.startswith("-") \
-        or tok.lower() in ("/c", "/k")
+        or tok.lower() in ("/c", "/k") or bool(VAR_RE.fullmatch(tok))
 
 
-def _is_entry(tok: str) -> bool:
-    return _base(tok) in ENTRY_NAMES or tok.replace("\\", "/").lower().endswith("reel/cli.py")
+def _is_entry(tok: str, reel_dir: bool) -> bool:
+    """The `reel` launcher by any path, the engine CLI script, or `cli.py` while the command line is in engine/reel."""
+    norm = tok.replace("\\", "/").lower()
+    return _base(tok) in ENTRY_NAMES or norm.endswith("reel/cli.py") or (reel_dir and _base(tok) == "cli.py")
 
 
 def _parse_after(rest: list):
-    """(verb, ID or None) from the words after the entry point, or None when there is no verb."""
-    verb = item = vid = ep = None
+    """(verb, video ID or None) from the words after the entry point, or None when there is no verb. The video is
+    the value of --video-id, else of --episode: the reel CLI has no positional video id, so no other word (an
+    option value such as `--model large-v3`) ever names a video (review efe8910 P2-1)."""
+    verb = vid = ep = None
     j = 0
     while j < len(rest):
         t = rest[j]
@@ -298,47 +358,92 @@ def _parse_after(rest: list):
             if not VERB_RE.fullmatch(t):
                 return None
             verb = t
-        elif item is None and ID_RE.fullmatch(t) and any(ch.isdigit() or ch == "_" for ch in t):
-            item = t
         j += 1
     if verb is None:
         return None
-    for cand in (vid, item, ep):
+    for cand in (vid, ep):
         if cand and ID_RE.fullmatch(cand):
             return verb, cand.upper()
     return verb, None
 
 
-def _segment_markers(toks: list) -> list:
+def _segment_markers(toks: list, state: dict) -> list:
     i = 0
-    while i < len(toks) and ENV_RE.match(toks[i]):
+    while i < len(toks) and (ENV_RE.match(toks[i]) or toks[i] in KEYWORDS):
         i += 1
-    run_py = False
+    if i < len(toks) and _base(toks[i]) in CD_WORDS:
+        target = [t for t in toks[i + 1:] if not t.startswith("-")]
+        state["reel_dir"] = bool(target) and target[0].replace("\\", "/").rstrip("/").lower().endswith("engine/reel")
+        return []
+    run_py, launcher = False, ""
     while i < len(toks):
         t = toks[i]
-        if _is_entry(t):
+        if _is_entry(t, state["reel_dir"]):
             m = _parse_after(toks[i + 1:])
             return [m] if m else []
         if _base(t) == "run_python.sh":
             run_py = True
         elif run_py:
             pass
-        elif t in ("-c", "-Command") and i + 1 < len(toks):
-            return reel_markers(toks[i + 1])
-        elif not _is_launcher(t):
+        elif t == "-m":
+            mod = toks[i + 1].lower() if i + 1 < len(toks) else ""
+            if mod in ("reel", "reel.cli") or mod.endswith(".reel.cli") or (mod == "cli" and state["reel_dir"]):
+                m = _parse_after(toks[i + 2:])
+                return [m] if m else []
+            return []
+        elif t in ("-c", "-Command", "-command"):
+            if launcher in ("bash", "sh", "zsh") and i + 1 < len(toks):
+                return reel_markers(toks[i + 1], "bash")
+            if launcher in ("powershell", "pwsh") and i + 1 < len(toks):
+                return reel_markers(" ".join(toks[i + 1:]), "powershell")
+            return []
+        elif t in PY_VALUE_FLAGS:
+            i += 1
+        elif _is_launcher(t):
+            b = _base(t)
+            launcher = b[:-4] if b.endswith(".exe") else b
+        else:
             return []
         i += 1
     return []
 
 
-def reel_markers(command) -> list:
-    """Every `reel <verb> [ID]` run by a shell command line, in order: [(verb, ID or None), ...]."""
+def reel_markers(command, shell: str = "bash") -> list:
+    """Every `reel <verb>` run by a command line, in order: [(verb, video ID or None), ...]. shell: "bash" (the Bash
+    tool) or "powershell" (the PowerShell tool); anything else is read as bash."""
     if not isinstance(command, str) or not command:
         return []
+    shell = "powershell" if shell in ("powershell", "pwsh") else "bash"
+    state = {"reel_dir": False}
     out = []
-    for seg in _segments(command):
-        out += _segment_markers(seg)
+    for seg in _segments(command, shell):
+        out += _segment_markers(seg, state)
     return out
+
+
+def _dict_keys(path: Path, name: str):
+    """The string keys of the module-level dict literal `name` in a Python file (read, never imported)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        target = node.targets[0] if isinstance(node, ast.Assign) and node.targets else \
+            node.target if isinstance(node, ast.AnnAssign) else None
+        if isinstance(target, ast.Name) and target.id == name and isinstance(node.value, ast.Dict):
+            return [k.value for k in node.value.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)]
+    return None
+
+
+def known_verbs(engine=None):
+    """The `reel` command table (CORE_COMMANDS of cli.py + the podcast and motion HELP tables), read statically from
+    the engine source; None when it cannot be read (then any verb starts a stage, and the report says so)."""
+    engine = ENGINE if engine is None else Path(engine)
+    try:
+        core = _dict_keys(engine / "cli.py", "CORE_COMMANDS")
+        if not core:
+            return None
+        extra = [_dict_keys(engine / "lib" / f, "HELP") or [] for f in ("podcast_cli.py", "motion_cli.py")]
+    except (OSError, SyntaxError, ValueError, UnicodeDecodeError):
+        return None
+    return set(core).union(*extra)
 
 
 # --- Paths --------------------------------------------------------------------------------------------------------
@@ -357,18 +462,26 @@ def default_projects_dir(env=None, platform=None) -> Path:
     return Path(home or Path.home()) / ".claude" / "projects"
 
 
-def _is_link(path) -> bool:
-    """A symlink or any Windows reparse point (junction): never walked into or read through."""
+def _is_link(path):
+    """True for a symlink or any Windows reparse point (junction): never walked into or read through. None when the
+    entry cannot be inspected (the caller lists it in `skipped`)."""
     try:
         st = os.lstat(path)
     except OSError:
-        return True
+        return None
     if stat.S_ISLNK(st.st_mode):
         return True
     return bool(getattr(st, "st_file_attributes", 0) & 0x400)
 
 
-def _walk_jsonl(root: Path) -> list:
+def _dir_label(d: Path) -> str:
+    """A folder's name for `skipped`: <session>/subagents/, else a generic label (folder names can hold paths)."""
+    return f"{d.parent.name}/subagents/" if d.name == "subagents" else "(folder)/"
+
+
+def _walk_jsonl(root: Path, skipped: list) -> list:
+    """Every *.jsonl below root, never entering links. A folder that cannot be listed and an entry that cannot be
+    inspected go to `skipped` (review efe8910 P3-3): nothing is dropped silently."""
     out = []
     stack = [root]
     while stack:
@@ -377,30 +490,46 @@ def _walk_jsonl(root: Path) -> list:
             with os.scandir(d) as it:
                 entries = sorted(it, key=lambda e: e.name)
         except OSError:
+            skipped.append({"file": _dir_label(d), "line": 0})
             continue
         for e in entries:
             p = Path(e.path)
-            if _is_link(p):
+            link = _is_link(p)
+            try:
+                is_dir = e.is_dir(follow_symlinks=False)
+            except OSError:
+                is_dir = False
+            if link is None:
+                if is_dir or e.name.endswith(".jsonl"):
+                    skipped.append({"file": _dir_label(p) if is_dir else _label(p), "line": 0})
                 continue
-            if e.is_dir(follow_symlinks=False):
+            if link:
+                continue
+            if is_dir:
                 stack.append(p)
             elif e.name.endswith(".jsonl"):
                 out.append(p)
     return sorted(out)
 
 
-def discover(paths) -> list:
-    """[(main file or None, [subagent files])] for every session under the given files or folders."""
+def discover(paths, skipped=None) -> list:
+    """[(main file or None, [subagent files])] for every session under the given files or folders; folders and
+    entries that cannot be read are appended to `skipped`."""
+    skipped = [] if skipped is None else skipped
     files = []
     for p in paths:
         p = Path(p)
         if p.is_file() and p.suffix == ".jsonl":
             files.append(p)
             sub = p.with_suffix("") / "subagents"
-            if sub.is_dir() and not _is_link(sub):
-                files += _walk_jsonl(sub)
+            if sub.is_dir():
+                link = _is_link(sub)
+                if link is None:
+                    skipped.append({"file": _dir_label(sub), "line": 0})
+                elif not link:
+                    files += _walk_jsonl(sub, skipped)
         elif p.is_dir():
-            files += _walk_jsonl(p)
+            files += _walk_jsonl(p, skipped)
     sessions, subs = {}, {}
     for f in sorted(set(files)):
         if f.parent.name == "subagents":
@@ -475,13 +604,23 @@ def _raw(usage: dict):
             "read": _int(usage.get("cache_read_input_tokens")), "output": _int(usage.get("output_tokens"))}, missing
 
 
+def _rank(raw: dict, missing: bool, model: str) -> tuple:
+    """Which record of one message id counts: the most tokens, then output, read, 1h write, 5m write, fresh, then a
+    record with the 5m/1h split over one without, then the larger model key. Streamed records of a response only
+    grow, so this is its final record, whichever file a stale replay sits in, and even a full tie has one answer
+    (review efe8910 P3-1: "last non-zero" depended on the random order of session files)."""
+    return (sum(raw.values()), raw["output"], raw["read"], raw["write_1h"], raw["write_5m"], raw["fresh"],
+            not missing, model)
+
+
 class Msg:
-    __slots__ = ("group", "model", "raw", "split_missing", "error", "kind", "ctx", "first_file", "session", "order")
+    __slots__ = ("group", "model", "raw", "split_missing", "error", "kind", "ctx", "first_file", "session", "order",
+                 "rank")
 
     def __init__(self, group, session, first_file, order):
         self.group, self.session, self.first_file, self.order = group, session, first_file, order
         self.model, self.raw, self.split_missing, self.error = "unknown", dict.fromkeys(CATS, 0), False, False
-        self.kind, self.ctx = "main", ("setup", None)
+        self.kind, self.ctx, self.rank = "main", ("setup", None), None
 
 
 class Reader:
@@ -490,6 +629,9 @@ class Reader:
         self.skipped = []
         self.sessions = 0
         self.order = 0
+        self.records = 0                     # JSON objects read (0 everywhere -> main() refuses)
+        self.unknown_verbs = 0               # `reel <word>` where the word is not in the command table
+        self.verbs = known_verbs()
 
     def _records(self, f: Path, quiet=False):
         label = _label(f)
@@ -505,11 +647,12 @@ class Reader:
                     continue
                 try:
                     r = json.loads(line)
-                except ValueError:
+                except (ValueError, RecursionError):        # RecursionError: a hostile, deeply nested line
                     if not quiet:
                         self.skipped.append({"file": label, "line": n})
                     continue
                 if isinstance(r, dict):
+                    self.records += 1
                     yield n, r
 
     def _take(self, group, session, label, r, kind, ctx, key_fallback):
@@ -529,10 +672,9 @@ class Reader:
             msg.ctx = ctx
         raw, missing = _raw(usage)
         model = normalize_model(m.get("model")) + ("+fast" if usage.get("speed") == "fast" else "")
-        if any(raw.values()):
-            msg.raw, msg.split_missing, msg.model = raw, missing, model
-        elif msg.model == "unknown":
-            msg.model = model
+        rank = _rank(raw, missing, model)
+        if msg.rank is None or rank > msg.rank:      # the record with the most tokens, in any file order
+            msg.raw, msg.split_missing, msg.rank, msg.model = raw, missing, rank, model
         if r.get("isApiErrorMessage") is True:
             msg.error = True
         return msg
@@ -546,7 +688,8 @@ class Reader:
                 continue
             if b.get("name") in SHELL_TOOLS:
                 inp = b.get("input")
-                for mk in reel_markers(inp.get("command") if isinstance(inp, dict) else None):
+                shell = "powershell" if b.get("name") == "PowerShell" else "bash"
+                for mk in reel_markers(inp.get("command") if isinstance(inp, dict) else None, shell):
                     yield "marker", mk
             elif b.get("name") in AGENT_TOOLS and isinstance(b.get("id"), str):
                 yield "spawn", b["id"]
@@ -556,11 +699,14 @@ class Reader:
             if r.get("type") == "assistant" and isinstance(r.get("message"), dict):
                 yield n, r
 
+    def _known(self, verb: str) -> bool:
+        return self.verbs is None or verb in self.verbs
+
     def _has_marker(self, main) -> bool:
-        """Does the main conversation run a reel command (for --marked-only)?"""
+        """Does the main conversation run a real reel command (for --marked-only)?"""
         for _, r in self._assistant(main, quiet=True):
             if r.get("isSidechain") is not True and not isinstance(r.get("parent_tool_use_id"), str) \
-                    and any(kind == "marker" for kind, _ in self._blocks(r)):
+                    and any(kind == "marker" and self._known(val[0]) for kind, val in self._blocks(r)):
                 return True
         return False
 
@@ -579,8 +725,15 @@ class Reader:
                 parent = parent if isinstance(parent, str) else None
                 for kind, val in self._blocks(r):
                     if kind == "marker":
-                        if not side and parent is None:
-                            ctx = (val[0], val[1] or ctx[1])
+                        if side or parent is not None:
+                            continue                     # a subagent's reel command moves nothing
+                        verb, item = val
+                        if not self._known(verb):
+                            self.unknown_verbs += 1      # `reel help`, a typo: the CLI rejects it, no stage
+                        elif verb in NON_STAGE_VERBS:
+                            ctx = (ctx[0], item or ctx[1])
+                        else:
+                            ctx = (verb, item or ctx[1])
                     elif parent is not None:
                         owner[val] = ("tool", parent)
                     else:
@@ -782,9 +935,9 @@ def build_report(paths, *, lead_model=None, raw_ids=False, marked_only=False, da
         runs_missing += missing
         for key, folder in runs:
             run_keys.append(key)
-            for main, subs in discover([folder]):
+            for main, subs in discover([folder], reader.skipped):
                 reader.read_session(key, main, subs, marked_only)
-    for main, subs in discover(plain):
+    for main, subs in discover(plain, reader.skipped):
         reader.read_session("", main, subs, marked_only)
     msgs = list(reader.msgs.values())
     lead = _choose_lead(msgs, lead_model)
@@ -808,11 +961,14 @@ def build_report(paths, *, lead_model=None, raw_ids=False, marked_only=False, da
                            f"({split_missing} message{'s' if split_missing != 1 else ''})")
     if lead and not lead_in:
         assumptions.append(f"the lead model {lead} is not in the price table: no weighted numbers")
+    if reader.verbs is None:
+        assumptions.append("the reel command table (engine/reel/cli.py) was not found: every verb starts a stage")
     rep = {"tool": "token_report", "version": VERSION, "report_date": date or _dt.date.today().isoformat(),
            "commit": commit if commit is not None else repo_commit(ROOT),
            "prices": {"source": PRICES_SOURCE, "read_on": PRICES_READ_ON, "lead_model": lead,
                       "unit": "lead-model fresh input token equivalents"},
            "anonymised": not raw_ids, "assumptions": assumptions, "sessions": reader.sessions,
+           "records": reader.records, "unknown_verbs": reader.unknown_verbs,
            "partial": bool(reader.skipped), "skipped": reader.skipped}
     rep.update(body)
     if run_keys or runs_missing:
@@ -873,6 +1029,18 @@ def _write_json(rep: dict, path: str) -> None:
         raise
 
 
+def _utf8_stdio() -> None:
+    """Report text is UTF-8 whatever the console or pipe encoding (review efe8910 P3-5: an Arabic report path
+    crashed a cp1252 stdout after the JSON was written)."""
+    for stream in (sys.stdout, sys.stderr):
+        enc = (getattr(stream, "encoding", None) or "").lower().replace("-", "").replace("_", "")
+        if enc != "utf8" and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="token_report", description=__doc__.split("\n\n")[0])
     ap.add_argument("paths", nargs="*", help="transcript files or folders (default: the projects folder)")
@@ -883,6 +1051,7 @@ def main(argv=None) -> int:
     ap.add_argument("--marked-only", action="store_true", help="only sessions that ran a reel command")
     ap.add_argument("--date", help="report date YYYY-MM-DD (default: today)")
     a = ap.parse_args(argv)
+    _utf8_stdio()
 
     def refuse(msg):
         print(f"token_report: {msg}", file=sys.stderr)
@@ -904,6 +1073,8 @@ def main(argv=None) -> int:
     if not any(discover([p]) or _manifest_runs(p) for p in paths if p.is_dir() or p.is_file()):
         return refuse("no Claude Code transcripts (*.jsonl) found under the given folder(s)")
     rep = build_report(paths, lead_model=a.lead_model, raw_ids=a.raw_ids, marked_only=a.marked_only, date=a.date)
+    if rep["records"] == 0:
+        return refuse("no readable transcript records (every line or file could not be read): nothing written")
     if a.json_path == "-":
         print(json.dumps(rep, indent=2, sort_keys=True, ensure_ascii=False))
         return 0
