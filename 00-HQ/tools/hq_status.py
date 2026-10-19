@@ -135,6 +135,66 @@ def api_month_estimate(api_dir):
         return {}
 
 
+PREVIEW_DIR = Path(r"D:\ClaudeData\release-preview")
+PREVIEW_LABEL = EP / "خد دا كوبي للويندوز" / "LABEL.txt"
+WNC_QUEUE = REPO / "tools" / "wnc-queue"
+
+
+def preview_label(path):
+    try:
+        t = Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    return {k: v.strip() for k, v in re.findall(r"^(label|commit|date):\s*(.+)$", t, re.M)}
+
+
+def should_queue_refresh(check_exit, locked, jobs):
+    """OPS-03 (was lane-watch 0f): queue one zero-token rebuild only when the folders are behind origin (exit 10),
+    no refresh holds the lock, the queue state is known (`wnc-queue list --json` rows) and no refresh waits or runs."""
+    if check_exit != 10 or locked or jobs is None:
+        return False
+    return not any(j.get("title") == "release preview refresh" and j.get("state") != "done" for j in jobs)
+
+
+def refresh_failure(log):
+    """The refresher's last log line when it says FAILED (lane-watch 0f reported it), else ''."""
+    try:
+        lines = [l for l in Path(log).read_text(encoding="utf-8", errors="replace").splitlines() if l.strip()]
+    except OSError:
+        return ""
+    return lines[-1][:300] if lines and "FAILED" in lines[-1] else ""
+
+
+def _run(cmd, timeout):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
+    except (subprocess.SubprocessError, OSError):
+        return None
+
+
+def preview_state(queue=False):
+    """Check the «خد دا كوبي» folders against origin/release/3.0 (refresh.py --check) and optionally queue one
+    rebuild through wnc-queue. Never builds here; never raises."""
+    st = {"label": preview_label(PREVIEW_LABEL), "check": None, "queued": False,
+          "failed": refresh_failure(PREVIEW_DIR / "refresh.log")}
+    r = _run([sys.executable, "-X", "utf8", str(PREVIEW_DIR / "refresh.py"), "--check"], 180)
+    if r is None:
+        return st
+    st["check"] = r.returncode
+    if queue and r.returncode == 10:
+        ls = _run(["bash", str(WNC_QUEUE), "list", "--owner", "release", "--json"], 60)
+        try:
+            jobs = json.loads(ls.stdout) if ls is not None and ls.returncode == 0 else None
+        except ValueError:
+            jobs = None
+        if should_queue_refresh(st["check"], (PREVIEW_DIR / "refresh.lock").exists(), jobs):
+            q = _run(["bash", str(WNC_QUEUE), "add", "--title", "release preview refresh", "--class", "none",
+                      "--timeout", "6h", "--owner", "release", "--cwd", str(PREVIEW_DIR), "--", "python", "-X", "utf8",
+                      str(PREVIEW_DIR / "refresh.py")], 60)
+            st["queued"] = q is not None and q.returncode == 0
+    return st
+
+
 def ram_percent():
     if os.name != "nt":
         return None
@@ -332,6 +392,16 @@ def snapshot(hq=HQ, repo=REPO, accounts=ACCOUNTS, api_dir=API_DIR):
             "requests": open_requests(Path(hq, "PRIMARY_ACCOUNT_INBOX.md"))}
 
 
+def preview_line(p):
+    if not p:
+        return "- فولدرات «خد دا كوبي»: مش متشيّكة في التشغيل ده."
+    lab = p.get("label", {})
+    state = {0: "متحدّثة مع GitHub", 10: "متأخرة عن GitHub"}.get(p.get("check"), "الفحص ما اشتغلش")
+    return (f"- فولدرات «خد دا كوبي» (المصدر LABEL.txt + refresh.py --check): {lab.get('label', '—')} @ "
+            f"{lab.get('commit', '—')[:8]} ({lab.get('date', '—')}) — {state}"
+            + (" — **اتحط rebuild في الطابور**" if p.get("queued") else ""))
+
+
 STALE_MIN = 330  # a run silent this long is killed by helper_loop (5 h 10 min + slack)
 
 
@@ -362,6 +432,7 @@ def render_report(s, prev, slot_title, sync=None):
           + (" — **tag جديد من آخر تقرير** (محتاج تأكيد التجربة في Premiere قبل ما يتسمّى verified)"
              if new_tag else " — **NO NEW VERIFIED BUILD**"),
           "- آخر نسخة متجرّبة جوه Premiere وجدول النسخ: `PROJECT_PLAN_AR.md` §5 (بيتحدّث مع كل release متجرّبة).",
+          preview_line(s.get("preview")),
           "", "## 4. حالة Git (المصدر: git rev-parse + ls-remote)",
           f"- `{g['branch']}` محلي {(g['local'] or '—')[:8]} / GitHub {(g['remote'] or '—')[:8]} → **{g['label']}** "
           f"(ملفات مش متعملها commit في شجرة الـ executor: {g['dirty_files']})"]
@@ -378,6 +449,8 @@ def render_report(s, prev, slot_title, sync=None):
         if v["status"] in ("DONE", "BLOCKED") and verdict not in ("ACCEPTED", "FIX", "answered", "noted"):
             extra = f" (intake: {verdict})" if verdict else ""
             L.append(f"- تقرير {k} ({v['status']}) من {v['who'].upper()} مستني الاستلام{extra}: `{v['file']}`")
+    if (s.get("preview") or {}).get("failed"):
+        L.append(f"- آخر rebuild لفولدرات «خد دا كوبي» فشل (refresh.log): {s['preview']['failed']}")
     if s["ram"] is not None and s["ram"] >= 85:
         L.append(f"- RAM {s['ram']}%: مفيش heavy job جديد يبدأ (الفرامل 85%).")
     if len(L) == n:
@@ -427,6 +500,7 @@ def main(argv=None):
             print(f"{a.mark_sent[0]}: no FILED row found")
         return 0 if ok else 4
     s = snapshot()
+    s["preview"] = preview_state(queue=a.write)
     last = Path(HQ, "reports", ".last-snapshot.json")
     prev = json.loads(last.read_text(encoding="utf-8")) if last.exists() else None
     slot = SLOTS.get(datetime.datetime.now().hour, "تقرير حالة")

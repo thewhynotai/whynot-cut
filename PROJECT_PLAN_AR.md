@@ -58,8 +58,8 @@
   - شروط الإغلاق: checklist الـ charter §29 كلها بدليل (شوف §7 تحت).
   - [x] OPS-00 — Audit + baseline + أرشفة أول دفعة — Command Center — DONE — دليل: `00-HQ/reports/2026-10-20-audit.md`, `00-HQ/ARCHIVE_MANIFEST.md`
   - [ ] ENV-01 — بيئة الـ tests للمساعدين — Command Center — IN_PROGRESS — دليل: `00-HQ/tasks/ENV-01.md`
-  - [ ] OPS-01 — مولّد الحالة والتقارير + المزامنة مع GitHub — Command Center — IN_PROGRESS — `00-HQ/tasks/OPS-01.md`
-  - [ ] OPS-02 — جدولة 4 تقارير يومية وتجربة التسليم — بعد OPS-01
+  - [x] OPS-01 — مولّد الحالة والتقارير + المزامنة مع GitHub — Command Center — DONE_ARCHIVED — 25/25 tests، مراجعتين مستقلتين، GitHub `ops/hq` d7ac597 — `00-HQ/tasks/archive/OPS-01/`
+  - [ ] OPS-02 — جدولة 4 تقارير يومية وتجربة التسليم — IN_PROGRESS — الـ routine اتعملت (9/1/5/9)، أول تشغيل مستني موافقتك مرة واحدة (Q-005)
   - [ ] OPS-05 — أول دورة handoff حقيقية بين H1 و H2 (peer review) بدليل — بعد ENV-01
 - [ ] **M1 — Gate 4 → `v3.0.0-p4` (أول build متجرّب جوه Premiere لـ 3.0)** — الـ executor — IN_PROGRESS
   - النتيجة اللي هتشوفها: build حي لـ PODCAST-TEST جوه Premiere + frames، والنسخة في `Releases`.
@@ -87,7 +87,7 @@
 
 ## 3. قائمة التنفيذ بالترتيب
 
-- [x] آخر تاسكات مكتملة: OPS-00 (audit + baseline + أرشفة) — `00-HQ/reports/2026-10-20-audit.md`
+- [x] آخر تاسكات مكتملة: OPS-00 (audit + baseline + أرشفة) — `00-HQ/reports/2026-10-20-audit.md`؛ OPS-01 (الـ pilot الكامل: tests → مراجعة مستقلة → commit → GitHub → أرشفة) — `00-HQ/tasks/archive/OPS-01/`
 - [ ] **التاسك الحالية:** ENV-01 — تسطيب الـ runtime في البيئة الحقيقية، وبعدها suite كاملة لـ H1 تثبت إن الـ 563
   اتحلوا. المسؤول: Command Center.
 - [ ] **اللي بعدها:** OPS-01 → OPS-02 (التقارير)، وفي نفس الوقت الـ executor بيكمّل Gate 4، والمساعدين بيكمّلوا كروتهم.
@@ -139,7 +139,7 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
   - [x] Inventory للمشروع والـ agents والـ routines والشاتات
   - [x] Baseline محفوظ (backup + git bundle + branch على GitHub)
   - [x] أرشفة أول دفعة بـ manifest
-  - [ ] مزامنة GitHub للـ HQ (`ops/hq`) — OPS-01
+  - [x] مزامنة GitHub للـ HQ (`ops/hq`) — OPS-01، local = remote متأكد في كل تشغيل
   - [x] Queue و lease و handoff و archive موجودين (00-HQ) — الـ TASK_QUEUE.yaml المولّد في OPS-01
   - [x] هويات الحسابات الثلاثة اتأكدت (D-002)
   - [ ] تجربة read/write و handoff لكل حساب — OPS-05
@@ -147,7 +147,7 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
   - [ ] resume بعد restart للجهاز — اتشاف فعليًا النهارده لـ H1 (keepalive 00:46)، لسه لـ H2
   - [ ] تقرير الصبح والليل + 4 تقارير PRIMARY مجدولة ومتجرّبة — OPS-02
   - [x] خطة الـ $500 جاهزة ومش متفعّلة (`00-HQ/BUDGET-API.md`)
-  - [ ] Pilot كامل: تاسك → QA مستقل → commit → GitHub → أرشفة → التاسك اللي بعدها — OPS-01 هي الـ pilot
+  - [x] Pilot كامل: تاسك → QA مستقل → commit → GitHub → أرشفة → التاسك اللي بعدها — OPS-01 → OPS-02
 
 ## 8. خطة الـ API بحد أقصى 500 دولار
 

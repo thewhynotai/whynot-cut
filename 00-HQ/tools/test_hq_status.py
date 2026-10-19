@@ -279,5 +279,39 @@ class FixRound2(unittest.TestCase):
         self.assertIsNone(hs._git(".", "rev-parse", "HEAD", timeout=0.000001))
 
 
+class Preview(unittest.TestCase):
+    """OPS-03: release-preview folders vs origin, without lane-watch."""
+
+    def test_label_is_read(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d, "LABEL.txt")
+            p.write_text("label: PREVIEW-3.0.0-p4\ncommit: 322d8a5de3c5\ndate: 2026-10-19 01:55 UTC\n", encoding="utf-8")
+            self.assertEqual(hs.preview_label(p), {"label": "PREVIEW-3.0.0-p4", "commit": "322d8a5de3c5",
+                                                   "date": "2026-10-19 01:55 UTC"})
+            self.assertEqual(hs.preview_label(Path(d, "none.txt")), {})
+
+    def test_queue_a_refresh_only_when_behind_and_not_already_queued(self):
+        done = [{"state": "done", "title": "release preview refresh"}]          # `wnc-queue list --json` rows
+        waiting = [{"state": "queued", "title": "release preview refresh"}]
+        running = [{"state": "running", "title": "release preview refresh"}]
+        self.assertTrue(hs.should_queue_refresh(10, False, done))
+        self.assertTrue(hs.should_queue_refresh(10, False, []))
+        self.assertFalse(hs.should_queue_refresh(0, False, done))      # up to date
+        self.assertFalse(hs.should_queue_refresh(10, True, done))      # a refresh holds the lock
+        self.assertFalse(hs.should_queue_refresh(10, False, waiting))  # already waiting in the queue
+        self.assertFalse(hs.should_queue_refresh(10, False, running))  # already running
+        self.assertFalse(hs.should_queue_refresh(10, False, None))     # queue state unknown: never guess
+        self.assertFalse(hs.should_queue_refresh(None, False, done))   # check could not run
+
+    def test_a_failed_refresh_is_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d, "refresh.log")
+            p.write_text("2026-10-19 04:55:50 DONE PREVIEW ok\n2026-10-20 03:00:00 FAILED clone fetch\n", encoding="utf-8")
+            self.assertIn("FAILED clone fetch", hs.refresh_failure(p))
+            p.write_text("2026-10-19 04:55:50 DONE PREVIEW ok\n", encoding="utf-8")
+            self.assertEqual(hs.refresh_failure(p), "")
+            self.assertEqual(hs.refresh_failure(Path(d, "none.log")), "")
+
+
 if __name__ == "__main__":
     unittest.main()

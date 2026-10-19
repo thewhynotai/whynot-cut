@@ -32,10 +32,10 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 | ENV-01 | Engine runtime for unsandboxed processes (helper suites: 563 env errors) | MASTER | IN PROGRESS | `tasks/ENV-01.md` | then SETUP-H1/H2 re-run |
 | OPS-01 | Status generator, Arabic reports, ops/hq GitHub mirror (pilot task) | MASTER | DONE_ARCHIVED (02:00, 25/25 tests, 2 reviews) | `tasks/archive/OPS-01/OPS-01.md` | OPS-02 |
 | OPS-02 | Schedule the 4 daily PRIMARY reports + delivery receipt test | MASTER | IN PROGRESS | `tasks/OPS-02.md` | — |
-| OPS-03 | Fold the release-preview refresh check into the report run; retire lane-watch | MASTER | READY | `tasks/OPS-03.md` | — |
+| OPS-03 | Fold the release-preview refresh check into the report run; retire lane-watch | MASTER | DONE_ARCHIVED (02:20, 28/28, review r1) | `tasks/archive/OPS-03/OPS-03.md` | — |
 | OPS-04 | After the tag: move 00-HQ into the repo; fix 3 repo references to archived docs | EXECUTOR | NOT READY (after the v3.0.0-p4 tag) | `tasks/OPS-04.md` | — |
 | OPS-05 | First observed cross-account cycle: H1 DONE → H2 peer review → intake verdict | MASTER (observe) | NOT READY (needs ENV-01) | `tasks/OPS-05.md` | — |
-| OPS-06 | Effort per tier in helper runs (HIGH → high, LIGHT/setup → medium); owner rule 10-19 21:00 | MASTER | READY | `tasks/OPS-06.md` | — |
+| OPS-06 | Effort per tier in helper runs (HIGH → high, LIGHT/setup → medium); owner rule 10-19 21:00 | MASTER | DONE_ARCHIVED (02:12, 30/30, review r1) | `tasks/archive/OPS-06/OPS-06.md` | — |
 | API-500 | The single paid API job (Stage 3 mechanical part) | LANE | PLANNED_NOT_AUTHORIZED (waits for «نفذ خطة الـ API») | `BUDGET-API.md` | — |
 
 ## Old-system tracks still running on Yunus's account (no change until their END)

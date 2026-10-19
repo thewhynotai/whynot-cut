@@ -170,6 +170,7 @@ the others.
 | Routine implementation from a clear card, tests, refactors, docs edits | Sonnet 5.5 | high |
 | File search, digests, inventories, log reading (subagents) | Haiku 5.5 or Sonnet 5.5 | medium |
 
+- **Effort follows the tier (owner rule 2026-10-19 ~21:00, OPS-06):** HIGH-tier work and reviews of HIGH cards at effort high; LIGHT tier, setup, coordination and monitoring at medium. Helper AUTO runs pass `--effort` from `auto\next-effort.txt` (written by the agent from the next card's **Tier:**; unknown = high; cleared when the helper goes IDLE).
 - Helper profiles start on Sonnet. When the card says Opus, type `/model opus` at the start of the task. Switch
   back with `/model sonnet` for routine parts.
 - **One mission per chat.** A chat starts from a task card and ends when it is delivered. A new task = a new chat
