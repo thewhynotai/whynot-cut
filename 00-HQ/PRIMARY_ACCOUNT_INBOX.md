@@ -27,4 +27,4 @@ channel state is `NOT_CONFIGURED`, and messages stay `FILED`.
 | R-2026-10-20-0150 | 2026-10-20 01:50 | hq_status | PRIMARY | FILED | تقرير حالة: 0 تغيير | `reports/2026-10-20-0150.md` |
 | R-2026-10-20-0159 | 2026-10-20 02:00 | hq_status | PRIMARY | FILED | تقرير حالة: 0 تغيير | `reports/2026-10-20-0159.md` |
 | R-2026-10-20-0230 | 2026-10-20 02:30 | hq_status | PRIMARY | FILED | تقرير حالة: 4 تغيير | `reports/2026-10-20-0230.md` |
-| R-2026-10-20-0247 | 2026-10-20 02:47 | hq_status | PRIMARY | FILED | تقرير حالة: 0 تغيير | `reports/2026-10-20-0247.md` |
+| R-2026-10-20-0247 | 2026-10-20 02:47 | hq_status | PRIMARY | SENT (session local_6b4431c0-41de-4ea5-b907-00792073ae27) | تقرير حالة: 0 تغيير | `reports/2026-10-20-0247.md` |
