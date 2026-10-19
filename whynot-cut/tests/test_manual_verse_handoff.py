@@ -20,9 +20,14 @@ sys.path.insert(0, str(SK / "tests"))
 
 from lib import common  # noqa: E402
 from test_manual_verse import has_verse  # noqa: E402
-from test_manual_verse_premiere_xml import NAME, video_project  # noqa: E402
+try:  # the fixture lives with the premiere_xml-verse patch (ADOBE-G4); until it lands this test cannot run
+    from test_manual_verse_premiere_xml import NAME, video_project  # noqa: E402
+    _PENDING = None
+except ImportError:  # executor 2026-10-19 (review c2c23e6 P2-3): an explicit, dated skip, removed by the fix round
+    _PENDING = "waits for ADOBE-G4's premiere_xml-verse patch (test_manual_verse_premiere_xml)"
 
 
+@unittest.skipIf(_PENDING, _PENDING or "")
 class TestHandoff(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="mvh_"))
