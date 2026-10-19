@@ -74,7 +74,7 @@ security line. Each row is OPEN until it is accepted and pushed.
 
 **Gate 4 exit, as in the phase plan:**
 - [ ] independent review, 0 Critical / 0 Important
-- [ ] full suite on a snapshot, 0 failures, `WNC_REQUIRE_SCANNERS=1`
+- [ ] full suite on a snapshot, 0 failures, `WNC_REQUIRE_SCANNERS=1`, and ZERO temporary dated skips (plan session 2026-10-19). A gate check greps the tests for the executor's dated-skip markers ("an explicit, dated skip", `_PENDING`, "waits for … patch") and for any `skipIf`/`skipUnless` added since p3.1 that isn't a platform or tool skip. A religious-safety or medical-safety test is never green-by-skip at the tag. Today: test_manual_verse_handoff (61feeb2) is removed by the verse fix-round commit, and the manual verse slot is NOT accepted while the skip exists.
 - [ ] `validate --strict` ×2
 - [ ] evals on the subscription CLI (`claude plugin eval`, the same judge as the p3 baseline), Task 53 cases included; run at the END, after code freeze, `-j 2` through heavy.sh; re-auth the bundled CLI first (H11: Yunus's one browser click; an `auth_failed` run is no result, not a fail); Task 53's two verse cases are CANCELLED (owner 2026-10-18: K-T8 cancelled, verses are added by the editor by hand); builder A swaps them for non-verse religious cases (hadith or a ruling), so each domain keeps at least 3 positive + 1 negative
 - [ ] full macOS CI on the tag
