@@ -66,4 +66,64 @@ def compare(plan: dict, rb: dict, fmt: dict, caps: dict) -> dict:
                     fails.append(f"{sc['id']}: {boxes[i][0]} overlaps {boxes[j][0]}")
     for ps in rb.get("missing_or_substituted") or []:
         fails.append(f"After Effects reports a missing/substituted font: {ps}")
+    _compare_audio(plan, rb, fails, warns)
     return {"ok": not fails, "failures": fails, "warnings": warns}
+
+
+KEY_DB_TOL = 0.01
+AE_SILENT_DB = -48.0     # After Effects treats Audio Levels at or below -48 dB as silence (and may clamp lower keys)
+
+
+def _key_level_ok(planned: float, got: float) -> bool:
+    """A planned silent key (at or below -48 dB, the fade floor) matches any value at or below -48 dB; every other key
+    keeps the exact tolerance (live risk R-L5)."""
+    if planned <= AE_SILENT_DB:
+        return got <= AE_SILENT_DB + KEY_DB_TOL
+    return abs(got - planned) <= KEY_DB_TOL
+
+
+def _compare_audio(plan: dict, rb: dict, fails: list, warns: list) -> None:
+    """T4.6: MAIN's audio layers: one DIALOGUE, one MUSIC exactly when the plan has music (with the plan's level keys),
+    one SFX_* per cue, nothing doubled (a rebuild never stacks a second bed)."""
+    got = rb.get("audio")
+    a = plan.get("audio") or {}
+    if got is None:
+        warns.append("the After Effects read-back has no audio layers (an older bridge): the MUSIC level keys were not "
+                     "checked")
+        return
+    names = [str(x.get("name")) for x in got]
+    for n in sorted(set(names)):
+        k = names.count(n)
+        if k > 1:
+            fails.append(f"audio layer {n} appears {k} times in MAIN (duplicate)")
+    if a.get("dialogue") and "DIALOGUE" not in names:
+        fails.append("audio layer DIALOGUE missing in MAIN")
+    music = a.get("music")
+    mus = [x for x in got if x.get("name") == "MUSIC"]
+    if music and not mus:
+        fails.append(f"audio layer MUSIC missing in MAIN (plan: {music.get('rel') or music.get('file')})")
+    elif not music and mus:
+        fails.append("a MUSIC layer is in MAIN but the plan has no music")
+    elif music and mus:
+        got_m = mus[0]
+        want, have = music.get("keyframes") or [], got_m.get("keys") or []
+        # each read-back key is [frame, left dB, right dB] (an older bridge: [frame, dB]); both channels must match
+        same = len(want) == len(have) and all(
+            len(h) >= 2 and int(w[0]) == int(h[0]) and all(_key_level_ok(float(w[1]), float(v)) for v in h[1:])
+            for w, h in zip(want, have))
+        if not same:
+            fails.append(f"MUSIC level keys differ from the plan ({len(have)} keys in After Effects, {len(want)} "
+                         "planned): the ducking is not what was approved")
+        end = music.get("end_frame")
+        if end is not None and got_m.get("out_frame") is not None and abs(int(got_m["out_frame"]) - int(end)) > 1:
+            fails.append(f"MUSIC ends at frame {got_m['out_frame']} in MAIN, the plan ends it at {end}")
+        if got_m.get("file") is not None:
+            from pathlib import PureWindowsPath     # splits on / and \ alike
+            import unicodedata
+            want_name = PureWindowsPath(str(music.get("file") or "")).name
+            norm_ = (lambda x: unicodedata.normalize("NFC", str(x)).casefold())
+            if norm_(got_m["file"]) != norm_(want_name):
+                fails.append(f"MUSIC plays {got_m['file']}, the plan names {want_name}")
+    sfx = [n for n in names if n.startswith("SFX_")]
+    if len(set(sfx)) != len(a.get("sfx") or []):
+        fails.append(f"{len(set(sfx))} SFX layers in MAIN, the plan has {len(a.get('sfx') or [])}")

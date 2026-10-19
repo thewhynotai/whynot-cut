@@ -44,7 +44,9 @@ PanelState from the item's evidence files (panel_fields)
       qc          08_quality_control/qc-results.json `ok`: true -> done, false -> failed (qc.py:291-292,
                   motion_qc.py:175)
       approval inputs (_approval_inputs): plan-approval.json, plus the motion fingerprint's inputs only for a motion
-                  item or a record of kind "motion", plus timeline-spec.json unless the record is of kind "motion"
+                  item or a record of kind "motion" (T4.6: with the data/Music licence files and music.json; the
+                  data/Music folders are watched and listed, and its tracks watched, so the panel recomputes when a
+                  licence or track changes), plus timeline-spec.json unless the record is of kind "motion"
       handoff     09_handoff/README.md exists (cli.py:835)
     Approval card (only while the approve step is waiting):
       fingerprint the current plan's, what approve-plan records: lib/plan.py plan_fingerprint (plan.py:912,
@@ -468,6 +470,8 @@ class _Item:
             self.plugin = common.PLUGIN_DIR.resolve()
         except (OSError, RuntimeError, ValueError):
             self.plugin = common.PLUGIN_DIR
+        self._music_walk = None                                      # data/Music, walked once per item (T4.6)
+        self._music_used = None                                      # ... and what the music choice reads of it
 
     def p(self, rel: str) -> Path:
         return self.paths.p(rel)
@@ -507,16 +511,88 @@ class _Item:
         files.append((prof / name, self.root, True))
         return files
 
+    def _music(self) -> tuple[list, list, list]:
+        """(folders, licence files, tracks) under the client's data/Music, walked once per item and never through a
+        link (as lib/motion_audio.py _walk; nothing at all when data/ or data/Music is a link): the folders, the
+        licence JSON files (<track>.licence.json / .license.json, licence.json / license.json) and music.json, and
+        the tracks. Only regular files."""
+        if self._music_walk is not None:
+            return self._music_walk
+
+        def link(q) -> bool:
+            return os.path.islink(q) or getattr(os.path, "isjunction", lambda _p: False)(q)
+        top = self.root / "data" / "Music"
+        folders, lic, tracks = [top], [], []
+        if link(self.root / "data") or link(top) or not top.is_dir():
+            self._music_walk = (folders, lic, tracks)
+            return self._music_walk
+        folders = []
+        try:
+            for dirpath, dirnames, filenames in os.walk(top, followlinks=False):
+                dirnames[:] = sorted(d for d in dirnames if not link(os.path.join(dirpath, d)))
+                folders.append(Path(dirpath))
+                for n in sorted(filenames):
+                    q = os.path.join(dirpath, n)
+                    if n.startswith(".") or link(q):
+                        continue
+                    try:
+                        if not stat.S_ISREG(os.lstat(q).st_mode):
+                            continue
+                    except OSError:
+                        continue
+                    k = n.casefold()
+                    if k.endswith((".licence.json", ".license.json")) or k in ("licence.json", "license.json",
+                                                                              "music.json"):
+                        lic.append(Path(q))
+                    elif Path(n).suffix.lower() in common.AUDIO_EXT:
+                        tracks.append(Path(q))
+        except OSError as e:
+            _failed(e)
+        self._music_walk = (folders, lic, tracks)
+        return self._music_walk
+
+    def _music_read(self) -> tuple[list, list]:
+        """(licence files, tracks) the motion plan's music choice reads (lib/motion_audio.py music_state): music off,
+        or a recipe without a music mood -> none; a track picked by hand -> that track, its own licence files and its
+        folder's licence; the auto pick -> every licence file, music.json and every track."""
+        if self._music_used is None:
+            self._music_used = self._music_choice_reads()
+        return self._music_used
+
+    def _music_choice_reads(self) -> tuple[list, list]:
+        import unicodedata
+        _folders, lic, tracks = self._music()
+        script = self.json("01_analysis/motion-script.json")
+        m = (script or {}).get("music", "__auto__")
+        if m is False or (isinstance(m, dict) and m.get("off") is True):
+            return [], []
+        if isinstance(m, dict) and m.get("file"):
+            def key(x: str) -> str:
+                return unicodedata.normalize("NFC", x.replace("\\", "/")).casefold()
+            want = key(os.path.normpath(str(m["file"])).replace("\\", "/"))
+            hit = [t for t in tracks if key(t.relative_to(self.root).as_posix()) == want]
+            if not hit:
+                return [], []
+            t = hit[0]
+            mine = {key(t.name) + x for x in (".licence.json", ".license.json")} | {"licence.json", "license.json"}
+            return [f for f in lic if f.parent == t.parent and key(f.name) in mine], [t]
+        rec = (self.json("00_inputs/source.json") or {}).get("recipe") or {}
+        if not ((rec.get("music") or {}).get("mood") if isinstance(rec, dict) else None):
+            return [], []
+        return lic, tracks
+
     def _motion_inputs(self) -> list | None:
-        """lib/motion_plan.py fingerprint (:46-57): source.json (motion_config.source), the script, words, pauses, the
-        client's brand tokens and motion.json (motion_config.motion_cfg)."""
+        """lib/motion_plan.py fingerprint: source.json (motion_config.source), the script, words, pauses, the client's
+        brand tokens, motion.json (motion_config.motion_cfg) and (T4.6) the data/Music licence files the music choice
+        reads (_music_read; the tracks are only hashed by size and head/tail, so they are never an input here)."""
         cfg = self._config_files("motion.json")
         if cfg is None:
             return None
         return [(self.p(rel), self.base, True) for rel in (
             "00_inputs/source.json", "01_analysis/motion-script.json", "02_transcription/words.json",
             "06_audio/dialogue/pauses.json")] + [
-            (self.paths.client_db / "branding/brand-tokens.json", self.root, True)] + cfg
+            (self.paths.client_db / "branding/brand-tokens.json", self.root, True)] + cfg + [
+            (f, self.root, True) for f in self._music_read()[0]]
 
     def _approval_inputs(self, motion: bool) -> list | None:
         """lib/plan.py approval_state (:945): plan-approval.json, then the motion fingerprint's inputs (a record with
@@ -549,6 +625,8 @@ class _Item:
             "08_quality_control/qc-results.json", f"08_quality_control/preview/{vid}_preview.mp4",
             f"08_quality_control/animatic/{vid}_animatic.mp4", "09_handoff/README.md")]
         out.append(self.paths.client_db / "branding/brand-tokens.json")
+        folders, lic, _all = self._music()            # T4.6: a licence or track added, edited or removed
+        out += folders + lic + self._music_read()[1]  # tracks: only those the music choice reads
         for name in ("motion.json", "sequence-settings.json"):
             out += [f for f, _, _ in (self._config_files(name) or [])]
         for rel in ("08_quality_control/premiere_frames", "08_quality_control/ae_frames"):
@@ -564,9 +642,10 @@ class _Item:
         return out
 
     def listed(self) -> list[Path]:
-        """Every folder whose entries panel_fields lists (the frame folders and their run-* folders): PanelFields keys
-        these by their listing (_listing), never by the folder's own mtime."""
-        out = []
+        """Every folder whose entries panel_fields lists (the frame folders and their run-* folders) or the motion
+        fingerprint reads (the data/Music folders, T4.6): PanelFields keys these by their listing (_listing), never
+        by the folder's own mtime."""
+        out = [f for f in self._music()[0] if f.is_dir()]
         for rel in ("08_quality_control/premiere_frames", "08_quality_control/ae_frames"):
             folder = self.p(rel)
             out.append(folder)

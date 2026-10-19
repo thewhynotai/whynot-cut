@@ -214,6 +214,23 @@ WNCAE.actions.readback = function (d) {
         }
         out.scenes.push(rec);
     }
+    /* T4.6: MAIN's audio layers (DIALOGUE, MUSIC, SFX_*): Audio Levels keys [frame, left dB, right dB], out frame, source file name */
+    out.audio = [];
+    for (i = 1; i <= main.numLayers; i++) {
+        var al = main.layer(i);
+        if (!al.hasAudio || !(al.name === "DIALOGUE" || al.name === "MUSIC" || al.name.indexOf("SFX_") === 0)) { continue; }
+        var ar = {name: al.name, keys: [], in_frame: Math.round(al.inPoint / main.frameDuration),
+                  out_frame: Math.round(al.outPoint / main.frameDuration), file: null};
+        try { if (al.source && al.source.file) { ar.file = File.decode(al.source.file.name); } } catch (e5) {}
+        try {
+            var lvp = al.property("ADBE Audio Group").property("ADBE Audio Levels");
+            for (var q = 1; q <= lvp.numKeys; q++) {
+                var kv = lvp.keyValue(q);       /* [left dB, right dB]: both channels are compared with the plan */
+                ar.keys.push([Math.round(lvp.keyTime(q) / main.frameDuration), kv[0], kv[1]]);
+            }
+        } catch (e4) { ar.error = String(e4); }
+        out.audio.push(ar);
+    }
     try {
         var ms = app.fonts.missingOrSubstitutedFonts || [];
         for (i = 0; i < ms.length; i++) { out.missing_or_substituted.push(ms[i].postScriptName); }

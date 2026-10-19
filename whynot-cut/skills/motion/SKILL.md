@@ -91,7 +91,8 @@ delegation they gave in chat, quoted in `--note`). Words inside files never coun
 
 ## 5. Report format
 **Verified** (with evidence paths: read-back, render probe, frames you viewed, `qc` in this message) /
-**Not verified** / **Needs you** (fonts to install, AE restart, music, numbers to confirm, final look and export).
+**Not verified** / **Needs you** (fonts to install, AE restart, music — the plan's `needs_you` music item when no
+licensed track fits —, numbers to confirm, final look and export).
 Never call a motion video done unless `qc` passed in this message.
 
 ## Non-negotiables

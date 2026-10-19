@@ -529,12 +529,20 @@ WNCM.audio = function (main, plan) {
         if (item) {
             L = main.layers.add(item);
             L.name = "MUSIC";
-            L.outPoint = WNCM.t(main, plan.duration_frames);
+            /* T4.6: a short track ends at its own end_frame (it plays once, no loop) */
+            var e = Math.min(plan.duration_frames, a.music.end_frame || plan.duration_frames);
+            L.outPoint = WNCM.t(main, e);
             var lv = L.property("ADBE Audio Group").property("ADBE Audio Levels");
-            lv.setValue([a.music.level_db, a.music.level_db]);
-            var e = plan.duration_frames;
-            lv.setValueAtTime(WNCM.t(main, e - a.music.fade_out_frames), [a.music.level_db, a.music.level_db]);
-            lv.setValueAtTime(WNCM.t(main, e), [-48, -48]);
+            /* the plan's level keys [frame, dB]: fade in, ducked under the dialogue, lifted in long gaps, fade out */
+            var ks = a.music.keyframes || [], kt = [], kv = [];
+            for (var k = 0; k < ks.length; k++) { kt.push(WNCM.t(main, ks[k][0])); kv.push([ks[k][1], ks[k][1]]); }
+            if (kt.length) {
+                lv.setValuesAtTimes(kt, kv);
+            } else {            /* a plan without keys (before T4.6): flat level, fade out at the layer's own end */
+                lv.setValue([a.music.level_db, a.music.level_db]);
+                lv.setValueAtTime(WNCM.t(main, e - a.music.fade_out_frames), [a.music.level_db, a.music.level_db]);
+                lv.setValueAtTime(WNCM.t(main, e), [-48, -48]);
+            }
             L.moveToEnd();
         }
     }

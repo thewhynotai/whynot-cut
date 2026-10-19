@@ -43,7 +43,15 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
    ("تلت مليون"), the engine asks the editor to confirm; never invent precision.
 6. Icons: find names with `reel motion-icons --search "<english concept>"`; use only listed names. Illustrations only
    from `reel motion-library` packs with ok licenses. Photos only from the client's asset manifest.
-7. Music only from `reel music --list` (licensed, mood fits the recipe); none fits → leave it out.
+7. Music: leave `music` out and the engine picks the licensed `data/Music` track that fits the recipe's mood (ties
+   decided by length, then name) and ducks it under the words. Set `music.file` only to choose a different track
+   from `reel music --list` with `"licensed": true`, or `"music": false` for none. A track counts as licensed only
+   with a `<track>.licence.json` or a folder `licence.json` (pack.json fields); never write one, never treat a PDF or
+   music.json text as a licence. No licensed fit → the plan compiles without music and carries one music item in
+   `needs_you` (the editor adds a licence or a track).
+   Moods come from the words of the track's file name or its music.json `moods`. Arabic mood words (أمل، توتر،
+   هادي، حماس، حزين، ملهم and their usual Egyptian/MSA forms) ARE mapped to the English moods through MOOD_TABLE
+   (lib/motion_audio.py); a word it does not know is named in the plan's reasons, never silently ignored.
 8. Run `reel motion-plan`; fix every error; explain any recipe deviation in `recipe_note`. Then `reel motion-animatic`
    and VIEW `_storyboard.jpg` (text order RTL, nothing clipped, the right icon for the idea).
 

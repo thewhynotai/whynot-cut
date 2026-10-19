@@ -51,21 +51,20 @@ MUSIC_EXT = {".wav", ".mp3", ".m4a", ".aac", ".aif", ".aiff", ".flac"}
 
 
 def music_library(root) -> list[dict]:
-    """Licensed tracks in data/Music with mood tags: data/Music/music.json {"tracks": [{"file", "moods", "license"}]}
-    wins; otherwise the file name's words are the tags (tense_dark_loop.wav -> tense, dark, loop)."""
-    import re
+    """Tracks in data/Music with mood tags (`reel music --list`), built from the motion music catalog
+    (lib/motion_audio.py: links and junctions are never walked, a link is never a licence): data/Music/music.json
+    {"tracks": [{"file", "moods", "license"}]} wins for the moods; otherwise the file name's words are the tags
+    (tense_dark_loop.wav -> tense, dark, loop). `licensed` / `licence` / `licence_why`: the track's licence JSON as
+    motion videos require it (T4.6); music.json's `license` text is shown as given and is not a licence."""
     from pathlib import Path
-    from .common import read_json
-    d = Path(root) / "data" / "Music"
-    if not d.is_dir():
-        return []
-    meta = {Path(t.get("file", "")).name.lower(): t for t in (read_json(d / "music.json", {}) or {}).get("tracks", [])}
+    from .motion_audio import MUSIC_DIR, _key, _moods_meta, music_catalog
+    d = Path(root).joinpath(*MUSIC_DIR)
+    meta = _moods_meta(d) if d.is_dir() else {}
     out = []
-    for f in sorted(d.rglob("*")):
-        if not f.is_file() or f.suffix.lower() not in MUSIC_EXT or f.name.startswith("."):
-            continue
-        m = meta.get(f.name.lower(), {})
-        moods = m.get("moods") or [w for w in re.split(r"[^A-Za-z؀-ۿ]+", f.stem.lower()) if len(w) > 2]
-        out.append({"rel": f.relative_to(root).as_posix(), "moods": moods, "license": m.get("license", ""),
-                    "tagged_by": "music.json" if m else "file name"})
+    for e in music_catalog(root):
+        m = meta.get(_key(Path(e["rel"]).name)) or {}
+        out.append({"rel": e["rel"], "moods": e["moods"], "unknown_moods": e["unknown_moods"], "license": m.get("license", ""),
+                    "tagged_by": "music.json" if m else "file name", "licensed": e["licensed"],
+                    "licence": e["licence"], "licence_why": e["why"], "decodes": e["decodes"],
+                    "duration_s": e["duration_s"]})
     return out

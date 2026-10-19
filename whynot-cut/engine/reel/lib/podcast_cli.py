@@ -171,7 +171,9 @@ def cmd_music(a):
     lib = music_library(Path(a.root))
     out({"tracks": lib, "recipe_moods": {t: r.get("music", {}).get("mood") for t, r in types().items()},
          "how": "pick a track whose moods fit the reel's recipe and set edit-decisions music.file (licensed tracks only; "
-                "no track fits -> leave music for the editor)" if lib else
+                "no track fits -> leave music for the editor). Motion videos use only tracks with \"licensed\": true "
+                "(a <track>.licence.json or a folder licence.json; never write one yourself) and pick by the recipe's "
+                "mood when motion-script.json names no music.file" if lib else
                 "no licensed music in data/Music: the music track stays for the editor (Needs you: music)"})
 
 

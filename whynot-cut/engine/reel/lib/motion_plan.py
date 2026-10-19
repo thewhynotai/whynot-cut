@@ -44,7 +44,8 @@ def _system_font() -> dict | None:
 
 
 def fingerprint(paths) -> str:
-    """Changes when anything the compiled plan depends on changes (script, words, pauses, recipe, motion.json, brand)."""
+    """Changes when anything the compiled plan depends on changes (script, words, pauses, recipe, motion.json, brand,
+    and the data/Music tracks and licences the music choice reads)."""
     src = msource(paths)
     h = hashlib.sha1()
     for rel in ("01_analysis/motion-script.json", "02_transcription/words.json", "06_audio/dialogue/pauses.json"):
@@ -54,6 +55,15 @@ def fingerprint(paths) -> str:
     h.update(bt.read_bytes() if bt.exists() else b"-")
     h.update(json.dumps([src.get("recipe"), src.get("format"), src.get("direction"), motion_cfg()], sort_keys=True,
                         ensure_ascii=True).encode())
+    from .motion_audio import music_state       # T4.6: what THIS plan's music choice reads (off / hand pick / auto)
+    try:
+        sm = json.loads(paths.p("01_analysis/motion-script.json").read_text(encoding="utf-8-sig")).get("music", "__auto__")
+    except (OSError, ValueError, AttributeError, RecursionError):
+        sm = "__auto__"
+    rmood = ((src.get("recipe") or {}).get("music") or {}).get("mood") or []
+    ms = music_state(paths.root, sm, [rmood] if isinstance(rmood, str) else list(rmood))
+    if ms:                      # no tracks: the fingerprint stays as before T4.6 (approved plans do not go stale)
+        h.update(json.dumps(ms, sort_keys=True, ensure_ascii=True).encode())
     return h.hexdigest()
 
 
@@ -669,20 +679,19 @@ def _recipe_checks(C: _Compiler, scenes: list[dict], script: dict):
 
 
 def _audio(C: _Compiler, scenes: list[dict], script: dict, duration: int) -> dict:
-    from .motion_audio import envelope, sequence_dialogue, sfx_files
+    from .motion_audio import envelope, music_plan, sequence_dialogue, sfx_files, speech_frames
     dia = sequence_dialogue(C.paths, C.tmap)
-    music = None
-    m = script.get("music") or {}
-    if m.get("file"):
-        f = (C.paths.root / m["file"]).resolve()
-        music_dir = (C.paths.root / "data" / "Music").resolve()
-        if not f.exists() or not f.is_relative_to(music_dir):
-            C.err(f"music {m['file']!r} must be a licensed file under data/Music")
-        else:
-            music = {"file": str(f), "level_db": float(m.get("level_db", (C.src.get("recipe") or {}).get("music", {}).get("level_db", -24))),
-                     "fade_out_frames": ms_to_frame(2000, C.fps)}
-    else:
-        C.warnings.append("no music: the music bed stays for the editor (licensed tracks: `reel music --list`)")
+    # T4.6: a licensed data/Music track (the script's choice, else the recipe's mood), ducked under the words; no
+    # usable licence -> no music and one NEEDS-YOU item (never an invented licence, never a write into data/)
+    mp = music_plan(C.paths.root, script.get("music"), C.src.get("recipe"), speech_frames(C.words, C.tmap), duration,
+                    C.fps, drafts_dir=C.paths.p("06_audio/licence-drafts") if getattr(C, "write", True) else None)
+    for e in mp["errors"]:
+        C.err(e)
+    C.warnings += mp["warnings"]
+    C.needs_you = [n for n in getattr(C, "needs_you", []) if n.get("kind") != "music"] + mp["needs_you"]
+    if mp["asset"]:
+        C.assets.append(mp["asset"])
+    music = mp["music"]
     cues = []
     tr = C.rm.get("sfx_on_transition")
     for k, s in enumerate(scenes):
@@ -730,6 +739,7 @@ def _finish(paths, C: _Compiler, script: dict, scenes: list[dict] | None, early:
                                "progress": bool(C.rm.get("progress")),
                                "voice_pulse": {"values": voice} if (C.rm.get("voice_pulse") or C.src.get("media") == "audio") else None},
                 "audio": audio, "assets": _dedupe(C.assets), "editorial_lines": C.editorial, "approvals": C.approvals,
+                "needs_you": list(getattr(C, "needs_you", [])),
                 "generated": now_iso()}
         from .ae_builder import brand_controls
         plan["brand"] = brand_controls(paths.client_db)
@@ -750,6 +760,15 @@ def _finish(paths, C: _Compiler, script: dict, scenes: list[dict] | None, early:
     if ok:
         set_status(paths, "ANALYZED", f"motion plan compiled ({len(plan['scenes'])} scenes)", "motion_plan", [md])
     return dict(val, plan=str(paths.p("01_analysis/motion-plan.json")) if plan else None, md=str(md))
+
+
+def _music_line(plan: dict) -> str:
+    m = plan["audio"].get("music")
+    if m:
+        return (f"{m.get('rel') or Path(m['file']).name} at {m['level_db']} dB under the dialogue, ducked with "
+                f"{len(m.get('keyframes') or [])} level keys ({(m.get('license') or {}).get('license', '?')})")
+    need = next((n for n in plan.get("needs_you") or [] if n.get("kind") == "music"), None)
+    return f"none — {need['text']}" if need else "none (off in the motion script)"
 
 
 def _caption_mode(v: str | None) -> str | None:
@@ -798,7 +817,7 @@ def write_motion_md(paths, plan: dict | None, val: dict, C: _Compiler) -> Path:
         L += [f"- {e['scene']} {e['field']}: {e['text']}" for e in val["editorial_lines"]] or ["- none"]
         a = plan["audio"]
         L += ["", "## Audio", "", f"- Dialogue: pauses removed ({Path(a['dialogue']).name})",
-              f"- Music: {Path(a['music']['file']).name + ' at ' + str(a['music']['level_db']) + ' dB' if a['music'] else 'none — for the editor'}",
+              f"- Music: {_music_line(plan)}",
               f"- SFX: {', '.join(sorted({c['kind'] for c in a['sfx']})) or 'none'}"]
         if plan["assets"]:
             L += ["", "## Assets and licenses", ""] + [f"- {x['ref']} ({x['license']}){' — ' + x['attribution'] if x['attribution'] else ''}"

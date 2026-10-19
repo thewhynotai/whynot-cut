@@ -407,6 +407,16 @@ recording its size; (f) the temp-folder export forms were never needed (the work
 that remains untested; (g) press Ctrl+Z once and check the three mutations (U3);
 (h) measure the three host calls the panel host uses and the spike never ran: `SourceMonitor.openFilePath` (native path), `Sequence.setPlayerPosition(TickTime)` and `uxp.shell.openPath` **(done in 0.1.3, rows H1 - H3; left: confirm the source monitor really loaded the clip, and whether the `shell.openPath` consent is remembered)**. **0.1.3 itself added the daemon connection (W1 - W3); it failed on the manifest permission. Of items (a) - (g) the 0.1.3 run repeated the 0.1.2 results for (b) (Repeat Edge Pixels lookup still fails), and the Project Modified attribution (c) got no new data.**
 
+## Pending ops
+
+Host work that later phases added to the CEP build. Each item still needs its UXP adapter in Phase 6, and a live
+measurement when no row above already covers it.
+
+| ID | Added by | Operation (CEP: Premiere `wnc_ppro_lib.jsx`; P4-P5: After Effects `wnc_motion_lib.jsx` / bridge `wnc_ae_bridge.jsx`) | ExtendScript calls | UXP counterpart | Status |
+|---|---|---|---|---|---|
+| P4 | T4.6 motion music | After Effects, `wnc_motion_lib.jsx` `WNCM.audio`: the MUSIC layer's Audio Levels get the plan's keys `[frame, dB]` (fade in, ducked under the dialogue, lifted in long gaps, fade out), linear in dB; a track shorter than the video ends at its own `end_frame` (outPoint). | `layers.add(footage)`, `outPoint`, `property("ADBE Audio Group").property("ADBE Audio Levels").setValuesAtTimes` | none yet: After Effects has no UXP build path (the AE bridge stays CEP) | ⚪ fake-AE tests only; live check at Gate 4 |
+| P5 | T4.6 audio read-back | After Effects, `wnc_ae_bridge.jsx` `readback`: `audio[]` = MAIN's DIALOGUE / MUSIC / SFX_* layers with `[frame, left dB, right dB]` level keys, the out frame and the source file name; the engine fails a duplicate layer, a missing or unplanned MUSIC layer, keys that differ from the plan, an end more than 1 frame off and another source file. | `layer.hasAudio`, `outPoint`, `source.file` (`File.decode`), `numKeys`, `keyTime`, `keyValue` on `ADBE Audio Levels` | same as P4 | ⚪ fake-AE tests only; live check at Gate 4 |
+
 ## Decisions summary
 
 - **UXP adapter now** (green): project create (see the O1 condition), save, close, open with a backslash path, save-as, scratch-disk set, persistence, active project, project views, still import, FCP7 XML import, sequence read-back, the four settings that were probed including the preview codec by display name, still placement, clip end / start / move / out / rename / disable, add a video track, remove a clip, Scale / Rotation / Opacity / Position / Crop keyframes with bezier interpolation **keyed in media time (`clip.getInPoint() + t`)**, static param values, the filter list, Sharpen, Noise, Lumetri, transitions, track rename, markers, single-frame export (backslash form), the `lockedAccess` + `executeTransaction` pattern with its "WhyNot Cut build" History label (one transaction per build if the editor should undo the build in one step).

@@ -24,10 +24,13 @@ Builds probe comps, reads them back, renders frames to view. Verified on After E
 `NH_BRAND/BRAND_CONTROLS` (colours; matching layers follow them) · `NH_SCENES/<S##>_<type>` (one comp per scene) ·
 `NH_PERSISTENT` (CAPTIONS, SPEAKER_BADGE) · `NH_ASSETS` · `MAIN_<id>` (background, scene layers with transitions,
 persistent layers, DIALOGUE/MUSIC/SFX audio). All keys at `frame × comp.frameDuration` (no drift at 29.97/23.976).
+MUSIC (T4.6): the plan's Audio Levels keys `[frame, dB]` (fade in, ducked to `level_db` under the dialogue, lifted
+in pauses long enough for attack + release + hold, fade out; a short track ends at its own `end_frame`, no loop).
 
 ## Read-back (after every build)
 Per scene: frames in MAIN, every text layer's string, font (not substituted), composer, direction, box at the hero
-frame inside the safe area and not overlapping, cue hash; plus `missingOrSubstitutedFonts`. Anything off → FAILED with
+frame inside the safe area and not overlapping, cue hash; plus `missingOrSubstitutedFonts`; plus MAIN's audio
+layers (one DIALOGUE, one MUSIC only when planned with the planned keys, one SFX_* per cue, no duplicates). Anything off → FAILED with
 the exact reason; PROJECT_ASSEMBLED only when everything matches.
 
 ## Render and frames
