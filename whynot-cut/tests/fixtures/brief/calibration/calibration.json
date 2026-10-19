@@ -1,0 +1,38 @@
+{
+ "what": "Synthetic calibration samples for lib/brief.estimate_tokens (Addendum M5-T3, Task 58, ruling Q58-2). Own text, no client material.",
+ "method": "Each sample was printed once (twice for ar_plain and en_plain, identical results) as a tool result in a Claude Code session on the subscription (model claude-opus-5-5, 2026-10-18); the added input of the next request was read back from that session's own transcript usage numbers (input + cache write + cache read of request n+1, minus request n's total and its output tokens), minus the per-call overhead measured with empty tool results (39, of which the empty-output notice is ~8: overhead 31).",
+ "status": "provisional: re-check with count_tokens when the API resumes (Nov)",
+ "overhead_tokens": 31,
+ "samples": {
+  "ar_plain": {
+   "file": "ar_plain.txt",
+   "measured_delta": 2049,
+   "tokens": 2018
+  },
+  "en_plain": {
+   "file": "en_plain.txt",
+   "measured_delta": 880,
+   "tokens": 849
+  },
+  "ar_diacritics": {
+   "file": "ar_diacritics.txt",
+   "measured_delta": 2945,
+   "tokens": 2914
+  },
+  "digits": {
+   "file": "digits.txt",
+   "measured_delta": 1559,
+   "tokens": 1528
+  },
+  "json_punct": {
+   "file": "json_punct.txt",
+   "measured_delta": 2052,
+   "tokens": 2021
+  },
+  "mixed": {
+   "file": "mixed.txt",
+   "measured_delta": 1730,
+   "tokens": 1699
+  }
+ }
+}
