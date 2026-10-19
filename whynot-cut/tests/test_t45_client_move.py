@@ -320,7 +320,7 @@ class TestMove(Base):
         new = Path("E:/New/Acme") if IS_WIN else Path("/Users/ed/Acme")
         doc = {"path": old + sep + sep.join(("data", "Raw", "c.mov")), "note": f"see {old}{sep}x"}
         with mock.patch("lib.client_move_paths.FOLD_CASE", True):
-            got = CM._rebase_doc(doc, ([old], new, CM._pairs([old], new, False), False), [0])
+            got = CM._rebase_doc(doc, ([old], new, CM._pairs([old], new, False), False, {}), [0])
         self.assertEqual(got["path"], str(new.joinpath("data", "Raw", "c.mov")))
         self.assertNotIn(old, got["note"])
 
@@ -789,6 +789,418 @@ class TestLongPaths(Base):
                 os.rmdir(CM._x(sub))
 
 
+class TestBoundDatabaseFiles(Base):
+    """Review 02df75f r1 P2-1 (+ P3-1 R13): inside the client database a move rewrites only its own path files and
+    client-database-status.json; a file whose bytes something checks, or that the editor / Claude wrote, is kept and
+    listed (cases.md F1-F4)."""
+    def moved(self, root=None):
+        self.hold(root)
+        doc = CM.move(root or self.src, self.dest, apply=True)
+        self.assertTrue(doc.get("applied"), doc)
+        return doc
+
+    def kept(self, doc) -> dict:
+        return {k["file"]: k["why"] for k in doc["outside_database"]["kept"]}
+
+    def test_the_reference_style_is_kept_and_every_video_stays_current(self):
+        from lib import ref_style
+        sd = self.src / "output/client_database/reference_style"
+        ref = str(self.src / "data/References/ref.mp4")
+        write_json(sd / "editing-style.json", {"pace": 20, "cited": ref})
+        write_json(sd / "editing-rules.json", {"mandatory": [f"match the cuts of {ref}"]})
+        (sd / "editing-style-analysis.md").write_text(f"From `{ref}`\n", encoding="utf-8")
+        p = Paths(self.src, "R01")
+        write_json(p.p(ref_style.VIDEO_STYLE), {"_reference_style": {"style_sha1": ref_style.style_sha1(self.src),
+                                                                     "overrides_sha1": ref_style._overrides(p)[1]}})
+        self.assertEqual(ref_style.video_state(p)["state"], "current")
+        before = {f.name: f.read_bytes() for f in sd.iterdir()}
+        doc = self.moved()
+        dd = self.dest / "output/client_database/reference_style"
+        self.assertEqual({f.name: f.read_bytes() for f in dd.iterdir()}, before)
+        self.assertEqual(ref_style.video_state(Paths(self.dest, "R01"))["state"], "current")
+        kept = self.kept(doc)
+        for name in before:
+            self.assertIn("reel ref-style", kept["output/client_database/reference_style/" + name])
+        cli = __import__("cli")
+        self.assertEqual(cli.next_doc(Paths(self.dest, "R01"))["stale"], [])
+
+    def test_the_sealed_rules_file_is_kept_and_still_reads(self):
+        from lib import rules_loop
+        prof = self.src / "output/client_database/reel-profile"
+        rules = [{"id": "R-1", "status": "active", "text": "logo from " + str(self.src / "assets" / "Brand" / "logo.png"),
+                  "from": ["N-1"]}]
+        f = prof / rules_loop.RULES_FILE
+        f.write_bytes(rules_loop._registry_bytes({"schema": rules_loop.SCHEMA, "rules": rules}))
+        self.assertEqual(rules_loop._State(self.src).registry()["rules"][0]["id"], "R-1")
+        raw = f.read_bytes()
+        hand = self.tmp / "by hand"
+        shutil.copytree(self.src, hand, copy_function=shutil.copy2)
+        doc = self.moved()
+        g = self.dest / "output/client_database/reel-profile" / rules_loop.RULES_FILE
+        self.assertEqual(g.read_bytes(), raw)
+        self.assertEqual(rules_loop._State(self.dest).registry()["rules"][0]["id"], "R-1")
+        self.assertIn("sealed by `reel rules`", self.kept(doc)["output/client_database/reel-profile/rules.json"])
+        self.hold(hand)                                                         # moved by hand, then repaired
+        am = CM.already_moved(hand, apply=True)
+        self.assertNotIn("error", am)
+        self.assertEqual((hand / "output/client_database/reel-profile" / rules_loop.RULES_FILE).read_bytes(), raw)
+        self.assertEqual(rules_loop._State(hand).registry()["rules"][0]["id"], "R-1")
+        self.assertIn("output/client_database/reel-profile/rules.json", self.kept(am))
+
+    def test_the_editors_own_writing_is_kept_and_the_status_file_is_still_rewritten(self):
+        prof = self.src / "output/client_database/profile/client-profile.md"
+        prof.write_text(f"# ملف العميل\nBrand book: {self.src / 'assets' / 'Brand' / 'book.pdf'}\n", encoding="utf-8")
+        notes = self.src / "output/client_database/reel-profile/notes.md"
+        notes.write_text(f"logo at {self.src / 'assets' / 'Brand' / 'logo.png'}\n", encoding="utf-8")
+        raw = {f: f.read_bytes() for f in (prof, notes)}
+        doc = self.moved()
+        kept = self.kept(doc)
+        for f, data in raw.items():
+            rel = f.relative_to(self.src).as_posix()
+            self.assertEqual((self.dest / rel).read_bytes(), data)
+            self.assertIn("written by the editor or Claude", kept[rel])
+        self.assertIn("output/client_database/client-database-status.json",
+                      [r["file"] for r in doc["outside_database"]["rewritten"]])
+        self.assertNotIn(str(self.src), (self.dest / "output/client_database/client-database-status.json")
+                         .read_text(encoding="utf-8").replace("\\\\", "\\"))
+
+    def test_brand_tokens_naming_a_path_are_kept_as_signed(self):
+        bt = self.src / "output/client_database/branding/brand-tokens.json"
+        write_json(bt, {"roles": {"primary": {"hex": "#112233"}}, "source": str(self.src / "assets/Brand/guide.pdf")})
+        raw = bt.read_bytes()
+        doc = self.moved()
+        self.assertEqual((self.dest / "output/client_database/branding/brand-tokens.json").read_bytes(), raw)
+        self.assertIn("approval", self.kept(doc)["output/client_database/branding/brand-tokens.json"])
+
+
+class TestInterruptedCopyRule(Base):
+    """Review 02df75f r1 P3-5 + P3-1 (M29, M30, R1): an interrupted copy is removed and made again only when every
+    file in it is the client's own copy (its size and time), except the one file the copy stopped in, whose bytes are
+    the start of the client's (cases.md F5, F6)."""
+    def partial(self, files: dict):
+        self.dest.mkdir(exist_ok=True)
+        for rel, (data, mtime_ns) in files.items():
+            f = self.dest / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(data)
+            if mtime_ns is not None:
+                os.utime(f, ns=(mtime_ns, mtime_ns))
+        (self.dest / CM.INCOMPLETE).write_text(json.dumps({"from": str(self.src), "mode": "move",
+                                                           "started_ns": time.time_ns()}), encoding="utf-8")
+
+    def src_ns(self, rel):
+        return os.stat(self.src / rel).st_mtime_ns
+
+    def test_an_older_smaller_file_with_other_content_is_never_removed(self):
+        self.partial({"data/Raw/clip 1.mp4": (b"EDITOR-OWN" * 10, int(T0 * 1e9))})     # camera card, shoot time
+        self.hold()
+        self.assertIn("not empty", CM.move(self.src, self.dest, apply=True)["refused"])
+        self.assertEqual((self.dest / "data/Raw/clip 1.mp4").read_bytes(), b"EDITOR-OWN" * 10)
+
+    def test_only_one_file_may_be_cut_short(self):
+        self.partial({"data/Raw/clip 1.mp4": (b"m" * 1200, None), "data/References/ref.mp4": (b"r" * 100, None)})
+        self.assertIn("not empty", CM.check(self.src, self.dest)["refused"])
+        (self.dest / "data/References/ref.mp4").unlink()
+        self.assertTrue(CM.check(self.src, self.dest)["partial"])
+
+    def test_a_copy_on_a_drive_that_keeps_coarse_times_is_redone(self):
+        self.dest.mkdir()
+        for rel, _size, _m in CM.scan(self.src, "move")["files"]:
+            d = self.dest / rel
+            d.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(self.src / rel, d)
+            t = os.stat(d).st_mtime_ns
+            os.utime(d, ns=(t, t - t % 2_000_000_000))                       # FAT: times kept to 2 s
+        (self.dest / CM.INCOMPLETE).write_text(json.dumps({"from": str(self.src), "mode": "move",
+                                                           "started_ns": time.time_ns()}), encoding="utf-8")
+        self.assertTrue(CM.check(self.src, self.dest)["partial"])
+        for rel in ("data/Raw/clip 1.mp4", "data/References/ref.mp4"):           # 3 s off: not what a drive rounds
+            t = os.stat(self.src / rel).st_mtime_ns + 3_000_000_000
+            os.utime(self.dest / rel, ns=(t, t))
+        doc = CM.check(self.src, self.dest)
+        self.assertIn("an interrupted copy of this client that changed", doc["refused"])     # ours, but changed:
+        self.assertIn("remove only the link", doc["how"])                                     # said so, never removed
+        self.assertTrue((self.dest / "data/Raw/clip 1.mp4").is_file())
+        (self.dest / CM.INCOMPLETE).write_text(json.dumps({"from": str(self.tmp / "Other"), "mode": "move",
+                                                           "started_ns": time.time_ns()}), encoding="utf-8")
+        self.assertNotIn("interrupted copy", CM.check(self.src, self.dest)["refused"])
+        (self.dest / CM.INCOMPLETE).write_text(json.dumps({"from": str(self.src), "mode": "move", "started_ns": "x"}),
+                                               encoding="utf-8")                          # not a marker we wrote
+        self.assertNotIn("interrupted copy", CM.check(self.src, self.dest)["refused"])
+
+    def test_one_whole_file_with_a_new_time_is_taken_as_the_one_being_copied(self):
+        self.partial({"data/notes.lock": (b"editor's own file", None)})            # same bytes, written later
+        self.assertTrue(CM.check(self.src, self.dest)["partial"])                  # = the one file being copied
+        self.partial({"data/Raw/clip 1.mp4": (b"m" * 5000, None)})
+        self.assertIn("not empty", CM.check(self.src, self.dest)["refused"])       # a second one: not a copy we made
+
+    def test_a_copy_stopped_during_the_rewrite_is_redone(self):
+        inv = "output/discovery/input-inventory.json"
+        rewritten = json.dumps({"files": [{"rel": "data/Raw/clip 1.mp4", "path": str(self.dest / "data/Raw/clip 1.mp4")}]})
+        self.partial({inv: (rewritten.encode("utf-8"), self.src_ns(inv)),
+                      "data/Raw/clip 1.mp4": ((self.src / "data/Raw/clip 1.mp4").read_bytes(),
+                                              self.src_ns("data/Raw/clip 1.mp4"))})
+        self.assertTrue(CM.check(self.src, self.dest)["partial"])
+        self.partial({"data/References/ref.mp4": (b"r" * 300, self.src_ns("data/References/ref.mp4") + 10 ** 9)})
+        self.partial({"data/notes.lock": (b"x" * 3, self.src_ns("data/notes.lock"))})     # client's time, other size
+        self.assertIn("not empty", CM.check(self.src, self.dest)["refused"])
+
+    def test_a_valid_marker_of_another_client_or_mode_is_refused(self):
+        self.dest.mkdir()
+        (self.dest / "data/Raw").mkdir(parents=True)
+        shutil.copy2(self.src / "data/Raw/clip 1.mp4", self.dest / "data/Raw/clip 1.mp4")
+        now = time.time_ns()
+        (self.dest / CM.INCOMPLETE).write_text(json.dumps({"from": str(self.src), "mode": "move", "started_ns": now}),
+                                               encoding="utf-8")
+        self.assertTrue(CM.check(self.src, self.dest)["partial"])                  # the control: ours
+        for mark in ({"from": str(self.tmp / "Other"), "mode": "move", "started_ns": now},
+                     {"from": str(self.src), "mode": "clone", "started_ns": now}):
+            (self.dest / CM.INCOMPLETE).write_text(json.dumps(mark), encoding="utf-8")
+            self.assertIn("not empty", CM.check(self.src, self.dest)["refused"], mark)
+
+
+class TestReviewR1Copy(Base):
+    """Review 02df75f r1 P3-1 R4, P3-4, P3-6, P3-7 (cases.md F7, F9-F11)."""
+    def test_a_media_file_cut_short_in_the_copy_is_caught(self):
+        real = shutil.copyfile
+
+        def short(s, d, follow_symlinks=True):
+            r = real(s, d, follow_symlinks=follow_symlinks)
+            if d.replace("\\", "/").endswith("data/Raw/clip 1.mp4"):
+                with open(d, "r+b") as f:
+                    f.truncate(100)
+            return r
+        self.hold()
+        with mock.patch.object(CM.shutil, "copyfile", side_effect=short):
+            doc = CM.move(self.src, self.dest, apply=True)
+        self.assertIn("size differs: data/Raw/clip 1.mp4", doc["refused"])
+        self.assertFalse(self.dest.exists())
+
+    def test_a_data_junction_to_a_store_is_not_a_copy(self):
+        store = self.tmp / "store" / "ClientX"
+        (store / "data/References").mkdir(parents=True)
+        (store / "data/References/ref.mp4").write_bytes(b"r" * 10)
+        c = self.tmp / "clients" / "ClientX"
+        (c / "assets").mkdir(parents=True)
+        (c / "output/client_database/reference_analysis").mkdir(parents=True)
+        link_dir(store / "data", c / "data")
+        key = str((c / "data/References/ref.mp4").resolve())                       # how older caches keyed it
+        self.assertTrue(key.casefold().startswith(os.path.realpath(store).casefold()))
+        write_json(c / "output/client_database/reference_analysis/cache.json", {key + "|10|5": {"video": key}})
+        self.assertIsNone(CM.unmigrated(c))
+        hand = self.tmp / "hand" / "ClientX"                                       # a real copy of it is still caught
+        shutil.copytree(c, hand)
+        self.assertFalse(is_link(hand / "data"))
+        self.assertIn("is a copy of", CM.unmigrated(hand)["refused"])
+
+    def test_a_link_that_cannot_be_recreated_rolls_the_move_back(self):
+        outside = self.tmp / "outside store"
+        (outside / "big").mkdir(parents=True)
+        (outside / "big/footage.mp4").write_bytes(b"F" * 1000)
+        link_dir(outside / "big", self.src / "data/Mirror")
+        before = tree(outside)
+        self.hold()
+        with mock.patch.object(CM, "_make_link", side_effect=OSError(1, "not allowed")):
+            doc = CM.move(self.src, self.dest, apply=True)
+        self.assertIn("removed again", doc["refused"])
+        self.assertIn("data/Mirror", doc["refused"])
+        self.assertIn("not allowed", doc["refused"])
+        self.assertFalse(self.dest.exists())
+        self.assertEqual(tree(outside), before)
+
+    def test_a_store_reached_through_another_alias_is_not_a_copy(self):
+        store = self.tmp / "store"
+        (store / "ClientX/data/References").mkdir(parents=True)
+        (store / "ClientX/data/References/ref.mp4").write_bytes(b"r" * 10)
+        link_dir(store, self.tmp / "alias")                                       # e.g. a mapped drive vs the share
+        c = self.tmp / "clients" / "ClientX"
+        (c / "assets").mkdir(parents=True)
+        (c / "output/client_database/reference_analysis").mkdir(parents=True)
+        link_dir(store / "ClientX/data", c / "data")
+        key = str(self.tmp / "alias" / "ClientX" / "data" / "References" / "ref.mp4")
+        write_json(c / "output/client_database/reference_analysis/cache.json", {key + "|10|5": {"video": key}})
+        self.assertIsNone(CM.unmigrated(c))
+
+    def test_edit_decisions_with_a_takes_history_say_undo_stops_at_the_move(self):
+        p = Paths(self.src, "R01")
+        write_json(p.p("01_analysis/takes-history.json"), {"schema": 1, "steps": [{"before": "e30=", "after_sha1": "x"}]})
+        self.hold()
+        doc = CM.move(self.src, self.dest, apply=True)
+        kept = {k["file"]: k["why"] for k in doc["outside_database"]["kept"]}
+        self.assertIn("output/projects/R01/01_analysis/edit-decisions.json",
+                      [r["file"] for r in doc["outside_database"]["rewritten"]])     # its media paths: the new folder
+        self.assertIn("reel takes --undo", kept["output/projects/R01/01_analysis/takes-history.json"])
+        plain = make_client(self.tmp, "Plain")                                    # every step undone: nothing to say
+        write_json(Paths(plain, "R01").p("01_analysis/takes-history.json"), {"schema": 1, "steps": []})
+        self.hold(plain)
+        doc2 = CM.move(plain, self.tmp / "E drive" / "Plain2", apply=True)
+        self.assertNotIn("takes-history", json.dumps(doc2["outside_database"]["kept"]))
+
+    def test_the_report_says_close_premiere_first_and_when_to_delete_the_old_folder(self):
+        dry = CM.move(self.src, self.dest)
+        self.assertIn(f"Close the Premiere and After Effects projects you have open at {self.src} first", dry["next"])
+        self.assertNotIn("Close the Premiere", CM.clone(self.src, self.tmp / "E drive" / "Sister")["next"])
+        self.hold()
+        doc = CM.move(self.src, self.dest, apply=True)
+        self.assertIn(f"close the Premiere and After Effects projects you have open at {self.src} first", doc["next"])
+        self.assertIn("keep it until", doc["old_folder"])                          # the fixture's plan is kept
+        self.assertNotIn("delete the old one yourself", doc["old_folder"])
+        plain = make_client(self.tmp, "Plain", steps=False)
+        self.hold(plain)
+        doc2 = CM.move(plain, self.tmp / "E drive" / "Plain2", apply=True)
+        self.assertTrue(doc2.get("applied"), doc2)
+        self.assertIn("delete the old one yourself", doc2["old_folder"])
+        self.assertNotIn("keep it until", doc2["old_folder"])
+
+
+class TestFileUrls(unittest.TestCase):
+    """Review 02df75f r1 P3-3: an interchange XML's pathurl is read back and written again by the build's own
+    pathurl, so a NAS share stays file://server/share/... and a drive file://localhost/... (cases.md F8)."""
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.root = self.tmp / "client"
+        (self.root / "output/projects/R01/07_premiere").mkdir(parents=True)
+        self.xml = self.root / "output/projects/R01/07_premiere/R01_interchange.xml"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def rebased(self, old, new, url):
+        self.xml.write_text(f"<pathurl>{url}</pathurl>\n<name>{old}</name>", encoding="utf-8")
+        rep = CM.rebase(self.root, [old], new=new)
+        self.assertEqual(rep["errors"], [])
+        return self.xml.read_text(encoding="utf-8").split("</pathurl>")[0][len("<pathurl>"):]
+
+    def test_nas_to_a_drive_and_back(self):
+        from lib.premiere_xml import path_from_url, pathurl
+        nas = "\\\\srv\\share\\C\\Acme" if IS_WIN else "//srv/share/C/Acme"
+        local = self.tmp / "New Acme & Co"
+        got = self.rebased(nas, local, "file://srv/share/C/Acme/data/Raw/clip%201.mp4")
+        self.assertEqual(got, pathurl(local / "data/Raw/clip 1.mp4"))
+        self.assertEqual(Path(path_from_url(got)), Path(os.path.realpath(local)) / "data/Raw/clip 1.mp4")
+        back = self.rebased(str(local), Path(nas), pathurl(local / "data/Raw/clip 1.mp4"))
+        self.assertEqual(back, "file://srv/share/C/Acme/data/Raw/clip%201.mp4")
+        self.assertIn(f"<name>{nas}</name>", self.xml.read_text(encoding="utf-8"))   # the plain text: by spelling
+
+    def report(self, old, new, text):
+        md = self.root / "output/projects/R01/08_quality_control/qc-report.md"
+        md.parent.mkdir(parents=True, exist_ok=True)
+        md.write_text(text, encoding="utf-8")
+        rep = CM.rebase(self.root, [old], new=new)
+        self.assertEqual(rep["errors"], [])
+        return md.read_text(encoding="utf-8"), {k["file"]: k["why"] for k in rep["kept"]}
+
+    def test_urls_in_a_report_keep_their_punctuation_query_and_fragment(self):
+        from lib.premiere_xml import pathurl
+        old = Path("D:/C/Acme") if IS_WIN else Path("/C/Acme")
+        new = self.tmp / "New"
+        u = pathurl(old / "x.mov")
+        text, kept = self.report(str(old), new, f"[clip]({u}). See {u}#t=10, and {u}?v=2.\nAlso {u}, done: {u}.\n"
+                                                f"Root: {pathurl(old)}\n")
+        n = pathurl(new / "x.mov")
+        self.assertEqual(text, f"[clip]({n}). See {n}#t=10, and {n}?v=2.\nAlso {n}, done: {n}.\nRoot: {pathurl(new)}\n")
+        self.assertEqual(kept, {})
+
+    def test_a_hand_typed_url_with_a_space_is_listed(self):
+        old = "D:\\C\\My Acme" if IS_WIN else "/C/My Acme"
+        url = "file://localhost/" + old.replace("\\", "/").lstrip("/") + "/x.mov"
+        _text, kept = self.report(old, self.tmp / "New", f"<a href=\"{url}\">clip</a>\n")
+        self.assertIn("check it yourself", kept["output/projects/R01/08_quality_control/qc-report.md"])
+
+    def test_a_url_in_a_json_value_is_rebuilt_too(self):
+        from lib.premiere_xml import pathurl
+        nas = "\\\\srv\\share\\C\\Acme" if IS_WIN else "//srv/share/C/Acme"
+        local = self.tmp / "New Acme"
+        f = self.root / "output/projects/R01/07_premiere/ppro-build-result.json"
+        write_json(f, {"url": "file://srv/share/C/Acme/data/x.mov", "note": "built from file://srv/share/C/Acme/data/x.mov"})
+        CM.rebase(self.root, [nas], new=local)
+        doc = read_json(f)
+        self.assertEqual(doc["url"], pathurl(local / "data/x.mov"))
+        self.assertEqual(doc["note"], "built from " + pathurl(local / "data/x.mov"))
+
+    def test_a_url_on_another_drive_or_server_is_never_looked_up(self):
+        from lib.premiere_xml import pathurl
+        old = self.tmp / "Old Acme"
+        seen = []
+        real = CM.client_db.__dict__.get("rel_under")
+
+        def spy(v, base, *rest):
+            seen.append(v)
+            return None if "offline" in str(v) else real(v, base, *rest)   # (the red run must not stall either)
+        with mock.patch.object(CM.client_db, "rel_under", side_effect=spy):
+            text, _kept = self.report(str(old), self.tmp / "New",
+                                      "music: file://offline/share/x.mp3 and " + pathurl(old / "x.mov") + "\n")
+        self.assertIn(pathurl(self.tmp / "New" / "x.mov"), text)
+        self.assertIn("file://offline/share/x.mp3", text)
+        self.assertFalse([v for v in seen if "offline" in str(v)], seen)
+
+    def test_a_share_url_of_an_old_root_given_as_a_mapped_drive_is_rebuilt(self):
+        """--already-moved --from Z:\\Clients\\Acme where Z: is \\\\nas\\work: the build wrote the share's URL."""
+        from lib.premiere_xml import pathurl
+        z = "Z:\\Clients\\Acme" if IS_WIN else "/Volumes/Z/Clients/Acme"
+        zhead, nas = ("Z:\\", "\\\\nas\\work\\") if IS_WIN else ("/Volumes/Z/", "//nas/work/")
+        real = os.path.realpath
+
+        def fake_real(p):
+            s = str(p)
+            if s.startswith(zhead):
+                return nas + s[len(zhead):]
+            return s if s[:2] in ("\\\\", "//") else real(s)                          # never a network lookup
+        local = self.tmp / "New Acme"
+        with mock.patch("lib.client_move.real", side_effect=fake_real), \
+                mock.patch("lib.client_move_paths.real", side_effect=fake_real):
+            got = self.rebased(z, local, "file://nas/work/Clients/Acme/data/x.mov")
+        self.assertEqual(got, pathurl(local / "data/x.mov"))
+
+    def test_a_drive_alias_url_of_the_old_root_is_rebuilt(self):
+        """A URL on another drive letter that IS the old folder (subst / a junction drive): only shares are skipped."""
+        from lib.premiere_xml import pathurl
+        old = self.tmp / "Old Acme"
+        alias = "Y:\\" if IS_WIN else "/aliasdrive/"
+        real = os.path.realpath
+
+        def fake_real(p):
+            s = str(p)
+            return str(self.tmp) + os.sep + s[len(alias):] if s.startswith(alias) else real(s)
+        local = self.tmp / "New Acme"
+        url = "file://localhost/" + (alias.replace("\\", "/") + "Old%20Acme/x.mov").lstrip("/")
+        with mock.patch("lib.client_move.real", side_effect=fake_real), \
+                mock.patch("lib.client_move_paths.real", side_effect=fake_real):
+            got = self.rebased(str(old), local, url)
+        self.assertEqual(got, pathurl(local / "x.mov"))
+
+    def test_an_offline_old_share_is_looked_up_once_per_move(self):
+        """--already-moved --from a NAS that is off now: every lookup of it stalls, so it is looked up once."""
+        from lib.premiere_xml import pathurl
+        nas = "\\\\nas\\gone\\Acme" if IS_WIN else "//nas/gone/Acme"
+        real = os.path.realpath
+        calls = []
+
+        def fake_real(p):
+            s = str(p)
+            if s[:2] in ("\\\\", "//"):
+                calls.append(s)
+                return s
+            return real(s)
+        local = self.tmp / "New Acme"
+        urls = [f"file://nas/gone/Acme/data/x{i}.mov" for i in range(3)]
+        music = [pathurl(self.tmp / "Music" / f"m{i}.mp3") for i in range(3)]          # local stock: not under it
+        self.xml.write_text("".join(f"<pathurl>{u}</pathurl>\n" for u in urls + music), encoding="utf-8")
+        write_json(self.root / "output/projects/R01/07_premiere/ppro-build-result.json",
+                   {"clips": [f"built from {u}" for u in urls]})
+        with mock.patch("lib.client_move.real", side_effect=fake_real), \
+                mock.patch("lib.client_move_paths.real", side_effect=fake_real):
+            rep = CM.rebase(self.root, [nas], new=local)
+        self.assertEqual(len(rep["rewritten"]), 2)
+        self.assertIn(pathurl(local / "data/x2.mov"), self.xml.read_text(encoding="utf-8"))
+        self.assertEqual(len(calls), 1, calls)
+        self.assertIn(music[2], self.xml.read_text(encoding="utf-8"))
+
+    def test_a_url_outside_the_old_root_is_left_alone(self):
+        url = "file://localhost/D:/C/Acme2/x.mov"
+        self.assertEqual(self.rebased("D:\\C\\Acme" if IS_WIN else "/C/Acme", self.tmp / "N", url), url)
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -812,9 +1224,21 @@ class TestRebaseBoundaries(unittest.TestCase):
     def test_a_root_is_replaced_only_where_it_ends(self):
         pairs = CM._pairs(["D:\\C\\Acme"], Path("E:/New"), True)
         for s, want in (("D:\\C\\Acme\\data\\x.mp4", 1), ("D:\\C\\Acme2\\x.mp4", 0), ("D:\\C\\Acme b\\x", 0),
-                        ("D:/C/Acme/x", 1), ('"D:\\\\C\\\\Acme\\\\x"', 1), ("file://localhost/D:/C/Acme/x.mov", 1),
+                        ("D:/C/Acme/x", 1), ('"D:\\\\C\\\\Acme\\\\x"', 1),
+                        ("file://localhost/D:/C/Acme/x.mov", 0),   # a URL is rebuilt whole (_rebased_url), not spelled
                         ("D:\\C\\Acme", 1)):
             self.assertEqual(CM._sub(s, pairs)[1], want, s)
+
+    def test_a_root_is_replaced_only_where_it_starts(self):
+        pairs = CM._pairs(["/Users/ed/Acme"], Path("/Users/ed/New"), True)
+        for s, want in (("/Volumes/Backup/Users/ed/Acme/x.mov", 0), ("see /Users/ed/Acme/x.mov", 1),
+                        ('"/Users/ed/Acme/x"', 1), ("[/Users/ed/Acme]", 1), ("--root=/Users/ed/Acme", 1)):
+            self.assertEqual(CM._sub(s, pairs)[1], want, s)
+        win = CM._pairs(["D:\\C\\Acme"], Path("E:/New"), True)
+        self.assertEqual(CM._sub("XD:\\C\\Acme\\x", win)[1], 0)
+        self.assertEqual(CM._sub("Clip: `D:\\C\\Acme\\x`", win)[1], 1)
+        self.assertEqual(CM._sub("error:\\nD:\\C\\Acme\\x", win)[1], 1)                  # an escaped newline before it
+        self.assertEqual(CM._sub("\\\\?\\D:\\C\\Acme\\x", win)[1], 1)                    # the long-path prefix
 
     def test_an_xml_escaped_root_is_found(self):
         pairs = CM._pairs(["D:\\C\\Pegasus & Co"], Path("E:/New"), True)

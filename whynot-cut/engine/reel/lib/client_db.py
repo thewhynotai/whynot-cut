@@ -420,14 +420,19 @@ def _parts(s: str) -> list[str]:
     return [x for x in s.split("/") if x not in ("", ".")]
 
 
-def rel_under(v: str, base: str) -> str | None:
+def rel_under(v: str, base: str, base_real: str | None = None) -> str | None:
     """The root-relative POSIX form of absolute `v` when it is under `base` (not `base` itself), else None. Name by
     name, case folded where the file system folds it (FOLD_CASE), then once more on the real paths (a junction alias,
-    macOS /var vs /private/var). The tail keeps the stored value's own spelling."""
+    macOS /var vs /private/var). The tail keeps the stored value's own spelling. `base_real`: realpath(base) when the
+    caller already has it (one lookup of an offline share per run, not one per value)."""
     from . import client_move_paths as cmp
     if not isinstance(v, str) or not v or is_relative(v):
         return None
-    for a, b in ((v, str(base)), (cmp.real(v), cmp.real(base))) if native_abs(v) else ((v, str(base)),):
+    def forms():                                   # the real paths only when the names don't match: a lookup on an
+        yield v, str(base)                             # offline share stalls
+        if native_abs(v):
+            yield cmp.real(v), base_real if base_real is not None else cmp.real(base)
+    for a, b in forms():
         pa, pb = _parts(a), _parts(b)
         fa, fb = ([x.casefold() for x in pa], [x.casefold() for x in pb]) if cmp.FOLD_CASE else (pa, pb)
         if pb and len(pa) > len(pb) and fa[:len(pb)] == fb and ".." not in pa[len(pb):]:

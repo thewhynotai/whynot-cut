@@ -38,7 +38,6 @@ import sys
 import time
 import zlib
 from pathlib import Path
-from urllib.parse import quote
 
 from . import client_db, linksafe
 from .client_move_paths import FOLD_CASE, inside, other_client, real
@@ -66,7 +65,15 @@ REBASE_JSON = {INVENTORY, "01_analysis/edit-decisions.json", "00_inputs/input-ma
                "07_premiere/timeline-manifest.json", "08_quality_control/preview/preview-result.json",
                "08_quality_control/project-status.json", "08_quality_control/qc-results.json",
                "08_quality_control/visual-verification.json", "01_analysis/reference_analysis/reference-measurements.json"}
+# inside the client database only these (besides client_db.migrate's own files) are rewritten: everything else there is
+# bound to its bytes (the reference style every video's copy is checked against, the sealed rules registry) or written
+# by the editor or Claude, and none of it is opened as media
+DB_REBASE = ("output/client_database/client-database-status.json",)
+URL = re.compile(r"file://[^\s<>\"'`()\[\]{}]+")    # pathurl %-encodes brackets: one here ends the URL (a .md link)
+TIME_SLACK_NS = 2_000_000_000                       # FAT keeps file times to 2 s, exFAT to 10 ms, NTFS to 100 ns
 _END = r"(?=[\\/\"'`<>)\],;|\t\r\n]|$)"           # a root ends at a separator, a quote or the end, never mid-name
+_START = r"(?:(?<![\w./\\-])|(?<=\\[nrt])|(?<=\\\\\?\\))"   # ...and starts there too (/Users/ed/A is no part of
+                                                   # /Volumes/B/Users/ed/A), also after an escaped \n or a \\?\ prefix
 
 
 def _x(p) -> str:
@@ -212,17 +219,33 @@ def _linked_database(src: Path) -> dict | None:
     return None
 
 
-def _only_ours(dest: Path, src_files: dict, started_ns) -> bool:
-    """Is everything in an interrupted copy something this client has (so removing it loses nothing of the editor's)?
-    Every file must be one of the client's; outside output/ (rewritten for the new place) it may be shorter (the copy
-    stopped while writing it), never larger; none newer than the interrupted run started. A file the client doesn't
-    have, or a newer one, means someone worked there: refused."""
-    if not isinstance(started_ns, int) or isinstance(started_ns, bool):
+def _prefix_of(part: str, whole: str) -> bool:
+    """Are the bytes of `part` the start of `whole` (a copy that stopped while writing it)?"""
+    try:
+        with open(_x(part), "rb") as a, open(_x(whole), "rb") as b:
+            for chunk in iter(lambda: a.read(1 << 20), b""):
+                if b.read(len(chunk)) != chunk:
+                    return False
+    except OSError:
         return False
+    return True
+
+
+def _only_ours(src: Path, dest: Path, src_files: dict) -> bool:
+    """Is everything in an interrupted copy the client's own copy (so removing it loses nothing of the editor's)? Every
+    file must be one of the client's with its modification time (to what the drive keeps, TIME_SLACK_NS) and size (a
+    copy keeps both; under output/ the rewrite for the new place keeps the time only), except at most one: the file the
+    copy stopped in, whose bytes are the start of the client's file. Anything else means someone put or changed
+    something there: refused."""
+    stopped_in = 0
     for rel, size, mns in scan(dest, "verify")["files"]:
-        if rel not in src_files or mns > started_ns:      # a copy keeps the client's times: newer = someone's work
+        if rel not in src_files:
             return False
-        if size > src_files[rel] and not rel.startswith("output/"):
+        s_size, s_mns = src_files[rel]
+        if abs(mns - s_mns) < TIME_SLACK_NS and (size == s_size or rel.startswith("output/")):
+            continue
+        stopped_in += 1
+        if stopped_in > 1 or not _prefix_of(str(dest.joinpath(*rel.split("/"))), str(src.joinpath(*rel.split("/")))):
             return False
     return True
 
@@ -252,11 +275,16 @@ def check(src, dest, mode: str = "move") -> dict:
             return _refusal(f"{dest} exists and is not a folder; nothing was written", pick)
         if not _empty(dest):
             mark = _incomplete_of(dest)
-            mine = mark and mark.get("mode") == mode and isinstance(mark.get("from"), str) and mark["from"] and \
-                _same(mark["from"], src) and \
-                _only_ours(dest, {r: s for r, s, _m in scan(src, mode)["files"]}, mark.get("started_ns"))
-            if not mine:
+            ours = mark and mark.get("mode") == mode and isinstance(mark.get("from"), str) and mark["from"] and \
+                type(mark.get("started_ns")) is int and _same(mark["from"], src)
+            if not ours:
                 return _refusal(f"{dest} exists and is not empty; nothing was written", pick)
+            if not _only_ours(src, dest, {r: (s, m) for r, s, m in scan(src, mode)["files"]}):
+                return _refusal(f"{dest} exists and is not empty: an interrupted copy of this client that changed after "
+                                "it stopped, or holds files that are not the client's (nothing was written)",
+                                "Check what is in it: if nothing there is yours, delete that folder yourself (a link in "
+                                "it: remove only the link, never what it points to), then run it again. Or " +
+                                pick[0].lower() + pick[1:])
             partial = True                               # our own copy, interrupted: it is removed and made again
     other = other_client(real(dest.parent) if partial else rd, src)    # a partial copy looks like a client itself
     if other:
@@ -267,16 +295,13 @@ def check(src, dest, mode: str = "move") -> dict:
 # --------------------------------------------------------------------------- what still names the old folder
 def _forms(o: str, n: str, text: bool) -> list[tuple[str, str]]:
     """Each way a file spells a root, with the new root in the same spelling: as is, with forward slashes, escaped (JSON
-    text, or a Python list's repr inside a message), and in text files also XML-escaped and as a file URL (interchange
-    XML pathurl, %-encoded)."""
+    text, or a Python list's repr inside a message), and in text files also XML-escaped. A file URL is not spelled
+    here: each one is read back to a path and written again for the new place (_rebase_text)."""
     from html import escape
     forms = [(o, n), (o.replace("\\", "/"), n.replace("\\", "/"))]
     forms += [(json.dumps(a, ensure_ascii=e)[1:-1], json.dumps(b, ensure_ascii=e)[1:-1])
               for a, b in list(forms) for e in (True, False)]
     if text:
-        po, pn = o.replace("\\", "/"), n.replace("\\", "/")
-        forms.append((quote(po if po.startswith("/") else "/" + po, safe="/:"),
-                      quote(pn if pn.startswith("/") else "/" + pn, safe="/:")))
         forms += [(escape(a, quote=False), escape(b, quote=False)) for a, b in list(forms)]
     out, seen = [], set()
     for a, b in forms:
@@ -295,9 +320,9 @@ def _pairs(olds, new: Path | None, text: bool, relative: bool = False) -> list:
         o = client_db._plain(str(o)).rstrip("\\/")
         for a, b in _forms(o, str(new) if new is not None else "", text):
             if relative:
-                out.append((re.compile(re.escape(a) + r"(?:\\\\|\\|/)", flags), ""))
+                out.append((re.compile(_START + re.escape(a) + r"(?:\\\\|\\|/)", flags), ""))
             else:
-                out.append((re.compile(re.escape(a) + _END, flags), b))
+                out.append((re.compile(_START + re.escape(a) + _END, flags), b))
     return out
 
 
@@ -307,6 +332,61 @@ def _sub(s: str, pairs) -> tuple[str, int]:
         s, k = pat.subn(lambda _m, rep=rep: rep, s)
         n += k
     return s, n
+
+
+def _head(p: str) -> str:
+    """The drive or the server of a path (its first part), case folded."""
+    parts = client_db._parts(p)
+    return parts[0].casefold() if parts else ""
+
+
+def _url_heads(olds) -> dict:
+    """Each old root: ({its drive or server as written and as its real path}, its real path or None). A mapped drive
+    Z: is \\\\nas\\work, and the build's pathurl writes the real one; the real path is looked up once per rebase."""
+    out = {}
+    for o in olds:
+        ro = real(o) if client_db.native_abs(o) else None
+        out[o] = ({_head(o), _head(ro) if ro else _head(o)}, ro)
+    return out
+
+
+def _rebased_url(url: str, olds, new: Path, heads: dict) -> str | None:
+    """A file URL under an old root (or the root itself) written again by the build's own pathurl for the same place
+    in `new`, its ?query / #fragment kept as they were; None = not under an old root."""
+    from html import unescape
+    from .premiere_xml import path_from_url, pathurl
+    cut = min((i for i in (url.find("?"), url.find("#")) if i >= 0), default=len(url))
+    path = str(path_from_url(unescape(url[:cut])))
+    share = path[:2] in ("\\\\", "//")
+    for o in olds:
+        hs, ro = heads[o]
+        if share and _head(path) not in hs:
+            continue                                     # a share on another server: never looked up (an offline
+        tail = "" if _is_root(path, o) else client_db.rel_under(path, o, ro)    # server stalls a lookup ~40 s)
+        if tail is not None:
+            return pathurl(new.joinpath(*[x for x in tail.split("/") if x])) + url[cut:]
+    return None
+
+
+def _rebase_text(text: str, olds, new: Path, pairs, heads: dict) -> tuple[str, int]:
+    """Text pointed at `new`: each file URL (an interchange XML's pathurl, a link in a report) read back to a path and,
+    when it is under an old root, written again by the build's own pathurl (a NAS share as file://server/share/..., a
+    drive as file://localhost/C:/...); the rest by spelling (_pairs). Punctuation after a URL is not part of it.
+    `heads`: _url_heads(olds), filled on the first URL and kept for the whole rebase."""
+    out, n, at = [], 0, 0
+    for m in URL.finditer(text):
+        seg, k = _sub(text[at:m.start()], pairs)
+        out.append(seg)
+        n += k
+        url = m.group(0).rstrip(".,;:!?")
+        if not heads:
+            heads.update(_url_heads(olds))
+        moved = _rebased_url(url, olds, new, heads)
+        out.append(moved if moved is not None else url)
+        n += moved is not None
+        at = m.start() + len(url)
+    seg, k = _sub(text[at:], pairs)
+    return "".join(out) + seg, n + k
 
 
 def _rebased_value(s: str, olds, new: Path, relative: bool):
@@ -320,13 +400,13 @@ def _rebased_value(s: str, olds, new: Path, relative: bool):
 
 
 def _rebase_doc(node, ctx: tuple, count: list):
-    olds, new, pairs, relative = ctx
+    olds, new, pairs, relative, heads = ctx
     if isinstance(node, str):
         whole = _rebased_value(node, olds, new, relative)
         if whole is not None:
             count[0] += 1
             return whole
-        s, k = _sub(node, pairs)
+        s, k = _sub(node, pairs) if relative else _rebase_text(node, olds, new, pairs, heads)
         count[0] += k
         return s
     if isinstance(node, list):
@@ -358,7 +438,8 @@ def _needles(olds) -> list:
     out = set()
     for o in olds:
         o = client_db._plain(str(o)).rstrip("\\/")
-        for form in {o, o.replace("\\", "/"), o.replace("/", "\\"), json.dumps(o)[1:-1]}:
+        for form in {o, o.replace("\\", "/"), o.replace("/", "\\"), json.dumps(o)[1:-1],
+                     json.dumps(o, ensure_ascii=False)[1:-1]}:
             for sep in ("\\", "/"):
                 for enc in ("utf-8", "utf-16-le", "utf-16-be"):
                     b = (form + sep).encode(enc)
@@ -376,16 +457,30 @@ def _project_fix(rel: str, ext: str) -> str:
             f"rebuild it: `reel ae-build --force{' --video-id ' + vid if vid else ''}`")
 
 
-def _rewritable(rel: str) -> str | None:
-    """Why a JSON file under output/ may NOT be rewritten (None = it may): an approval or sign-off hashes its exact bytes
-    (the plan, the words, the motion script, the reels plan, the pauses, the brand tokens), or it is not on the list of
-    files known to carry media paths and nothing else that is bound to them (REBASE_JSON)."""
+def _rewritable(rel: str, ext: str) -> str | None:
+    """Why a file under output/ may NOT be rewritten (None = it may): an approval or sign-off hashes its exact bytes
+    (the plan, the words, the motion script, the reels plan, the pauses, the brand tokens); in the client database,
+    anything but DB_REBASE (bound to its bytes, or the editor's or Claude's own writing); a JSON file not on the list of
+    files known to carry media paths and nothing else that is bound to them (REBASE_JSON). Other text (reports,
+    interchange XML) may be rewritten."""
     tail = rel.split("/", 3)[-1] if rel.startswith(("output/projects/", "output/episodes/")) else rel
-    if any(rel.endswith("/" + s) for s in SIGNED):
+    if ext == ".json" and any(rel.endswith("/" + s) for s in SIGNED):
         return ("an approval or sign-off is bound to its exact content (plan approval, transcript check, cut "
                 "proposals, motion or reels plan): kept so it stays approved. It names the old folder until its step "
                 "runs again; question for the executor in BL-14")
-    if tail in REBASE_JSON or rel.startswith("output/client_database/"):
+    if rel.startswith("output/client_database/"):
+        if rel in DB_REBASE:
+            return None
+        if rel.startswith("output/client_database/reference_style/"):
+            return ("every video's copy of the client reference style is checked against this folder's exact bytes "
+                    "(`reel ref-style`): kept, so no video's style turns outdated. A path in it is a citation, never "
+                    "opened")
+        if rel == "output/client_database/reel-profile/rules.json":
+            return ("sealed by `reel rules` (a rewrite would make the rules file refused as edited by hand): kept. A "
+                    "path in a rule's text is never opened")
+        return ("written by the editor or Claude (profile, notes, analysis): kept as written. A path in it is text, "
+                "never opened")
+    if ext != ".json" or tail in REBASE_JSON:
         return None
     return "not on the list of files a move may rewrite: it names the old folder until its step runs again"
 
@@ -426,7 +521,9 @@ def rebase(root, olds, new=None, dry_run: bool = False) -> dict:
     if not olds:
         return rep
     tp, needles = _pairs(olds, new, True), _needles(olds)
-    ctx_abs, ctx_rel = (olds, new, _pairs(olds, new, False), False), (olds, new, _pairs(olds, new, False, True), True)
+    heads: dict = {}
+    ctx_abs = (olds, new, _pairs(olds, new, False), False, heads)
+    ctx_rel = (olds, new, _pairs(olds, new, False, True), True, heads)
     owned = {f"output/client_database/{r}" for r in client_db.path_files(root / "output" / "client_database")}
     for rel, size, _m in scan(root, "scan")["files"]:
         if rel in owned:                                 # client_db.migrate's: stored relative, never re-absolutised
@@ -446,7 +543,7 @@ def rebase(root, olds, new=None, dry_run: bool = False) -> dict:
             rep["kept"].append({"file": rel, "why": "too big to check (over 64 MB)"})
             continue
         why = "a log of what happened in the old folder: kept as written" if ext in LOG_EXT else \
-            _rewritable(rel) if ext == ".json" else None
+            _rewritable(rel, ext)
         if why:
             if _names(p, needles, lambda q: open(q, "rb")):
                 rep["kept"].append({"file": rel, "why": why})
@@ -459,12 +556,15 @@ def rebase(root, olds, new=None, dry_run: bool = False) -> dict:
                                       else ctx_abs, count)
                 n, data = count[0], json.dumps(new_doc, ensure_ascii=False, indent=2) + "\n"
             else:
-                data, n = _sub(text, tp)
+                data, n = _rebase_text(text, olds, new, tp, heads)
         except (OSError, ValueError) as e:
             if _names(p, needles, lambda q: open(q, "rb")):
                 rep["kept"].append({"file": rel, "why": f"names the old folder but couldn't be read ({type(e).__name__})"
                                                        ": it is refreshed when its step runs again"})
             continue
+        if _names_text(data, needles):
+            rep["kept"].append({"file": rel, "why": "still names the old folder in a form a move doesn't rewrite (a "
+                                                    "link typed by hand?): check it yourself"})
         if not n:
             continue
         if not dry_run:
@@ -476,7 +576,28 @@ def rebase(root, olds, new=None, dry_run: bool = False) -> dict:
                 rep["errors"].append({"file": rel, "why": str(e)})
                 continue
         rep["rewritten"].append({"file": rel, "values": n})
+    from .safety.takes import ED, HISTORY
+    for r in list(rep["rewritten"]):
+        if r["file"].endswith("/" + ED) and _has_steps(root.joinpath(*r["file"].split("/")[:-2], *HISTORY.split("/"))):
+            rep["kept"].append({"file": r["file"][:-len(ED)] + HISTORY,
+                                "why": "`reel takes --undo` steps were recorded against the plan as it was before the "
+                                       "move: an undo now refuses (nothing is overwritten); change the takes with "
+                                       "`reel takes --drop/--keep` instead"})
     return rep
+
+
+def _names_text(s: str, needles: list) -> bool:
+    b = s.encode("utf-8")
+    hay = b.lower() if FOLD_CASE else b
+    return any(n in hay for n in needles)
+
+
+def _has_steps(p: Path) -> bool:
+    try:
+        doc = json.loads(Path(_x(p)).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(doc, dict) and bool(doc.get("steps"))
 
 
 # --------------------------------------------------------------------------- a copy nobody migrated
@@ -491,8 +612,11 @@ def _foreign(root: Path, v) -> str | None:
         return None
     parts = list(pp.parts)
     for i in range(1, len(parts) - 1):
-        if parts[i].lower() in client_db.ANCHORS and root.joinpath(*parts[i:]).exists():
-            return str(type(pp)(*parts[:i]))
+        here = root.joinpath(*parts[i:])
+        if parts[i].lower() in client_db.ANCHORS and here.exists():
+            if client_db.native_abs(v) and _is_root(real(here), real(v)):   # the same file, through one of the client's
+                return None                              # own links (a data/ junction to a store: older caches keyed its
+            return str(type(pp)(*parts[:i]))             # real path, or another alias of it)
     return None
 
 
@@ -668,7 +792,9 @@ def _copy_client(src, dest, mode: str, apply: bool) -> dict:
     if not apply:
         if mode == "move":
             doc["outside_database"] = rebase(src, olds, new=dest, dry_run=True)
-        return dict(doc, next=f"dry run: nothing was written. Run `reel {verb} --to <folder> --apply` to do it.")
+        close = (f" Close the Premiere and After Effects projects you have open at {src} first (an open project keeps "
+                 "saving to the old folder while it is copied).") if mode == "move" else ""
+        return dict(doc, next=f"dry run: nothing was written.{close} Run `reel {verb} --to <folder> --apply` to do it.")
     client_db._require_lock(src)
     names = _top(sc, mode)
     if ref["partial"]:
@@ -720,20 +846,28 @@ def _copy_client(src, dest, mode: str, apply: bool) -> dict:
         doc["warnings"] = [f"{len(times)} file(s) lost part of their modification time on this drive (FAT/exFAT keeps "
                            "times to 2 s): `reel next` may ask to redo a step there. Prefer an NTFS / APFS drive."]
     if mode == "move":
-        doc["old_folder"] = (f"left in place at {src}: check the new folder (`reel next --root \"{dest}\"`), then "
+        doc["old_folder"] = (f"left in place at {src}: keep it until the steps listed as approved in "
+                             "`outside_database.kept` have run again at the new folder (their plans still read the old "
+                             "folder's media); then delete it yourself" if _kept_approved(outside) else
+                             f"left in place at {src}: check the new folder (`reel next --root \"{dest}\"`), then "
                              "delete the old one yourself")
-        doc["next"] = f"work from {dest} from now on" + _then(outside)
+        doc["next"] = (f"close the Premiere and After Effects projects you have open at {src} first (an open project "
+                       f"keeps saving to the old folder), then work from {dest} from now on" + _then(outside))
     else:
         doc["next"] = (f"a new client at {dest} with this client's brand database and no media: add its assets/ and "
                        "data/, then `reel discover` and `reel client-db` there")
     return doc
 
 
+def _kept_approved(outside: dict) -> bool:
+    return any("approval" in k["why"] for k in outside["kept"])
+
+
 def _then(outside: dict) -> str:
     out = []
     if outside["projects"]:
         out.append("relink or rebuild the Premiere/After Effects projects listed in `projects`")
-    if any("approval" in k["why"] for k in outside["kept"]):
+    if _kept_approved(outside):
         out.append("the plans/transcripts listed in `outside_database.kept` still name the old folder (kept so they "
                    "stay approved): re-run their steps before a build, or wait for the executor's answer (BL-14)")
     return ("; then " + "; ".join(out)) if out else ""
