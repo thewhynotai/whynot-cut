@@ -30,8 +30,8 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 | S6b | Gate 4 eval cases for the Phase 4 skills | H1 | NOT READY (ask the executor which skills are frozen) | — | master writes the card |
 | STAGE3-DRAFTS | Stage 3 task specs (F1, F10, F11 skeleton) as drafts | MASTER | NOT READY (after the Gate 4 tag / 1 Nov) | — | becomes H1/H2/LANE cards |
 | ENV-01 | Engine runtime for unsandboxed processes (helper suites: 563 env errors) | MASTER | IN PROGRESS | `tasks/ENV-01.md` | then SETUP-H1/H2 re-run |
-| OPS-01 | Status generator, Arabic reports, ops/hq GitHub mirror (pilot task) | MASTER | IN PROGRESS | `tasks/OPS-01.md` | OPS-02 |
-| OPS-02 | Schedule the 4 daily PRIMARY reports + delivery receipt test | MASTER | NOT READY (needs OPS-01) | `tasks/OPS-02.md` | — |
+| OPS-01 | Status generator, Arabic reports, ops/hq GitHub mirror (pilot task) | MASTER | DONE_ARCHIVED (02:00, 25/25 tests, 2 reviews) | `tasks/archive/OPS-01/OPS-01.md` | OPS-02 |
+| OPS-02 | Schedule the 4 daily PRIMARY reports + delivery receipt test | MASTER | IN PROGRESS | `tasks/OPS-02.md` | — |
 | OPS-03 | Fold the release-preview refresh check into the report run; retire lane-watch | MASTER | READY | `tasks/OPS-03.md` | — |
 | OPS-04 | After the tag: move 00-HQ into the repo; fix 3 repo references to archived docs | EXECUTOR | NOT READY (after the v3.0.0-p4 tag) | `tasks/OPS-04.md` | — |
 | OPS-05 | First observed cross-account cycle: H1 DONE → H2 peer review → intake verdict | MASTER (observe) | NOT READY (needs ENV-01) | `tasks/OPS-05.md` | — |

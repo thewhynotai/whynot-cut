@@ -1,6 +1,6 @@
 # OPS-01 — Status generator, Arabic reports and GitHub mirror for 00-HQ
 
-- **Assigned:** COMMAND CENTER (master)    **Model:** Opus 5.5    **Size:** M    **Status:** IN_PROGRESS
+- **Assigned:** COMMAND CENTER (master)    **Model:** Opus 5.5    **Size:** M    **Status:** DONE_ARCHIVED (2026-10-20 02:00)
 - **Tier:** LIGHT (internal tooling: tests first, ONE independent review, no mutation run, ≤ 2 fix rounds)
 - **Milestone:** M0 Operations bootstrap. **Depends on:** nothing. **Unblocks:** OPS-02 (scheduled delivery).
 
@@ -33,5 +33,10 @@ Never the master tree's working files; git there is read-only (`rev-parse`, `rev
 ## Required tests
 `python -X utf8 -m unittest 00-HQ/tools/test_hq_status.py` all pass; one real run; one independent fresh review.
 
-## Closure evidence
-(filled at close: test output, review file, local SHA = remote SHA, archive path)
+## Closure evidence (2026-10-20 02:00)
+- **Tests:** red first (11 errors) → green 11/11; fix round 1: 8 new tests red → 19/19; fix round 2: 6 new tests (4 red) → **25/25 OK** (`python -X utf8 -m unittest test_hq_status`, run from `00-HQ/tools`).
+- **Reviews (independent, fresh Opus):** `reviews/OPS-01-r1.md` PASS-WITH-MINORS (5 P2) → all fixed; `reviews/OPS-01-r2.md` delta: the 5 P2 FIXED, 1 new P2 (non-ASCII names in `git ls-files`) → fixed in round 2 with a test. LIGHT tier: closed after the 2nd fix round.
+- **Real runs:** reports `reports/2026-10-20-0136.md`, `-0150.md`, `-0159.md`; ops/hq local = remote at each run; last 450fbe05 (git ls-remote).
+- **Acceptance 1-9:** met (r1/r2 tables); line 3 has unit coverage on the label only (git_state itself checked by real runs).
+- **Known limits (accepted, LIGHT):** a pipe inside backticks in a BOARD cell breaks that row; STALE only after 330 min silence; the mirror filters by type and 1 MB size but has no name deny-list (fine while the repo is private: it holds staff e-mails and executor patches); the `report_verdict` helper is tested but production reads the same map inline.
+- **Archive:** this packet → `tasks/archive/OPS-01/`; the code stays live in `00-HQ/tools/`.
