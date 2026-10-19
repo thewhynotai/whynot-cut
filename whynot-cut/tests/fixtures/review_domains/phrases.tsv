@@ -234,3 +234,33 @@ loss of interest in daily activities	-business
 الجلسة ٧٥٥ ألكس والشعر بيقل	-business
 الجلسة ٨١٠ دايود والشعر بيقل	-business
 الجلسة ١٠٦٤ إن دي ياج والشعر بيقل	-business
+# Review 9f411f0 (targeted last fix): bare «N٪ على <treatment>» offers again; a statistic needs an outcome cue, never a bare verb
+٣٠٪ على الليزر	+business
+احجزي دلوقتي ٣٠٪ على الفيلر	+business
+٣٠٪ على البوتوكس لحد آخر الشهر	+business
+٣٠٪ على الجلسات بس الأسبوع ده	+business
+٥٠٪ على الجلسة التانية	+business
+٣٠٪ على تاني جلسة	+business
+٣٠% على الفيلر	+business
+بيوصل ٥٠٪ على كل الباقات	+business
+التوفير بيوصل ٥٠٪ على كل الجلسات	+business
+العرض الأشهر عندنا ٤٠٪	+business
+عرض نادر ٥٠٪ لأول ١٠ حاجزين	+business
+العرض الأكتر طلبا ٥٠٪	+business
+عرض الصيف بيزيد ٢٠٪	+business
+٣٠٪ على الكورس	+business
+نسبة النجاح ٩٠٪ على الليزر	-business
+التحسن بيوصل ٥٠٪ على الجلسات	-business
+النتيجة بتوصل ٨٠٪ على البوتوكس	-business
+الشعر بيخف ٧٠٪ على الليزر	-business
+# the old P2-2 fillers (يعني, حوالي, تقريبا, يا دكتور) before a bare price; «هنا» after it is a place, not a unit
+الكشف يعني ٣٠٠ والدكتور موجود	+business
+الكشف حوالي ٣٠٠ والدكتور موجود	+business
+الكشف تقريبا ٣٠٠ والدكتور موجود	+business
+الكشف عندي يعني ٣٠٠ والدكتور موجود	+business
+الكشف يا دكتور ٣٠٠ والمتابعة كل شهر	+business
+الكشف ٣٠٠ هنا في العيادة	+business
+الكشف عندي ٣٠٠ هنا	+business
+الكشف يعني ٣ مرات في السنة	-business
+الجلسة حوالي ٤٥ دقيقة والدكتور بيتابع	-business
+بالف هنا	-business

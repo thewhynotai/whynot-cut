@@ -877,7 +877,8 @@ class TestFinalRound(unittest.TestCase):
         ms = RD.matchers()
         for unit in ("الكشف ٣٠٠ ", "الجلسة الأولى ", "عرض رمضان الجديد ", "٥٠٪ على ", "اشتري ١ و خد ", "قسط على ",
                      "﴿ خصم ﴾ ٥٠٪ ", "الحق ", "installments ", "it's 400 a ", "0% ", "الكشف كان ٣٠٠ وبقى ",
-                     "الكشف عندي في يا ", "عرض جانبي بيقل "):
+                     "الكشف عندي في يا ", "عرض جانبي بيقل ",
+                     "التحسن بيوصل ٥٠٪ على الليزر ", "الكشف يعني ٣٠٠ هنا "):
             def cost(n):
                 t0 = time.perf_counter()
                 RD.detect(unit * n, ms)
@@ -924,12 +925,12 @@ class TestLastMiniRound(unittest.TestCase):
         """«عرض» counts only as an offer; «نسبة» + outcome + «N٪ على <treatment>» is a statistic, not a price."""
         for t in ("عرض جانبي ٢٪", "ده عرض جانبي نادر ٢٪", "العرض ده بيقل ٥٠٪ بعد العلاج", "عرض شائع ٣٠٪",
                   "العرض ده بيختفي ٨٠٪", "نسبة النجاح ٩٠٪ على الليزر", "نسبة الاستجابة ٦٠٪ على البوتوكس",
-                  "التحسن بيوصل ٧٠٪ على الجلسات", "النتيجة ٩٥٪ على الفيلر", "بيقل ٥٠٪ على التاني",
-                  "نسبة النجاح ٩٠٪ على كل الجلسات", "التحسن بيوصل ٧٠٪ على كل الجلسات", "٣٠٪ على الكورس",
+                  "التحسن بيوصل ٧٠٪ على الجلسات", "النتيجة ٩٥٪ على الفيلر",
+                  "نسبة النجاح ٩٠٪ على كل الجلسات", "التحسن بيوصل ٧٠٪ على كل الجلسات",
                   "الشعر بيخف ٨٠٪ على الليزر"):
             self.assertNotIn("business", domains(t), t)
         for t in ("عرض خاص ٢٠٪", "العرض ده ٣٠٪", "عرض رمضان ٣٠٪", "خصم ٩٠٪", "نسبة الخصم ٣٠٪ على الباقة",
-                  "٥٠٪ على كل جلسات الليزر", "٢٠٪ على الكشف"):
+                  "٥٠٪ على كل جلسات الليزر", "٢٠٪ على الكشف", "٣٠٪ على الكورس"):
             self.assertIn("percent-off", self.rules(t), t)
 
     def test_clinic_units_veto_a_bare_price(self):
@@ -941,6 +942,50 @@ class TestLastMiniRound(unittest.TestCase):
         for t in ("الجلسة ٥٠٠", "الجلسة ٥٠٠ والمريض مرتاح", "الباقة ٣ جلسات بـ ١٥٠٠ جنيه"):
             self.assertIn("business", domains(t), t)
 
+
+class TestTargetedLastFix(unittest.TestCase):
+    """Review 9f411f0: a bare «N٪ على <treatment>» is an offer again; a statistic needs an outcome noun, an outcome
+    noun + verb or بيخف/بتخف before the percent (a bare verb is never a veto); «عرض» is vetoed only in its symptom
+    sense; the fillers يعني/حوالي/تقريبا/يا دكتور join a bare price, and «هنا» after the number is a place."""
+
+    def rules(self, text: str) -> list:
+        return [m["rule"] for m in RD.detect(text).get("business", [])]
+
+    def test_bare_percent_on_a_treatment_is_an_offer(self):
+        for noun in ("الليزر", "الفيلر", "البوتوكس", "الجلسات", "الجلسة التانية", "تاني جلسة", "الكورس", "التانية"):
+            for pct in ("٣٠٪", "30%", "%30"):
+                t = f"احجزي دلوقتي {pct} على {noun}"
+                self.assertIn("percent-off", self.rules(t), t)
+        for t in ("بيوصل ٥٠٪ على كل الباقات", "التوفير بيوصل ٥٠٪ على كل الجلسات", "بيقل ٥٠٪ على التاني",
+                  "بتزيد ٢٠٪ على الليزر"):
+            self.assertIn("percent-off", self.rules(t), t)                        # a bare verb never vetoes
+
+    def test_a_statistic_needs_an_outcome_cue(self):
+        for t in ("نسبة النجاح ٩٠٪ على الليزر", "نسبة نجاحها ٩٠٪ على الفيلر", "التحسن بيوصل ٥٠٪ على الجلسات",
+                  "النتيجة بتوصل ٨٠٪ على البوتوكس", "الاستجابة كانت ٦٠٪ على الكورس", "النتايج بتبقى ٧٠٪ على الليزر",
+                  "الشعر بيخف ٧٠٪ على الليزر", "البقع بتخف ٧٠٪ على الليزر",
+                  "النتيجة ٩٥٪ على الفيلر", "الشفا ٨٠٪ على الكورس"):
+            self.assertNotIn("business", domains(t), t)
+
+    def test_offer_sense_of_ard(self):
+        for t in ("العرض الأشهر عندنا ٤٠٪", "عرض نادر ٥٠٪ لأول ١٠ حاجزين", "العرض الأكتر طلبا ٥٠٪",
+                  "عرض الصيف بيزيد ٢٠٪"):
+            self.assertIn("percent-off", self.rules(t), t)
+        for t in ("عرض جانبي ٢٪", "ده عرض جانبي نادر ٢٪", "عرض شائع ٣٠٪", "العرض ده بيختفي ٨٠٪", "العرض ده بيقل ٥٠٪"):
+            self.assertNotIn("business", domains(t), t)
+
+    def test_discourse_fillers_and_here_after_the_number(self):
+        for gap in ("يعني", "حوالي", "تقريبا", "يا دكتور", "عندي يعني", "يا دكتوره"):
+            for number in ("٣٠٠", "300", "تلتمية"):
+                t = f"الكشف {gap} {number} والمتابعة كل شهر"
+                self.assertIn("priced-amount", self.rules(t), t)
+        for t in ("الكشف ٣٠٠ هنا في العيادة", "الكشف عندي ٣٠٠ هنا", "الجلسة ٥٠٠ هنا"):
+            self.assertIn("priced-amount", self.rules(t), t)
+        matches = [m["match"] for m in RD.detect("الكشف كان ٣٠٠ وبقى ٢٠٠ هنا")["business"]]
+        self.assertTrue(any("300" in m and "200" in m for m in matches), matches)    # the second amount too
+        for t in ("الكشف يعني ٣ مرات", "الجلسة حوالي ٤٥ دقيقة", "الكشف تقريبا ٢٠٢٤", "بالف هنا",
+                  "الكشف يعني بكرة ٣٠٠"):
+            self.assertNotIn("priced-amount", self.rules(t), t)
 
 class TestPhrases(unittest.TestCase):
     """Pre-mortem T50 item 2: every reported miss or false alarm is one line of fixtures/review_domains/phrases.tsv."""
