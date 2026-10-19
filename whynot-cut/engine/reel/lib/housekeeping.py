@@ -514,9 +514,9 @@ def _runtimes_old_item(a: Path, opts: dict, now: float) -> dict:
     if not link_safe and others:
         why += "; the complete old runtimes stay: this engine's runtime cleanup is not the link-safe one yet"
 
-    def still_half(p: Path) -> bool:        # right before removal: setup may have rebuilt it or made it current
-        cur = plat.current_runtime_id(a) or current
-        return _is_half(p) and not _same_id(p.name, cur) and not any(
+    def still_half(p: Path) -> bool:        # right before each removal: setup may have rebuilt it, made it current,
+        cur = plat.current_runtime_id(a) or current     # or started a build (review 41bc006 P3-1)
+        return _is_half(p) and not _building(d) and not _same_id(p.name, cur) and not any(
             _same_id(p.name, k) for k in _keep_runtimes(d, current))
 
     def do():
@@ -944,14 +944,21 @@ def _plan(a: Path, opts: dict) -> list[dict]:
 
 
 # ------------------------------------------------------------------------------------------------ public API
+def _removable_bytes(items) -> int:
+    """What a yes frees: the bytes of the removable items only (a kept item's size is shown on its own line, never
+    added in; review 41bc006 P3-2)."""
+    return sum(i["bytes"] for i in items if i["removable"])
+
+
 def scan(home=None, *, models: bool = False, uv_cache: bool = False) -> dict:
-    """What can go and how big it is (read-only): {"home", "total_bytes", "items": [{key, path, bytes, removable,
-    why}]} in the KEYS order. `bytes` is reported for kept items too (the editor sees what a yes would free).
-    models / uv_cache: the two opt-in items (each needs the editor's own yes)."""
+    """What can go and how big it is (read-only): {"home", "removable_bytes", "items": [{key, path, bytes, removable,
+    why}]} in the KEYS order. removable_bytes is what `--apply` with the same opt-ins would free; `bytes` is reported
+    for kept items too (each line says why it stays). models / uv_cache: the two opt-in items (each needs the editor's
+    own yes)."""
     a = _anchor(home)
     items = [{k: v for k, v in it.items() if not k.startswith("_")}
              for it in _plan(a, {"models": bool(models), "uv_cache": bool(uv_cache)})]
-    return {"home": str(a), "total_bytes": sum(i["bytes"] for i in items), "items": items}
+    return {"home": str(a), "removable_bytes": _removable_bytes(items), "items": items}
 
 
 def clean(home=None, *, apply: bool = False, models: bool = False, uv_cache: bool = False) -> dict:
@@ -974,7 +981,7 @@ def clean(home=None, *, apply: bool = False, models: bool = False, uv_cache: boo
         freed += removed
         items.append(it)
     return {"home": str(a), "apply": bool(apply), "models": bool(models), "uv_cache": bool(uv_cache), "ok": ok,
-            "total_bytes": sum(i["bytes"] for i in items), "freed_bytes": freed, "items": items}
+            "removable_bytes": _removable_bytes(items), "freed_bytes": freed, "items": items}
 
 
 def rotate_logs(folder, max_bytes: int = LOG_MAX, keep: int = LOG_KEEP) -> list[str]:

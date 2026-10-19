@@ -448,7 +448,7 @@ class TestPlan(Home):
             self.assertEqual(set(i), {"key", "path", "bytes", "removable", "why"})
             self.assertIsInstance(i["bytes"], int)
             self.assertTrue(i["why"])
-        self.assertEqual(rep["total_bytes"], sum(i["bytes"] for i in rep["items"]))
+        self.assertEqual(rep["removable_bytes"], sum(i["bytes"] for i in rep["items"] if i["removable"]))
         json.dumps(rep, ensure_ascii=False)
 
 
@@ -861,7 +861,7 @@ class TestOwn(Home):
     def test_lock_file_present_but_free(self):
         with self.status():
             rep = HK.scan(self.home)
-        self.assertEqual(rep["total_bytes"], sum(i["bytes"] for i in rep["items"]))
+        self.assertEqual(rep["removable_bytes"], sum(i["bytes"] for i in rep["items"] if i["removable"]))
         with self.status():
             self.assertTrue(self.item(HK.clean(self.home, models=True), "models_unused")["removable"])
 
@@ -888,7 +888,7 @@ class TestOwn(Home):
 
     def test_home_missing_is_a_plain_answer(self):
         rep = HK.scan(self.tmp / "no home")
-        self.assertEqual(rep["total_bytes"], 0)
+        self.assertEqual(rep["removable_bytes"], 0)
         self.assertEqual([i["key"] for i in rep["items"]], list(HK.KEYS))
 
     def test_ok_field(self):
@@ -1549,6 +1549,199 @@ class TestFixRound1(Home):
             self.assertEqual(HK._keep_runtimes(rt, "R-CUR"), {"r-cur", "r-prev"})
         with mock.patch.object(HK, "_FOLD", False):
             self.assertEqual(HK._keep_runtimes(rt, "r-cur"), {"r-cur", "r-prev"})
+
+
+# ------------------------------------------------------------------------------------------------ fix round 2
+class TestFixRound2(Home):
+    """Review 41bc006 (FAIL r2). P2-2: ruling Q3's three branches no test pinned (each test is red on the reviewer's
+    mutant C3, C5 or C6, lane5/work/41bc006/mutate.py). P3-1: the cheap guards (H1, U1, U3/U4, U6, R4, and a build
+    re-checked before each half-removed runtime). P3-2: removable_bytes counts only what a yes frees."""
+
+    def setUp(self):
+        super().setUp()
+        self.small = self.home / "models" / "models--Systran--faster-whisper-small"
+        self.medium = self.home / "models" / "models--Systran--faster-whisper-medium"
+
+    def models_apply(self, **kw):
+        with self.status():
+            dry = HK.scan(self.home, models=True)
+            rep = HK.clean(self.home, apply=True, models=True, **kw)
+        return self.item(dry, "models_unused"), self.item(rep, "models_unused")
+
+    def client(self, name: str) -> Path:
+        d = self.clients / name
+        (d / "assets").mkdir(parents=True, exist_ok=True)
+        (d / "data").mkdir(parents=True, exist_ok=True)
+        return d
+
+    # ---------------------------------------------------------------- P2-2 / Q3: the three unpinned branches
+    def test_the_second_client_s_model_is_kept(self):                 # mutant C3 (only the first client read)
+        self.client("Dr B")
+        write(self.clients / "Dr B" / ".claude" / "whynot-cut.local.md", b"---\nwhisper_model: small\n---\n")
+        with mock.patch.object(common, "PROFILES_DIR", self.tmp / "no-profiles"):
+            dry, it = self.models_apply()
+        self.assertIn("small (in use: client Dr B)", dry["why"])
+        self.assertTrue(self.small.exists())
+        self.assertIsNone(it["error"])
+        self.assertEqual(it["removed"], 0)
+
+    def test_a_shipped_profile_s_default_model_is_kept(self):          # mutant C5 (default_model dropped)
+        shipped = self.tmp / "profiles"
+        write(shipped / "clinic-x" / "profile.json", b'{"id": "clinic-x"}')
+        write(shipped / "clinic-x" / "transcription.json", b'{"default_model": "small"}')
+        with mock.patch.object(common, "PROFILES_DIR", shipped):    # no client names clinic-x
+            dry, it = self.models_apply()
+        self.assertIn("small (in use: profile clinic-x)", dry["why"])
+        self.assertTrue(self.small.exists())
+        self.assertEqual(it["removed"], 0)
+
+    def test_a_client_reel_profile_s_fallback_is_kept(self):           # mutant C6 (fallback_models dropped)
+        write(self.clients / "Dr A" / "output" / "client_database" / "reel-profile" / "transcription.json",
+              b'{"fallback_models": ["small"]}')
+        with mock.patch.object(common, "PROFILES_DIR", self.tmp / "no-profiles"):   # nothing shipped carries it
+            dry, it = self.models_apply()
+        self.assertIn("small (in use: client Dr A)", dry["why"])
+        self.assertTrue(self.small.exists())
+        self.assertEqual(it["removed"], 0)
+
+    # ---------------------------------------------------------------- P3-1: the cheap guards
+    def test_home_two_levels_inside_a_client_is_refused(self):         # mutant H1 (only the direct parent)
+        client = self.clients / "Dr A"
+        write(client / ".whynot-client", b"{}")
+        inner = client / "sub" / "engine"
+        inner.parent.mkdir()
+        os.replace(self.home, inner)
+        with mock.patch.object(HK, "_clients_root", return_value=None), self.status():
+            rep = HK.clean(inner, apply=True, models=True)
+            auto = HK.auto_prune(inner, cap_bytes=2)
+        self.assertEqual(rep["freed_bytes"], 0)
+        self.assertIn("inside a client folder (Dr A)", self.item(rep, "cache_other")["error"])
+        self.assertEqual(auto["removed"], [])
+        for keep in ("cache/font-index.json", "logs/pipeline.log.1", "models/models--Systran--faster-whisper-small"):
+            self.assertTrue(os.path.lexists(inner / keep), keep)
+
+    def test_uv_cache_link_to_elsewhere_in_the_home_is_refused(self):  # mutant U1 (inside the HOME counted fine)
+        uvd = self.home / "cache" / "uv"
+        dir_link(uvd / "m", self.home / "models")
+        os.utime(uvd, (OLD, OLD))
+        before = tree_digest(self.small)
+        with self.status(), mock.patch.object(HK.subprocess, "run", side_effect=AssertionError("uv ran")):
+            dry = HK.scan(self.home, uv_cache=True)
+            rep = HK.clean(self.home, apply=True, uv_cache=True)
+        for r in (dry, rep):
+            it = self.item(r, "uv_cache")
+            self.assertFalse(it["removable"])
+            self.assertIn("m inside the uv cache is a link to outside it", it["why"])
+        self.assertIsNone(self.item(rep, "uv_cache")["error"])     # uv never started
+        self.assertTrue(linksafe.is_link(uvd / "m"))
+        self.assertEqual(tree_digest(self.small), before)          # (no --models: the models stay as they were)
+        self.assertTrue((self.medium / "blobs" / "b1").exists())
+
+    def test_uv_cache_folder_itself_a_link(self):                     # mutants U4 (scan) and U3 (apply re-check)
+        uvd = self.home / "cache" / "uv"
+        real = self.outside / "uv-real"
+        write(real / "wheels" / "o.whl", b"o" * 500)
+        os.replace(uvd, self.tmp / "uv-was")
+        dir_link(uvd, real)
+        before = self.outside_hash()
+        with self.status(), mock.patch.object(HK.subprocess, "run", side_effect=AssertionError("uv ran via a link")):
+            dry = HK.scan(self.home, uv_cache=True)
+            HK.clean(self.home, apply=True, uv_cache=True)
+        it = self.item(dry, "uv_cache")
+        self.assertFalse(it["removable"])
+        self.assertIn("link", it["why"])
+        self.assertEqual(self.outside_hash(), before)
+        os.rmdir(uvd) if IS_WIN else os.unlink(uvd)          # the junction / symlink as a name
+        os.replace(self.tmp / "uv-was", uvd)
+        real_plan = HK._plan
+
+        def plan(*a, **kw):                  # cache/uv is swapped for a link after the scan, before uv runs
+            items = real_plan(*a, **kw)
+            os.replace(uvd, self.tmp / "uv-was")
+            dir_link(uvd, real)
+            return items
+        with self.status(), mock.patch.object(HK, "_plan", side_effect=plan), \
+                mock.patch.object(HK.subprocess, "run", side_effect=AssertionError("uv ran via a link")):
+            rep = HK.clean(self.home, apply=True, uv_cache=True)
+        it = self.item(rep, "uv_cache")
+        self.assertTrue(it["removable"])
+        self.assertIn("changed meanwhile", it["error"])
+        self.assertEqual(it["removed"], 0)
+        self.assertEqual(self.outside_hash(), before)
+
+    def test_uv_freed_bytes_are_measured_after_uv(self):              # mutant U6 (the scan size reported)
+        write(self.home / "cache" / "uv" / "wheels" / "b.whl", b"b" * 400, OLD)
+
+        def uv_clean(uv, cache_dir, timeout=HK.UV_TIMEOUT_S):  # uv frees only a part (a file another uv holds)
+            os.unlink(Path(cache_dir) / "wheels" / "a.whl")
+        with self.status(), mock.patch.object(HK, "_uv_clean", side_effect=uv_clean):
+            rep = HK.clean(self.home, apply=True, uv_cache=True)
+        it = self.item(rep, "uv_cache")
+        self.assertEqual(it["bytes"], 1400)
+        self.assertEqual(it["removed"], 1000)
+        self.assertTrue((self.home / "cache" / "uv" / "wheels" / "b.whl").exists())
+
+    def half(self, name: str, size: int = 9000) -> Path:
+        d = self.home / "runtimes" / name
+        write(d / ("Scripts" if IS_WIN else "bin") / PY, b"h" * size, OLD)
+        age_tree(d)
+        return d
+
+    def test_a_build_started_after_the_scan_stops_runtime_removal(self):   # mutant R4 (build not re-checked)
+        d = self.half("r-half")
+        calls = []
+
+        def prune(home, keep, dry_run=False):
+            calls.append(dry_run)
+            return {"removed": ["r-old"], "kept": sorted(keep), "failed": {}}
+        real_plan = HK._plan
+
+        def plan(*a, **kw):                  # reel setup starts building right after the scan
+            items = real_plan(*a, **kw)
+            write(self.home / "runtimes" / ".r-new.building", b"{}")
+            return items
+        with self.status(), mock.patch.object(HK, "_prune_is_link_safe", return_value=True), \
+                mock.patch.object(HK.runtime, "prune", side_effect=prune), \
+                mock.patch.object(HK, "_plan", side_effect=plan):
+            rep = HK.clean(self.home, apply=True)
+        it = self.item(rep, "runtimes_old")
+        self.assertTrue(it["removable"])
+        self.assertNotIn(False, calls)                       # no real prune ran
+        self.assertEqual(it["removed"], 0)
+        self.assertIn("changed the runtimes meanwhile", it["error"])
+        self.assertTrue(d.exists())
+
+    def test_a_build_started_between_two_half_removals_keeps_the_rest(self):
+        h1, h2 = self.half("r-half1"), self.half("r-half2")
+        real = HK.safe_remove
+
+        def rm(p, a, within=None):
+            got = real(p, a, within)
+            if Path(p).parent.name == "runtimes":            # setup starts a build right after the first one went
+                write(self.home / "runtimes" / ".r-new.building", b"{}")
+            return got
+        with self.status(), mock.patch.object(HK, "_prune_is_link_safe", return_value=False), \
+                mock.patch.object(HK, "safe_remove", side_effect=rm):
+            rep = HK.clean(self.home, apply=True)
+        self.assertFalse(os.path.lexists(h1))
+        self.assertTrue(h2.exists())
+        self.assertEqual(self.item(rep, "runtimes_old")["removed"], 9000)
+
+    # ---------------------------------------------------------------- P3-2: removable_bytes
+    def test_removable_bytes_counts_only_what_a_yes_frees(self):
+        with self.status():
+            dry = HK.scan(self.home)
+            rep = HK.clean(self.home)
+            withm = HK.scan(self.home, models=True)
+            done = HK.clean(self.home, apply=True)
+        for r in (dry, rep, withm, done):
+            self.assertNotIn("total_bytes", r)
+            self.assertEqual(r["removable_bytes"], sum(i["bytes"] for i in r["items"] if i["removable"]))
+        self.assertLess(dry["removable_bytes"], sum(i["bytes"] for i in dry["items"]))   # kept items are listed
+        self.assertFalse(self.item(dry, "models_unused")["removable"])
+        self.assertEqual(withm["removable_bytes"] - dry["removable_bytes"], self.item(withm, "models_unused")["bytes"])
+        self.assertEqual(rep["removable_bytes"], dry["removable_bytes"])
+        self.assertEqual(done["freed_bytes"], dry["removable_bytes"])
 
 
 if __name__ == "__main__":
