@@ -2,12 +2,17 @@
 
 Yunus wants stopped work resumed automatically with no approvals asked («احلها بدون اي ابروف مني وكمل شغل»).
 Keep this run CHEAP: few tool calls, no thinking out loud, no project work.
+**Time box:** if any single step takes more than 2 minutes, or a tool asks for a permission, stop and end the run
+(the next run in 30 min retries). No PowerShell at all; the only shell call allowed is the one-line Bash
+`stale_suites.py age` below (it worked unattended in every report run).
 
 `HQ` = `D:\0 Work\0 Pegasus IMC Agency\00 TWN\0 TWN AI\Editing Plugin\00-HQ`. Nudge log = `HQ\intake\watchdog-nudges.json`
-(`{"<session id>": "<ISO time with offset>", …}`, written with PowerShell `(Get-Date).ToString("o")`; create it if
-missing; an entry without an offset counts as "nudged just now" until rewritten).
+(`{"<session id>": "<ISO time with offset>", …}`). Read and write it ONLY with the Read and Write tools; the time to
+record is this run's own `createdAt` from `get_session "self"` (UTC, ends in Z). Create it if missing; an entry
+without an offset counts as "nudged just now" until rewritten.
 
-0. **Stop check.** `git -C "<HQ>\..\WhyNotCut" tag -l v3.0.0`: prints v3.0.0 → reply "release done, watchdog idle", stop.
+0. **Stop check (shell-free).** Glob `<HQ>\..\WhyNotCut\.git\refs\tags\v3.0.0`, and Grep `refs/tags/v3.0.0$` in
+   `<HQ>\..\WhyNotCut\.git\packed-refs`. Either found → reply "release done, watchdog idle", stop.
 1. **Stuck routine runs.** Load in ONE ToolSearch `select:mcp__scheduled-tasks__list_task_runs,mcp__ccd_session_mgmt__stop_session,mcp__ccd_session_mgmt__list_sessions,mcp__ccd_session_mgmt__get_session,mcp__ccd_session_mgmt__list_events,mcp__ccd_session_mgmt__send_message`.
    For `whynot-cut-hq-intake` and `whynot-cut-primary-report-2`: `list_task_runs` limit 1. If the newest run is
    `running`, get its age with ONE Bash call: `python -X utf8 "<HQ>\tools\stale_suites.py" age <its started_at>`
@@ -16,7 +21,7 @@ missing; an entry without an offset counts as "nudged just now" until rewritten)
    > 420 (intake; its reviews are long) → `stop_session` it. Any other answer (including "unknown") → leave it.
 2. **Targets, in this order** (skip any with `isRunning: true` or archived; `get_session` each):
    - executor `local_22b44953-13e2-409d-93c1-3b201b119548` (work track)
-   - Command Center `local_5f0c462a-b4b0-4689-95c2-f6f160f428f8` (work track)
+   - Command Center `local_a36b6974-0281-4d5f-b70f-d0bd7c51b4ef` (work track)
    - Builder A `local_b32f950e-064d-4ef3-8d7a-6138a875d045` (work track until it ENDs)
    - adobe `local_f9018851-ec7d-42b4-9b62-9f9b3bf23cb6` (wakes on call: resume only after an error, never an idle nudge)
    - plan session `local_263cabbf-75e3-42a1-b384-1753a7bd4dad` (resume only after an error, never an idle nudge)
@@ -41,7 +46,7 @@ missing; an entry without an offset counts as "nudged just now" until rewritten)
      `python -X utf8 <HQ>\tools\hq_status.py`, read the inbox and BOARD, unblock what is stuck (heavy queue orphans:
      AUTOMATION_RUNBOOK §5b; stuck routine runs), take the next READY MASTER card, keep PROJECT_PLAN_AR.md true. Decide
      and continue, don't ask Yunus."
-   Record each nudge in the nudge log (PowerShell, one call). If a send fails because a limit is still active, find
+   Record each nudge in the nudge log (Read + Write tools, no shell). If a send fails because a limit is still active, find
    "resets <time>" and, if no `whynot-cut-resume-<HHMM>` one-shot exists, create one at reset + 3 min with the prompt
    "Run the same steps as the scheduled task whynot-cut-auto-resume-2."
 5. **Final reply:** one line: stuck runs stopped, sessions nudged, or "nothing to resume".

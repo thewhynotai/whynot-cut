@@ -6,7 +6,7 @@ Owner: Command Center (master). Words used here: **configured** (exists) · **sc
 ## 0. Routine set since 2026-10-20 11:50 (Command Center, Yunus: «احلها بدون اي ابروف مني»)
 - `whynot-cut-primary-report-2` (09/13/17/21, **Bypass mode**, notifies the Command Center) — `roles/PRIMARY-REPORT.md`.
 - `whynot-cut-auto-resume-2` (:13/:43, **Bypass mode**) — `roles/WATCHDOG.md`: stops stuck routine runs, resumes the
-  executor, the Command Center (`local_5f0c462a…`) and Builder A, including when their transcripts are too big to read.
+  executor, the Command Center (`local_a36b6974…`) and Builder A, including when their transcripts are too big to read.
 - `whynot-cut-hq-intake` (:37, Bypass) — `roles/MASTER-INTAKE.md`.
 - Retired (disabled, kept for history): `whynot-cut-auto-resume` v1 (no Command Center target, blind to huge
   transcripts), `whynot-cut-lane-watch`, `whynot-cut-owner-update`; `whynot-cut-primary-report` v1 deleted (it ran in
@@ -79,7 +79,7 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
 
 ## 6. Incidents
 - 2026-10-20 11:20–11:45 (Yunus: «ليه مرجعتش تشتغل لوحدها… احلها بدون اي ابروف»). Found and fixed:
-  1. The Command Center session was never a watchdog target → added (`local_5f0c462a…`).
+  1. The Command Center session was never a watchdog target → added (`local_a36b6974…`, the parent Command Center; first set to the btw fork by mistake, corrected 11:55).
   2. The v1 watchdog could not read huge transcripts ("(no messages)") → never resumed the executor (idle 05:15) or
      Builder A (07:06). Both nudged by hand 11:38; v2 judges unreadable work tracks by last activity.
   3. Routine runs in default mode hung on permission prompts, and a hung run blocks every later run of its routine
