@@ -150,6 +150,19 @@ def _walk(music_dir: Path):
         yield Path(dirpath), sorted(f for f in filenames if _regular(os.path.join(dirpath, f)))
 
 
+class _Why(str):
+    """A licence problem: the technical text (kept in `why`) with its code (and a value, e.g. the licence type) for
+    the editor's wording (_plain). Plain strings (read errors) have no code: "can't be read"."""
+    code = "unreadable"
+    arg = ""
+
+
+def _why(code: str, text: str, arg: str = "") -> _Why:
+    w = _Why(text)
+    w.code, w.arg = code, arg
+    return w
+
+
 def _read_small(p: Path, cap: int) -> tuple[bytes | None, str]:
     """(at most cap bytes, '') or (None, why): lstat first (no link, a regular file only: never a FIFO, device or
     folder), then one non-blocking, no-follow handle, fstat again on it, and at most cap + 1 bytes read from it."""
@@ -165,6 +178,8 @@ def _read_small(p: Path, cap: int) -> tuple[bytes | None, str]:
         return None, f"{name} is a folder, not a licence file"
     if not _stat.S_ISREG(st.st_mode):
         return None, f"{name} is not a regular file"
+    if st.st_nlink != 1:
+        return None, f"{name} is hard-linked to another file, not a licence file of its own"
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(p, flags)
@@ -261,29 +276,29 @@ def _check_licence(data: dict, name: str, folder: Path, is_folder: bool, music_d
     allowed = _allowed()
     lic = data.get("license")
     if not isinstance(lic, str) or not lic.strip():
-        return f'{name} has no "license" field'
+        return _why("no_type", f'{name} has no "license" field')
     if lic not in allowed:
-        return f"{name}: license {lic!r} is not allowed ({', '.join(allowed)})"
+        return _why("not_allowed", f"{name}: license {lic!r} is not allowed ({', '.join(allowed)})", lic)
     if not isinstance(data.get("source"), str) or not data["source"].strip():
-        return f'{name} needs a "source" (where the track was licensed from)'
+        return _why("no_source", f'{name} needs a "source" (where the track was licensed from)')
     attr = data.get("attribution")
     if attr is not None and not isinstance(attr, str):
-        return f'{name}: "attribution" must be text'
+        return _why("attribution", f'{name}: "attribution" must be text')
     if lic.upper().startswith("CC-BY") and not (attr or "").strip():
-        return f"{name}: a {lic} licence needs its attribution text"
+        return _why("attribution", f"{name}: a {lic} licence needs its attribution text")
     proof = data.get("proof")
     if proof is not None and not isinstance(proof, str):
-        return f'{name}: "proof" must be text'
+        return _why("proof", f'{name}: "proof" must be text')
     if lic == "commercial" and not (proof or "").strip():
-        return f'{name}: a commercial licence needs a "proof" (an order id, or a receipt file next to it)'
+        return _why("proof", f'{name}: a commercial licence needs a "proof" (an order id, or a receipt file next to it)')
     if proof and proof.strip():
         why = _proof_problem(proof.strip(), folder, music_dir)
         if why:
-            return f"{name}: {why}"
+            return _why("proof", f"{name}: {why}")
     if is_folder:
         files = data.get("files")
         if files != "*" and not (isinstance(files, list) and files and all(isinstance(f, str) for f in files)):
-            return f'{name}: a folder licence must say which "files" it covers ("*" or a list of names)'
+            return _why("files", f'{name}: a folder licence must say which "files" it covers ("*" or a list of names)')
     return ""
 
 
@@ -303,7 +318,7 @@ def _one_of(files: list[Path]) -> tuple[dict | None, Path | None, str]:
     first = got[0][0][0]
     if any(d is None or d != first for (d, _w), _f in got):
         names = " and ".join(f.name for _x, f in got)
-        return None, got[0][1], f"{names} exist and disagree (keep one)"
+        return None, got[0][1], _why("disagree", f"{names} exist and disagree (keep one)")
     return first, got[0][1], ""
 
 
@@ -325,8 +340,8 @@ def licence_for(track: Path, names: list[str], root: Path) -> tuple[dict | None,
         return (None, why, True) if why else (_licence_record(data, f, root, "track"), "", False)
     fold = [folder / n for n in names if _key(n) in FOLDER_LICENCES]
     if not fold:
-        return None, (f"no licence for {track.name}: add {track.name}.licence.json next to it (or a licence.json "
-                      "for its folder)"), False
+        return None, _why("no_licence", f"no licence for {track.name}: add {track.name}.licence.json next to it (or a "
+                                        "licence.json for its folder)"), False
     data, f, why = _one_of(fold)
     if data is None:
         return None, why, True
@@ -335,7 +350,7 @@ def licence_for(track: Path, names: list[str], root: Path) -> tuple[dict | None,
     if why:
         return None, why, True
     if data["files"] != "*" and tk not in {_key(n) for n in data["files"] if isinstance(n, str)}:
-        return None, f"the folder licence {f.name} does not list {track.name}", False
+        return None, _why("not_listed", f"the folder licence {f.name} does not list {track.name}"), False
     return _licence_record(data, f, root, "folder"), "", False
 
 
@@ -391,7 +406,9 @@ def music_catalog(root, probe: bool = True) -> list[dict]:
                     dur = None
                 ok = bool(dur and dur > 0)
             out.append({"rel": f.relative_to(root).as_posix(), "file": str(f), "moods": moods, "unknown_moods": unknown,
-                        "licensed": licence is not None, "licence": licence, "why": why, "licence_invalid": invalid,
+                        "licensed": licence is not None, "licence": licence, "why": str(why),
+                        "why_code": getattr(why, "code", "unreadable") if why else "",
+                        "why_arg": getattr(why, "arg", "") if why else "", "licence_invalid": invalid,
                         "decodes": ok, "duration_s": round(float(dur), 3) if ok else None})
     return out
 
@@ -690,36 +707,31 @@ def _draft_line(drafts: list[str]) -> tuple[str, str]:
             "التراك بتاعها.")
 
 
-_PLAIN = [   # why (technical, kept in "why") -> what the editor reads, EN / Egyptian Arabic
-    (r"^no licence for", "no licence file", "ملوش ملف ترخيص"),
-    (r"does not list", "the folder licence doesn't list it", "ترخيص الفولدر مش مكتوب فيه"),
-    (r"license '([^']*)' is not allowed", "the licence type {0} isn't allowed", "نوع الترخيص {0} مش مسموح بيه"),
-    (r'has no "license" field', "the licence type (license) is missing", "نوع الترخيص (license) ناقص"),
-    (r'needs a "source"', "the licence doesn't say where the music came from (source)",
-     "الترخيص مش مكتوب فيه جبت الموسيقى منين (source)"),
-    (r"attribution text|\"attribution\" must be text", "the credit line (attribution) is missing",
-     "سطر الإسناد (attribution) ناقص"),
-    (r"proof", "the purchase proof (proof) is missing or not found", "إثبات الشراء (proof) ناقص أو مش موجود"),
-    (r"disagree", "it has two licence files that say different things", "ليه ملفين ترخيص مكتوب فيهم كلام مختلف"),
-    (r'"files"', "the folder licence doesn't say which files it covers (files)",
-     "ترخيص الفولدر مش مكتوب فيه الملفات اللي بيغطيها (files)"),
-]
+_PLAIN = {   # reason code (licence_for / _check_licence) -> what the editor reads, EN / Egyptian Arabic
+    "no_licence": ("no licence file", "ملوش ملف ترخيص"),
+    "not_listed": ("the folder licence doesn't list it", "ترخيص الفولدر مش مكتوب فيه"),
+    "not_allowed": ("the licence type {0} isn't allowed", "نوع الترخيص {0} مش مسموح بيه"),
+    "no_type": ("the licence type (license) is missing", "نوع الترخيص (license) ناقص"),
+    "no_source": ("the licence doesn't say where the music came from (source)",
+                  "الترخيص مش مكتوب فيه جبت الموسيقى منين (source)"),
+    "attribution": ("the credit line (attribution) is missing", "سطر الإسناد (attribution) ناقص"),
+    "proof": ("the purchase proof (proof) is missing or not found", "إثبات الشراء (proof) ناقص أو مش موجود"),
+    "disagree": ("it has two licence files that say different things", "ليه ملفين ترخيص مكتوب فيهم كلام مختلف"),
+    "files": ("the folder licence doesn't say which files it covers (files)",
+              "ترخيص الفولدر مش مكتوب فيه الملفات اللي بيغطيها (files)"),
+    "unreadable": ("its licence file can't be read (the details say why)",
+                   "ملف الترخيص بتاعه مش مقروء (السبب في التفاصيل)"),
+}
 
 
 def _plain_parts(e: dict) -> tuple[str, str, str]:
-    """(track name, EN reason, AR reason) of one track's licence problem in the editor's words. The patterns run on
-    the reason with the track's and its licence files' names taken out, so a track called attribution.wav or
-    proof.wav is never read as its name; a file that cannot be read at all (empty, broken, wrong format, a link, too
-    big) is "can't be read" (the technical reason stays in `why`)."""
-    name = Path(e["rel"]).name
-    clean = e.get("why") or ""
-    for n in sorted({name + s for s in TRACK_LICENCE_SUFFIXES} | set(FOLDER_LICENCES) | {name}, key=len, reverse=True):
-        clean = clean.replace(n, "<file>")
-    for pat, en, ar in _PLAIN:
-        mt = re.search(pat, clean)
-        if mt:
-            return name, en.format(*mt.groups()), ar.format(*mt.groups())
-    return name, "its licence file can't be read (the details say why)", "ملف الترخيص بتاعه مش مقروء (السبب في التفاصيل)"
+    """(track name, EN reason, AR reason) of one track's licence problem in the editor's words, from its reason code
+    (music_catalog's "why_code"), never from the text: a file or proof value named "proof" or "attribution", in any
+    letter case, cannot change it. A file that cannot be read at all (empty, broken, wrong format, a link, a hard
+    link, too big) is "can't be read"; the technical reason stays in `why`."""
+    en, ar = _PLAIN.get(e.get("why_code") or "unreadable", _PLAIN["unreadable"])
+    arg = e.get("why_arg") or ""
+    return Path(e["rel"]).name, en.format(arg), ar.format(arg)
 
 
 def _plain(e: dict) -> tuple[str, str]:
@@ -841,12 +853,12 @@ def music_plan(root, script_music, recipe: dict | None, speech: list, n_frames: 
                   "الموسيقى بنفسك في After Effects.")
         elif _music_reached_through_link(root):
             why = "data/ or data/Music is reached through a link (a junction or symlink): music is never read through a link"
-            en = ("No music was read: data/Music is reached through a link (a junction or shortcut), and WhyNot Cut "
-                  "never reads music through a link. Put the music in the real data/Music folder. Until then the video "
-                  "has speech and sound effects only.")
-            ar = ("مفيش موسيقى اتقرت: فولدر data/Music واصل له لينك (junction أو shortcut)، وWhyNot Cut عمره ما بيقرا "
-                  "موسيقى من لينك. حط الموسيقى في فولدر data/Music الحقيقي. لحد ما ده يحصل الفيديو فيه كلام ومؤثرات "
-                  "صوتية بس.")
+            en = ("No music was read: data/Music (or data) is a link (a junction or symlink) to another place, and "
+                  "WhyNot Cut never reads music through a link. Put the music in a real data/Music folder. Until then the "
+                  "video has speech and sound effects only.")
+            ar = ("مفيش مزيكا اتقرت: فولدر data/Music (أو data) متوصّل بلينك (junction) لمكان تاني، والمزيكا مش بتتقري "
+                  "من خلال لينك. حط المزيكا في فولدر data/Music حقيقي. لحد ما ده يحصل الفيديو فيه كلام ومؤثرات صوتية "
+                  "بس.")
         elif not usable:
             bad = [x for x in catalog if not x["licensed"]]
             damaged = [x for x in catalog if x["licensed"] and not x["decodes"]]
@@ -896,7 +908,7 @@ def music_plan(root, script_music, recipe: dict | None, speech: list, n_frames: 
             rs = "; ".join(f"{Path(x['rel']).name}: moods {', '.join(x['moods']) or 'none'}"
                            + (f" (Arabic mood words not known: {', '.join(x['unknown_moods'])})"
                               if x.get("unknown_moods") else "") for x in seen)
-            rs_ar = "؛ ".join(f"{Path(x['rel']).name}: المود {', '.join(x['moods']) or 'مفيش'}"
+            rs_ar = "؛ ".join(f"{Path(x['rel']).name}: المود {'، '.join(x['moods']) or 'مفيش'}"
                               + (f" (كلمات مود عربي مش معروفة: {', '.join(x['unknown_moods'])})"
                                  if x.get("unknown_moods") else "") for x in seen)
             if len(usable) > 3:
@@ -909,7 +921,7 @@ def music_plan(root, script_music, recipe: dict | None, speech: list, n_frames: 
                 f"; fitting but not licensed: {_reasons(fit_unlic)}" if fit_unlic else "")
             en = (f"No licensed track fits this video's mood ({ms}): {rs}.{fit_en} Add a licensed track tagged with one "
                   f"of these moods (in its file name or music.json), or choose a track for this video.{den}")
-            ar = (f"مفيش تراك مرخّص على مود الفيديو ده ({ms}): {rs_ar}.{fit_ar} ضيف تراك مرخّص متصنّف على المود ده (في اسم "
+            ar = (f"مفيش تراك مرخّص على مود الفيديو ده ({'، '.join(moods)}): {rs_ar}.{fit_ar} ضيف تراك مرخّص متصنّف على المود ده (في اسم "
                   f"الملف أو music.json)، أو اختار تراك للفيديو ده.{dar}")
         if chosen is None:
             res["needs_you"].append(_need(why, "/".join(MUSIC_DIR), en, ar))

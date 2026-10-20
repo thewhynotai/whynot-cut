@@ -453,6 +453,45 @@ class TestLicences(MusicDir):
         en, _ar = motion_audio._plain(c["files.wav"])
         self.assertIn("GPL-3.0", en)
 
+    def test_F2_plain_reason_by_code_for_odd_names_and_values(self):
+        """P3-1 / P3-2 (review c4fb7a6): the editor's reason comes from the reason code, never from the text, so a
+        name in another letter case, a licence name holding a trigger word, or a proof value holding one reads right."""
+        from lib import motion_audio
+        cases = {
+            "e/proof.wav": ("proof.wav.licence.json", b"", "can't be read"),                     # empty, name says proof
+            "c/Proof.WAV": ("proof.wav.licence.json", b"", "can't be read"),                     # other letter case
+            "v/a.wav": ("a.wav.licence.json", json.dumps(lic(license="commercial", proof="attribution text.pdf")),
+                        "purchase proof"),                                                         # the value says attribution
+            "s/source.wav": ("source.wav.licence.json", json.dumps(lic(license="GPL-3.0")), "isn't allowed"),
+        }
+        for rel, (lname, body, want) in cases.items():
+            t = self.music / rel
+            tone(t)
+            f = t.parent / lname
+            f.write_bytes(body if isinstance(body, bytes) else body.encode("utf-8"))
+        d = self.music / "d"
+        tone(d / "Proof.wav")
+        put_lic(d / "Proof.wav.licence.json", lic())
+        put_lic(d / "proof.wav.license.json", lic(license="MIT"))                                # disagree, other case
+        c = self.cat()
+        for rel, (_l, _b, want) in cases.items():
+            en, _ar = motion_audio._plain(c[Path(rel).name])
+            self.assertIn(want, en, rel)
+        en, _ar = motion_audio._plain(c["Proof.wav"])
+        self.assertIn("two licence files", en)
+        self.assertNotIn("credit line", motion_audio._plain(c["a.wav"])[0])
+
+    def test_P3_3_a_hard_linked_licence_is_not_a_licence(self):
+        tone(self.music / "a.wav")
+        src = put_lic(self.tmp / "shared.json", lic())
+        try:
+            os.link(src, self.music / "a.wav.licence.json")
+        except OSError:
+            self.skipTest("no hard links here")
+        e = self.cat()["a.wav"]
+        self.assertFalse(e["licensed"])
+        self.assertRegex(e["why"], r"(?i)hard")
+
     def test_F5_hand_pick_with_another_letter_case_on_a_case_sensitive_system(self):
         """Minor 5 (macOS): resolve() keeps the given case there and paths compare case-sensitively; given_rel compares
         each component with _key, so data/music/Tense_Dark.WAV still names data/Music/tense_dark.wav."""
@@ -1491,6 +1530,42 @@ class TestMusicPlan(MusicPlanCase):
             tone(f, 1.0, freq=777)
             os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns + 5 * 10 ** 9))
             self.assertNotEqual(ES.PanelFields()._signature(act, home), k0, given)
+
+    def test_P3_4_same_size_same_mtime_licence_edit_moves_the_panel_key(self):
+        """The licence files the choice reads are content-hashed in the panel's cache key, like the gate files."""
+        from serve import engine_state as ES
+        f = self.licensed("tense_dark.wav", secs=1.0)
+        lf = put_lic(self.music / "tense_dark.wav.licence.json", lic(source="aaaa"))
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, True)
+        act = {"client_root": self.root, "item": self.reel.video_id}
+        for music in ("__unset__", {"file": "data/Music/tense_dark.wav"}):
+            put_lic(lf, lic(source="aaaa"))
+            self.compile(music)
+            st = lf.stat()
+            k0 = ES.PanelFields()._signature(act, home)
+            lf.write_text(lf.read_text(encoding="utf-8").replace("aaaa", "bbbb"), encoding="utf-8")
+            os.utime(lf, ns=(st.st_atime_ns, st.st_mtime_ns))
+            self.assertEqual((lf.stat().st_size, lf.stat().st_mtime_ns), (st.st_size, st.st_mtime_ns))
+            self.assertNotEqual(ES.PanelFields()._signature(act, home), k0, music)
+        self.assertTrue(f.exists())
+
+    def test_P3_5_arabic_wording(self):
+        tone(self.music / "tense_x.wav", 30)
+        self.licensed("calm_soft.wav")
+        r, plan = self.compile()
+        it = self.assert_no_music_one_need(r, plan)
+        self.assertIn("tense، dark، cinematic", it["text_ar"])          # Arabic list separator between the tags
+        self.assertNotIn("tense, dark", it["text_ar"])
+        shutil.rmtree(self.music)
+        self.music.mkdir()
+        self.junction_music(False)
+        r, plan = self.compile()
+        it = self.assert_no_music_one_need(r, plan)
+        self.assertNotIn("shortcut", it["text"].lower())
+        self.assertNotIn("shortcut", it["text_ar"].lower())
+        self.assertNotIn("واصل له لينك", it["text_ar"])
+        self.assertIn("متوصّل بلينك", it["text_ar"])
 
     def test_F3_mood_mismatch_text_is_arabic_and_names_each_track_once(self):
         """Minor 3: text_ar has no English sentence parts; a fitting unlicensed track is named once."""

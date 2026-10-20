@@ -89,7 +89,8 @@ Cost (PanelFields)
     inputs and configs), the listing (entry names and kinds) of every folder whose entries are listed (the frame
     folders and their run-* folders: NTFS stamps a folder's mtime in clock ticks, so a frame written in the same tick
     as the folder's last change leaves the folder's stat as it was) and a sha256 of the small gate files (GATE_FILES,
-    at most GATE_HASH_MAX each): an approval or
+    at most GATE_HASH_MAX each) and of the data/Music licence files and music.json the music choice reads (T4.6):
+    an approval, verdict or licence or
     verdict rewritten in place with the same size and a kept mtime still changes the key. A result built while any
     read failed for a reason other than "not found" (a sharing violation, a permission flip, a share that dropped)
     is never cached. active.json itself is read on every call, so staleness and a changed item are seen at once. An
@@ -938,8 +939,8 @@ def _gate_hash(path: Path, base: Path) -> str | None:
 class PanelFields:
     """panel_fields with a cache: the item's fields are computed again only when a file or folder they come from
     changed (_stat_key of every path in _Item.watched, the _listing of every folder in _Item.listed, plus a content
-    hash of the small gate files in GATE_FILES:
-    an approval or verdict rewritten in place with the same size and a kept mtime is still seen). active.json is read
+    hash of the small gate files in GATE_FILES and of the licence files the music choice reads (T4.6):
+    an approval, verdict or licence rewritten in place with the same size and a kept mtime is still seen). active.json is read
     on every call. A result built while any read failed for a reason other than "not found" is never cached (the next
     call reads again). Thread-safe; every call returns its own copy.
     `generation` (G2 H3, the daemon's push on change) moves only when the fields served differ from the ones served
@@ -970,8 +971,11 @@ class PanelFields:
                 watched = it.watched()
                 listed = tuple((str(f), _listing(f)) for f in it.listed())
                 gates = tuple(_gate_hash(it.p(rel), it.base) for rel in GATE_FILES)
+                # T4.6: the licence files and music.json the music choice reads, hashed like the gate files (a
+                # same-size edit that keeps the mtime still changes the key)
+                music = tuple((str(f), _gate_hash(f, it.root)) for f in it._music_read()[0])
             return (str(act["client_root"]), act["item"], tuple((str(p), _stat_key(p)) for p in watched), listed,
-                    gates)
+                    gates, music)
         except Exception as e:                    # no key: compute without the cache
             _failed(e)
             log.debug("engine state: no cache key (%s)", type(e).__name__)
