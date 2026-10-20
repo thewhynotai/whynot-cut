@@ -41,4 +41,4 @@ channel state is `NOT_CONFIGURED`, and messages stay `FILED`.
 | R-2026-10-20-1256 | 2026-10-20 12:56 | hq_status | PRIMARY | FILED | تقرير حالة: 3 تغيير | `reports/2026-10-20-1256.md` |
 | R-2026-10-20-1303 | 2026-10-20 13:04 | hq_status | PRIMARY | SENT (session local_0fea5398-a929-48e3-bced-e61a1904debe) | تقرير الضهر: 0 تغيير | `reports/2026-10-20-1303.md` |
 | R-2026-10-20-1623 | 2026-10-20 16:23 | hq_status | PRIMARY | FILED | تقرير حالة: 1 تغيير | `reports/2026-10-20-1623.md` |
-| R-2026-10-20-1704 | 2026-10-20 17:04 | hq_status | PRIMARY | FILED | تقرير العصر: 0 تغيير | `reports/2026-10-20-1704.md` |
+| R-2026-10-20-1704 | 2026-10-20 17:04 | hq_status | PRIMARY | SENT (session local_9a91a749-1f11-4c6e-9ea4-ea507a49d177) | تقرير العصر: 0 تغيير | `reports/2026-10-20-1704.md` |
