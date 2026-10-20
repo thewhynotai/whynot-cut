@@ -14,4 +14,7 @@ Create the Claude-app scheduled task `whynot-cut-primary-report` (cron 0 9,13,17
 ## Evidence
 - 2026-10-20 02:01 first manual run waited on a permission prompt (Q-005).
 - 2026-10-20 02:46 run `local_6b4431c0`: report R-2026-10-20-0247 written, marked **SENT (session local_6b4431c0…)**, ops/hq SYNCED. Delivery channel verified.
-- Still needed to close: two scheduled runs observed (09:00, 13:00), and one ACKNOWLEDGED (Yunus replies to a report).
+- 11:39 the routine was re-created as `whynot-cut-primary-report-2` in bypass mode (no permission prompts); 11:43 run `local_bc75882a` delivered R-2026-10-20-1143 unattended, SENT.
+- **Scheduled run 1:** 13:03 `local_0fea5398` succeeded unattended.
+- 13:54–16:20 account usage limit: routine runs during the limit fail fast (status failed, not stuck), so later runs are not blocked.
+- Still needed to close: the 17:00 scheduled run, and one ACKNOWLEDGED (Yunus replies to a report).

@@ -31,7 +31,7 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 | (lane 1) | API lane 1 | — | STOPPED (owner budget ruling 10-19 10:03); BL-16 and BL-04 moved to cards above | — | — |
 | S6b | Gate 4 eval cases for the Phase 4 skills | H1 | NOT READY (ask the executor which skills are frozen) | — | master writes the card |
 | STAGE3-DRAFTS | Stage 3 task specs (F1, F10, F11 skeleton) as drafts | MASTER | NOT READY (after the Gate 4 tag / 1 Nov) | — | becomes H1/H2/LANE cards |
-| ENV-01 | Engine runtime for unsandboxed processes (helper suites: 563 env errors) | MASTER | IN PROGRESS (fix in, 104/104 real-env OK; H1 suite in 2026-10-20 08:26: 2 gaps left — engine uses imageio ffmpeg 4.2.2 not the pin, venv is py3.13 vs locks 3.12; see reviews/SETUP-H1-r3.md) | `tasks/ENV-01.md` | then SETUP-H1/H2 re-run |
+| ENV-01 | Engine runtime for unsandboxed processes (helper suites: 563 env errors) | MASTER | DONE_ARCHIVED (16:23; helper full suite 8899 OK, 0 fail) | `tasks/archive/ENV-01/ENV-01.md` | — |
 | OPS-01 | Status generator, Arabic reports, ops/hq GitHub mirror (pilot task) | MASTER | DONE_ARCHIVED (02:00, 25/25 tests, 2 reviews) | `tasks/archive/OPS-01/OPS-01.md` | OPS-02 |
 | OPS-02 | Schedule the 4 daily PRIMARY reports + delivery receipt test | MASTER | IN PROGRESS | `tasks/OPS-02.md` | — |
 | OPS-03 | Fold the release-preview refresh check into the report run; retire lane-watch | MASTER | DONE_ARCHIVED (02:20, 28/28, review r1) | `tasks/archive/OPS-03/OPS-03.md` | — |

@@ -1,6 +1,6 @@
 # ENV-01 — Engine runtime for unsandboxed processes (helper suites)
 
-- **Assigned:** COMMAND CENTER (master)    **Model:** Opus 5.5    **Size:** S    **Status:** IN_TESTING (waits for H1's h1-setup4 suite)
+- **Assigned:** COMMAND CENTER (master)    **Model:** Opus 5.5    **Size:** S    **Status:** DONE_ARCHIVED (2026-10-20 16:23)
 - **Tier:** LIGHT (dev workflow)    **Milestone:** M0    **Unblocks:** every helper card (SETUP-H1/H2 baseline, then all ACCEPTs)
 
 ## Goal
@@ -32,6 +32,7 @@ never use a per-user site: the packages must live inside the venv's own site-pac
 - Acceptance 3 (full suite from a helper context with no env errors) → H1's `h1-setup4` re-run; Answer written in SETUP-H1 02:49. OPEN until that report.
 - Acceptance 4: same 47 versions (frozen from the sandbox view).
 - 2026-10-20 07:25 H1 `h1-setup4` (SETUP-H1-r3, ACCEPTED by the intake 08:26): 8,226 ran, 8,087 OK, **no ModuleNotFoundError**; 51 failures, 46 from two more gaps: the suite ran on the 2.x venv (Python 3.13, imageio ffmpeg 4.2.2) instead of the pinned 3.0 runtime.
-- Step 3 (11:27): the canonical runner `tools/test.sh` picks `~/.whynot-cut/runtimes/r-6e4a68a292b4` (Python 3.12, `-s`) in the REAL environment; the failing groups (TestMotionQC, test_vfr_flagged, test_cut_proof_resampling…, the unicode bracket tables) + align/structure/cli: **Ran 124 — OK** (`env-fixerify-testsh.log`). Every suite command now uses `tools/test.sh`: MASTER-INTAKE step 1B, helper_loop peer review (30/30 loop tests, RELOAD-h1/h2), PLAYBOOK §2 item 3.
-- Still open for acceptance 3: one full helper suite through `tools/test.sh` (next helper suite).
-- Cleanup left: the step-1 per-user copy (~556 MB on C) is now a duplicate; remove it when no suite runs (`pip uninstall` with the venv copy taking precedence).
+- Step 3 (11:27): the canonical runner `tools/test.sh` picks `~/.whynot-cut/runtimes/r-6e4a68a292b4` (Python 3.12, `-s`) in the REAL environment; the failing groups (TestMotionQC, test_vfr_flagged, test_cut_proof_resampling…, the unicode bracket tables) + align/structure/cli: **Ran 124 — OK** (`D:\ClaudeData\accounts\env-fix\verify-testsh.log`). Every suite command now uses `tools/test.sh`: MASTER-INTAKE step 1B, helper_loop peer review (30/30 loop tests, RELOAD-h1/h2), PLAYBOOK §2 item 3.
+- **Acceptance 3 met (2026-10-20 14:08):** H2's `h2-bl03` from the marketing@ worktree through `bash tools/test.sh`: **Ran 8899 — OK (0 failures, 0 errors; skipped 88, expected failures 23)**, heavy.sh rc=0 (`inbox/h2/2026-10-20-1350-BL-03.md`). Yesterday's helper baseline: 563 errors.
+- Cleanup done 16:22: the step-1 duplicate in the real per-user site removed with the SYSTEM python (540 MB → 0 MB on C); the venv still imports numpy from its own site-packages (`cleanup-user-site.log`).
+- Review: LIGHT tier, environment change verified by measurement at each step (real-env runs 104/104, 124/124, full 8899 OK); no code review applicable beyond the 3 one-line command changes (loop tests 30/30).
