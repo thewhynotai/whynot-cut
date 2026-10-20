@@ -21,7 +21,7 @@ The same pattern hit H1's `h1-bl02-final` (00:48 → ended 03:52).
 2. A simulated cut run leaves no slot held for more than one intake period.
 3. MASTER-INTAKE.md and the runbook updated.
 
-## Closure (2026-10-20 06:25) — DONE_ARCHIVED
+## Closure (2026-10-20 06:15) — DONE_ARCHIVED
 - Change: `00-HQ/tools/stale_suites.py` (tag-based orphan ending + tested lock rules), `roles/MASTER-INTAKE.md`
   step 0.1 (lock with session id; stale rule; `end-tag` only for a run known dead; delete only your own lock) and
   step 1B (`env WNC_RUN=<session id>` on the review suite; reviewer in the foreground); runbook §5b.

@@ -1,0 +1,78 @@
+diff --git a/whynot-cut/engine/reel/cli.py b/whynot-cut/engine/reel/cli.py
+index 231edb1..5ac37ae 100644
+--- a/whynot-cut/engine/reel/cli.py
++++ b/whynot-cut/engine/reel/cli.py
+@@ -1003,6 +1003,13 @@ def cmd_next(a):
+     out(next_doc(P(a)), check=False)
+
+
++def cmd_run_state(a):
++    """BL-04 (M5-T7): `reel next` with the item's run state folded in (lib/run_state.py): where a session cut by a
++    usage limit goes on, with no stage repeated and none left half done."""
++    from lib import run_state
++    out(run_state.resume(P(a), next_doc), check=False)
++
++
+ def next_doc(p: Paths) -> dict:
+     """The `reel next` document of one clip, reel or motion project (also read by `reel board`, T3.10)."""
+     from lib.motion_config import is_motion
+@@ -1036,6 +1043,11 @@ def next_doc(p: Paths) -> dict:
+     todo = [name for name, f in chk if f is None or not Path(f).exists()]
+     stale = stale_steps(p, todo)
+     todo = [s_ for s_ in stale] + [n for n in todo if n not in [s_.split(" (")[0] for s_ in stale]]
++    from lib.run_state import preflight_problem
++    pf = preflight_problem(p)    # BL-04 (REL-PREVIEW): missing after later steps, older than the footage, or not naming
++    if pf:                       # it (ppro-build refuses then): preflight first, after discover / client-db (it needs
++        first = [n for n in todo if n in ("discover", "client-db")]     # them). Not a delivery blocker (stale_steps).
++        todo = first + [f"preflight ({pf})"] + [n for n in todo if n not in first and n.split(" (")[0] != "preflight"]
+     status = load_status(p)["status"]
+     from lib.common import DONE_STATUSES
+     if stale and status in DONE_STATUSES:
+@@ -1070,7 +1082,7 @@ CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze"
+ # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
+ # and works while another session holds the client (gate G2).
+ CORE_READS = {"board", "serve", "perf-report", "setup", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
+-              "status", "next", "lock", "doctor", "validate"}
++              "status", "next", "run-state", "lock", "doctor", "validate"}
+ WRITES_IF = {
+     "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
+                                                 / "output/discovery/input-inventory.json").exists(),
+@@ -1663,6 +1675,7 @@ CORE_COMMANDS: dict[str, str] = {
+     "status": "show the project status record",
+     "board": "one table of every client in the clients folder: each video's state and next step (--json for the panel)",
+     "next": "what the next step is (resumable workflow), with stale-input warnings",
++    "run-state": "where a cut session goes on: `reel next` plus the stages it left unfinished or whose output is torn",
+     "lock": "one writer per client folder: show (--status) or release (--release, lead only) output/.whynot-lock",
+     "mogrt-build": "build MOGRT templates (extra: needs --extras and an explicit editor request)",
+     "ae-script": "write the After Effects script (extra: needs --extras)",
+@@ -1977,13 +1990,17 @@ def start(a):
+
+
+ def run(a):
+-    """Dispatch the parsed command (inside the client's writer lock when it writes)."""
++    """Dispatch the parsed command (inside the client's writer lock when it writes). A stage verb of one item is
++    recorded in its run state (BL-04, lib/run_state.recording): started before, finished after."""
+     from lib import motion_cli, podcast_cli
++    from lib.run_state import recording
+     if a.cmd in podcast_cli.ARGS:
+-        podcast_cli.dispatch(a)
++        with recording(a):
++            podcast_cli.dispatch(a)
+         return
+     if a.cmd in motion_cli.ARGS:
+-        motion_cli.dispatch(a)
++        with recording(a):
++            motion_cli.dispatch(a)
+         return
+     if not a.video_id and a.cmd not in NO_ID and not a.episode:
+         inv = read_json(Path(a.root).expanduser() / "output/discovery/input-inventory.json")
+@@ -1995,7 +2012,8 @@ def run(a):
+             if a.cmd not in OPTIONAL_ID:
+                 raise SystemExit("--video-id required (found %d source files; `reel inbox` lists them)" % len(src))
+     canonical_video_id(a)
+-    globals()["cmd_" + a.cmd.replace("-", "_")](a)
++    with recording(a):
++        globals()["cmd_" + a.cmd.replace("-", "_")](a)
+
+
+ if __name__ == "__main__":

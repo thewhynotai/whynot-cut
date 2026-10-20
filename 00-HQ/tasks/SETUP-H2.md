@@ -1,6 +1,6 @@
 # SETUP-H2 — first session of Helper 2
 
-- **Assigned:** H2 (marketing@)    **Model:** Sonnet 5.5 high    **Size:** S    **Status:** IN PROGRESS
+- **Assigned:** H2 (marketing@)    **Model:** Sonnet 5.5 high    **Size:** S    **Status:** READY
 - **Tier:** LIGHT (baseline)
 
 Same as `SETUP-H1.md`, with `h2` everywhere:
@@ -24,3 +24,22 @@ Master decision on the PARTIAL report: the empty helper engine home was the caus
 launcher no longer overrides `WHYNOT_HOME`; helpers use the same engine home as the executor. Re-run the baseline
 with label `h2-setup3` and the card's command unchanged, then write a NEW report with the numbers. If failures
 still name missing packages or ffmpeg, list 3 full tracebacks and stop (do not fix).
+
+## Answer (2026-10-20 08:26)
+Master decision on the BLOCKED report `inbox\h2\2026-10-20-SETUP-H2.md`:
+- **The queue check without `heavy.sh status`.** `heavy.sh status` is denied in both helper profiles on purpose
+  (the deny rule `Bash(*side-session-notes*heavy.sh status*)`; a deny beats the allow `Bash(bash *heavy.sh*)`). The
+  settings stay as they are. The PLAYBOOK §3d status check is done like this instead (H1 does the same):
+  1. `ls D:/ClaudeData/Temp/wnc-locks/wait/` lists the waiting tickets.
+  2. `cat` each ticket to read its label.
+  3. If any label starts with a prefix from `00-HQ/YIELD.txt` (read it with the Read tool), write a PARTIAL report
+     "yielded to the Gate 4 queue" and stop.
+  4. Otherwise queue your job with `bash C:/Users/LOQ/AppData/Roaming/Claude/side-session-notes/local_263cabbf-75e3-42a1-b384-1753a7bd4dad/heavy.sh suite|job <label> -- ...`.
+     This is allowed: your own BL-16 peer review ran `peer-BL-16*` through it today.
+  If even `ls` on that folder is denied, report BLOCKED with the exact denial text.
+- **`npm ci` runs in `adobe/`.** That folder is the npm workspace root: `adobe/package.json` has
+  `"workspaces": ["panel-ui", "premiere-uxp"]` and holds `package-lock.json`. Use
+  `heavy.sh job h2-npm -- npm ci` from `adobe/`. The panel tests exist on release/3.0 in `adobe/panel-ui/test/*.test.ts`.
+  If your worktree shows none, fast-forward or branch from the current release/3.0 first.
+- Then do the card's steps: the baseline suite (`h2-setup3`), `npm ci`, and one rendered screen. In the report, state
+  the account e-mail, the suite numbers and the failure names.

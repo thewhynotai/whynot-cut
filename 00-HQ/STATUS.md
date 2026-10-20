@@ -1,6 +1,6 @@
 # STATUS (edited by the MASTER only)
 
-- **Last intake:** 2026-10-19 20:38 (Cairo). H1 SETUP-H1 report PARTIAL (Python env lacks numpy/PIL/fontTools/av, suite not a valid baseline): noted, no review. No DONE/BLOCKED reports, no ACCEPTED rows.
+- **Last intake:** 2026-10-20 09:40 (Cairo). BL-04 BLOCKED answered → READY (queue check via wnc-locks/wait; preflight-first in next_doc + test_plan_approval fixture patch ruled OK; H2 runs full suite with the 3 patches, then DONE → peer + master Opus review, HIGH). Nothing to merge.
 - **10:10:** API lane 1 is stopped (owner budget ruling 10:03).
   - BL-16 → H1 (Mayar) and BL-04 → H2 (marketing@), as cards with claims reserved. If not started by 25 Oct, both
     fall back to the executor.
@@ -103,3 +103,8 @@
 3. H14 (Anthropic OK for panel chat on the editor's own login) is open. It matters only outside the agency.
 4. Helper deny lists are guardrails, not a hard fence (Bash could still write anywhere). Helpers approve prompts
    with care.
+5. (2026-10-20 08:27 intake) The engine venv on this PC (`~/.whynot-cut/venv`) runs imageio-ffmpeg 4.2.2 instead of the pinned
+   ffmpeg, and Python 3.13 while the locks pin 3.12. Every full suite here (master and helpers) carries ~77
+   environmental failures (test_media_normalise, test_t26_conform_wiring, the fuzz imports, bidi…). These could hide
+   a real media regression. Owner: ENV-01 (see `reviews/SETUP-H1-r3.md`). Small cards are still to be written for
+   the 2 darwin-only t45 tests on Windows and the fuzz modules' import-time crash.

@@ -1,6 +1,6 @@
 # SETUP-H1 — first session of Helper 1
 
-- **Assigned:** H1    **Model:** Sonnet 5.5 high    **Size:** S    **Status:** IN PROGRESS
+- **Assigned:** H1    **Model:** Sonnet 5.5 high    **Size:** S    **Status:** ACCEPTED
 - **Tier:** LIGHT (baseline)
 
 ## Before this card (the helper's human, once)
@@ -55,3 +55,10 @@ numpy/PIL/av/imageio-ffmpeg. They are now installed inside the engine venv itsel
 modules your tracebacks named pass 104/104 from the real environment. Re-run the baseline with label `h1-setup4` and the
 card's command unchanged, then write a NEW report with the numbers. Any remaining failure is now a real one: list it.
 
+
+## Intake decision (2026-10-20 08:26)
+ACCEPTED on report r3 (`inbox\h1\2026-10-20-SETUP-H1-r3.md`, review `reviews\SETUP-H1-r3.md`). The baseline is
+8226 run / 27 F / 24 E / 87 skipped, all environmental, load-timing or already fixed on release/3.0. The ENV-01 gaps
+(pinned ffmpeg not used, venv on Python 3.13) are routed to ENV-01 and the executor. You do not need to re-run
+h1-setup5 for this card. ENV-01 will ask for a re-run when its fix lands. Next time, write the account e-mail in
+SETUP reports.
