@@ -145,13 +145,15 @@ def silent_guards() -> list[dict]:
     return out
 
 
+STANDARD_GIT_BASH = (r"C:\Program Files\Git\bin\bash.exe", r"C:\Program Files (x86)\Git\bin\bash.exe")
+
+
 def git_bash_found() -> bool:
-    """Windows: is there a Git Bash where Claude Code (or the installer's settings entry) finds one? The
-    CLAUDE_CODE_GIT_BASH_PATH value (environment, else <claude config>/settings.json env), `git` on PATH
-    (<git>\\..\\..\\bin\\bash.exe), %ProgramFiles%\\Git, %ProgramFiles(x86)%\\Git, %LOCALAPPDATA%\\Programs\\Git and the
-    installer's own %LOCALAPPDATA%\\WhyNotCut\\git."""
+    """Windows: does Claude Code find a Git Bash? Only where Claude Code itself looks (review f2ca516 P2): the
+    CLAUDE_CODE_GIT_BASH_PATH value (environment, else <claude config>/settings.json env) when it names an existing
+    bash.exe / sh.exe, `git.exe` in an absolute PATH folder (<git>\\..\\..\\bin\\bash.exe), and the two literal
+    Program Files folders. A per-user Git (%LOCALAPPDATA%) counts only through the settings entry the installer writes."""
     import os
-    import shutil
     val = os.environ.get("CLAUDE_CODE_GIT_BASH_PATH") or ""
     if not val.strip():
         cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
@@ -161,16 +163,15 @@ def git_bash_found() -> bool:
             doc = {}
         env = doc.get("env") if isinstance(doc, dict) else None
         val = str(env.get("CLAUDE_CODE_GIT_BASH_PATH") or "") if isinstance(env, dict) else ""
-    cands = [Path(val.strip().strip('"'))] if val.strip() else []
-    git = shutil.which("git", path=os.environ.get("PATH", ""))
-    if git:
-        cands.append(Path(git).parent.parent / "bin" / "bash.exe")
-    cands += [Path(os.environ[v]) / "Git" / "bin" / "bash.exe" for v in ("ProgramFiles", "ProgramFiles(x86)")
-              if os.environ.get(v)]
-    if os.environ.get("LOCALAPPDATA"):
-        lad = Path(os.environ["LOCALAPPDATA"])
-        cands += [lad / "Programs" / "Git" / "bin" / "bash.exe", lad / "WhyNotCut" / "git" / "bin" / "bash.exe"]
-    return any(c.is_file() for c in cands)
+    val = val.strip().strip('"')
+    if val and Path(val).name.lower() in ("bash.exe", "sh.exe") and Path(val).is_file():
+        return True
+    for d in os.environ.get("PATH", "").split(os.pathsep):      # absolute folders only: never the current folder
+        d = d.strip().strip('"')
+        if d and Path(d).is_absolute() and (Path(d) / "git.exe").is_file() \
+                and (Path(d).parent / "bin" / "bash.exe").is_file():
+            return True
+    return any(Path(x).is_file() for x in STANDARD_GIT_BASH)
 
 
 def guard_heartbeat(now: float | None = None) -> dict:
@@ -190,8 +191,8 @@ def guard_heartbeat(now: float | None = None) -> dict:
                "doctor` cannot see it run: type /hooks in Claude Code - when WhyNot Cut's PreToolUse hook is listed, "
                "the guard is on. Updating the plugin to 3.0 makes this check automatic.")
     elif not active and plat.IS_WIN and git_bash_found():    # BL-18 (ii): Git Bash is there, no session ran yet
-        fix = ("no WhyNot Cut session has run the guard yet: open or restart Claude Code, then /hooks to check "
-               "WhyNot Cut's hooks are listed, and `reel doctor` again.")
+        fix = ("no WhyNot Cut session has run the guard in the last 24 hours: open or restart Claude Code, then "
+               "/hooks to check WhyNot Cut's hooks are listed, and `reel doctor` again.")
     elif not active:
         fix = ("install Git for Windows (https://git-scm.com/download/win), then restart Claude Code: WhyNot Cut's "
                "guard hooks run through Git Bash. Then run /hooks to check they are listed, and `reel doctor` again."

@@ -634,41 +634,62 @@ class TestHeartbeat(ClientFixture):
             st = onboard.guard_heartbeat()
         self.assertFalse(st["active"])
         self.assertNotIn("Git for Windows", st["fix"])
-        self.assertIn("no WhyNot Cut session has run the guard yet: open or restart Claude Code, then /hooks", st["fix"])
+        self.assertIn("no WhyNot Cut session has run the guard in the last 24 hours: open or restart Claude Code, "
+                      "then /hooks", st["fix"])
 
     @unittest.skipUnless(os.name == "nt", "Git Bash is only needed on Windows")
     def test_git_bash_found_looks_where_claude_code_looks(self):
+        """Only where Claude Code itself looks (review f2ca516 P2): CLAUDE_CODE_GIT_BASH_PATH (environment, else the
+        Claude settings env) naming bash.exe / sh.exe, `git` on an absolute PATH folder (<git>\..\..\bin\bash.exe),
+        and the two literal Program Files folders. A per-user Git under %LOCALAPPDATA% counts only through the settings
+        entry the installer writes, because Claude Code never looks there by itself."""
         from unittest import mock
         from lib import onboard
         t = Path(self.tmp.name) / "gb"
-        empty = {"PATH": str(t / "nopath"), "ProgramFiles": str(t / "pf"), "ProgramFiles(x86)": str(t / "pf86"),
-                 "LOCALAPPDATA": str(t / "lad"), "CLAUDE_CODE_GIT_BASH_PATH": "", "CLAUDE_CONFIG_DIR": str(t / "cfg")}
-        with mock.patch.dict(os.environ, empty):
+        pf = (t / "pf" / "Git" / "bin" / "bash.exe", t / "pf86" / "Git" / "bin" / "bash.exe")
+        empty = {"PATH": str(t / "nopath"), "LOCALAPPDATA": str(t / "lad"), "CLAUDE_CODE_GIT_BASH_PATH": "",
+                 "CLAUDE_CONFIG_DIR": str(t / "cfg")}
+        with mock.patch.dict(os.environ, empty), mock.patch.object(onboard, "STANDARD_GIT_BASH", pf):
             self.assertFalse(onboard.git_bash_found())
-        places = [("CLAUDE_CODE_GIT_BASH_PATH", t / "custom" / "bash.exe", None),
-                  ("PATH", t / "pg" / "bin" / "bash.exe", t / "pg" / "cmd"),
-                  ("ProgramFiles", t / "pf" / "Git" / "bin" / "bash.exe", t / "pf"),
-                  ("LOCALAPPDATA", t / "lad" / "Programs" / "Git" / "bin" / "bash.exe", t / "lad"),
-                  ("LOCALAPPDATA", t / "lad2" / "WhyNotCut" / "git" / "bin" / "bash.exe", t / "lad2")]
-        for var, bash, value in places:
-            bash.parent.mkdir(parents=True, exist_ok=True)
-            bash.write_text("", encoding="utf-8")
-            if var == "PATH":
-                value.mkdir(parents=True, exist_ok=True)
-                (value / "git.exe").write_text("", encoding="utf-8")
-            with mock.patch.dict(os.environ, {**empty, var: str(value or bash)}):
-                self.assertTrue(onboard.git_bash_found(), var)
-            bash.unlink()
-            with mock.patch.dict(os.environ, {**empty, var: str(value or bash)}):
-                self.assertFalse(onboard.git_bash_found(), var + " (removed)")
-        settings = t / "cfg" / "settings.json"                # Claude Code's own settings env, as the installer writes
-        settings.parent.mkdir(parents=True, exist_ok=True)
-        bash = t / "fromsettings" / "bash.exe"
-        bash.parent.mkdir(parents=True, exist_ok=True)
-        bash.write_text("", encoding="utf-8")
-        settings.write_text(json.dumps({"env": {"CLAUDE_CODE_GIT_BASH_PATH": str(bash)}}), encoding="utf-8")
-        with mock.patch.dict(os.environ, empty):
+            for bash in pf:                                       # the literal Program Files folders
+                bash.parent.mkdir(parents=True, exist_ok=True)
+                bash.write_text("", encoding="utf-8")
+                self.assertTrue(onboard.git_bash_found(), bash)
+                bash.unlink()
+                self.assertFalse(onboard.git_bash_found(), f"{bash} (removed)")
+            for per_user in (t / "lad" / "Programs" / "Git" / "bin" / "bash.exe",
+                             t / "lad" / "WhyNotCut" / "git" / "bin" / "bash.exe"):    # not without the settings entry
+                per_user.parent.mkdir(parents=True, exist_ok=True)
+                per_user.write_text("", encoding="utf-8")
+            self.assertFalse(onboard.git_bash_found())
+            custom = t / "custom" / "bash.exe"
+            custom.parent.mkdir(parents=True, exist_ok=True)
+            custom.write_text("", encoding="utf-8")
+            other = t / "custom" / "git-bash.exe"                 # Claude Code wants bash.exe or sh.exe
+            other.write_text("", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"CLAUDE_CODE_GIT_BASH_PATH": str(custom)}):
+                self.assertTrue(onboard.git_bash_found())
+            with mock.patch.dict(os.environ, {"CLAUDE_CODE_GIT_BASH_PATH": str(other)}):
+                self.assertFalse(onboard.git_bash_found())
+            with mock.patch.dict(os.environ, {"CLAUDE_CODE_GIT_BASH_PATH": str(t / "gone" / "bash.exe")}):
+                self.assertFalse(onboard.git_bash_found())        # a stale value falls through, as in Claude Code
+            pg = t / "pg"
+            (pg / "cmd").mkdir(parents=True, exist_ok=True)
+            (pg / "cmd" / "git.exe").write_text("", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"PATH": str(pg / "cmd")}):
+                self.assertFalse(onboard.git_bash_found())        # git without bash.exe next to it
+                (pg / "bin").mkdir(parents=True, exist_ok=True)
+                (pg / "bin" / "bash.exe").write_text("", encoding="utf-8")
+                self.assertTrue(onboard.git_bash_found())
+            with mock.patch.dict(os.environ, {"PATH": "cmd"}), mock.patch("os.getcwd", return_value=str(pg)):
+                self.assertFalse(onboard.git_bash_found())        # a relative PATH entry is never searched
+            settings = t / "cfg" / "settings.json"                # the settings env, as the installer writes it
+            settings.parent.mkdir(parents=True, exist_ok=True)
+            per_user = t / "lad" / "Programs" / "Git" / "bin" / "bash.exe"
+            settings.write_text(json.dumps({"env": {"CLAUDE_CODE_GIT_BASH_PATH": str(per_user)}}), encoding="utf-8")
             self.assertTrue(onboard.git_bash_found())
+            settings.write_text("{not json", encoding="utf-8")   # unreadable: no crash, the other places decide
+            self.assertFalse(onboard.git_bash_found())
 
 
 class TestGuardReviewRound1(ClientFixture):
