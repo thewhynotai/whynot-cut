@@ -93,7 +93,8 @@ def brand_controls(db: Path) -> dict:
 
 
 def fonts_map(db: Path) -> dict:
-    typ = read_json(db / "branding/typography.json", {})
+    from . import client_db
+    typ = client_db.load(db, "branding/typography.json", {})
     roles = typ.get("roles", {})
     d = {"caption": "", "headline": "", "body": "", "term": "", "small": ""}
     d.update(font_role_fallback().get("postscript", {}))
@@ -153,7 +154,8 @@ def generate(paths: Paths) -> dict:
         raise Guidance("no compiled plan yet (01_analysis/timeline-spec.json)", "Run `reel plan` first",
                        where=str(paths.p("01_analysis/timeline-spec.json")))
     tpls = load_config("graphics-templates.json")["templates"]
-    manifest = read_json(paths.client_db / "asset-manifest.json", {"assets": []})
+    from . import client_db
+    manifest = client_db.load(paths, "asset-manifest.json", {"assets": []})
     by_rel = {a["rel"]: a for a in manifest["assets"]}
     logo = next((a for a in manifest["assets"] if a["category"] == "logo"), None)
     events = []
