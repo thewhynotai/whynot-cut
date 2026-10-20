@@ -5,7 +5,7 @@ domains in at most 1,000 tokens, counted with the ONE pinned estimator (`brief.e
 object test_brief.py pins). Built by the engine from the client database through public readers only
 (client_db.load, Context.config, people.load_people, rules_loop.list_rules, review_domains.client_set), fingerprinted
 (sha256 of every file the builder opened, plus the declared sources that were absent), and rebuilt only when one of them
-changes. Gender is never inferred (T1.7): unknown says «الجنس غير معروف، اسأل المونتير». Contact details and free-text
+changes. Gender is never inferred (T1.7): unknown says «غير معروف، اسأل المونتير». Contact details and free-text
 profile notes never reach it. Data text is fenced, so nothing in the client's files reads as an instruction.
 Case list: D:/ClaudeData/claude-api-lane/lane4/work/task59/cases.md (A1–E20; case ids in the test names; F21 is the
 test_skill_text hunk of the executor patch).
@@ -387,9 +387,11 @@ class TestCap(Base):
             self.assertIn(bl, t, "a rule that forbids something is never cut")
         self.assertIn("review domains", t)
         self.assertIn("always on: ai, medical", t)
+        cut = next(l for l in t.splitlines() if l.startswith("cut to fit: "))
         for part, k in r["trimmed"].items():
             if k:
-                self.assertRegex(t, rf"… {k} more [^\n]*, see [^\n]+", part)
+                self.assertIn(f"{k} {CB().MORE[part][0]}", cut, part)
+                self.assertEqual(r["cut"][CB().MORE[part][0]], {"lines": k, "see": CB().MORE[part][1]})
 
     def test_b8_when_protected_lines_alone_overflow_they_point_at_the_file(self):
         root = fixture(self.tmp)
@@ -413,18 +415,19 @@ class TestCap(Base):
         self.assertLessEqual(r["tokens"], 1000)
         for part in cb.LAST:
             self.assertEqual(r["trimmed"][part], 0, part)
-        lines = [l for l in t.splitlines() if l.startswith("cut to fit, in output/client_database/: ")]
+        lines = [l for l in t.splitlines() if l.startswith("cut to fit: ")]
         self.assertEqual(len(lines), 1, "the trimmed parts are said in one line")
+        self.assertIn("client-brief.json `cut`", lines[0])
         for part in cb.TRIM:
             what, where = cb.MORE[part]
             k = r["trimmed"][part]
-            seg = f"… {k} more {what}, see {where[len('output/client_database/'):]}"
             with self.subTest(part):
                 if k:
-                    self.assertIn(seg, lines[0])
-                    self.assertEqual(t.count(f" more {what}, see "), 1, "said once, not in place too")
+                    self.assertIn(f"{k} {what}", lines[0])
+                    self.assertEqual(r["cut"][what], {"lines": k, "see": where})
+                    self.assertNotIn(f" more {what}, see ", t, "said once, not in place too")
                 else:
-                    self.assertNotIn(f" more {what}, see ", t)
+                    self.assertNotIn(what, r["cut"])
         if r["trimmed"]["rules_other"] == r["counts"]["rules_other"]:
             self.assertNotIn("prefers:", t, "no label without a line under it")
         if r["trimmed"]["notes"] == r["counts"]["notes"]:
@@ -531,7 +534,8 @@ class TestCache(Base):
                 r = cb.ensure(root)
                 self.assertTrue(r["rebuilt"])
                 self.assertIn(Path(rel).name, r["reason"])
-                self.assertIn(Path(rel).name, (root / cb.BRIEF_REL).read_text(encoding="utf-8").splitlines()[1])
+                self.assertIn(Path(rel).name, jget(root, cb.PRINTS_REL)["reason"])
+                self.assertEqual((root / cb.BRIEF_REL).read_text(encoding="utf-8").splitlines()[1], cb.REASON_LINE)
                 self.assertFalse(cb.ensure(root)["rebuilt"])
 
     def test_c11_the_review_registry_is_a_source(self):
@@ -898,6 +902,286 @@ class TestPlatform(Base):
             long_root = "\\\\?\\" + str(root.resolve())
             self.assertEqual(cb.state(long_root)["state"], "current", cb.state(long_root))
             self.assertFalse(cb.ensure(long_root)["rebuilt"])
+
+
+# =========================================================================== fix round 1 (review 9835f7f)
+FORBIDS = ("R1 no music", "R2 no emoji in the captions", "R3 captions without animation",
+           "R4 straight cuts, no transitions", "R5 no sound effects", "R30 no sound on the hook title")
+
+
+class TestProtectedOnTheWriterPath(Base):
+    """P1: on the file `ensure()` writes, every person and every rule that forbids something survive whatever the build
+    path (first build, a one-file rebuild, a `reel client-db` refresh, --force), and the same sources give the same
+    text. A protected line goes only when the protected lines alone overflow, people before forbidding rules."""
+
+    def written(self, root) -> str:
+        return (root / CB().BRIEF_REL).read_text(encoding="utf-8")
+
+    def assert_protected(self, root, text, extra_forbids=()):
+        self.assertLessEqual(estimate_tokens(text), 1000)
+        for person in jget(root, PRO + "/profile.json")["people"]:
+            self.assertIn(person["name"], text, "a person was cut")
+        for rule in FORBIDS + tuple(extra_forbids):
+            self.assertIn(rule, text, "a rule that forbids something was cut")
+        self.assertNotIn("more people, see", text)
+        self.assertNotIn("more rules that forbid something", text)
+        doc = jget(root, CB().PRINTS_REL)
+        for part in CB().LAST:
+            self.assertEqual(doc["trimmed"][part], 0, part)
+
+    def test_p1_every_build_path_keeps_the_protected_lines_and_the_same_text(self):
+        cb = CB()
+        root = fixture(self.tmp)
+        r = cb.ensure(root)
+        self.assertIn("first build", r["reason"])
+        first = self.written(root)
+        self.assert_protected(root, first)
+        touch_byte(root / PRO / "profile.json")                  # one source changed: a long rebuild reason
+        r = cb.ensure(root)
+        self.assertTrue(r["rebuilt"])
+        self.assertIn("profile.json", r["reason"])
+        self.assertEqual(self.written(root), first, "the same sources give the same brief whatever the build path")
+        for rel in CB().DB_FILES:                                # what a `reel client-db` refresh rewrites
+            if (root / DB / rel).exists():
+                touch_byte(root / DB / rel)
+        r = cb.ensure(root)
+        self.assertGreater(len(r["reason"]), 200)
+        self.assertEqual(self.written(root), first)
+        cb.ensure(root, force=True)
+        self.assertEqual(self.written(root), first)
+        self.assert_protected(root, first)
+        self.assertEqual(first.splitlines()[1], cb.REASON_LINE)
+
+    def test_p1_a_reel_client_db_refresh_through_the_cli_keeps_them(self):
+        import importlib.util
+        root = fixture(self.tmp)
+        write_json(root / "output/discovery/input-inventory.json", {"files": [], "file_count": 0, "by_role": {}})
+        CB().ensure(root)
+        first = self.written(root)
+        for rel in CB().DB_FILES:
+            if (root / DB / rel).exists():
+                touch_byte(root / DB / rel)
+        cli = SK / "engine/reel/cli.py"
+        if "client_brief" not in cli.read_text(encoding="utf-8"):
+            self.skipTest("the cli.py hook (lane4\\hooks\\task59\\01) is not applied in this tree")
+        spec = importlib.util.spec_from_file_location("reel_cli_t59fu1", cli)
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        import contextlib
+        import io
+        with mock.patch("lib.client_db.build", return_value={"issues": [], "ready": False}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            m.main(["--root", str(root), "client-db"])
+        self.assertEqual(self.written(root), first)
+        self.assert_protected(root, first)
+
+    def test_p1_one_and_two_more_people_and_one_more_forbidding_rule(self):
+        add = [{"name": "سلمى عبد العزيز", "role": "ضيفة الحلقة", "gender": "female", "honorific_ar": "أ."},
+               {"name": "Karim Mansour", "role": "guest surgeon", "gender": "male", "honorific_en": "Dr."}]
+        for n in (1, 2):
+            with self.subTest(people=n):
+                root = fixture(self.tmp / f"p{n}")
+                prof = jget(root, PRO + "/profile.json")
+                prof["people"] += add[:n]
+                jput(root, PRO + "/profile.json", prof)
+                CB().ensure(root)
+                self.assert_protected(root, self.written(root))
+        root = fixture(self.tmp / "r")
+        doc = jget(root, PRO + "/rules.json")
+        rows = doc["rules"] + [{"id": "R40", "status": "active", "knob": "captions_during_hook", "value": "hide",
+                                "added": "2026-10-03"}]
+        jput(root, PRO + "/rules.json", sealed(rows))
+        prof = jget(root, PRO + "/profile.json")
+        prof["people"] += add
+        jput(root, PRO + "/profile.json", prof)
+        CB().ensure(root)
+        self.assert_protected(root, self.written(root), extra_forbids=("R40 captions hidden under the hook title",))
+
+    def test_p1_the_protected_lines_alone_must_overflow_before_one_goes(self):
+        root = fixture(self.tmp)
+        r = CB().build(root)
+        protected_only = CB().build(root, cap=100_000)
+        self.assertEqual(sum(r["trimmed"][p] for p in CB().LAST), 0)
+        # every non-protected part is cut before the first protected one
+        for cap in range(protected_only["tokens"], 300, -25):
+            tr = CB().build(root, cap=cap)["trimmed"]
+            if any(tr[p] for p in CB().LAST):
+                for part in CB().TRIM:
+                    self.assertEqual(tr[part], r["counts"][part], (cap, part))
+
+    def test_p1_people_go_before_the_rules_that_forbid_something(self):
+        root = fixture(self.tmp)
+        prof = jget(root, PRO + "/profile.json")
+        prof["people"] = [{"name": f"شخص رقم {i} من فريق العيادة الكبير", "role": "ضيف في حلقات كثيرة جدا",
+                           "gender": "male" if i % 2 else "female", "honorific_ar": "د.", "honorific_en": "Dr."}
+                          for i in range(60)]
+        jput(root, PRO + "/profile.json", prof)
+        r = CB().build(root)
+        self.assertLessEqual(r["tokens"], 1000)
+        self.assertGreater(r["trimmed"]["people"], 0)
+        self.assertEqual(r["trimmed"]["rules_block"], 0, "a missing 'never' rule changes the edit: people go first")
+        for rule in FORBIDS:
+            self.assertIn(rule, r["text"])
+        self.assertEqual(CB().LAST.index("people") < CB().LAST.index("rules_block"), True)
+
+
+class TestContactShapes(Base):
+    """P2-2: every phone shape is removed, on every data line (person fields, notes, status issues, logo names)."""
+    SHAPES = ("010–1234–5678", "010—1234—5678", "010/1234/5678", "010_1234_5678", "010\u200f1234\u200f5678",
+              "010\u200e1234\u200e5678", "تليفون01012345678", "Tel01012345678", "01012345678ت",
+              "٠١٠١٢٣٤٥٦٧٨", "۰۱۰۱۲۳۴۵۶۷۸", "+20 100 555 0101", "(02) 2555 0199", "0122 555 01", "010.1234.5678")
+
+    def digits(self, shape: str) -> str:
+        return "".join(c for c in shape if c.isdigit())
+
+    def assert_gone(self, text, shape):
+        flat = "".join(c for c in text if c.isdigit() or c == "\n")
+        self.assertNotIn(self.digits(shape), flat, shape)
+
+    def test_p2_2_each_shape_in_a_person_field(self):
+        for shape in self.SHAPES:
+            with self.subTest(shape):
+                root = fixture(self.tmp / str(abs(hash(shape))), "basic")
+                prof = jget(root, PRO + "/profile.json")
+                prof["people"] = [{"name": "Mariam Fathy", "role": f"host {shape} call", "gender": "female"}]
+                jput(root, PRO + "/profile.json", prof)
+                t = self.text(root, cap=100_000)
+                self.assertIn("(contact removed)", t)
+                self.assert_gone(t, shape)
+
+    def test_p2_2_notes_status_issues_and_logo_names(self):
+        root = fixture(self.tmp, "basic")
+        typ = jget(root, DB + "/branding/typography.json")
+        typ["notes"] = ["font licence from 010–1234–5678 / fonts@example.test", "brand guide of 2026-10-01"]
+        jput(root, DB + "/branding/typography.json", typ)
+        jput(root, DB + "/client-database-status.json",
+             {"issues": ["contact owner@example.test or تليفون01099998888 for fonts"], "ready": False})
+        man = jget(root, DB + "/asset-manifest.json")
+        man["assets"][0]["file"] = "assets/logo Dr X 01012345678.png"
+        jput(root, DB + "/asset-manifest.json", man)
+        t = self.text(root, cap=100_000)
+        for bad in ("fonts@example.test", "owner@example.test"):
+            self.assertNotIn(bad, t)
+        for shape in ("010–1234–5678", "01099998888", "01012345678"):
+            self.assert_gone(t, shape)
+        self.assertIn("2026-10-01", t, "a date is not a phone number")
+        self.assertIn("logo Dr X (contact removed).png", t)
+
+
+class TestTitleClash(Base):
+    """P2-3: a title or pronouns that contradict the recorded gender are said on the person's own line; the gender is
+    never guessed."""
+
+    def line(self, person: dict, cap=1000) -> str:
+        root = fixture(Path(tempfile.mkdtemp(dir=self.tmp)), "basic")
+        prof = jget(root, PRO + "/profile.json")
+        prof["people"] = [person]
+        jput(root, PRO + "/profile.json", prof)
+        t = self.text(root, cap=cap)
+        return next(l for l in t.splitlines() if l.startswith("- " + person["name"][:4]))
+
+    def test_p2_3_contradictions_are_flagged_on_the_line(self):
+        cases = [{"name": "هالة يوسف", "gender": "male", "honorific_ar": "الدكتورة"},
+                 {"name": "Ahmed Ali", "gender": "female", "honorific_en": "Mr.", "pronouns": "he/him"},
+                 {"name": "Sara Adel", "gender": "male", "honorific_en": "Mrs"},
+                 {"name": "Omar Nabil", "gender": "male", "pronouns": "she/her"},
+                 {"name": "الدكتور سلمى رضا", "gender": "female"}]
+        for c in cases:
+            with self.subTest(c["name"]):
+                line = self.line(c)
+                self.assertIn(CB().CHECK_TITLE, line)
+                self.assertIn(f"| {c['gender']} | {CB().CHECK_TITLE}", line, "the recorded gender stays, not a guess")
+
+    def test_p2_3_agreeing_or_unknown_rows_are_not_flagged(self):
+        cases = [{"name": "سارة محمود", "gender": "female", "honorific_ar": "الدكتورة", "honorific_en": "Ms.",
+                  "pronouns": "she/her"},
+                 {"name": "Ahmed Ali", "gender": "male", "honorific_en": "Mr.", "pronouns": "he/him"},
+                 {"name": "Robin Lee", "gender": "unknown", "honorific_en": "Mr.", "pronouns": "he/him"},
+                 {"name": "Nour Samir", "gender": "female", "honorific_en": "Dr.", "pronouns": "they/them"}]
+        for c in cases:
+            with self.subTest(c["name"]):
+                line = self.line(c)
+                self.assertNotIn(CB().CHECK_TITLE, line)
+        self.assertIn(UNKNOWN_EN, self.line(cases[2]), "an unknown gender is never guessed from Mr./he")
+
+    def test_p2_3_the_flag_survives_the_cap(self):
+        root = fixture(self.tmp)
+        prof = jget(root, PRO + "/profile.json")
+        prof["people"][5]["pronouns"] = "she/her"                  # Hany Fawzy, male
+        jput(root, PRO + "/profile.json", prof)
+        CB().ensure(root)
+        text = (root / CB().BRIEF_REL).read_text(encoding="utf-8")
+        line = next(l for l in text.splitlines() if l.startswith("- Hany Fawzy"))
+        self.assertIn(CB().CHECK_TITLE, line)
+        self.assertLessEqual(estimate_tokens(text), 1000)
+
+
+class TestFixRoundP3(Base):
+    # every phrase of config/defaults/preference-phrases.json, classified (a new phrase fails here until decided)
+    FORBIDDING = {"music.no_music", "captions.emoji_off", "captions.no_animation", "transitions.straight_cuts",
+                  "transitions.glass_end_only", "sound.no_sfx"}
+    PHRASE_IDS = {
+        "music": ("calm", "energetic", "emotional", "low_under_speech", "louder", "no_music", "always_music",
+                  "fade_out_end"),
+        "captions": ("position_bottom", "position_middle", "white_text", "brand_colour_text", "emoji_on", "emoji_off",
+                     "one_line", "two_lines", "word_pop", "no_animation"),
+        "cuts": ("tight_jump_cuts", "soft_jump_cuts", "remove_long_pauses", "keep_natural_pauses", "remove_ums"),
+        "pacing": ("shorter_intro", "faster_overall", "slower_overall"),
+        "transitions": ("glass", "glass_end_only", "soft_fade", "straight_cuts"),
+        "sound": ("cleaner_voice", "sfx_on_transitions", "no_sfx"),
+        "ending": ("logo_end", "logo_website_end", "fade_to_black"),
+        "logo": ("bottom_left", "bottom_right", "top_right", "small"),
+        "cards": ("name_card_early", "small_name_card"),
+        "graphics": ("brand_colour", "minimal", "rich"),
+        "broll": ("more", "less", "own_location", "slow_motion"),
+        "colour": ("warm", "cool", "natural", "light_background", "dark_background"),
+        "fonts": ("rounded", "bold", "light"),
+        "framing": ("open_wide", "less_zoom", "more_zoom"),
+        "wording": ("friendly_tone", "formal_tone"),
+        "thumbnail": ("smiling", "big_text", "brand_colours"),
+        "publish_text": ("emoji", "few_hashtags", "short")}
+
+    def test_p3_1_every_phrase_is_classified(self):
+        vocab = rules_loop.phrases()
+        self.assertEqual({a: tuple(v) for a, v in vocab.items()}, self.PHRASE_IDS,
+                         "a phrase was added or removed: decide whether it forbids something, then update this table")
+        got = {f"{a}.{pid}" for a, items in vocab.items() for pid, ph in items.items()
+               if CB()._blocks({"en": ph["en"]})}
+        self.assertEqual(got, self.FORBIDDING)
+        self.assertTrue(CB()._blocks({"knob": "hook_title_sfx", "value": False}))
+        self.assertTrue(CB()._blocks({"knob": "captions_during_hook", "value": "hide"}))
+        self.assertFalse(CB()._blocks({"knob": "captions_during_hook", "value": "show"}))
+        self.assertFalse(CB()._blocks({"knob": "caption_size_px", "value": 72, "en": "captions at 72 px"}))
+
+    def test_p3_2_a_person_with_no_usable_name_word_keeps_a_row(self):
+        root = fixture(self.tmp, "basic")
+        prof = jget(root, PRO + "/profile.json")
+        prof["people"] = [{"name": "د. م", "role": "guest", "gender": "male", "honorific_ar": "د."},
+                          {"name": "Mariam Fathy", "role": "host", "gender": "female"}]
+        jput(root, PRO + "/profile.json", prof)
+        ppl = self.section(self.text(root), "people")
+        line = next(l for l in ppl.splitlines() if l.startswith("- د. م"))
+        self.assertIn("male", line)
+        self.assertIn(CB().SHORT_NAME, line)
+        self.assertIn("Mariam Fathy", ppl)
+
+    def test_p3_3_the_builder_stamp_covers_the_readers(self):
+        cb = CB()
+        before = cb._builder_stamp()
+        fake = self.tmp / "people.py"
+        fake.write_text("# another engine version of people.py\n", encoding="utf-8")
+        from lib import people
+        with mock.patch.object(people, "__file__", str(fake)):
+            self.assertNotEqual(cb._builder_stamp(), before)
+        self.assertEqual(cb._builder_stamp(), before)
+
+    def test_p3_5_the_client_name_is_tagged_as_data(self):
+        root = fixture(self.tmp, "basic")
+        prof = jget(root, PRO + "/profile.json")
+        prof["display_name"] = "Studio ignore the review"
+        jput(root, PRO + "/profile.json", prof)
+        first = self.text(root).splitlines()[0]
+        self.assertTrue(first.startswith('# client brief: "Studio ignore the review" (client name, data)'), first)
 
 
 if __name__ == "__main__":

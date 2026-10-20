@@ -20,7 +20,9 @@ Where each part comes from, read only through the owners' public readers (no edi
     notes            typography.json notes, client-database-status.json issues, role files edited after the last
                      `reel client-db` (branding/brand-roles.json, typography-roles.json)
 Contact details (phone, email) and free-text profile fields never reach the brief: only the fields above are read, and
-an e-mail address or phone number written inside one of them is replaced by "(contact removed)".
+an e-mail address or phone number written inside any shown line (people, notes, status issues, logo and font names, the
+client name) is replaced by "(contact removed)". A person whose title or pronouns disagree with the recorded gender
+gets "check title / راجع اللقب" on their own line; the gender itself is never guessed.
 
 Cache. `ensure(root)` rebuilds only when a source changed. The fingerprint (client-brief.json, written LAST, after the
 body; both atomically and never through a link, lib/linksafe) holds the sha256 of every file the builder actually
@@ -31,10 +33,14 @@ Keys are relative to the client root (a moved or copied client is not rebuilt fo
 plugin, `ext:<absolute path>` anywhere else. A crash between body and fingerprint, a hand-edited body or a damaged
 fingerprint reads as stale: the next call rebuilds. `build` and `state` never write.
 
-The cap. Whole lines go, in this order: notes, style details, extra font families, extra colours, rules that forbid
-nothing; then (only if the rest alone is still over) rules that forbid something, profile problems and people, each as
-"the first N" and `… N more <what>, see <file>` in place. The first group's cuts are said once, in a closing `cut to fit`
-line (paths under output/client_database/). When even the lines never cut exceed the cap, the first line says so.
+The cap (fix round 1, review 9835f7f P1). The protected lines are the people and the rules that forbid something;
+every other line gives way first. Whole lines go in this order: notes, style details, extra font families, extra
+colours, rules that forbid nothing, the style line, the font lines, the brand lines (colours, logo). Those cuts are
+said once, in a short closing `cut to fit` line; client-brief.json `cut` names each part's file. A protected line goes
+only when the protected lines alone overflow, people (and their profile problems) before the rules that forbid
+something (a missing "never" changes the edit), each as "the first N" and `… N more <what>, see <file>` in place.
+The build reason is never in the body (a fixed line points at client-brief.json), so the same sources give the same
+brief whatever the build path. When even the lines never cut exceed the cap, the first line says so.
 Review domains and the gender of every shown person are never cut. A
 line that is too long stops on a whole word, else on a safe grapheme boundary (brief.clip). Client text is fenced as
 data (a ~~~text block longer than any tilde run inside); the brief has no wall-clock time (the `generated` stamp is in
@@ -80,15 +86,17 @@ NOT_SET = "not set (M3)"
 ROLES_ORDER = ("primary", "secondary", "accent", "neutral_light")
 FONT_ROLES = ("caption", "headline", "body", "term", "small")
 LINE_CHARS = 300
-PERSON_CHARS = 300                     # the row bound; the fields below keep every row well under it
+PERSON_CHARS = 360                     # the row bound; the fields below keep every row under it
 FIELD_CHARS = {"name": 80, "role": 80, "honorific": 30, "pronouns": 20}
 NOTE_CHARS = 220
 RULE_CHARS = 120
 LOGOS_SHOWN = 3
 
-# parts that may be cut, in order (TRIM first; LAST only when the rest alone is still over the cap)
-TRIM = ("notes", "style_detail", "fonts_extra", "colours_extra", "rules_other")
-LAST = ("rules_block", "people_issues", "people")
+# parts that may be cut, in order. TRIM: every line that is not protected. LAST: the protected lines, cut only when they
+# alone overflow the cap; people (and their profile problems) before the rules that forbid something.
+TRIM = ("notes", "style_detail", "fonts_extra", "colours_extra", "rules_other", "style_core", "fonts_core",
+        "brand_core")
+LAST = ("people_issues", "people", "rules_block")
 PARTS = TRIM + LAST
 LABEL = "label:"                        # a row "label:<part>" is shown only while a line of <part> is
 OVER_CAP = " (over the cap: the lines that are never cut are longer)"
@@ -97,26 +105,42 @@ MORE = {"notes": ("notes", DB_REL + "/client-database-status.json"),
         "fonts_extra": ("font families", f"{DB_REL}/{TYPOGRAPHY_REL}"),
         "colours_extra": ("colour lines", DB_REL + "/branding/brand-tokens.json"),
         "rules_other": ("rules", CLIENT_PROFILE_REL + "/rules.json"),
+        "style_core": ("style lines", CLIENT_PROFILE_REL + "/style.json"),
+        "fonts_core": ("font lines", f"{DB_REL}/{TYPOGRAPHY_REL}"),
+        "brand_core": ("brand lines", DB_REL + "/branding/brand-tokens.json"),
         "rules_block": ("rules that forbid something", CLIENT_PROFILE_REL + "/rules.json"),
         "people_issues": ("profile problems", CLIENT_PROFILE_REL + "/profile.json"),
         "people": ("people", CLIENT_PROFILE_REL + "/profile.json")}
 
 _HEX = re.compile(r"#?([0-9A-Fa-f]{6})")
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
-_PHONE = re.compile(r"(?<![\w#])\+?\d[\d\s().\-]{6,}\d(?!\w)")
+# a phone number: 8+ digits (any script: \d is Unicode) joined by spaces, ( ) . - en/em dashes / _ NBSP or bidi marks;
+# bounded by non-digits only, so a number glued to letters (Tel0101..., «تليفون0101...») is caught too
+_PHONE_SEP = "[\\s().\\-\u2010-\u2015/_\u00a0\u202f\u200e\u200f\u061c]"
+_PHONE = re.compile(r"(?<!\d)\+?\d(?:" + _PHONE_SEP + r"*\d){7,}(?!\d)")
+_DATE = re.compile(r"\d{4}[-/.]\d{1,2}[-/.]\d{1,2}")          # 2026-10-01 is a date, not a phone
 _NAME = re.compile(r"[\w][\w \-]*")
 _KNOB_HEX = re.compile(r"#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})")       # style_knobs: the "#" is required
-_BLOCKS = re.compile(r"\b(no|without|never|hidden)\b", re.I)
+_BLOCKS = re.compile(r"\b(no|without|never|hidden|only)\b", re.I)   # tests pin every phrase id's class
 _CODE = (".py", ".pyc", ".pyd", ".so", ".dll", ".pth", ".zip")
 CONTACT = "(contact removed)"
+CHECK_TITLE = "check title / راجع اللقب"
+SHORT_NAME = "name too short to check"
+EN_TITLES = {"mr": "male", "sir": "male", "mrs": "female", "ms": "female", "miss": "female", "madam": "female"}
+PRONOUNS = {"he": "male", "him": "male", "his": "male", "himself": "male",
+            "she": "female", "her": "female", "hers": "female", "herself": "female"}
+REASON_LINE = "built: why and when in client-brief.json"       # fixed: the body never depends on the build path
 
 
 def _builder_stamp() -> str:
-    """Changes when this module, the estimator's rates, the cap or the gender values change: the brief is rebuilt."""
-    try:
-        src = Path(__file__).read_bytes()
-    except OSError:
-        src = b""
+    """Changes when this module or a reader it relies on (client_db, font_roles, people, review_domains, rules_loop,
+    style_knobs), the estimator's rates, the cap or the gender values change: the brief is rebuilt."""
+    src = b""
+    for mod in (sys.modules[__name__], client_db, font_roles, people, review_domains, rules_loop, style_knobs):
+        try:
+            src += Path(mod.__file__).read_bytes() + b"\0"
+        except (OSError, AttributeError, TypeError):
+            pass
     extra = json.dumps({"rates": RATES, "cap": CAP_TOKENS, "genders": people.GENDERS, "schema": SCHEMA},
                        sort_keys=True).encode("utf-8")
     return hashlib.sha256(src + b"\0" + extra).hexdigest()[:16]
@@ -316,12 +340,43 @@ def _people(prof: dict, perr) -> dict:
         ppl, issues = people.load_people(prof)
     except Exception as e:  # noqa: BLE001 — a profile slip never stops the brief
         return {"state": "damaged", "people": [], "issues": [], "error": f"people[] not read ({type(e).__name__})"}
+    fields = ("name", "role", "honorific_ar", "honorific_en", "pronouns")
     for p in ppl:
-        out["people"].append({k: str(p.get(k) or "").strip() for k in ("name", "role", "honorific_ar",
-                                                                         "honorific_en", "pronouns")}
-                             | {"gender": p.get("gender") if p.get("gender") in ("male", "female") else "unknown"})
+        out["people"].append({k: str(p.get(k) or "").strip() for k in fields}
+                             | {"gender": p.get("gender") if p.get("gender") in ("male", "female") else "unknown",
+                                "clash": _title_clash(p), "short": False})
+    raw = prof.get("people") if isinstance(prof.get("people"), list) else []
+    names = {e["name"] for e in out["people"]}
+    for k, r in enumerate(raw):                 # dropped by load_people for want of a usable name word: still shown
+        if isinstance(r, dict) and str(r.get("name") or "").strip() and str(r["name"]).strip() not in names:
+            g = str(r.get("gender") or "unknown").strip().lower()
+            out["people"].insert(min(k, len(out["people"])),
+                                 {f: str(r.get(f) or "").strip() for f in fields}
+                                 | {"gender": g if g in ("male", "female") else "unknown", "clash": False,
+                                    "short": True})
     out["issues"] = [str(i) for i in issues]
     return out
+
+
+def _title_clash(p: dict) -> bool:
+    """A recorded gender that the person's own title or pronouns contradict: the Arabic honorific (people.check_text,
+    the engine's own check, on the title and the name), an English title (Mr/Mrs/Ms/Miss) or he/she pronouns. Never a
+    guess: an unknown gender is never compared."""
+    g = p.get("gender")
+    if g not in ("male", "female"):
+        return False
+    for text in (f"{p.get('honorific_ar') or ''} {p.get('name') or ''}", str(p.get("name") or "")):
+        try:
+            errors, _warnings = people.check_text("profile", text, [p])
+        except Exception:  # noqa: BLE001 — a malformed row: the clash check never stops the brief
+            errors = []
+        if errors:
+            return True
+    t = EN_TITLES.get(re.sub(r"[^a-z]", "", str(p.get("honorific_en") or "").lower()))
+    if t and t != g:
+        return True
+    said = {PRONOUNS[w] for w in re.findall(r"[a-z]+", str(p.get("pronouns") or "").lower()) if w in PRONOUNS}
+    return len(said) == 1 and said != {g}
 
 
 def _fonts(paths, ctx: Context) -> dict:
@@ -493,18 +548,22 @@ def collect(paths) -> dict:
 
 # --------------------------------------------------------------------------------------------- rendering
 def _no_contacts(s: str) -> str:
-    s = _EMAIL.sub(CONTACT, s)
-    return _PHONE.sub(lambda m: CONTACT if sum(c.isdigit() for c in m.group()) >= 8 else m.group(), s)
+    s = _EMAIL.sub(CONTACT, str(s))
+    return _PHONE.sub(lambda m: m.group() if _DATE.fullmatch(m.group()) else CONTACT, s)
 
 
 def _person(p: dict, root) -> str:
     """One person, each field clipped on its own (contacts removed first, so a cut never leaves part of a number);
     the gender text is never cut."""
-    f = lambda k, n: clip(scrub(_no_contacts(p[k]), root), n)  # noqa: E731
+    f = lambda k, n: clip(_no_contacts(scrub(p[k], root)), n)  # noqa: E731
     bits = [f("name", FIELD_CHARS["name"]) or "?"]
     if p["role"]:
         bits.append(f("role", FIELD_CHARS["role"]))
     bits.append(GENDER_TEXT.get(p["gender"], UNKNOWN_GENDER))
+    if p.get("clash"):
+        bits.append(CHECK_TITLE)                # never cut: on the person's own line, right after the gender
+    if p.get("short"):
+        bits.append(SHORT_NAME)
     if p["honorific_ar"]:
         bits.append(f'"{f("honorific_ar", FIELD_CHARS["honorific"])}"')
     if p["honorific_en"]:
@@ -516,7 +575,7 @@ def _person(p: dict, root) -> str:
 
 def _sections(f: dict, root) -> list:
     """[(title, fenced, [(part or None, line)])], every line already scrubbed and clipped."""
-    d = lambda x, n=LINE_CHARS: clip(scrub(x, root), n)  # noqa: E731
+    d = lambda x, n=LINE_CHARS: clip(_no_contacts(scrub(x, root)), n)  # noqa: E731
     S = []
     b = f["brand"]
     rows = []
@@ -526,19 +585,19 @@ def _sections(f: dict, root) -> list:
         rows.append((None, "brand: damaged: brand-tokens.json could not be read (fix it, or run `reel client-db`)"))
     else:
         if b["roles"]:
-            rows.append((None, "colours: " + SEP.join(f"{r} {h}" for r, h in b["roles"])))
+            rows.append(("brand_core", "colours: " + SEP.join(f"{r} {h}" for r, h in b["roles"])))
         elif b["measured_only"]:
-            rows.append((None, "colours: none official yet (measured candidates only: assign roles in "
-                               "branding/brand-roles.json, or ask the client for colour codes)"))
+            rows.append(("brand_core", "colours: none official yet (measured candidates only: assign roles in "
+                                       "branding/brand-roles.json, or ask the client for colour codes)"))
         else:
-            rows.append((None, "colours: none recorded"))
+            rows.append(("brand_core", "colours: none recorded"))
         if b["official_extra"]:
             rows.append(("colours_extra", "other official colours: " + ", ".join(b["official_extra"])))
         if b["derived"]:
             rows.append(("colours_extra", "working tints (not official): " + SEP.join(f"{k} {h}" for k, h in
                                                                                        b["derived"])))
     logos = b["logos"]
-    rows.append((None, "logo: " + (d(", ".join(logos[:LOGOS_SHOWN])) + (f" (+{len(logos) - LOGOS_SHOWN} more)"
+    rows.append(("brand_core", "logo: " + (d(", ".join(logos[:LOGOS_SHOWN])) + (f" (+{len(logos) - LOGOS_SHOWN} more)"
                                                                           if len(logos) > LOGOS_SHOWN else "")
                                    if logos else "none identified")))
     S.append(("brand", False, rows))
@@ -553,7 +612,7 @@ def _sections(f: dict, root) -> list:
     for x in p["people"]:
         rows.append(("people", clip(_person(x, root), PERSON_CHARS)))
     for i in p["issues"]:
-        rows.append(("people_issues", "! " + d(_no_contacts(i), NOTE_CHARS)))
+        rows.append(("people_issues", "! " + d(i, NOTE_CHARS)))
     S.append(("people (data)", True, rows))
 
     fo = f["fonts"]
@@ -563,7 +622,7 @@ def _sections(f: dict, root) -> list:
     elif fo["state"] == "damaged":
         rows.append((None, "fonts: damaged: typography.json could not be read (fix it, or run `reel client-db`)"))
     else:
-        rows.append((None, d("roles: " + SEP.join(
+        rows.append(("fonts_core", d("roles: " + SEP.join(
             f"{r} {fam} {sty}".rstrip() + ("" if exact else " (nearest)") if fam else f"{r} none"
             for r, fam, sty, exact in fo["roles"]))))
         if fo["pairs"]:
@@ -575,22 +634,22 @@ def _sections(f: dict, root) -> list:
                 if isinstance(sc, (int, float)) and not isinstance(sc, bool):
                     bits.append(f"score {sc:g}")
                 bits.append(pr["source"])
-                rows.append((None, d(f"font pair: {pr['role']} {pr['arabic']} + {pr['latin']} ({', '.join(bits)})")))
+                rows.append(("fonts_core", d(f"font pair: {pr['role']} {pr['arabic']} + {pr['latin']} ({', '.join(bits)})")))
         else:
-            rows.append((None, "font pairs: not set"))
+            rows.append(("fonts_core", "font pairs: not set"))
         if fo["used"]:
             rows.append(("fonts_extra", d("families: " + SEP.join(fo["used"]))))
         for e in fo["extra"]:
             rows.append(("fonts_extra", d("also: " + e)))
         if fo["uninstalled"]:
-            rows.append((None, f"not installed: {fo['uninstalled']} font file(s)"))
+            rows.append(("fonts_core", f"not installed: {fo['uninstalled']} font file(s)"))
     S.append(("fonts", False, rows))
 
     st = f["style"]
-    rows = [(None, f"style family: {d(st['family'], 40) if st['family'] else NOT_SET} | intensity: "
+    rows = [("style_core", f"style family: {d(st['family'], 40) if st['family'] else NOT_SET} | intensity: "
                    f"{d(st['intensity'], 40) if st['intensity'] else NOT_SET}")]
     if st["error"]:
-        rows.append((None, d(f"style: {st['error']}")))
+        rows.append(("style_core", d(f"style: {st['error']}")))
     rows += [("style_detail", d(x)) for x in st["detail"]]
     S.append(("style", False, rows))
 
@@ -627,10 +686,10 @@ def _sections(f: dict, root) -> list:
 
 
 def _render(sections: list, name: str, reason: str, cap: int, keep: dict, shown: int, over: bool = False) -> str:
-    """A cut of a TRIM part is said once, in the closing `trimmed to fit` line (one shared folder, so the pointers
-    cost less); a cut of a protected part (LAST) is said in place, with its full path."""
-    L = [f"# client brief: {name} (~{shown} tokens / {cap})" + (OVER_CAP if over else ""),
-         f"built: {reason}"]
+    """A cut of a TRIM part is said once, in the short closing `cut to fit` line (client-brief.json `cut` names each
+    part's file); a cut of a protected part (LAST) is said in place, with its full path. `reason` is not printed."""
+    L = [f'# client brief: "{name}" (client name, data) (~{shown} tokens / {cap})' + (OVER_CAP if over else ""),
+         REASON_LINE]
     cuts = []
     for title, fenced, rows in sections:
         out, seen = [], {}
@@ -651,11 +710,10 @@ def _render(sections: list, name: str, reason: str, cap: int, keep: dict, shown:
                 out.append(text)
             if part and i == last[part] and seen[part] > keep.get(part, 0):
                 what, where = MORE[part]
-                more = f"… {seen[part] - keep.get(part, 0)} more {what}, see "
                 if part in LAST:
-                    out.append(more + where)
+                    out.append(f"… {seen[part] - keep.get(part, 0)} more {what}, see {where}")
                 else:
-                    cuts.append(more + where[len(DB_REL) + 1:])
+                    cuts.append(f"{seen[part] - keep.get(part, 0)} {what}")
         if not out:
             continue                                # every line of it cut: said in the trimmed-to-fit line
         L.append(f"## {title}")
@@ -665,7 +723,7 @@ def _render(sections: list, name: str, reason: str, cap: int, keep: dict, shown:
         else:
             L += out
     if cuts:
-        L.append(f"cut to fit, in {DB_REL}/: " + "; ".join(cuts))
+        L.append("cut to fit: " + ", ".join(cuts) + " (each part's file: client-brief.json `cut`)")
     return "\n".join(L) + "\n"
 
 
@@ -763,7 +821,8 @@ def build(paths_or_root, cap: int = CAP_TOKENS, reason: str = "built") -> dict:
         else:
             watched[k] = pre[k]
     text, n, trimmed, counts = render(f, root, cap, reason)
-    return {"text": text, "tokens": n, "cap": cap, "trimmed": trimmed, "counts": counts, "facts": f,
+    cut = {MORE[k][0]: {"lines": v, "see": MORE[k][1]} for k, v in trimmed.items() if v}
+    return {"text": text, "tokens": n, "cap": cap, "trimmed": trimmed, "counts": counts, "facts": f, "cut": cut,
             "reason": reason, "opened": sorted(opened), "watched": sorted(watched),
             "prints": {"opened": dict(sorted(opened.items())), "watched": dict(sorted(watched.items()))}}
 
@@ -844,7 +903,7 @@ def ensure(paths_or_root, force: bool = False, cap: int = CAP_TOKENS) -> dict:
     body = r["text"].encode("utf-8")
     linksafe.replace_atomic(root / BRIEF_REL, root, body, within=DB_REL)
     doc = {"schema": SCHEMA, "builder": BUILDER, "brief_sha256": hashlib.sha256(body).hexdigest(),
-           "tokens": r["tokens"], "cap": cap, "reason": reason, "trimmed": r["trimmed"],
+           "tokens": r["tokens"], "cap": cap, "reason": reason, "trimmed": r["trimmed"], "cut": r["cut"],
            "opened": r["prints"]["opened"], "watched": r["prints"]["watched"], "generated": now_iso()}
     linksafe.replace_atomic(root / PRINTS_REL, root,
                             (json.dumps(doc, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8"),
