@@ -84,22 +84,26 @@ REBASE_JSON = {INVENTORY, "01_analysis/edit-decisions.json", "00_inputs/input-ma
                "01_analysis/motion-plan.json",
                # Claude's map of SFX kinds to the client's sound files (review 087e8e3 P3-1): `reel sfx` opens the
                # paths; the plan reads only its keys, and no fingerprint or sign-off hashes it
-               "06_audio/sfx-map.json"}
+               "06_audio/sfx-map.json",
+               # audio-clean's report (the footage and the cleaned wav: qc reads only its metrics) and its cut check
+               # (review b690c54 P2-1): rewritten, so the advice never asks for `reel audio-clean` again, which would
+               # rewrite the signed pauses.json (motion approvals stale) with the default pause settings
+               "06_audio/dialogue/dialogue-clean-report.json", "06_audio/dialogue/cut-verification.json"}
 # the step that really writes a kept file again (review 087e8e3 P3-1), named in the delete advice while that file may
 # still be opened by the old folder's path: by the item's kind (its flag), then the part after the item's folder, an
-# exact file or a folder ending in "/" (a frames run: readers take the newest run, so a new run replaces it). A kept file
-# not here has no step that safely writes it again (Claude's or the editor's own, 02_transcription/chunks/: `reel
-# transcribe` skips while a transcript exists and --force throws the corrections away): the old folder is kept for it
-STEP_OF = {"projects": ("--video-id", {"06_audio/dialogue/cut-verification.json": "reel audio-clean",
-                                       "06_audio/dialogue/dialogue-clean-report.json": "reel audio-clean",
-                                       "06_audio/sfx/": "reel sfx",
-                                       "08_quality_control/premiere_frames/": "reel ppro-frames",
+# exact file or a folder ending in "/" (`reel sfx` writes <kind>.provenance.json; an ae_frames run's frames.json: readers
+# take the newest run, so a new run replaces it). A kept file not here has no step that safely writes it again
+# (Claude's or the editor's own; 02_transcription/chunks/: `reel transcribe` skips while a transcript exists and --force
+# throws the corrections away; `reel ppro-frames` writes only images; `reel audio-clean` never: see REBASE_JSON): the
+# old folder is kept for it
+STEP_OF = {"projects": ("--video-id", {"06_audio/sfx/": "reel sfx",
                                        "08_quality_control/ae_frames/": "reel motion-frames"}),
            "episodes": ("--episode", {"00_inputs/episode.json": "reel episode-prep"})}
 # inside the client database only these (besides client_db.migrate's own files) are rewritten: everything else there is
 # bound to its bytes (the reference style every video's copy is checked against, the sealed rules registry) or written
 # by the editor or Claude, and none of it is opened as media
 DB_REBASE = ("output/client_database/client-database-status.json",)
+RELINK = {"premiere": "File > Link Media", "after_effects": "File > Dependencies > Find Missing Footage"}  # per app
 BRAND_TOKENS = "output/client_database/branding/brand-tokens.json"   # signed (motion plans): rewritten, kept absolute
 # (its readers open it directly, not through client_db.load)
 # the approvals and sign-offs a move voids on purpose: kind -> (its own file in the item's folder, the NEEDS-YOU line in
@@ -1265,9 +1269,10 @@ def _old_folder(src: Path, dest: Path, kept: list[dict], projects: list[dict]) -
             by_hand.append(rel)
     ar, en = [], []
     if projects:
-        names = [p["file"] for p in projects]
-        ar.append(f"افتح المشاريع دي من المكان الجديد واعمل Link Media، أو ابنيها تاني: {'، '.join(names)}")
-        en.append(f"open these projects from the new place and use Link Media, or rebuild them: {', '.join(names)}")
+        names = [f"{p['file']} ({RELINK[p['app']]})" for p in projects]       # review b690c54 P3-2
+        ar.append(f"افتح المشاريع دي من المكان الجديد ووصّل الميديا تاني، أو ابنيها تاني: {'، '.join(names)}")
+        en.append(f"open these projects from the new place and relink their media, or rebuild them: "
+                  f"{', '.join(names)}")
     if runs:
         ar.append(f"شغّل تاني: {'، '.join(runs)}")
         en.append(f"run again: {', '.join(runs)}")

@@ -1243,39 +1243,125 @@ class TestReview087e8e3(Base):
         self.assertEqual(m["hit"], {"file": str(self.dest / "data" / "SFX" / "hit.wav"), "gain_db": -3})
         self.assertTrue(Path(m["whoosh"]).is_file() and Path(m["hit"]["file"]).is_file())
 
+    # the engine's own files, in the shape their writers give them (review b690c54 P3-3): the keys and every path field
+    # copied from the writer named in each, never invented JSON
+    def clean_report(self, vid: str) -> dict:                  # audio_clean.clean, audio_clean.py:423-428
+        return {"generated": "2026-10-20T10:00:00+0300", "source": self.old("data/Raw/clip 1.mp4"),
+                "output": self.old(f"output/projects/{vid}/06_audio/dialogue/dialogue_clean.wav"),
+                "source_assessment": {"speech_to_noise_db": 31.2}, "decisions": [
+                    "one channel used: the file is mono", "no hum notches (no mains hum stands out in the pauses)",
+                    "no spectral denoise: the source is already clean (31.2 dB speech-to-noise)"],
+                "channel_plan": {"mono": True}, "regions_ms": {"speech": [[0, 4000]], "pauses": [[4000, 4600]]},
+                "chain": ["highpass=f=80", "loudnorm"], "loudness_target": -16, "metrics": {"lufs": -16.1},
+                "loudness": {"gain_db": 2.5, "lufs": -16.1, "true_peak_dbtp": -1.5},
+                "note": "Original camera audio is kept (muted) in the Premiere project for A/B."}
+
+    @staticmethod
+    def cut_verification() -> dict:                            # audio_clean.verify_cuts, audio_clean.py:804-826
+        return {"ok": True, "coverage": 0.97, "orig_words": 31, "tight_words": 30, "chunks": 1, "cuts": 2,
+                "windows_ms": [[1000, 9000]], "windows": [{"ms": [1000, 9000], "cuts": 2, "pieces": 1,
+                                                           "pieces_ms": [[1000, 9000]], "uncut_words": 31,
+                                                           "cut_words": 30, "short_audio": False}],
+                "windows_without_words": [], "windows_short_audio": [], "protected_ranges_ms": [], "missing": [],
+                "possible_hallucinations": [], "noise_floor_db": -62.0, "asr_variance_not_near_cuts": [],
+                "changed": [], "rule": "per cut: the same model reads the uncut source around it",
+                "tight_transcript": "السلام عليكم", "at": "2026-10-20T10:01:00+0300"}
+
+    def provenance(self, kind: str, wav: str) -> dict:         # sfx.install_mapped, sfx.py:212-213
+        return {"kind": kind, "source": self.old(wav), "sha256": "a" * 64, "converted_at": "2026-10-20T10:02:00+0300",
+                "map_entry": self.old(wav), "output": f"{kind}.wav", "format": "wav 48000 Hz pcm_s24le stereo"}
+
+    def ae_frames(self, vid: str) -> dict:                     # motion_render.frames, motion_render.py:208-209
+        return {"plan_fingerprint": "f" * 40, "render": self.old(f"output/projects/{vid}/04_after_effects/renders/"
+                                                                   f"MAIN_{vid}.mov"),
+                "frames": [{"frame": 12, "scene": "S01", "type": "kinetic_quote", "kind": "hero",
+                            "expect": {"lines": ["x"]}, "file": "F001_S01_hero.png", "source": f"MAIN_{vid}.mov"}],
+                "missing": [], "generated": "2026-10-20T10:03:00+0300"}
+
+    def episode_info(self, ep: str) -> dict:                   # episode.prep, episode.py:278-286
+        return {"episode_id": ep, "file": self.old(f"data/Episodes/{ep}.mp4"), "rel": f"data/Episodes/{ep}.mp4",
+                "media": "video", "fingerprint": "e" * 40, "duration_ms": 3600000,
+                "video": {"display_width": 1920, "display_height": 1080, "fps": 25, "codec": "h264", "aspect": "16:9"},
+                "audio": {"channels": 2}, "sheet_rel": None, "sheet": {}, "sheet_text": "",
+                "intake_sheet": self.old(f"output/episodes/{ep}/00_inputs/intake/_intake_sheet.jpg"),
+                "overlay_scan": None, "lower_thirds_hint": False, "supers_sheet": None, "head_sheet": None,
+                "estimate_minutes": 40, "warnings": [], "created": "2026-10-20T10:04:00+0300"}
+
+    @staticmethod
+    def chunk_plan() -> dict:                                  # episode.chunk_plan, episode.py:512-514
+        return {"fingerprint": "c" * 40 + ":{}", "chunk_ms": 600000, "total_ms": 3600000, "language": "ar",
+                "chunks": [[0, 600000], [600000, 1200000]], "created": "2026-10-20T10:05:00+0300"}
+
     def test_each_kept_file_names_the_step_that_really_writes_it(self):
-        raw = self.old("data/Raw/clip 1.mp4")
-        for rel in ("output/episodes/EP01/00_inputs/episode.json",
-                    "output/episodes/EP01/02_transcription/chunks/plan.json",
-                    "output/projects/R01/06_audio/dialogue/cut-verification.json",
-                    "output/projects/R01/06_audio/dialogue/dialogue-clean-report.json",
-                    "output/projects/R01/06_audio/sfx/sfx-notes.json",
-                    "output/projects/R01/08_quality_control/premiere_frames/run-1/frames.json",
-                    "output/projects/R02/02_transcription/chunks/plan.json",
-                    "output/projects/R02/08_quality_control/ae_frames/run-1/frames.json"):
-            self.put(rel, {"source": raw})
+        for rel, doc in (("output/episodes/EP01/00_inputs/episode.json", self.episode_info("EP01")),
+                         ("output/episodes/EP01/02_transcription/chunks/plan.json", self.chunk_plan()),
+                         ("output/projects/R01/06_audio/dialogue/cut-verification.json", self.cut_verification()),
+                         ("output/projects/R01/06_audio/dialogue/dialogue-clean-report.json", self.clean_report("R01")),
+                         ("output/projects/R01/06_audio/sfx/whoosh.provenance.json",
+                          self.provenance("whoosh", "data/SFX/whoosh_01.wav")),
+                         ("output/projects/R02/02_transcription/chunks/plan.json", self.chunk_plan()),
+                         ("output/projects/R02/08_quality_control/ae_frames/run-20261020-100300/frames.json",
+                          self.ae_frames("R02"))):
+            self.put(rel, doc)
         doc = self.moved()
         d = self.dest
-        runs = [f'`reel episode-prep --root "{d}" --episode EP01`', f'`reel audio-clean --root "{d}" --video-id R01`',
-                f'`reel sfx --root "{d}" --video-id R01`', f'`reel ppro-frames --root "{d}" --video-id R01`',
+        runs = [f'`reel episode-prep --root "{d}" --episode EP01`', f'`reel sfx --root "{d}" --video-id R01`',
                 f'`reel motion-frames --root "{d}" --video-id R02`']
-        hand = ["output/episodes/EP01/02_transcription/chunks/plan.json", "output/projects/R01/09_handoff/delivery.json",
-                "output/projects/R02/02_transcription/chunks/plan.json"]
+        hand = ["output/projects/R01/09_handoff/delivery.json"]      # the fixture's own: no step writes it
+        prj = f"{self.PRPROJ} (File > Link Media)"
         self.assertEqual(doc["old_folder"],
-                         self.AR + f"افتح المشاريع دي من المكان الجديد واعمل Link Media، أو ابنيها تاني: {self.PRPROJ}؛ "
+                         self.AR + f"افتح المشاريع دي من المكان الجديد ووصّل الميديا تاني، أو ابنيها تاني: {prj}؛ "
                          f"شغّل تاني: {'، '.join(runs)}؛ سيب الفولدر القديم لحد ما الملفات دي تتصلّح بإيدك أو تتعمل "
-                         f"تاني: {'، '.join(hand)}. " + self.EN + "open these projects from the new place and use Link "
-                         f"Media, or rebuild them: {self.PRPROJ}; run again: {', '.join(runs)}; keep the old folder "
+                         f"تاني: {'، '.join(hand)}. " + self.EN + "open these projects from the new place and relink "
+                         f"their media, or rebuild them: {prj}; run again: {', '.join(runs)}; keep the old folder "
                          f"until these files are fixed by hand or made again: {', '.join(hand)}. The old folder is "
                          + self.delete_line())
         self.assertNotIn("reel transcribe", doc["old_folder"])     # a no-op there; --force drops the corrections
+        self.assertNotIn("chunks", doc["old_folder"])               # a chunk plan stores no path
+
+    def test_audio_clean_is_never_advised_after_a_move(self):
+        """Review b690c54 P2-1: every cleaned clip's report names the footage and the cleaned wav. A move rewrites it
+        and the cut check (nothing hashes either); `reel audio-clean` again would rewrite the signed pauses.json (the
+        motion approvals go stale) and fall back to the default pause settings, so the advice never names it."""
+        (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
+        (self.src / self.PRPROJ).unlink()
+        for vid in ("R01", "R02"):
+            self.put(f"output/projects/{vid}/06_audio/dialogue/dialogue-clean-report.json", self.clean_report(vid))
+            self.put(f"output/projects/{vid}/06_audio/dialogue/cut-verification.json", self.cut_verification())
+        doc = self.moved()
+        rewritten = {r["file"] for r in doc["outside_database"]["rewritten"]}
+        for vid in ("R01", "R02"):
+            rel = f"output/projects/{vid}/06_audio/dialogue/dialogue-clean-report.json"
+            self.assertIn(rel, rewritten)
+            rep = read_json(self.dest.joinpath(*rel.split("/")))
+            self.assertEqual(rep["source"], str(self.dest / "data" / "Raw" / "clip 1.mp4"))
+            self.assertEqual(rep["output"], str(self.dest.joinpath("output", "projects", vid, "06_audio", "dialogue",
+                                                                   "dialogue_clean.wav")))
+            self.assertEqual(rep["metrics"], {"lufs": -16.1})                   # what qc reads: as it was
+        self.assertEqual(doc["old_folder"], self.delete_line())
+        for rel in ("06_audio/dialogue/dialogue-clean-report.json", "06_audio/dialogue/cut-verification.json"):
+            self.assertIsNone(CM._rewritable(f"output/projects/R01/{rel}", ".json"), rel)
+        self.assertFalse([v for _f, t in CM.STEP_OF.values() for v in t.values()
+                          if v in ("reel audio-clean", "reel transcribe")])
+
+    def test_a_json_in_premiere_frames_is_kept_for_a_fix_by_hand(self):
+        """Review b690c54 P3-1: `reel ppro-frames` writes only PNGs and the sheet there, so it is never named."""
+        (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
+        (self.src / self.PRPROJ).unlink()
+        rel = "output/projects/R01/08_quality_control/premiere_frames/run-20261020-100000/notes.json"
+        self.put(rel, {"seen": self.old("data/Raw/clip 1.mp4")})
+        adv = self.moved()["old_folder"]
+        self.assertNotIn("ppro-frames", adv)
+        self.assertIn(f"made again: {rel}. ", adv)
 
     def test_every_distinct_step_is_named_however_many_files_are_kept(self):
         raw = self.old("data/Raw/clip 1.mp4")
         for k in range(1, 8):
-            self.put(f"output/projects/R0{k}/08_quality_control/ae_frames/run-1/frames.json", {"render": raw})
+            self.put(f"output/projects/R0{k}/08_quality_control/ae_frames/run-20261020-100300/frames.json",
+                     self.ae_frames(f"R0{k}"))
             self.put(f"output/projects/R0{k}/09_handoff/delivery.json", {"sent": raw})
-        self.put("output/projects/R01/08_quality_control/ae_frames/run-2/frames.json", {"render": raw})
+        self.put("output/projects/R01/08_quality_control/ae_frames/run-20261020-110300/frames.json",
+                 self.ae_frames("R01"))
         adv = self.moved()["old_folder"]
         for k in range(1, 8):
             self.assertEqual(adv.count(f'`reel motion-frames --root "{self.dest}" --video-id R0{k}`'), 2, (k, adv))
@@ -1287,11 +1373,28 @@ class TestReview087e8e3(Base):
         before = (self.src / self.PRPROJ).read_bytes()
         doc = self.moved()
         self.assertEqual([p["file"] for p in doc["outside_database"]["projects"]], [self.PRPROJ])
+        prj = f"{self.PRPROJ} (File > Link Media)"
         self.assertEqual(doc["old_folder"],
-                         self.AR + f"افتح المشاريع دي من المكان الجديد واعمل Link Media، أو ابنيها تاني: {self.PRPROJ}. "
-                         + self.EN + f"open these projects from the new place and use Link Media, or rebuild them: "
-                         f"{self.PRPROJ}. The old folder is " + self.delete_line())
+                         self.AR + f"افتح المشاريع دي من المكان الجديد ووصّل الميديا تاني، أو ابنيها تاني: {prj}. "
+                         + self.EN + f"open these projects from the new place and relink their media, or rebuild "
+                         f"them: {prj}. The old folder is " + self.delete_line())
         self.assertEqual((self.dest / self.PRPROJ).read_bytes(), before)       # read, never edited
+
+    def test_an_after_effects_project_gets_its_own_menu(self):
+        """Review b690c54 P3-2: Link Media is Premiere's; After Effects finds missing footage."""
+        (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
+        aep = "output/projects/R02/04_after_effects/project/R02_MO.aep"
+        f = self.src.joinpath(*aep.split("/"))
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"RIFX\x00\x00" + self.old("data/Raw/clip 1.mp4").encode("utf-16-le") + b"\x00\x00")
+        before = f.read_bytes()
+        doc = self.moved()
+        self.assertEqual(sorted(p["file"] for p in doc["outside_database"]["projects"]), [self.PRPROJ, aep])
+        adv = doc["old_folder"]
+        self.assertIn(f"{aep} (File > Dependencies > Find Missing Footage)", adv)
+        self.assertIn(f"{self.PRPROJ} (File > Link Media)", adv)
+        self.assertEqual(adv.count("Link Media"), 2)                          # the .prproj only, once per language
+        self.assertEqual((self.dest / aep).read_bytes(), before)              # read, never edited
 
     def test_a_project_that_links_nothing_in_the_old_folder_keeps_the_advice_plain(self):
         (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
