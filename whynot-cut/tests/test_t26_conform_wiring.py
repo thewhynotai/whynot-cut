@@ -37,7 +37,8 @@ from lib.common import Paths, ffmpeg_exe, read_json, write_json  # noqa: E402
 
 FX = SK / "tests" / "fixtures" / "media_normalise"
 CLI = SK / "engine" / "reel" / "cli.py"
-KEYS = {"state", "path", "parts", "cfr_fps", "source_tag", "source_size", "reason", "lines", "at"}
+KEYS = {"state", "path", "parts", "cfr_fps", "source_tag", "source_size", "source_mtime", "source_fp", "reason", "lines",
+        "at"}
 ARABIC = re.compile("[؀-ۿ]")
 
 
@@ -294,12 +295,12 @@ class TestStale(_Client):
         with quiet():
             self.assertEqual(media.start_conform(p, mode="off")["state"], "pending")
 
-    def test_a_source_newer_than_its_copy_is_stale(self):
+    def test_a_source_with_a_new_time_is_stale(self):
         p, f = self.ready()
         r = self.rec(p)
         t = (self.root / r["path"]).stat().st_mtime + 60
         os.utime(f, (t, t))
-        self.assertIn("newer", media.conform_current(p, f, r))
+        self.assertIn("modified time", media.conform_current(p, f, r))
 
     def test_a_missing_copy_is_stale(self):
         p, f = self.ready()
@@ -1282,6 +1283,383 @@ class TestR2EditSkill(unittest.TestCase):
         para = para[:para.index("\n- ")]
         self.assertIn('reel conform --root "<CLIENT_FOLDER>" --video-id <ID> --wait', para)
         self.assertIn("timeout", para)
+
+
+# --------------------------------------------------------------------------- fix round 3 (review 01ea9ae)
+class _R3(_R2):
+    def imp(self, p, src):
+        with quiet():
+            return media.conform_import(p, src)
+
+    def assertOriginal(self, res, state):
+        self.assertEqual((res["use"], res["state"], res["path"], res["parts"]), ("original", state, None, []), res)
+
+    def ready(self, vid="V1", fname=None):
+        p, f = self.clip("tag60_real30", vid=vid, fname=fname)
+        self.preflight(p, f)
+        self.assertEqual(self.job(p)["state"], "ready")
+        return p, f
+
+    def wait(self, p):
+        """What `reel conform --wait` runs (cli.cmd_conform)."""
+        with quiet():
+            media.start_conform(p, mode="off")
+        return self.job(p, wait_s=5)
+
+    def age(self, p, seconds):
+        import datetime as dt
+        doc = self.doc(p)
+        doc["files"][0]["normalise"]["conform"]["at"] = (dt.datetime.now().astimezone() - dt.timedelta(
+            seconds=seconds)).isoformat(timespec="seconds")
+        write_json(p.p("00_inputs/preflight.json"), doc)
+
+    def foreign_claim(self, p, age_s=3600, **kw):
+        cp = self.write_claim(p, 99999, pid_created=None, host="other-mac", host_id="mac:0000000000other", **kw)
+        old = time.time() - age_s
+        os.utime(cp, (old, old))
+        return cp
+
+    def link_dir(self, link: Path, target: Path):
+        """A directory junction (Windows) or symlink, removed at the end as a link only (never its target's files)."""
+        try:
+            if os.name == "nt":
+                subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(target)], check=True, capture_output=True)
+            else:
+                os.symlink(target, link, target_is_directory=True)
+        except (OSError, subprocess.CalledProcessError) as e:
+            self.skipTest(f"no link: {e}")
+        self.addCleanup(lambda: os.rmdir(link) if os.name == "nt" else os.unlink(link))
+
+
+class TestR3TouchedSource(_R3):
+    """P2-1: a source whose time changed but not its bytes (touch, a cloud or NAS re-sync, a copy tool that does not
+    keep times). `reel conform --wait` checks it again (the sidecar's full sha256), reuses the copy and records the new
+    time, so the next build imports the copy: the loop «run --wait» -> ready -> «run --wait» is gone."""
+
+    def test_wait_after_a_time_only_change_gives_the_copy_again(self):
+        for i, shift in enumerate((60, 30 * 86400, -86400)):    # a touch; a clock a month ahead; a restore a day back
+            with self.subTest(shift=shift):
+                p, f = self.ready(vid=f"T{i}", fname=f"touched {i}.mp4")
+                r = self.rec(p)
+                copy = self.root / r["path"]
+                made = copy.stat().st_mtime_ns
+                t = f.stat().st_mtime + shift
+                os.utime(f, (t, t))
+                res = self.imp(p, f)
+                self.assertOriginal(res, "ready")                               # until it is checked again
+                self.assertIn("modified time", res["reason"])
+                self.assertIn("reel conform --wait", res["lines"]["en"][0])
+                self.assertEqual(self.wait(p)["state"], "ready")
+                for _ in range(2):                                              # and it stays so
+                    res = self.imp(p, f)
+                    self.assertEqual((res["use"], res["path"]), ("copy", r["path"]), res)
+                self.assertEqual(copy.stat().st_mtime_ns, made)                 # reused, never encoded again
+                self.assertEqual(self.rec(p)["source_mtime"], f.stat().st_mtime)
+
+    def test_the_cli_wait_ends_the_loop(self):
+        p, f = self.ready()
+        t = f.stat().st_mtime + 60
+        os.utime(f, (t, t))
+        self.assertEqual(self.imp(p, f)["use"], "original")
+        rc, doc, out = reel(self.root, "conform", "--wait", video_id="V1")
+        self.assertEqual((rc, doc and doc.get("state")), (0, "ready"), out)
+        self.assertEqual(self.imp(p, f)["use"], "copy")
+
+    def test_a_ready_record_from_before_this_check_is_made_again(self):
+        p, f = self.ready()
+        doc = self.doc(p)
+        for k in ("source_mtime", "source_fp"):
+            doc["files"][0]["normalise"]["conform"].pop(k, None)               # written by the round-2 engine
+        write_json(p.p("00_inputs/preflight.json"), doc)
+        self.assertIsNotNone(media.conform_current(p, f, self.rec(p)))
+        self.assertOriginal(self.imp(p, f), "ready")
+        self.assertEqual(self.wait(p)["state"], "ready")
+        self.assertEqual(self.imp(p, f)["use"], "copy")
+
+
+class TestR3SameSizeEdit(_R3):
+    """P3-5: a same-size edit with the time put back (a metadata tool editing in place with «keep the date»): the
+    record keeps a cheap content check (sha256 of the size and the first and last FP_BYTES), compared at every build."""
+
+    def edit(self, f, offset, data=b"\xab" * 4096):
+        st = f.stat()
+        with open(f, "r+b") as h:
+            h.seek(offset)
+            h.write(data)
+        os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertEqual((f.stat().st_size, f.stat().st_mtime_ns), (st.st_size, st.st_mtime_ns))
+
+    def test_a_same_size_edit_with_its_time_put_back_is_never_imported(self):
+        p, f = self.ready()
+        orig = f.read_bytes()
+        st = f.stat()
+        for where, offset in (("head", 0), ("tail", len(orig) - 4096)):
+            with self.subTest(where):
+                self.edit(f, offset)
+                self.assertIn("content", media.conform_current(p, f, self.rec(p)))
+                res = self.imp(p, f)
+                self.assertOriginal(res, "ready")
+                self.assertIn("reel conform --wait", res["lines"]["en"][0])
+                self.edit(f, 0, orig)                                           # the control: the bytes back
+                os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+                self.assertIsNone(media.conform_current(p, f, self.rec(p)))
+                self.assertEqual(self.imp(p, f)["use"], "copy")
+
+    def test_the_check_reads_the_first_and_last_part_only(self):
+        with mock.patch.object(media, "FP_BYTES", 4096, create=True):
+            p, f = self.ready()
+            size = f.stat().st_size
+            self.assertGreater(size, 4 * 4096)
+            orig = f.read_bytes()
+            for where, offset, seen in (("head", 100, True), ("tail", size - 200, True),
+                                        ("middle", size // 2, False)):          # the middle: the stated limit
+                with self.subTest(where):
+                    self.edit(f, offset, b"\xcd" * 64)
+                    why = media.conform_current(p, f, self.rec(p))
+                    self.assertEqual(why is not None, seen, why)
+                    self.edit(f, 0, orig)
+
+
+class TestR3PathSpellings(_R3):
+    """P3-4: one file under two spellings (a junction inside the client, an 8.3 short name) is one file: a reel never
+    conforms the whole episode, and the build never silently uses the original."""
+
+    def episode(self, footage_dir: Path, rel_footage: str):
+        ep = make_vfr(footage_dir / "EP3.mp4", seconds=4)
+        p = Paths(self.root, "EP3_R01")
+        p.ensure_project()
+        write_json(p.p("00_inputs/source.json"), {"footage": rel_footage, "in_ms": 2500, "out_ms": 5000,
+                                                  "kind": "episode_reel", "episode_id": "EP3", "reel_id": "R01"})
+        return p, ep
+
+    def test_a_reel_whose_footage_is_reached_through_a_junction(self):
+        real = self.root / "data" / "Episodes"
+        p, ep = self.episode(real, "data/Episodes/EP3.mp4")    # plan._client_rel: the real path
+        link = self.root / "data" / "EpLink"
+        self.link_dir(link, real)
+        via = link / "EP3.mp4"                                  # the editor's spelling
+        self.assertEqual(media.conform_windows(p, via), [(2.5, 5.0)])
+        self.preflight(p, via)
+        self.assertEqual(self.job(p)["state"], "ready")
+        r = self.rec(p)
+        self.assertIsNone(r["path"])                            # parts, never the whole episode
+        self.assertEqual([(x["from_ms"], x["to_ms"]) for x in r["parts"]], [(500, 7000)])
+        for src in (ep, "data/Episodes/EP3.mp4", via):
+            with self.subTest(src=str(src)):
+                res = self.imp(p, src)
+                self.assertEqual((res["use"], res["parts"]), ("copy", r["parts"]), res)
+
+    def test_an_eight_dot_three_short_name(self):
+        if os.name != "nt":
+            self.skipTest("8.3 names are Windows only")
+        import ctypes
+        p, f = self.ready()
+        buf = ctypes.create_unicode_buffer(1024)
+        n = ctypes.windll.kernel32.GetShortPathNameW(str(f), buf, 1024)
+        if not n or buf.value.lower() == str(f).lower():
+            self.skipTest("this volume makes no 8.3 names")
+        short = Path(buf.value)
+        self.assertEqual(self.imp(p, short)["use"], "copy")
+        self.assertTrue(media._same_file(short, f))
+
+
+class TestR3ClaimCannotBeMade(_R3):
+    """P3-2: a claim file that can't be created (a folder ACL; a name a virus scanner still holds after the last job
+    removed it) never crashes `reel conform --wait`: retried for a moment, then a failed record with a plain line in
+    both languages, the original used, the job's lock released."""
+
+    def test_a_claim_that_cannot_be_created_is_a_failed_record_never_a_crash(self):
+        from lib import writer_lock as WL
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        with mock.patch.object(WL, "_create", side_effect=PermissionError(13, "Access is denied")), \
+                mock.patch.object(media, "CLAIM_CREATE_S", 0.3, create=True):
+            res = self.job(p, wait_s=5)
+        self.assertEqual(res["state"], "failed")
+        r = self.rec(p)
+        self.assertContract(r)
+        self.assertEqual(r["state"], "failed")
+        self.assertIn("conform-job.claim", r["reason"])
+        self.assertIn("reel conform --wait", r["lines"]["en"][0])
+        self.assertTrue(ARABIC.search(r["lines"]["ar"][0]))
+        self.assertIn("reel conform --wait", r["lines"]["ar"][0])
+        res = self.imp(p, f)
+        self.assertOriginal(res, "failed")
+        self.assertEqual(res["lines"], r["lines"])
+        got = []
+
+        def take():
+            with media.file_locked(p.p(media.JOB_REL), 0):
+                got.append(True)
+        t = threading.Thread(target=take)
+        t.start()
+        t.join(30)
+        self.assertEqual(got, [True])                           # the job's own lock was released
+        self.assertEqual(self.wait(p)["state"], "ready")        # and `--wait` makes it once the folder can be written
+
+    def test_a_claim_held_for_a_moment_is_retried(self):
+        from lib import writer_lock as WL
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        real, calls = WL._create, []
+
+        def flaky(path, rec):
+            calls.append(1)
+            if len(calls) <= 2:
+                raise PermissionError(13, "delete pending")
+            return real(path, rec)
+        with mock.patch.object(WL, "_create", flaky):
+            self.assertEqual(self.job(p, wait_s=0)["state"], "ready")
+        self.assertGreaterEqual(len(calls), 3)
+
+
+class TestR3ForeignClaim(_R3):
+    """P3-1: where the volume takes OS locks and this job holds the item's one, another computer's claim written by a
+    job that held that OS lock too is a leftover (that job is gone), however young. A claim from a computer that had
+    no OS lock (a Mac on an SMB share without locks), or any claim on a volume without OS locks, keeps the 12 h rule."""
+
+    def test_another_computers_claim_is_a_leftover_where_the_os_lock_is_ours(self):
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        cp = self.foreign_claim(p, os_lock=True)
+        self.assertFalse(media._job_running(p))
+        self.assertEqual(self.job(p, wait_s=5)["state"], "ready")
+        self.assertFalse(cp.exists())
+
+    def test_a_pending_record_behind_such_a_claim_is_reaped(self):
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        self.age(p, 1800)
+        self.foreign_claim(p, os_lock=True)
+        self.assertOriginal(self.imp(p, f), "failed")
+
+    def test_the_twelve_hour_rule_stays_where_it_must(self):
+        for case in ("the writer had none", "an older claim", "no os lock here"):   # the lock-less one last: it stays
+            with self.subTest(case):
+                p, f = self.clip("tag60_real30", vid=f"F{len(case)}")
+                self.preflight(p, f)
+                if case == "no os lock here":
+                    self.no_os_locks()
+                cp = self.foreign_claim(p, **({} if case == "an older claim" else
+                                              {"os_lock": case == "no os lock here"}))
+                before = cp.read_bytes()
+                self.assertTrue(media._job_running(p))
+                self.assertEqual(self.job(p, wait_s=0)["job"], "running")
+                self.assertEqual(cp.read_bytes(), before)
+
+    def test_the_claim_says_whether_its_job_holds_an_os_lock(self):
+        for locks in (True, False):
+            with self.subTest(locks=locks):
+                p, f = self.clip("tag60_real30", vid=f"L{int(locks)}")
+                self.preflight(p, f)
+                if not locks:
+                    self.no_os_locks()
+                real, seen = MN.conform, []
+
+                def spy(*a, **k):
+                    seen.append(json.loads(p.p(CLAIM).read_text(encoding="utf-8")))
+                    return real(*a, **k)
+                with mock.patch.object(MN, "conform", spy):
+                    self.assertEqual(self.job(p)["state"], "ready")
+                self.assertIs(seen[0]["os_lock"], locks)
+
+
+class TestR3Takeover(_R3):
+    """P3-3 (known limit, CLOSEOUT) and the survivors N02 / N03: the takeover of a dead claim compares the claim it
+    moved aside with the one it judged, and the put-back never replaces a claim made meanwhile."""
+
+    def test_a_fresh_claim_made_while_a_dead_one_is_judged_is_put_back(self):     # N02
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        self.no_os_locks()
+        cp = self.write_claim(p, self.dead_pid())
+        live, real_live, state = self.sleeper(), media._claim_live, {"raced": False}
+
+        def racing(path, rec=None, **kw):
+            if not state["raced"]:
+                state["raced"] = True
+                self.write_claim(p, live, started_at="the new job")             # a new job's claim lands meanwhile
+                return False                                                    # the old one was judged dead
+            return real_live(path, rec, **kw)
+        with mock.patch.object(media, "_claim_live", racing):
+            self.assertEqual(self.job(p, wait_s=1)["job"], "running")
+        self.assertEqual(json.loads(cp.read_text(encoding="utf-8"))["started_at"], "the new job")
+        self.assertFalse(list(cp.parent.glob(cp.name + ".stale-*")))
+
+    def test_the_put_back_never_replaces_a_third_jobs_claim(self):               # N03
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        self.no_os_locks()
+        cp = self.write_claim(p, self.dead_pid())
+        a_pid, c_pid = self.sleeper(), self.sleeper()
+        real_live, real_read, state = media._claim_live, media._read_claim, {"n": 0}
+
+        def racing_live(path, rec=None, **kw):
+            if state["n"] == 0:
+                state["n"] = 1
+                self.write_claim(p, a_pid, started_at="job A")                  # A's fresh claim
+                return False
+            return real_live(path, rec, **kw)
+
+        def racing_read(path):
+            r = real_read(path)
+            if Path(path).name.startswith(cp.name + ".stale-") and state["n"] == 1:
+                state["n"] = 2
+                self.write_claim(p, c_pid, started_at="job C")                  # C's claim, in the gap
+            return r
+        with mock.patch.object(media, "_claim_live", racing_live), mock.patch.object(media, "_read_claim", racing_read):
+            self.assertEqual(self.job(p, wait_s=1)["job"], "running")
+        self.assertEqual(json.loads(cp.read_text(encoding="utf-8"))["started_at"], "job C")
+        aside = list(cp.parent.glob(cp.name + ".stale-*"))
+        self.assertEqual([json.loads(x.read_text(encoding="utf-8"))["started_at"] for x in aside], ["job A"])
+
+
+class TestR3MutantGaps(_R3):
+    """The review's other survivors: N09 (the claim never waited for), N13 (a shared bare name), N15 (the frame-rate
+    advice on a tone-map-only failure)."""
+
+    def test_wait_waits_for_a_live_claim_without_os_locks(self):                 # N09
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        self.no_os_locks()
+        cp = self.write_claim(p, self.sleeper())
+        timer = threading.Timer(1.5, cp.unlink)                                 # that job ends
+        timer.start()
+        self.addCleanup(timer.cancel)
+        t0 = time.monotonic()
+        res = self.job(p, wait_s=30)
+        self.assertEqual((res["job"], res["state"]), ("done", "ready"))
+        self.assertGreaterEqual(time.monotonic() - t0, 1.0)
+
+    def test_a_bare_name_two_measured_files_share_is_never_guessed(self):        # N13
+        cams = [self.root / "data" / c / "C0001.mp4" for c in ("CamA", "CamB")]
+        for c in cams:
+            c.parent.mkdir(parents=True)
+            shutil.copyfile(FX / "tag60_real30.mp4", c)
+        p = Paths(self.root, "CAM")
+        p.ensure_project()
+        with quiet():
+            media.preflight(p, cams)
+        self.assertEqual(self.job(p)["state"], "ready")
+        self.assertOriginal(self.imp(p, "C0001.mp4"), "none")
+        a, b = self.imp(p, cams[0]), self.imp(p, cams[1])
+        self.assertEqual((a["use"], b["use"]), ("copy", "copy"))
+        self.assertNotEqual(a["path"], b["path"])
+
+    def test_a_tone_map_only_failure_has_no_frame_rate_advice(self):             # N15
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        real = MN.decide
+
+        def tone_map_only(m, *a, **k):
+            return dict(real(m, *a, **k), actions=["tonemap"], cfr_fps=None, tonemap="pq")
+        with mock.patch.object(MN, "decide", tone_map_only), mock.patch.object(MN, "_engine_ffmpeg", lambda: None):
+            self.assertEqual(self.job(p)["state"], "failed")
+        r = self.rec(p)
+        self.assertIsNone(r["cfr_fps"])
+        self.assertIn("FFmpeg", r["lines"]["en"][0])
+        self.assertNotIn("constant-frame-rate export", " ".join(r["lines"]["en"]))
+        self.assertNotIn("بمعدل فريمات ثابت", " ".join(r["lines"]["ar"]))
 
 
 if __name__ == "__main__":
