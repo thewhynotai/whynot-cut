@@ -78,6 +78,9 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
   hand after checking its CPU on the CHILD python (the venv `python.exe` launcher always shows 0 CPU).
 
 ## 6. Incidents
+- 2026-10-20 23:31 → 2026-10-21 02:20: third limit. The 21:37 intake run died holding `intake.lock` (no tagged suites
+  left; the 02:37 intake clears it per OPS-07). Watchdog 02:24 resumed the executor + Command Center; the Command
+  Center resumed Builder A (its Task 29 subagent stopped on the limit). Helpers kept going (BL-16 fix delivered 01:xx).
 - 2026-10-20 ~18:30 → 21:20: second usage limit of the day. Routine runs failed fast (nothing blocked), but the 21:00
   report was lost. Helpers kept working on their own seats. 21:56 the Command Center (nudged by the watchdog) re-ran
   the report (R-2026-10-20-2156 SENT). Prevention: WATCHDOG step 1b re-runs a report that failed on a limit (≤ 180 min old).

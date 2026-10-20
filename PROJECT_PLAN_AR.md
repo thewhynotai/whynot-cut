@@ -109,8 +109,8 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
 | الحساب | الدور | الحالة الموثّقة |
 |---|---|---|
 | **PRIMARY** = حسابك (info@) | Command Center: القرارات، الاستلام، المراجعة، التقارير، تفعيل الـ API | الشات ده |
-| **ASSISTANT_A** = H1 (mayar@) | Engine builder + peer review لشغل H2 | AUTO شغال (22:00: بيصلّح BL-16، والـ suite بتاعته شغالة) |
-| **ASSISTANT_B** = H2 (marketing@) | Product builder + peer review لشغل H1 | AUTO شغال (22:00: BL-03 رجعت FIX، وبيراجع BL-02) |
+| **ASSISTANT_A** = H1 (mayar@) | Engine builder + peer review لشغل H2 | AUTO شغال (02:30: سلّم تصليح BL-16، وشغال على S6b) |
+| **ASSISTANT_B** = H2 (marketing@) | Product builder + peer review لشغل H1 | AUTO شغال (02:30: بيعمل peer review لتصليح BL-16، وبعده تصليحات BL-03) |
 
 - التسليم بين الحسابات عن طريق الملفات بس: الكارت في `00-HQ/tasks/`، والتقرير في `00-HQ/inbox/<h>/`،
   والـ review في `00-HQ/reviews/`، والـ branch `<h>/<ID>`. محدش بيكلّم حد في الشات.
@@ -177,4 +177,5 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
 - 2026-10-20 — اتقفل OPS-01/03/06/07 و ENV-01 (suite المساعدين 8899 OK) و OPS-02 (التقارير بتوصل لوحدها).
   اتمسح 540 MB packages مكررة من C. الـ routines اتعملت من جديد في Bypass عشان ماتقفش على موافقة.
 - 2026-10-20 بالليل — limit تاني (لحد 9:20) ضيّع تقرير 9، فاتعاد 9:56 ووصل. الـ watchdog بقى يعيد أي تقرير يضيع بسبب
-  الـ limit لوحده. كارت S6b (eval cases لمهارات Phase 4) اتكتب لـ H1، مستني رد الـ executor.
+  الـ limit لوحده. كارت S6b (eval cases لمهارات Phase 4) اتكتب لـ H1 وبقى READY بعد رد الـ executor.
+- 2026-10-21 فجرًا — limit تالت (11:31 → 2:20). الشغل رجع لوحده، و H1 سلّم تصليح BL-16 وH2 بيراجعه.
