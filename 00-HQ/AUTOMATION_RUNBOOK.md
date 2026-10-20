@@ -78,6 +78,9 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
   hand after checking its CPU on the CHILD python (the venv `python.exe` launcher always shows 0 CPU).
 
 ## 6. Incidents
+- 2026-10-20 ~18:30 → 21:20: second usage limit of the day. Routine runs failed fast (nothing blocked), but the 21:00
+  report was lost. Helpers kept working on their own seats. 21:56 the Command Center (nudged by the watchdog) re-ran
+  the report (R-2026-10-20-2156 SENT). Prevention: WATCHDOG step 1b re-runs a report that failed on a limit (≤ 180 min old).
 - 2026-10-20 11:20–11:45 (Yunus: «ليه مرجعتش تشتغل لوحدها… احلها بدون اي ابروف»). Found and fixed:
   1. The Command Center session was never a watchdog target → added (`local_a36b6974…`, the parent Command Center; first set to the btw fork by mistake, corrected 11:55).
   2. The v1 watchdog could not read huge transcripts ("(no messages)") → never resumed the executor (idle 05:15) or
