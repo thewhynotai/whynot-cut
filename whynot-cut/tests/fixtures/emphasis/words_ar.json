@@ -1,0 +1,320 @@
+{
+ "meta": {
+  "language": "ar",
+  "duration_ms": 22000
+ },
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "النهارده",
+   "start_ms": 0,
+   "end_ms": 400,
+   "probability": 0.9
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "هكلمكم",
+   "start_ms": 480,
+   "end_ms": 880,
+   "probability": 0.9
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "عن",
+   "start_ms": 960,
+   "end_ms": 1360,
+   "probability": 0.9
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "الرجيم",
+   "start_ms": 1440,
+   "end_ms": 1840,
+   "probability": 0.9
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "أول",
+   "start_ms": 2240,
+   "end_ms": 2640,
+   "probability": 0.9
+  },
+  {
+   "id": 6,
+   "segment_id": 1,
+   "word": "حاجة",
+   "start_ms": 2720,
+   "end_ms": 3120,
+   "probability": 0.9
+  },
+  {
+   "id": 7,
+   "segment_id": 1,
+   "word": "لازم",
+   "start_ms": 3200,
+   "end_ms": 3600,
+   "probability": 0.9
+  },
+  {
+   "id": 8,
+   "segment_id": 1,
+   "word": "تعرفوها",
+   "start_ms": 3680,
+   "end_ms": 4080,
+   "probability": 0.9
+  },
+  {
+   "id": 9,
+   "segment_id": 1,
+   "word": "كويس",
+   "start_ms": 4160,
+   "end_ms": 4560,
+   "probability": 0.9
+  },
+  {
+   "id": 10,
+   "segment_id": 1,
+   "word": "أنا",
+   "start_ms": 4960,
+   "end_ms": 5360,
+   "probability": 0.9
+  },
+  {
+   "id": 11,
+   "segment_id": 1,
+   "word": "نزلت",
+   "start_ms": 5440,
+   "end_ms": 5840,
+   "probability": 0.9
+  },
+  {
+   "id": 12,
+   "segment_id": 1,
+   "word": "خمسمية",
+   "start_ms": 5920,
+   "end_ms": 6320,
+   "probability": 0.9
+  },
+  {
+   "id": 13,
+   "segment_id": 1,
+   "word": "جرام",
+   "start_ms": 6400,
+   "end_ms": 6800,
+   "probability": 0.9
+  },
+  {
+   "id": 14,
+   "segment_id": 1,
+   "word": "في",
+   "start_ms": 6880,
+   "end_ms": 7280,
+   "probability": 0.9
+  },
+  {
+   "id": 15,
+   "segment_id": 1,
+   "word": "الأسبوع",
+   "start_ms": 7360,
+   "end_ms": 7760,
+   "probability": 0.9
+  },
+  {
+   "id": 16,
+   "segment_id": 1,
+   "word": "ده",
+   "start_ms": 8160,
+   "end_ms": 8560,
+   "probability": 0.9
+  },
+  {
+   "id": 17,
+   "segment_id": 1,
+   "word": "كان",
+   "start_ms": 8640,
+   "end_ms": 9040,
+   "probability": 0.9
+  },
+  {
+   "id": 18,
+   "segment_id": 1,
+   "word": "مع",
+   "start_ms": 9120,
+   "end_ms": 9520,
+   "probability": 0.9
+  },
+  {
+   "id": 19,
+   "segment_id": 1,
+   "word": "بالأوزمبيك",
+   "start_ms": 9600,
+   "end_ms": 10000,
+   "probability": 0.9
+  },
+  {
+   "id": 20,
+   "segment_id": 1,
+   "word": "والرياضة",
+   "start_ms": 10080,
+   "end_ms": 10480,
+   "probability": 0.9
+  },
+  {
+   "id": 21,
+   "segment_id": 1,
+   "word": "وبعدين",
+   "start_ms": 10880,
+   "end_ms": 11280,
+   "probability": 0.9
+  },
+  {
+   "id": 22,
+   "segment_id": 1,
+   "word": "٣",
+   "start_ms": 11360,
+   "end_ms": 11760,
+   "probability": 0.9
+  },
+  {
+   "id": 23,
+   "segment_id": 1,
+   "word": "كيلو",
+   "start_ms": 11840,
+   "end_ms": 12240,
+   "probability": 0.9
+  },
+  {
+   "id": 24,
+   "segment_id": 1,
+   "word": "كمان",
+   "start_ms": 12320,
+   "end_ms": 12720,
+   "probability": 0.9
+  },
+  {
+   "id": 25,
+   "segment_id": 1,
+   "word": "الست",
+   "start_ms": 13120,
+   "end_ms": 13520,
+   "probability": 0.9
+  },
+  {
+   "id": 26,
+   "segment_id": 1,
+   "word": "دي",
+   "start_ms": 13600,
+   "end_ms": 14000,
+   "probability": 0.9
+  },
+  {
+   "id": 27,
+   "segment_id": 1,
+   "word": "قالتلي",
+   "start_ms": 14080,
+   "end_ms": 14480,
+   "probability": 0.9
+  },
+  {
+   "id": 28,
+   "segment_id": 1,
+   "word": "سر",
+   "start_ms": 14560,
+   "end_ms": 14960,
+   "probability": 0.9
+  },
+  {
+   "id": 29,
+   "segment_id": 1,
+   "word": "مهم",
+   "start_ms": 15040,
+   "end_ms": 15440,
+   "probability": 0.9
+  },
+  {
+   "id": 30,
+   "segment_id": 1,
+   "word": "اكتبوا",
+   "start_ms": 15840,
+   "end_ms": 16240,
+   "probability": 0.9
+  },
+  {
+   "id": 31,
+   "segment_id": 1,
+   "word": "كلمة",
+   "start_ms": 16320,
+   "end_ms": 16720,
+   "probability": 0.9
+  },
+  {
+   "id": 32,
+   "segment_id": 1,
+   "word": "رِجيـم",
+   "start_ms": 16800,
+   "end_ms": 17200,
+   "probability": 0.9
+  },
+  {
+   "id": 33,
+   "segment_id": 1,
+   "word": "في",
+   "start_ms": 17280,
+   "end_ms": 17680,
+   "probability": 0.9
+  },
+  {
+   "id": 34,
+   "segment_id": 1,
+   "word": "الكومنتات",
+   "start_ms": 17760,
+   "end_ms": 18160,
+   "probability": 0.9
+  },
+  {
+   "id": 35,
+   "segment_id": 1,
+   "word": "ومتنسوش",
+   "start_ms": 18560,
+   "end_ms": 18960,
+   "probability": 0.9
+  },
+  {
+   "id": 36,
+   "segment_id": 1,
+   "word": "تعملوا",
+   "start_ms": 19040,
+   "end_ms": 19440,
+   "probability": 0.9
+  },
+  {
+   "id": 37,
+   "segment_id": 1,
+   "word": "متابعة",
+   "start_ms": 19520,
+   "end_ms": 19920,
+   "probability": 0.9
+  },
+  {
+   "id": 38,
+   "segment_id": 1,
+   "word": "يلا",
+   "start_ms": 20320,
+   "end_ms": 20720,
+   "probability": 0.9
+  },
+  {
+   "id": 39,
+   "segment_id": 1,
+   "word": "سلام",
+   "start_ms": 20800,
+   "end_ms": 21200,
+   "probability": 0.9
+  }
+ ]
+}

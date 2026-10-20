@@ -1,0 +1,128 @@
+{
+ "meta": {
+  "language": "ar",
+  "duration_ms": 8880
+ },
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "النهارده",
+   "start_ms": 0,
+   "end_ms": 400,
+   "probability": 0.9
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "هنتكلم",
+   "start_ms": 480,
+   "end_ms": 880,
+   "probability": 0.9
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "عن",
+   "start_ms": 960,
+   "end_ms": 1360,
+   "probability": 0.9
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "الـ",
+   "start_ms": 1760,
+   "end_ms": 2160,
+   "probability": 0.9
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "Ozempic",
+   "start_ms": 2240,
+   "end_ms": 2640,
+   "probability": 0.9
+  },
+  {
+   "id": 6,
+   "segment_id": 1,
+   "word": "وال",
+   "start_ms": 2720,
+   "end_ms": 3120,
+   "probability": 0.9
+  },
+  {
+   "id": 7,
+   "segment_id": 1,
+   "word": "semaglutide",
+   "start_ms": 3200,
+   "end_ms": 3600,
+   "probability": 0.9
+  },
+  {
+   "id": 8,
+   "segment_id": 1,
+   "word": "وده",
+   "start_ms": 4000,
+   "end_ms": 4400,
+   "probability": 0.9
+  },
+  {
+   "id": 9,
+   "segment_id": 1,
+   "word": "دوا",
+   "start_ms": 4480,
+   "end_ms": 4880,
+   "probability": 0.9
+  },
+  {
+   "id": 10,
+   "segment_id": 1,
+   "word": "مهم",
+   "start_ms": 4960,
+   "end_ms": 5360,
+   "probability": 0.9
+  },
+  {
+   "id": 11,
+   "segment_id": 1,
+   "word": "جدا",
+   "start_ms": 5440,
+   "end_ms": 5840,
+   "probability": 0.9
+  },
+  {
+   "id": 12,
+   "segment_id": 1,
+   "word": "اكتبوا",
+   "start_ms": 6240,
+   "end_ms": 6640,
+   "probability": 0.9
+  },
+  {
+   "id": 13,
+   "segment_id": 1,
+   "word": "كلمة",
+   "start_ms": 6720,
+   "end_ms": 7120,
+   "probability": 0.9
+  },
+  {
+   "id": 14,
+   "segment_id": 1,
+   "word": "diet",
+   "start_ms": 7200,
+   "end_ms": 7600,
+   "probability": 0.9
+  },
+  {
+   "id": 15,
+   "segment_id": 1,
+   "word": "تحت",
+   "start_ms": 7680,
+   "end_ms": 8080,
+   "probability": 0.9
+  }
+ ]
+}

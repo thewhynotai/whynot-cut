@@ -1,0 +1,280 @@
+{
+ "meta": {
+  "language": "en",
+  "duration_ms": 18640
+ },
+ "words": [
+  {
+   "id": 1,
+   "segment_id": 1,
+   "word": "today",
+   "start_ms": 0,
+   "end_ms": 400,
+   "probability": 0.9
+  },
+  {
+   "id": 2,
+   "segment_id": 1,
+   "word": "I",
+   "start_ms": 480,
+   "end_ms": 880,
+   "probability": 0.9
+  },
+  {
+   "id": 3,
+   "segment_id": 1,
+   "word": "will",
+   "start_ms": 960,
+   "end_ms": 1360,
+   "probability": 0.9
+  },
+  {
+   "id": 4,
+   "segment_id": 1,
+   "word": "talk",
+   "start_ms": 1440,
+   "end_ms": 1840,
+   "probability": 0.9
+  },
+  {
+   "id": 5,
+   "segment_id": 1,
+   "word": "about",
+   "start_ms": 1920,
+   "end_ms": 2320,
+   "probability": 0.9
+  },
+  {
+   "id": 6,
+   "segment_id": 1,
+   "word": "diets",
+   "start_ms": 2400,
+   "end_ms": 2800,
+   "probability": 0.9
+  },
+  {
+   "id": 7,
+   "segment_id": 1,
+   "word": "the",
+   "start_ms": 3200,
+   "end_ms": 3600,
+   "probability": 0.9
+  },
+  {
+   "id": 8,
+   "segment_id": 1,
+   "word": "first",
+   "start_ms": 3680,
+   "end_ms": 4080,
+   "probability": 0.9
+  },
+  {
+   "id": 9,
+   "segment_id": 1,
+   "word": "thing",
+   "start_ms": 4160,
+   "end_ms": 4560,
+   "probability": 0.9
+  },
+  {
+   "id": 10,
+   "segment_id": 1,
+   "word": "you",
+   "start_ms": 4640,
+   "end_ms": 5040,
+   "probability": 0.9
+  },
+  {
+   "id": 11,
+   "segment_id": 1,
+   "word": "should",
+   "start_ms": 5120,
+   "end_ms": 5520,
+   "probability": 0.9
+  },
+  {
+   "id": 12,
+   "segment_id": 1,
+   "word": "know",
+   "start_ms": 5600,
+   "end_ms": 6000,
+   "probability": 0.9
+  },
+  {
+   "id": 13,
+   "segment_id": 1,
+   "word": "I",
+   "start_ms": 6400,
+   "end_ms": 6800,
+   "probability": 0.9
+  },
+  {
+   "id": 14,
+   "segment_id": 1,
+   "word": "lost",
+   "start_ms": 6880,
+   "end_ms": 7280,
+   "probability": 0.9
+  },
+  {
+   "id": 15,
+   "segment_id": 1,
+   "word": "five",
+   "start_ms": 7360,
+   "end_ms": 7760,
+   "probability": 0.9
+  },
+  {
+   "id": 16,
+   "segment_id": 1,
+   "word": "hundred",
+   "start_ms": 7840,
+   "end_ms": 8240,
+   "probability": 0.9
+  },
+  {
+   "id": 17,
+   "segment_id": 1,
+   "word": "grams",
+   "start_ms": 8320,
+   "end_ms": 8720,
+   "probability": 0.9
+  },
+  {
+   "id": 18,
+   "segment_id": 1,
+   "word": "a",
+   "start_ms": 8800,
+   "end_ms": 9200,
+   "probability": 0.9
+  },
+  {
+   "id": 19,
+   "segment_id": 1,
+   "word": "week",
+   "start_ms": 9280,
+   "end_ms": 9680,
+   "probability": 0.9
+  },
+  {
+   "id": 20,
+   "segment_id": 1,
+   "word": "with",
+   "start_ms": 10080,
+   "end_ms": 10480,
+   "probability": 0.9
+  },
+  {
+   "id": 21,
+   "segment_id": 1,
+   "word": "Ozempic",
+   "start_ms": 10560,
+   "end_ms": 10960,
+   "probability": 0.9
+  },
+  {
+   "id": 22,
+   "segment_id": 1,
+   "word": "and",
+   "start_ms": 11040,
+   "end_ms": 11440,
+   "probability": 0.9
+  },
+  {
+   "id": 23,
+   "segment_id": 1,
+   "word": "some",
+   "start_ms": 11520,
+   "end_ms": 11920,
+   "probability": 0.9
+  },
+  {
+   "id": 24,
+   "segment_id": 1,
+   "word": "walking",
+   "start_ms": 12000,
+   "end_ms": 12400,
+   "probability": 0.9
+  },
+  {
+   "id": 25,
+   "segment_id": 1,
+   "word": "comment",
+   "start_ms": 12800,
+   "end_ms": 13200,
+   "probability": 0.9
+  },
+  {
+   "id": 26,
+   "segment_id": 1,
+   "word": "DIET",
+   "start_ms": 13280,
+   "end_ms": 13680,
+   "probability": 0.9
+  },
+  {
+   "id": 27,
+   "segment_id": 1,
+   "word": "below",
+   "start_ms": 13760,
+   "end_ms": 14160,
+   "probability": 0.9
+  },
+  {
+   "id": 28,
+   "segment_id": 1,
+   "word": "to",
+   "start_ms": 14240,
+   "end_ms": 14640,
+   "probability": 0.9
+  },
+  {
+   "id": 29,
+   "segment_id": 1,
+   "word": "get",
+   "start_ms": 14720,
+   "end_ms": 15120,
+   "probability": 0.9
+  },
+  {
+   "id": 30,
+   "segment_id": 1,
+   "word": "the",
+   "start_ms": 15200,
+   "end_ms": 15600,
+   "probability": 0.9
+  },
+  {
+   "id": 31,
+   "segment_id": 1,
+   "word": "plan",
+   "start_ms": 15680,
+   "end_ms": 16080,
+   "probability": 0.9
+  },
+  {
+   "id": 32,
+   "segment_id": 1,
+   "word": "see",
+   "start_ms": 16480,
+   "end_ms": 16880,
+   "probability": 0.9
+  },
+  {
+   "id": 33,
+   "segment_id": 1,
+   "word": "you",
+   "start_ms": 16960,
+   "end_ms": 17360,
+   "probability": 0.9
+  },
+  {
+   "id": 34,
+   "segment_id": 1,
+   "word": "soon",
+   "start_ms": 17440,
+   "end_ms": 17840,
+   "probability": 0.9
+  }
+ ]
+}

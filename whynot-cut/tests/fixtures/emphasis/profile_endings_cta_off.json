@@ -1,0 +1,18 @@
+{
+ "endings": {
+  "cta": {
+   "on": false,
+   "keyword_ar": "رجيم",
+   "keyword_en": "DIET"
+  },
+  "follow": {
+   "on": true,
+   "handle": "@dr.example",
+   "logo": null
+  },
+  "sign_off": {
+   "on": true,
+   "phrase": "يلا سلام"
+  }
+ }
+}
