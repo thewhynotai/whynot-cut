@@ -1,0 +1,18 @@
+schema_version: "1.1"
+name: read-once-natural
+description: 'Natural re-read: a big output file is read in full; if it is read in full a second time the read-once reminder follows that second read (plumbing and the reminder text), and the answer is still right.'
+tags: [token-budget, hooks]
+runs: 3
+context:
+  scaffold_script: scaffold.sh
+# What this case measures (BL-01, M5-T6). It does NOT force a second read: the task makes a re-read tempting (the
+# last segment's text is needed after another file was read) but never required. A model that keeps what it read
+# makes ONE full read and passes (path a). A model that reads the whole file again must see the plugin's one-line
+# reminder right after that second read (path b: the hook is registered, fires on the CLI, and the text is right).
+# It fails only when a second full read has no reminder, or the answer is wrong. It is a plumbing + reminder-text
+# check, not a with/without-hook behaviour measurement (the no-plugin arm has no hook by construction).
+# Needs live confirmation on the subscription CLI after code freeze: that PostToolUse fires for a re-read on every
+# supported CLI (2.1.299 returns the full content again, so it should) and that the `trace` target carries the
+# hook's additionalContext.
+# Its sibling `read-once` forces the second full read and requires the reminder: that is the case that fails when the
+# hook is missing or broken. This one is the natural-behaviour check and is allowed to pass without any reminder.

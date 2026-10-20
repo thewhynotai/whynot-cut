@@ -150,6 +150,27 @@ Music: NOT_PLACED
 EOF
 }
 
+# add_big_transcript <client dir> <id>: a large word-timed transcript (60 segments, ~35 KB: over the read-once hook's
+# 20 KB threshold) at output/projects/<id>/02_transcription/transcript.json, for the read-once eval. Fictional text.
+add_big_transcript() {
+  local p="$1/output/projects/$2/02_transcription" i k n ms
+  mkdir -p "$p"
+  {
+    printf '{"language": "en", "source": "%s", "segments": [\n' "$2"
+    for i in $(seq 1 60); do
+      printf '  {"id": %d, "start": %d.%03d, "text": "Fictional segment %d of the Example Clinic talk: laser sessions need rest between visits", "words": [' \
+        "$i" $(( (i - 1) * 4 )) 0 "$i"
+      for k in 1 2 3 4 5 6 7 8 9 10 11 12; do
+        ms=$(( (i - 1) * 4000 + k * 300 ))
+        printf '{"w": "word%d", "s": %d.%03d, "e": %d.%03d}' "$k" $(( ms / 1000 )) $(( ms % 1000 )) $(( (ms + 250) / 1000 )) $(( (ms + 250) % 1000 ))
+        [ "$k" -lt 12 ] && printf ', '
+      done
+      if [ "$i" -lt 60 ]; then printf ']},\n'; else printf ']}\n'; fi
+    done
+    printf ']}\n'
+  } > "$p/transcript.json"
+}
+
 # add_episode_plan <client dir>: EP12's reels plan (fictional candidates) waiting for the editor to pick the reels
 add_episode_plan() {
   local p="$1/output/episodes/EP12/01_analysis"

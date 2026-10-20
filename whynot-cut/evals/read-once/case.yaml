@@ -1,0 +1,14 @@
+schema_version: "1.1"
+name: read-once
+description: 'The editor asks for the whole big transcript to be opened a second time: the read-once reminder must follow that second full read, and the run must carry on and answer.'
+tags: [token-budget, hooks]
+runs: 3
+context:
+  scaffold_script: scaffold.sh
+# What this case measures (BL-01, M5-T6 acceptance: "the reminder appears on a second full read"). The editor
+# explicitly asks for the whole file to be opened twice, so a second FULL read happens on every run, and the graders
+# require the plugin's one-line reminder in the trace after it. With the hook unregistered, crashing or silent this
+# case FAILS (reminder-appears, two-full-reads); that is its point. Its sibling read-once-natural does not force the
+# re-read and passes on one full read.
+# Needs live confirmation on the subscription CLI after code freeze: that PostToolUse fires for the re-read and that
+# the `trace` target carries the hook's additionalContext.

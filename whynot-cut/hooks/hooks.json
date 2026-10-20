@@ -1,5 +1,5 @@
 {
-  "description": "WhyNot Cut guardrails (read-only client sources, Premiere-first, role limits) for Bash, PowerShell and file tools (file tools only for paths in client sources, the marker/lock and After Effects prefs: no process for any other write); session context for client folders and the clients workspace, also after a cd; optional evidence gate at turn end (off unless evidence_gate: true). See hooks/README.md",
+  "description": "WhyNot Cut guardrails (read-only client sources, Premiere-first, role limits) for Bash, PowerShell and file tools (file tools only for paths in client sources, the marker/lock and After Effects prefs: no process for any other write); session context for client folders and the clients workspace, also after a cd; optional evidence gate at turn end (off unless evidence_gate: true); a one-line reminder on a second full read of the same big file under output/. See hooks/README.md",
   "hooks": {
     "PreToolUse": [
       {
@@ -32,11 +32,25 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {"type": "command", "if": "Read(//**/[Oo][Uu][Tt][Pp][Uu][Tt]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/read_once.py\"", "timeout": 10}
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "startup|resume|clear|compact|fork",
         "hooks": [
           {"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_context.py\"", "timeout": 10}
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/read_once.py\"", "timeout": 10}
         ]
       }
     ],
@@ -57,7 +71,8 @@
     "SessionEnd": [
       {
         "hooks": [
-          {"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_end.py\"", "timeout": 10}
+          {"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/session_end.py\"", "timeout": 10},
+          {"type": "command", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/read_once.py\"", "timeout": 10}
         ]
       }
     ]

@@ -254,7 +254,8 @@ class TestCwdChanged(HookFixture):
         self.assertFalse((self.data / "scope" / "s1").exists())
 
     def test_hooks_json_wires_cwdchanged_like_session_start(self):
-        (start,), (cwd,) = HOOKS["SessionStart"], HOOKS["CwdChanged"]
+        (start, *extra), (cwd,) = HOOKS["SessionStart"], HOOKS["CwdChanged"]
+        self.assertEqual([b.get("matcher") for b in extra], ["compact"] * len(extra))   # BL-01: read_once.py, compact only
         self.assertEqual(start["hooks"], cwd["hooks"])
         self.assertNotIn("matcher", cwd)                        # CwdChanged has no matcher support
         self.assertEqual(start["matcher"].split("|"), ["startup", "resume", "clear", "compact", "fork"])

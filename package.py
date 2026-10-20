@@ -21,7 +21,7 @@ SHIP_TOP = {".claude-plugin", "whynot-cut", "README.md"}
 SKIP_FILES = {".DS_Store", "Thumbs.db", "desktop.ini"}
 EXEC = {"bin/reel", "setup/setup_env.sh", "setup/setup_env.py", "hooks/run_python.sh", "hooks/guard.py",
         "hooks/session_context.py", "hooks/session_end.py", "hooks/stop_gate.py", "hooks/stop_gate.sh",
-        "hooks/subagent_status.py",
+        "hooks/subagent_status.py", "hooks/read_once.py",
         "examples/make_demo.py"}
 
 
