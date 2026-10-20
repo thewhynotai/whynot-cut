@@ -66,3 +66,12 @@ ACCEPTED · SUPERSEDED · PROPOSED.
 - Fix: install the same 47 pinned versions (frozen from the sandbox view) into the real user-site, PyPI only, from the
   Terminal (`D:\ClaudeData\accounts\env-fix\`). The sandboxed sessions keep their own copy, so the executor's runtime
   does not change.
+
+## D-010 · 2026-10-20 · Routines run in Bypass mode; no AI time arithmetic
+- **Context:** Yunus asked that the system resume by itself with no approvals. Routines in default mode hung on
+  permission prompts and blocked their own later runs; a watchdog misread UTC vs the Cairo shell clock.
+- **Chosen:** report and watchdog recreated in Bypass mode (like the intake since 10-19); every age/threshold in routine
+  procedures is computed by `00-HQ/tools/stale_suites.py age`; the Command Center is a watchdog target.
+- **Trade-off:** Bypass runs act without review; their procedures stay narrow (read state, nudge, stop stuck runs,
+  write 00-HQ files) and never push anything but `ops/hq`.
+

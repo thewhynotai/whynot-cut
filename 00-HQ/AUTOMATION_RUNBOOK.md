@@ -78,6 +78,17 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
   hand after checking its CPU on the CHILD python (the venv `python.exe` launcher always shows 0 CPU).
 
 ## 6. Incidents
+- 2026-10-20 11:20–11:45 (Yunus: «ليه مرجعتش تشتغل لوحدها… احلها بدون اي ابروف»). Found and fixed:
+  1. The Command Center session was never a watchdog target → added (`local_5f0c462a…`).
+  2. The v1 watchdog could not read huge transcripts ("(no messages)") → never resumed the executor (idle 05:15) or
+     Builder A (07:06). Both nudged by hand 11:38; v2 judges unreadable work tracks by last activity.
+  3. Routine runs in default mode hung on permission prompts, and a hung run blocks every later run of its routine
+     (no 09:00 report). Report + watchdog recreated in **Bypass mode** (as the intake already was); stuck runs stopped.
+  4. The first v2 watchdog run stopped two healthy 3-minute-old runs: it compared UTC `started_at` with the shell clock
+     (Cairo time labelled "EDT"). Fixed: all ages come from `stale_suites.py age` (tested: UTC Z, offsets, no zone =
+     unknown). The intake run it stopped left a session-named lock that the next intake clears by itself (OPS-07).
+  5. Heavy queue held 219 min by H1's stray A/B script (H1 asked to free it) → its tree ended; queue flowing.
+  Verified after: report run 11:43 delivered unattended (row R-2026-10-20-1143 SENT with its session id).
 - 2026-10-20 03:52 → 11:23: a routine run that never finishes (the 02:01 report run waiting on a permission prompt;
   the 03:52 auto-resume run cut by the usage limit) blocks EVERY later run of that routine (the app starts no new run
   while one is "in progress"). Effect: no 09:00 report; no watchdog after the 06:00 reset, so the executor (stopped
