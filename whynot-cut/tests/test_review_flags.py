@@ -1454,5 +1454,112 @@ class TestM1Domains(Base):
         self.assertEqual(a, b)
 
 
+# ------------------------------------------------------------------------- Task 53 leftover (review 6275496 P2-3)
+HADITH_PLANT = SK / "evals" / "review-religious-hadith-attribution" / "plant" / "timeline-spec.json"
+
+
+def hadith_spec() -> dict:
+    """The Task 53 eval's planted plan: G01 a greeting, G02 a «قال رسول الله ﷺ …» citation the religious lexicon
+    detects, G03 a call to subscribe. Its words are read from that fixture, never copied into this file."""
+    return json.loads(HADITH_PLANT.read_text(encoding="utf-8"))
+
+
+class TestReligiousNeverImplied(Base):
+    """A line whose words trigger religious (a hadith citation, quoted scripture) needs its own `religious` row, as a
+    triggered ai does: a religious client's `medical` row never clears it. Before the fix one `medical: ok` row cleared
+    the citation for religious, so it reached no approval list (NEEDS-YOU, autopilot). A file written before the fix
+    becomes not current once on such a line (its ok row may hold a religious that was only implied)."""
+
+    DOMAIN = "religious"
+
+    def setUp(self):
+        super().setUp()
+        put_timeline(self.p, hadith_spec())
+
+    def refused(self, findings):
+        before = self.file.read_bytes() if self.file.exists() else None
+        with self.assertRaises(Guidance) as cm:
+            RF.write(self.p, findings)
+        self.assertEqual(self.file.read_bytes() if self.file.exists() else None, before, "a refusal writes nothing")
+        return cm.exception
+
+    def ok_flags(self) -> dict:
+        return {o["event_id"]: o.get("flags") for o in read_json(self.file)["ok"]}
+
+    def test_the_fixture_line_is_detected_as_religious(self):
+        from lib import review_domains as RD
+        det = {x["event_id"]: set(x["detected"]) for x in RD.scan(self.p)["lines"]}
+        self.assertEqual(det, {"G01": set(), "G02": {"religious"}, "G03": set()})
+
+    def test_a_detected_citation_passed_as_medical_ok_is_refused(self):
+        for g02 in (("G02", "medical", "ok", ""), ("G02", "medical", "reword-to-match", "r")):
+            with self.subTest(g02[2]):
+                e = self.refused(table(("G01", "medical", "ok", ""), g02, ("G03", "medical", "ok", "")))
+                self.assertIn("G02 has not been reviewed for religious (its words trigger it: ", e.error)
+                self.assertNotIn("G01", e.error)
+                self.assertNotIn("G03", e.error)
+        self.assertFalse(self.file.exists())
+
+    def test_an_explicit_religious_row_is_accepted(self):
+        r = RF.write(self.p, table(("G01", "medical", "ok", ""), ("G02", "religious", "needs-approval", "hadith"),
+                                   ("G03", "medical", "ok", "")))
+        self.assertEqual([(i["event_id"], i["flag"], i["verdict"]) for i in r["items"]],
+                         [("G02", "religious", "needs-approval")])
+        self.assertEqual(self.ok_flags(), {"G01": RELIGIOUS_OK, "G03": RELIGIOUS_OK})   # untriggered: still implied
+        self.assertIsNotNone(RF.load(self.p))
+        RF.write(self.p, table(("G02", "religious", "ok", ""), ("G02", "medical", "reword-to-match", "r")))
+        self.assertEqual(self.ok_flags()["G02"], ["religious"])
+        self.assertIsNotNone(RF.load(self.p))
+        self.file.unlink()
+        RF.write(self.p, table(("G01", "medical", "ok", ""), ("G02", "religious", "ok", ""),     # a religious row
+                               ("G03", "medical", "ok", "")))                                    # covers medical
+        self.assertEqual(self.ok_flags()["G02"], RELIGIOUS_OK)
+        self.assertIsNotNone(RF.load(self.p))
+        RF.write(self.p, table())                    # a file written now carries its explicit religious: no re-ask
+        self.assertEqual(self.ok_flags(), {"G01": RELIGIOUS_OK, "G02": RELIGIOUS_OK, "G03": RELIGIOUS_OK})
+
+    def test_a_medical_client_is_unchanged(self):
+        self.domain("medical")
+        e = self.refused(table(("G01", "medical", "ok", ""), ("G02", "medical", "ok", ""), ("G03", "medical", "ok", "")))
+        self.assertIn("G02 has not been reviewed for religious", e.error)
+        RF.write(self.p, table(("G01", "medical", "ok", ""), ("G02", "medical", "ok", ""), ("G02", "religious", "ok", ""),
+                               ("G03", "medical", "ok", "")))
+        self.assertEqual(self.ok_flags(), {"G01": MED, "G02": ["medical", "religious"], "G03": MED})
+        doc = read_json(self.file)
+        write_json(self.file, {k: v for k, v in doc.items() if k != "coverage"})   # an older file: still current here
+        self.assertIsNotNone(RF.load(self.p))                    # (religious is never implied for a medical client)
+
+    def test_an_older_file_is_not_current_once_and_asks_only_the_citation_again(self):
+        """load() decision: before the fix write() stored the implied religious in the ok row's `flags`, so an older
+        file cannot tell an explicit religious from an implied one. On a line whose words trigger religious it is not
+        current (NEEDS-YOU asks for the review again, autopilot holds it), and the next write asks only that line."""
+        good = filed(RF.write(self.p, table(("G01", "medical", "ok", ""), ("G02", "religious", "ok", ""),
+                                            ("G02", "medical", "ok", ""), ("G03", "medical", "ok", ""))))
+        self.assertEqual(good["coverage"], 2)                           # the on-disk value (module docstring)
+        self.assertEqual(RF.load(self.p), good)
+        older = {k: v for k, v in good.items() if k != "coverage"}     # what the engine wrote for one `medical: ok`
+        for label, doc in (("no marker", older), ("another marker", dict(good, coverage=1)),
+                           ("ok rows without flags", dict(older, ok=[{"event_id": o["event_id"], "text": o["text"]}
+                                                                     for o in good["ok"]]))):
+            with self.subTest(label):
+                write_json(self.file, doc)
+                self.assertIsNone(RF.load(self.p))
+                e = self.refused(table())
+                self.assertIn("G02 has not been reviewed for religious", e.error)
+                self.assertNotIn("G01", e.error)
+                self.assertNotIn("G03", e.error)
+        RF.write(self.p, table(("G02", "religious", "ok", "")))         # once: the next write is current again
+        self.assertEqual(read_json(self.file)["coverage"], RF.COVERAGE)
+        self.assertIsNotNone(RF.load(self.p))
+        self.assertEqual(self.ok_flags(), {"G01": RELIGIOUS_OK, "G02": RELIGIOUS_OK, "G03": RELIGIOUS_OK})
+
+    def test_an_older_file_without_a_religious_line_stays_current(self):
+        put_timeline(self.p)                                     # the default plan: nothing on it triggers religious
+        good = filed(RF.write(self.p, full(("G2", "medical", "needs-doctor-approval", "dose"))))
+        write_json(self.file, {k: v for k, v in good.items() if k != "coverage"})
+        self.assertIsNotNone(RF.load(self.p))
+        RF.write(self.p, table())                                # and its rows still carry
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -13,10 +13,14 @@ For talks on faith, ethics and spirituality (e.g. a sheikh, preacher or scholar)
    الصَّالِحَاتِ») is not a citation: on a graphic it is the speaker's words (no ﴿ ﴾, no reference), marked
    `needs-approval` so the content owner confirms that framing. Captions keep it as spoken.
 2. **Hadith (أحاديث):** only if the speaker cites it; show the speaker's words with attribution as the speaker gave it
-   ("قال رسول الله ﷺ…" only when the speaker said it). Strength/grading is never added or implied by the edit;
-   anything the reels plan or brief marks as needing review → `needs-approval`.
+   ("قال رسول الله ﷺ…" only when the speaker said it). Strength/grading is never added or implied by the edit. A
+   hadith or other religious citation on screen always needs the content owner's approval, whatever the reels plan or
+   brief says (owner rule 2026-10-19: the human religious approval gate stays on): `needs-approval`, or
+   `reword-to-match` or `remove` when the screen does not match what the speaker said; never `ok`.
 3. **Stories, visions, sayings of scholars:** attribute, don't assert: «ينقل الضيف عن أبي الحسن الشاذلي», «من القصة التي
-   رواها الضيف». Never title them as hadith or as established fact.
+   رواها الضيف». Never title them as hadith or as established fact. A saying or story attributed to a scholar on
+   screen always needs the content owner's approval, whatever the reels plan or brief says: `needs-approval` (or
+   `reword-to-match` / `remove`); never `ok`.
 4. **Rulings (فتوى / حكم):** a statement that sounds like a ruling on screen (حلال / حرام / واجب / قضاء الصلاة…) is
    `needs-approval`; never present it as a fatwa addressed to the viewer.
 5. **Names and honorifics:** ﷺ after the Prophet's name, (رضي الله عنه/عنها) as the speaker uses them, correct spelling

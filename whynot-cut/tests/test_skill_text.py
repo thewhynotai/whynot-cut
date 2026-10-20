@@ -512,5 +512,36 @@ class TestClientBrief(unittest.TestCase):
         self.assertIn('run `reel client-brief --root "<CLIENT>"` so it is rebuilt', researcher)
 
 
+class TestReligiousApprovalGate(unittest.TestCase):
+    """Owner rule (Yunus 2026-10-19): the human religious approval gate stays ON. In religious-content.md a hadith or
+    other religious citation on screen (§2) and a saying or story attributed to a scholar (§3) always need the content
+    owner's approval, whatever the reels plan or brief says (review 6275496 P1: «anything the reels plan or brief marks
+    as needing review» let a cited hadith pass as ok). WhyNot Cut still never writes Quran text (§1)."""
+    REF = SKILLS / "medical-accuracy" / "references" / "religious-content.md"
+
+    def item(self, n: int) -> str:
+        s = self.REF.read_text(encoding="utf-8")
+        start = s.index(f"\n{n}. **")
+        return " ".join(s[start:s.index(f"\n{n + 1}. **", start)].split())
+
+    def test_a_citation_on_screen_always_needs_the_content_owners_approval(self):
+        for n in (2, 3):
+            with self.subTest(item=n):
+                sec = self.item(n)
+                self.assertRegex(sec, r"always needs the content owner's approval")
+                self.assertRegex(sec, r"whatever the reels plan or brief says")
+                self.assertRegex(sec, r"never `ok`")
+        sec2 = self.item(2)
+        self.assertRegex(sec2, r"(?i)hadith or other religious citation on screen")
+        self.assertRegex(sec2, r"`needs-approval`, or `reword-to-match` or `remove` when the screen")
+        self.assertNotRegex(sec2, r"marks as needing review")
+        self.assertRegex(self.item(4), r"`needs-approval`")                    # a ruling: unchanged
+
+    def test_the_plugin_still_never_writes_quran_text(self):
+        flat = " ".join(self.REF.read_text(encoding="utf-8").split())
+        self.assertRegex(flat, r"WhyNot Cut never writes Quran text \(owner decision 2026-10-18\)")
+        self.assertRegex(flat, r"A graphic that shows a verse is `remove`")
+
+
 if __name__ == "__main__":
     unittest.main()

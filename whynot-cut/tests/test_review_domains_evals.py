@@ -381,26 +381,32 @@ class TestEnginePins(CaseBase):
                         continue
                     self.assertNotIn(flag, self.covered(doc, eid), (case, what))
 
-    def test_a_religious_line_passed_as_medical_ok_is_caught_by_the_eval_not_the_engine(self):
-        """A known engine gap, pinned (review 6275496 P2-3; leftover for the executor). For a religious client (key
-        ai+medical+religious) ONE `medical: ok` row clears the line for religious too (T4.13's implied coverage,
-        `review_flags._cover`): the exemption that makes ai need its own row does not apply to religious, so this holds
-        even when the line's words DO trigger religious (a «قال رسول الله ﷺ …» citation), not only for the undetected
-        «حرام». On a medical client the same row is refused («list G02 for religious»). The engine accepts it, NEEDS-YOU
-        lists nothing, and only the eval's g02-religious grader (and the editor's read) catches it."""
+    def test_a_religious_line_passed_as_medical_ok_is_refused_when_detected_and_caught_by_the_eval_when_not(self):
+        """Review 6275496 P2-3, fixed in the engine: for a religious client (key ai+medical+religious) a line whose
+        words trigger religious (a «قال رسول الله ﷺ …» citation) needs its own religious row, as a triggered ai does
+        (`review_flags._cover`): one `medical: ok` row is refused, naming the line and religious, and nothing is
+        written. A written lexicon limit stays: the undetected «حرام» ruling is still cleared by that row (T4.13's
+        implied coverage on a line nothing triggers), and only the eval's g02-religious grader (and the editor's read)
+        catches it. On a medical client the same row is refused too («list G02 for religious»)."""
         for case in ("review-religious-ruling", "review-religious-hadith-attribution",
                      "review-religious-business-word-in-hadith"):
             with self.subTest(case=case):
                 vid, _pol, rows, _w = CASES[case]
                 p = self.client(case)
                 detected = {x["event_id"]: sorted(x["detected"]) for x in RD.scan(p)["lines"]}
-                if case != "review-religious-ruling":
-                    self.assertIn("religious", detected["G02"])      # the citation IS detected, and still cleared
                 lazy = without(rows, ["G02"]) + ok("G02", "medical")
-                doc = RF.write(p, {"items": lazy}, by="eval")
-                self.assertIn("religious", self.covered(doc, "G02"))
                 fm, body = graders(case)["g02-religious"]
                 self.assertFalse(passes(fm, body, table(lazy)))
+                if case == "review-religious-ruling":                 # the lexicon limit: not detected, so implied
+                    self.assertNotIn("religious", detected["G02"])
+                    doc = RF.write(p, {"items": lazy}, by="eval")
+                    self.assertIn("religious", self.covered(doc, "G02"))
+                    continue
+                self.assertIn("religious", detected["G02"])          # the citation IS detected: refused
+                with self.assertRaises(Guidance) as cm:
+                    RF.write(p, {"items": lazy}, by="eval")
+                self.assertIn("G02 has not been reviewed for religious", str(cm.exception))
+                self.assertFalse(RF.path(p).exists())
         vid, _pol, rows, _w = CASES["review-religious-hadith-and-dose"]       # the medical client: refused
         with self.assertRaises(Guidance) as cm:
             RF.write(self.client("review-religious-hadith-and-dose"),
