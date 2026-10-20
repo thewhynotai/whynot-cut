@@ -88,6 +88,14 @@ class TestAclProblems(unittest.TestCase):
         for owner in ("SY", "BA", ME):
             self.assertEqual(home_acl.acl_problems(f"O:{owner}D:PAI(A;OICI;FA;;;{ME})", ME), [])
 
+    def test_the_fixed_aliases_read_as_their_sids(self):
+        """Fix r1 P3: OWNER RIGHTS is S-1-3-4, and a built-in alias (e.g. Remote Desktop Users) is a real SID, so the
+        fix command can remove its explicit grant."""
+        for alias, sid in (("OW", "S-1-3-4"), ("RD", "S-1-5-32-555"), ("RU", "S-1-5-32-554"),
+                           ("BO", "S-1-5-32-551"), ("WR", "S-1-5-33")):
+            with self.subTest(alias=alias):
+                self.assertEqual(home_acl.acl_problems(f"O:{ME}D:P(A;;FA;;;{alias})", ME), [sid])
+
     def test_one_line_per_sid(self):
         sddl = f"O:{ME}D:(A;;FA;;;{OTHER})(A;OICIIO;GA;;;{OTHER})(A;;FW;;;BU)"
         self.assertEqual(home_acl.acl_problems(sddl, ME), [OTHER, "Users (S-1-5-32-545)"])
@@ -186,6 +194,28 @@ class TestPrepareHome(_Tmp):
         made, calls = self.create(profile / ".whynot-cut", profile=profile, read=lambda p: D_SUBFOLDER)
         self.assertEqual((made, calls), (False, []))
 
+    def test_an_existing_home_with_items_owned_by_another_account_stops_setup(self):
+        """Fix r1 P2 (master r1): a locked home can still hold what another account made there while it was open."""
+        home = self.tmp / "WhyNotCut"
+        (home / "runtimes").mkdir(parents=True)
+        read = lambda p: f"O:{OTHER}D:PAI(A;OICI;FA;;;{ME})" if str(p).endswith("runtimes") else LOCKED   # noqa: E731
+        with self.assertRaises(home_acl.HomeAclError) as cm:
+            self.create(home, read=read)
+        self.assertFalse(str(cm.exception)[:1].isascii())
+        self.assertIn("runtimes", str(cm.exception))
+        self.assertIn("new empty folder", cm.exception.how)
+        self.assertTrue((home / "runtimes").is_dir())
+
+    def test_a_folder_that_cannot_be_made_is_arabic_first_guidance(self):
+        """Fix r1 P3 (peer P3-2): e.g. a drive root where this account may not make folders."""
+        home = self.tmp / "WhyNotCut"
+        with mock.patch.object(home_acl.os, "mkdir", side_effect=PermissionError(13, "Access is denied")), \
+                self.assertRaises(home_acl.HomeAclError) as cm:
+            self.create(home)
+        self.assertFalse(str(cm.exception)[:1].isascii())
+        self.assertIn(str(home), str(cm.exception))
+        self.assertIn("WHYNOT_HOME", cm.exception.how)
+
     def test_a_file_in_the_way_is_guidance(self):
         home = self.tmp / "WhyNotCut"
         home.write_text("x", encoding="utf-8")
@@ -249,6 +279,36 @@ class TestPrepareHome(_Tmp):
         self.assertIn("link", str(cm.exception))
         self.assertEqual(list(real.iterdir()), [])
 
+    @unittest.skipUnless(IS_WIN, "junctions: Windows")
+    def test_an_existing_linked_home_is_refused(self):
+        """Fix r1 P2 (peer P2-1, spec: a linked home is refused): an existing junction home, or an existing home under
+        a linked parent, stops setup too; nothing is written through the link."""
+        import _winapi
+        real = self.tmp / "real"
+        (real / "WhyNotCut").mkdir(parents=True)
+        link = self.tmp / "home"
+        _winapi.CreateJunction(str(real), str(link))
+        self.addCleanup(os.rmdir, link)
+        for home in (link, link / "WhyNotCut"):
+            with self.subTest(home=home.name), self.assertRaises(home_acl.HomeAclError) as cm:
+                self.create(home)
+            self.assertIn("link", str(cm.exception))
+        self.assertEqual(list(real.iterdir()), [real / "WhyNotCut"])
+        self.assertEqual(list((real / "WhyNotCut").iterdir()), [])
+
+    @unittest.skipUnless(IS_WIN, "junctions: Windows")
+    def test_a_profile_reached_through_a_link_is_compared_on_real_paths(self):
+        """Fix r1 P3 (r1 P3-1): a folder in the profile that is a junction to another drive is not the profile."""
+        import _winapi
+        profile, outside = self.tmp / "Users" / "x", self.tmp / "open"
+        profile.mkdir(parents=True)
+        outside.mkdir()
+        _winapi.CreateJunction(str(outside), str(profile / "data"))
+        self.addCleanup(os.rmdir, profile / "data")
+        env = {"USERPROFILE": str(profile)}
+        self.assertFalse(home_acl.under_profile(profile / "data" / "a" / "WhyNotCut", env))
+        self.assertTrue(home_acl.under_profile(profile / ".whynot-cut", env))
+
 
 class TestDoctorFixes(_Tmp):
     def fixes(self, home, *, read=lambda p: LOCKED, is_win=True):
@@ -261,6 +321,14 @@ class TestDoctorFixes(_Tmp):
         self.assertEqual(fix["who"], "editor")
         self.assertIn("Authenticated Users (S-1-5-11)", fix["item"])
         self.assertIn(home_acl.lock_command(home, ME, ["S-1-5-11"]), fix["fix"])
+        # fix r1 P3 (peer P3-4): Git Bash may rewrite the /switches of a native command, so the shell is named
+        self.assertIn("PowerShell or Command Prompt", fix["fix"])
+
+    def test_an_alias_grant_is_removed_by_the_command(self):
+        home = self.tmp / "whynot"
+        home.mkdir()
+        (fix,) = self.fixes(home, read=lambda p: f"O:{ME}D:P(A;OICI;FA;;;{ME})(A;OICI;0x1301bf;;;RD)")
+        self.assertIn('/remove:g "*S-1-5-32-555"', fix["fix"])
 
     def test_a_top_level_item_owned_by_another_account_is_a_fix(self):
         """Review finding 4: the folder's own list does not cover what another account already owns inside."""
@@ -312,6 +380,17 @@ class TestDoctorFixes(_Tmp):
         os.chmod(home, 0o755)
         self.assertEqual(self.fixes(home, is_win=False), [])
 
+    def test_posix_a_dangling_link_home_is_a_fix_not_a_crash(self):
+        """Fix r1 P3 (r1 P3-3): reel doctor on macOS with a home that is a symlink to nothing."""
+        home = self.tmp / "h"
+        try:
+            os.symlink(self.tmp / "gone", home)
+        except (OSError, NotImplementedError):
+            self.skipTest("this account may not make symlinks")
+        self.addCleanup(os.unlink, home)                                  # the link as a link
+        (fix,) = self.fixes(home, is_win=False)
+        self.assertIn("could not be read", fix["item"])
+
 
 @unittest.skipUnless(IS_WIN, "the real lock: Windows")
 class TestRealLock(_Tmp):
@@ -320,7 +399,7 @@ class TestRealLock(_Tmp):
     treated as outside the profile."""
 
     def test_create_lock_read_back_remove(self):
-        home = self.tmp / "WhyNotCut"
+        home = self.tmp / "Why Not Cut"                                   # fix r1 P3: a path with spaces, for real
         env = dict(os.environ, USERPROFILE=str(self.tmp / "profile"))
         try:
             self.assertTrue(home_acl.prepare_home(home, is_win=True, environ=env))

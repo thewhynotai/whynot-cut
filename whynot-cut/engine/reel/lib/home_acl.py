@@ -6,7 +6,9 @@ may change files there could plant code that runs as the editor.
     exclusively and locked right away: `icacls <home> /inheritance:r /grant:r <user SID>:(OI)(CI)F
     *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F`, then read back (and must still be empty). If that fails, the new
     folder is removed and HomeAclError (Arabic first, with the exact command) stops setup;
-  - an EXISTING home other accounts may write in stops setup the same way (setup never continues on one).
+  - an EXISTING home other accounts may write in, or with a top-level item another account owns, stops setup the
+    same way (setup never continues on one).
+  A home or parent that is a junction or symlink stops setup on every system, new or existing.
 * `doctor_fixes(home)` (reel doctor, every time): Windows reads the ACL; a write right for any SID but the user,
   SYSTEM and Administrators, another owner, or a top-level item owned by another account is an editor fix with the
   exact command. A home or parent that is a junction or symlink is a fix too. POSIX: no group or other write.
@@ -25,9 +27,16 @@ from .errors import Guidance
 from .linksafe import is_link
 
 SYSTEM, ADMINS, CREATOR_OWNER = "S-1-5-18", "S-1-5-32-544", "S-1-3-0"
+# every SDDL alias that is the same SID on every machine (the domain-relative ones, DA, DU..., stay as letters)
 _ALIASES = {"SY": SYSTEM, "BA": ADMINS, "WD": "S-1-1-0", "AU": "S-1-5-11", "BU": "S-1-5-32-545", "IU": "S-1-5-4",
-            "CO": CREATOR_OWNER, "OW": "S-1-4", "BG": "S-1-5-32-546", "PU": "S-1-5-32-547", "AN": "S-1-5-7",
-            "NU": "S-1-5-2", "NS": "S-1-5-20", "LS": "S-1-5-19", "AC": "S-1-15-2-1"}
+            "CO": CREATOR_OWNER, "OW": "S-1-3-4", "BG": "S-1-5-32-546", "PU": "S-1-5-32-547", "AN": "S-1-5-7",
+            "NU": "S-1-5-2", "NS": "S-1-5-20", "LS": "S-1-5-19", "AC": "S-1-15-2-1", "CG": "S-1-3-1",
+            "AO": "S-1-5-32-548", "SO": "S-1-5-32-549", "PO": "S-1-5-32-550", "BO": "S-1-5-32-551",
+            "RE": "S-1-5-32-552", "RU": "S-1-5-32-554", "RD": "S-1-5-32-555", "NO": "S-1-5-32-556",
+            "MU": "S-1-5-32-558", "LU": "S-1-5-32-559", "IS": "S-1-5-32-568", "CY": "S-1-5-32-569",
+            "ER": "S-1-5-32-573", "CD": "S-1-5-32-574", "RA": "S-1-5-32-575", "ES": "S-1-5-32-576",
+            "MS": "S-1-5-32-577", "HA": "S-1-5-32-578", "AA": "S-1-5-32-579", "RM": "S-1-5-32-580",
+            "SU": "S-1-5-6", "ED": "S-1-5-9", "PS": "S-1-5-10", "RC": "S-1-5-12", "WR": "S-1-5-33"}
 _NAMES = {"S-1-1-0": "Everyone", "S-1-5-11": "Authenticated Users", "S-1-5-32-545": "Users",
           "S-1-5-4": "Interactive users", "S-1-5-32-546": "Guests", "S-1-5-7": "Anonymous",
           "S-1-15-2-1": "All app packages"}
@@ -79,8 +88,9 @@ def lock_argv(home, sid: str, environ=None, remove=()) -> list[str]:
 
 
 def lock_command(home, sid: str, remove=()) -> str:
-    """The same command for the editor to type: every SID argument in quotes, or PowerShell would read (OI) as a
-    command and Git Bash would expand the *."""
+    """The same command for the editor to type in PowerShell or Command Prompt: every SID argument in quotes, or
+    PowerShell would read (OI) as a command. (Git Bash may rewrite the /switches of a native command, so the texts
+    name the two shells.)"""
     return f'icacls "{home}" ' + " ".join(a if a.startswith("/") else f'"{a}"' for a in _ops(sid, remove))
 
 
@@ -183,7 +193,7 @@ def under_profile(home, environ=None) -> bool:
     prof = env.get("USERPROFILE")
     if not prof:
         return False
-    h, p = (os.path.normcase(os.path.abspath(x)) for x in (home, prof))
+    h, p = (os.path.normcase(os.path.realpath(x)) for x in (home, prof))    # a junction inside is not the profile
     try:
         return os.path.commonpath([h, p]) == p
     except ValueError:                                                     # another drive
@@ -207,10 +217,14 @@ def _foreign_items(home: Path, sid: str, read) -> list[str]:
         return sorted(e.name for e in it if owner_of(read(e.path), sid) not in ok)
 
 
+_NEW_HOME_HOW = ("point WHYNOT_HOME to a new empty folder, open a new Claude Code session, then reel setup (it builds "
+                 "the engine there)")
+
+
 def _open_fix_how(home, sid: str, todo) -> str:
-    return (f"run in a terminal: {lock_command(home, sid, [s for s, _ in todo if s])}   (only if you made this "
-            "folder and it holds only the engine; if it says access is denied, another account made it: point "
-            "WHYNOT_HOME to a new empty folder instead)")
+    return (f"run in PowerShell or Command Prompt: {lock_command(home, sid, [s for s, _ in todo if s])}   (only if "
+            "you made this folder and it holds only the engine; if it says access is denied, another account made it: "
+            "point WHYNOT_HOME to a new empty folder instead)")
 
 
 def prepare_home(home, *, is_win: bool | None = None, environ=None, runner=subprocess.run, sid: str | None = None,
@@ -226,27 +240,35 @@ def prepare_home(home, *, is_win: bool | None = None, environ=None, runner=subpr
         raise HomeAclError(f"فيه ملف مكان فولدر المحرك {home} / a file is in the way of the engine home {home}",
                            "point WHYNOT_HOME to a folder, open a new session, then reel setup again")
     bad = _link_problem(home)
-    if bad and not existed:
+    if bad:
         raise HomeAclError(f"فولدر المحرك {home} أو الفولدر اللي فوقه اختصار (junction أو symlink)، فالإعداد وقف / "
                            f"the engine home {home} or its parent folder is a link ({bad}), so setup stopped",
                            "pick a real folder: set WHYNOT_HOME to it, open a new session, then reel setup again")
     if not existed:
-        home.parent.mkdir(parents=True, exist_ok=True)
-        os.mkdir(home)                                 # exclusive: FileExistsError if another process made it first
+        try:
+            home.parent.mkdir(parents=True, exist_ok=True)
+            os.mkdir(home)                             # exclusive: FileExistsError if another process made it first
+        except OSError as e:
+            raise HomeAclError(f"مقدرناش نعمل فولدر المحرك {home}، فالإعداد وقف / could not create the engine home "
+                               f"{home} ({type(e).__name__}), so setup stopped",
+                               "pick another folder: set WHYNOT_HOME to it, open a new session, then reel setup "
+                               "again") from e
     if not is_win or under_profile(home, environ):
         return not existed
     if existed:
         try:
             sid = sid or current_user_sid(environ=environ)
             todo = _problems(read(home), sid)
+            foreign = _foreign_items(home, sid, read)
         except OSError as e:
             raise HomeAclError(f"مقدرناش نقرا صلاحيات فولدر المحرك {home} / cannot read the access list of the "
                                f"engine home {home} ({e})", "run reel setup again; if it repeats, send this report") from e
-        if todo:
+        if todo or foreign:
+            who = [lb for _, lb in todo] + [f"{n} (another owner)" for n in foreign]
             raise HomeAclError(f"حسابات تانية على الجهاز تقدر تغيّر في فولدر المحرك {home}، فالإعداد وقف / other "
                                f"accounts on this PC may change files in the engine home {home} "
-                               f"({', '.join(lb for _, lb in todo)}), so setup stopped",
-                               _open_fix_how(home, sid, todo) + "; then reel setup again")
+                               f"({', '.join(who)}), so setup stopped",
+                               _NEW_HOME_HOW if foreign else _open_fix_how(home, sid, todo) + "; then reel setup again")
         return False
     cmd = None
     try:
@@ -268,7 +290,8 @@ def prepare_home(home, *, is_win: bool | None = None, environ=None, runner=subpr
         raise HomeAclError(f"مقدرناش نقفل فولدر المحرك {home} على حسابك بس، فالإعداد وقف (حساب تاني على الجهاز كان "
                            f"هيقدر يغيّر فيه) / could not lock the engine home {home} to your account ({e}), so setup "
                            "stopped: another account on this PC could change the engine there",
-                           (f"run in a terminal: {cmd}  then reel setup again (or point WHYNOT_HOME to a new folder)"
+                           (f"run in PowerShell or Command Prompt: {cmd}  then reel setup again (or point "
+                            "WHYNOT_HOME to a new folder)"
                             if cmd else "run reel setup again; if it repeats, send this report")) from e
     return True
 
@@ -302,10 +325,15 @@ def doctor_fixes(home, *, is_win: bool | None = None, read=None, sid: str | None
         if foreign:
             fixes.append({"item": f"items in the engine home {home} belong to another account ({', '.join(foreign)}):"
                                   " it could change the engine whatever the folder's own access list says",
-                          "who": "editor", "fix": "point WHYNOT_HOME to a new empty folder, open a new Claude Code "
-                                                  "session, then reel setup (it builds the engine there)"})
+                          "who": "editor", "fix": _NEW_HOME_HOW})
         return fixes
-    if os.stat(home).st_mode & 0o022:
+    try:
+        mode = os.stat(home).st_mode
+    except OSError as e:                                                   # e.g. a symlink to nothing
+        return [{"item": f"the engine home {home} could not be read ({type(e).__name__})", "who": "editor",
+                 "fix": "set WHYNOT_HOME to the real folder (or a new one), open a new Claude Code session, then "
+                        "reel setup"}]
+    if mode & 0o022:
         return [{"item": f"the engine home {home} is writable by the group or others: another account could plant "
                          "code that runs as you", "who": "editor",
                  "fix": f'run in a terminal: chmod go-w "{home}"  then reel doctor again'}]
