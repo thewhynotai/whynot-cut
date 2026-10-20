@@ -1,6 +1,6 @@
 # STATUS (edited by the MASTER only)
 
-- **Last intake:** 2026-10-20 09:40 (Cairo). BL-04 BLOCKED answered → READY (queue check via wnc-locks/wait; preflight-first in next_doc + test_plan_approval fixture patch ruled OK; H2 runs full suite with the 3 patches, then DONE → peer + master Opus review, HIGH). Nothing to merge.
+- **Last intake:** 2026-10-20 12:45 (Cairo). No new reports. Took over the stale lock of run local_27a4af61 (stopped after SETUP-H2 ACCEPTED r1, before ledger/STATUS); completed its ledger line. H2 queue topped up: BL-20 (skip_audit gate tool, LIGHT, S) READY. Nothing to merge.
 - **10:10:** API lane 1 is stopped (owner budget ruling 10:03).
   - BL-16 → H1 (Mayar) and BL-04 → H2 (marketing@), as cards with claims reserved. If not started by 25 Oct, both
     fall back to the executor.
