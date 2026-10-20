@@ -10,7 +10,7 @@ CI can't run Premiere or After Effects. The live-Mac end-to-end test (G11, G12 P
 | Trigger | Job | What it does | Wall time | Billed (x10) |
 |---|---|---|---|---|
 | Push to `release/3.0` or `mac/dev` (the agency Mac's branch, G12 Phase 12) (pushes that change only `PROGRESS.md`, `docs/superpowers/**`, `docs/design/**` or this file are skipped) | **smoke** | Builds the engine venv from the smoke slice of the lock and fetches the pinned ffmpeg. Runs `bash -n` on the shell scripts with bash 3.2 and `install.sh --dry-run` in a throwaway HOME. Then runs the unit subset below. | ~5 min (cap 12) | ~50–60 |
-| Tag `v3.0.0-*` (phase tags `v3.0.0-pN`, release candidates `v3.0.0-rcN`) | **full** | Builds the engine venv from the whole runtime lock and fetches the pinned ffmpeg. Runs the same shell checks, then the whole suite, `bash tools/test.sh`. | ~20–25 min (cap 45) | ~200–250 (cap 450) |
+| Tag `v3.0.0-*` (phase tags `v3.0.0-pN`, release candidates `v3.0.0-rcN`) | **full** | Builds the engine venv from the whole runtime lock and fetches the pinned ffmpeg. Runs the same shell checks, then the whole suite, `bash tools/test.sh`. | ~60 min for the 6,300+ tests of Gate 4 (cap 100; the suite step 90) | ~600 (cap 1,000) |
 | Actions → macOS → Run workflow (or `gh workflow run macos.yml --ref release/3.0 -f suite=smoke\|full`) | smoke or full | As above, on demand | as above | as above |
 
 A newer push to the same ref cancels the older run. A tag's full run is never cancelled by its branch push, because they're different refs.

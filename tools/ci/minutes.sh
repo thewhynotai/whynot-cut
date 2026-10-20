@@ -89,7 +89,7 @@ echo "  macOS   $macos min  x10 = $((macos * 10))"
 echo "  Windows $windows min  x2  = $((windows * 2))"
 echo "  Linux   $linux min  x1  = $linux"
 echo "  used    $used of $FREE weighted minutes"
-echo "  left    $left  (= about $(( (left > 0 ? left : 0) / 10 )) macOS minutes: ~$(( (left > 0 ? left : 0) / 60 )) smoke runs or ~$(( (left > 0 ? left : 0) / 300 )) full runs)"
+echo "  left    $left  (= about $(( (left > 0 ? left : 0) / 10 )) macOS minutes: ~$(( (left > 0 ? left : 0) / 60 )) smoke runs or ~$(( (left > 0 ? left : 0) / 600 )) full runs)"
 if [ "$left" -lt "$WARN" ]; then
   echo "WARNING: fewer than $WARN weighted minutes left this month. Push release/3.0 and mac/dev batches with [skip ci]"
   echo "         (each push runs the smoke job) and skip the full run until the 1st; see docs/ci.md." >&2
