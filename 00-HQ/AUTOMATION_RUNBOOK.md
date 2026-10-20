@@ -3,6 +3,15 @@
 Owner: Command Center (master). Words used here: **configured** (exists) · **scheduled** (has a trigger) ·
 **running** (a process/session is live now) · **delivered** (the recipient can see it) · **verified** (evidence below).
 
+## 0. Routine set since 2026-10-20 11:50 (Command Center, Yunus: «احلها بدون اي ابروف مني»)
+- `whynot-cut-primary-report-2` (09/13/17/21, **Bypass mode**, notifies the Command Center) — `roles/PRIMARY-REPORT.md`.
+- `whynot-cut-auto-resume-2` (:13/:43, **Bypass mode**) — `roles/WATCHDOG.md`: stops stuck routine runs, resumes the
+  executor, the Command Center (`local_5f0c462a…`) and Builder A, including when their transcripts are too big to read.
+- `whynot-cut-hq-intake` (:37, Bypass) — `roles/MASTER-INTAKE.md`.
+- Retired (disabled, kept for history): `whynot-cut-auto-resume` v1 (no Command Center target, blind to huge
+  transcripts), `whynot-cut-lane-watch`, `whynot-cut-owner-update`; `whynot-cut-primary-report` v1 deleted (it ran in
+  default mode and hung on permission prompts).
+
 ## 1. Routine inventory (audit 2026-10-20 01:15 Cairo, after the 00:45 reboot)
 
 | Routine | Kind | What it does | State found | Decision | Evidence |
@@ -74,6 +83,10 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
   while one is "in progress"). Effect: no 09:00 report; no watchdog after the 06:00 reset, so the executor (stopped
   05:15) was never resumed. 11:23 Command Center stopped both stuck runs and ran both routines by hand. Detection now
   in every report (PRIMARY-REPORT step 2: a routine whose newest run is `running` for > 60 min = STUCK).
+  Prevention (11:45, on the plan session's evidence that all 4 watchdog hangs were on its step-1 PowerShell call):
+  the auto-resume prompt is now shell-free (tag check by Glob/Grep on `.git`), time-boxed (any step > 2 min or a
+  permission prompt → end the run), treats an idle work track with an unreadable (empty) transcript as STOPPED
+  after 60 min, and tells resumed tracks to re-queue heavy jobs lost at a limit and to use `tools/test.sh`.
 - 2026-10-20 03:54 → 06:00: Yunus's account hit its usage limit (reset 06:00). The intake run of 03:37 died holding
   `intake.lock` until 09:38 and its suite `review-BL-16` frozen in a heavy slot (140 min), blocking `h1-setup4` and
   `peer-BL-16`. 06:05 Command Center: lock renamed `intake.lock.stale-0338-limit`, orphan suite ended; both waiting
