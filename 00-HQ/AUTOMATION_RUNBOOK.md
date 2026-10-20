@@ -61,6 +61,10 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
 4. Open **Helpers LIVE** and check both show `AUTO ON  loop running`.
 
 ## 6. Incidents
+- 2026-10-20 03:54 → 06:00: Yunus's account hit its usage limit (reset 06:00). The intake run of 03:37 died holding
+  `intake.lock` until 09:38 and its suite `review-BL-16` frozen in a heavy slot (140 min), blocking `h1-setup4` and
+  `peer-BL-16`. 06:05 Command Center: lock renamed `intake.lock.stale-0338-limit`, orphan suite ended; both waiting
+  suites started. Permanent fix → card OPS-07. Helpers kept working on their own seats through the limit (05:20 runs).
 - 2026-10-19 ~20:40: all four recurring Claude tasks found disabled (cause unknown). 21:30: the whole account hit its
   usage limit. 00:45 reboot. Recovered by the Command Center 2026-10-20.
 - 2026-10-20 01:35 (Command Center's own mistake): while creating the `ops` worktree, a plain `git config user.name`
