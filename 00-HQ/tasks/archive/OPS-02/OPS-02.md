@@ -1,6 +1,6 @@
 # OPS-02 — Schedule the four daily PRIMARY reports and prove delivery
 
-- **Assigned:** see BOARD    **Status:** NOT READY (needs OPS-01)    **Tier:** LIGHT    **Milestone:** M0
+- **Assigned:** see BOARD    **Status:** DONE_ARCHIVED (2026-10-20 17:10)    **Tier:** LIGHT    **Milestone:** M0
 
 ## Goal
 Create the Claude-app scheduled task `whynot-cut-primary-report` (cron 0 9,13,17,21 * * *, Cairo). Each run: runs `hq_status.py --write --sync`, checks the routines are enabled (list_scheduled_tasks), and ends with the Arabic report as its final reply (that session in Yunus's app is the delivery). 09:00 and 21:00 are the full-plan refreshes.
@@ -17,4 +17,7 @@ Create the Claude-app scheduled task `whynot-cut-primary-report` (cron 0 9,13,17
 - 11:39 the routine was re-created as `whynot-cut-primary-report-2` in bypass mode (no permission prompts); 11:43 run `local_bc75882a` delivered R-2026-10-20-1143 unattended, SENT.
 - **Scheduled run 1:** 13:03 `local_0fea5398` succeeded unattended.
 - 13:54–16:20 account usage limit: routine runs during the limit fail fast (status failed, not stuck), so later runs are not blocked.
-- Still needed to close: the 17:00 scheduled run, and one ACKNOWLEDGED (Yunus replies to a report).
+- **Scheduled run 2:** 17:03 `local_9a91a749` succeeded unattended: R-2026-10-20-1704 SENT with its session id, ops/hq
+  commit 4484496. Acceptance 1–3 met.
+- Closed 2026-10-20 17:10 (LIGHT tier). **Known limit:** acceptance 4 (ACKNOWLEDGED) needs Yunus to answer one report;
+  he is away, so it moves to the inbox as Q-006 and is recorded there when it happens.

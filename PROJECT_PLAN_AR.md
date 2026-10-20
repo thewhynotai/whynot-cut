@@ -45,13 +45,14 @@
   build + frames على Premiere 26.5.2 يوم 14–15 أكتوبر بالـ bridge 3.1.1 (الدليل:
   `WhyNotCut/docs/adobe/live-roundtrip-2026-10-14.md`).
 - **نسخة تجربة 3.0:** `PREVIEW-3.0.0-p4` في فولدرات «خد دا كوبي للويندوز/للماك» (commit 322d8a5). دي **مش release**،
-  ومتأخرة عن الكود الحالي بـ 50 commit.
+  ومتأخرة عن الكود الحالي (الـ executor بيعمل push بعد الـ suite).
 - **إيه شغال جوه Premiere فعلًا:** الشات في Claude بيبني sequence في Premiere عن طريق الـ bridge، ويصدّر frames
   ويتأكد منها، ويعيد البنا بعد تعديل. **مش شغال لسه:** الـ panel نفسه جوه Premiere (UXP) بالشات والزراير = V1.
-- **أهم إنجاز النهارده:** نظام الإدارة الجديد اتأسس فوق `00-HQ`، والـ API اتقفل لحد أمرك، ونسخة احتياطية كاملة
-  اتعملت، ولقينا سبب فشل tests المساعدين.
-- **أهم مشكلة:** المساعدين ماكانش ينفع يتقبل منهم أي شغل لأن الـ tests عندهم بتفشل (563) لسبب في البيئة مش في
-  الكود. الحل شغال دلوقتي (ENV-01).
+- **أهم إنجاز النهارده (20 أكتوبر):** نظام الإدارة الجديد اتأسس فوق `00-HQ` واتقفل منه 7 تاسكات بالأدلة
+  (OPS-00/01/02/03/06/07 + ENV-01). الـ API مقفول لحد أمرك. التقارير بتوصلك لوحدها 4 مرات في اليوم.
+- **مشكلة المساعدين اتحلت:** الـ tests عندهم كانت بتفشل (563) بسبب البيئة. دلوقتي suite كاملة من حساب H2 = 8,899
+  test، صفر فشل (ENV-01).
+- **أهم حاجة مفتوحة:** أول دورة كاملة بين الحسابين لحد الـ merge (OPS-05)، و Gate 4 عند الـ executor.
 
 ## 2. الـ Product Roadmap بالكامل
 
@@ -60,17 +61,20 @@
 - [ ] **M0 — نظام التشغيل والإدارة (Operations Bootstrap)** — Command Center — شغالين فيه النهارده
   - شروط الإغلاق: checklist الـ charter §29 كلها بدليل (شوف §7 تحت).
   - [x] OPS-00 — Audit + baseline + أرشفة أول دفعة — Command Center — DONE — دليل: `00-HQ/reports/2026-10-20-audit.md`, `00-HQ/ARCHIVE_MANIFEST.md`
-  - [ ] ENV-01 — بيئة الـ tests للمساعدين — Command Center — IN_PROGRESS — دليل: `00-HQ/tasks/ENV-01.md`
+  - [x] ENV-01 — بيئة الـ tests للمساعدين — DONE_ARCHIVED — suite H2 = 8899 OK، 0 فشل — `00-HQ/tasks/archive/ENV-01/`
   - [x] OPS-01 — مولّد الحالة والتقارير + المزامنة مع GitHub — Command Center — DONE_ARCHIVED — 25/25 tests، مراجعتين مستقلتين، GitHub `ops/hq` d7ac597 — `00-HQ/tasks/archive/OPS-01/`
-  - [ ] OPS-02 — جدولة 4 تقارير يومية وتجربة التسليم — IN_PROGRESS — الـ routine اتعملت (9/1/5/9)، أول تشغيل مستني موافقتك مرة واحدة (Q-005)
-  - [ ] OPS-05 — أول دورة handoff حقيقية بين H1 و H2 (peer review) بدليل — بعد ENV-01
+  - [x] OPS-02 — 4 تقارير يومية بتوصلك لوحدها — DONE_ARCHIVED — تشغيلتين مجدولين 13:03 و 17:03 وصلوا من غير تدخل — `00-HQ/tasks/archive/OPS-02/` (فاضل بس ردك مرة على تقرير: Q-006)
+  - [x] OPS-03 — فحص نسخة التجربة جوه التقرير — DONE_ARCHIVED — `00-HQ/tasks/archive/OPS-03/`
+  - [x] OPS-06 — مستوى الـ effort حسب الـ tier في شغل المساعدين — DONE_ARCHIVED — `00-HQ/tasks/archive/OPS-06/`
+  - [x] OPS-07 — الـ limit مايجمّدش الاستلام ولا طابور الـ tests — DONE_ARCHIVED (اتجرّب لوحده 12:37) — `00-HQ/tasks/archive/OPS-07/`
+  - [ ] OPS-05 — أول دورة handoff حقيقية بين H1 و H2 لحد الـ merge — IN_PROGRESS — خطوات 1–4 اتشافت على BL-16، مستني تصليح H1 والـ merge
 - [ ] **M1 — Gate 4 → `v3.0.0-p4` (أول build متجرّب جوه Premiere لـ 3.0)** — الـ executor — IN_PROGRESS
   - النتيجة اللي هتشوفها: build حي لـ PODCAST-TEST جوه Premiere + frames، والنسخة في `Releases`.
   - شروط الإغلاق: review مستقل 0 Critical / 0 Important، الـ suite كاملة 0 failures، `validate --strict` مرتين،
     evals، macOS CI أخضر، تجربة live، سطر الأمان، ميزانية T4.14، تقرير `GATE-4-REPORT-AR.md`، tag.
   - المفتوح (من `WhyNotCut/PROGRESS.md`): T4.1، Task 18/22 (BL-02/BL-03)، Task 25 + K-T7، Task 26 wiring، Task 29،
     Tasks 50–60، manual verse slot، «كل features الـ S1 متوصلة»، BL-01، BL-04، BL-15، **T4.14 (محتاجك: 60 ثانية تفريغ)**.
-  - تاسكات المساعدين لـ Gate 4: BL-16 (H1، DONE مستني review)، BL-02 (H1، شغالة)، BL-04 و BL-03 و BL-18 (H2).
+  - تاسكات المساعدين لـ Gate 4: BL-16 (H1، FIX round 1)، BL-02 (H1، DONE مستني peer review)، BL-03 (H2، DONE مستني peer review)، BL-04 و BL-20 (H2). BL-18 اتعمله merge (f2ca516).
 - [ ] **M1b — تجربة ماك صغيرة (ساعة)** بعد الـ tag على طول — Mac tester — BACKLOG
 - [ ] **M2 — خطة بناء V1 (Stage 2)** — Command Center — BACKLOG — الشرط: الـ tag. الناتج: خطط Stage 3–9 مكتوبة.
 - [ ] **M3 — أساس الـ panel (Stage 3) = أول plugin بيشتغل جوه Premiere بالـ UI بتاعه** — H1/H2 (+ API-500 لو اتفعّلت)
@@ -90,11 +94,11 @@
 
 ## 3. قائمة التنفيذ بالترتيب
 
-- [x] آخر تاسكات مكتملة: OPS-00 (audit + baseline + أرشفة) — `00-HQ/reports/2026-10-20-audit.md`؛ OPS-01 (الـ pilot الكامل: tests → مراجعة مستقلة → commit → GitHub → أرشفة) — `00-HQ/tasks/archive/OPS-01/`
-- [ ] **التاسك الحالية:** ENV-01 — تسطيب الـ runtime في البيئة الحقيقية، وبعدها suite كاملة لـ H1 تثبت إن الـ 563
-  اتحلوا. المسؤول: Command Center.
-- [ ] **اللي بعدها:** OPS-01 → OPS-02 (التقارير)، وفي نفس الوقت الـ executor بيكمّل Gate 4، والمساعدين بيكمّلوا كروتهم.
-- [ ] **المحجوب:** API-500 (مستني أمرك)، T4.14 (مستني 60 ثانية تفريغ منك)، H14 (موافقة Anthropic، مهم بس برّه الوكالة).
+- [x] آخر تاسكات مكتملة: OPS-00، OPS-01، OPS-03، OPS-06، OPS-07، ENV-01، OPS-02 (كلهم في `00-HQ/tasks/archive/`)، و T4.14 (التفريغ اتصحح بكلامك).
+- [ ] **التاسك الحالية:** OPS-05 — متابعة BL-16 من تصليح H1 ← peer review ← قبول ← merge الـ executor ← SHA على GitHub.
+  المسؤول: Command Center (متابعة). وفي نفس الوقت: H1 و H2 بيعملوا peer review لـ BL-02 و BL-03، والـ executor بيكمّل Gate 4.
+- [ ] **اللي بعدها:** OPS-04 بعد الـ tag `v3.0.0-p4` (نقل 00-HQ جوه الـ repo).
+- [ ] **المحجوب:** API-500 (مستني أمرك)، H14 (موافقة Anthropic، مهم بس برّه الوكالة).
 
 كل تاسك بتمشي بالـ checklist دي (الـ charter §24.2):
 فحص المتطلبات ← معايير القبول ← تنفيذ محدود ← tests ← مراجعة مستقلة ← تجربة Premiere لو مطلوبة ← تحديث الملفات ←
@@ -105,12 +109,12 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
 | الحساب | الدور | الحالة الموثّقة |
 |---|---|---|
 | **PRIMARY** = حسابك (info@) | Command Center: القرارات، الاستلام، المراجعة، التقارير، تفعيل الـ API | الشات ده |
-| **ASSISTANT_A** = H1 (mayar@) | Engine builder | AUTO شغال (من 00:46) على BL-02 |
-| **ASSISTANT_B** = H2 (marketing@) | Product builder + peer review لشغل H1 | واقف بـ STOP من 20:55 امبارح، بيرجع مع ENV-01 |
+| **ASSISTANT_A** = H1 (mayar@) | Engine builder + peer review لشغل H2 | AUTO شغال (17:00: بيراجع BL-03) |
+| **ASSISTANT_B** = H2 (marketing@) | Product builder + peer review لشغل H1 | AUTO شغال (17:00: بيراجع BL-02) |
 
 - التسليم بين الحسابات عن طريق الملفات بس: الكارت في `00-HQ/tasks/`، والتقرير في `00-HQ/inbox/<h>/`،
   والـ review في `00-HQ/reviews/`، والـ branch `<h>/<ID>`. محدش بيكلّم حد في الشات.
-- **مفيش إثبات لسه** على دورة كاملة بين الحسابين (peer review حقيقي). ده OPS-05.
+- **اتشاف فعليًا:** H1 سلّم BL-16 ← H2 راجعه من حسابه ← الاستلام إدّى FIX. فاضل الـ merge (OPS-05).
 
 ## 5. نسخ البرنامج والإصدارات
 
@@ -136,8 +140,8 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
 
 - **الـ Plugins:** superpowers (TDD/review)، plugin-dev، andrej-karpathy-skills (اتسطّب امبارح، نفس نص `CLAUDE.md`)،
   whynot-cut 2.2.1. التفاصيل والتجارب: `00-HQ/PLUGIN_CAPABILITY_MATRIX.md`.
-- **الـ Routines:** كلها كانت **متوقفة (disabled)** من امبارح 8:40 بالليل (السبب مش معروف، اتكرر قبل كده). حالة كل
-  واحدة وإيه اللي رجع: `00-HQ/AUTOMATION_RUNBOOK.md`.
+- **الـ Routines (شغالة، Bypass، من غير موافقات):** التقرير (9/1/5/9)، الاستلام (كل ساعة :37)، والـ watchdog
+  (:13/:43) اللي بيرجّع الشغل بعد الـ limit ويوقف أي تشغيلة معلّقة. التفاصيل: `00-HQ/AUTOMATION_RUNBOOK.md`.
 - **Checklist الـ charter §29 (M0):**
   - [x] Inventory للمشروع والـ agents والـ routines والشاتات
   - [x] Baseline محفوظ (backup + git bundle + branch على GitHub)
@@ -148,7 +152,7 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
   - [ ] تجربة read/write و handoff لكل حساب — OPS-05
   - [x] scheduler + runner (helper AUTO loop + keepalive) موجودين ومتجرّبين 21/21 بـ fake Claude
   - [ ] resume بعد restart للجهاز — اتشاف فعليًا النهارده لـ H1 (keepalive 00:46)، لسه لـ H2
-  - [ ] تقرير الصبح والليل + 4 تقارير PRIMARY مجدولة ومتجرّبة — OPS-02
+  - [x] تقرير الصبح والليل + 4 تقارير PRIMARY مجدولة ومتجرّبة — OPS-02 (13:03 و 17:03 وصلوا لوحدهم)
   - [x] خطة الـ $500 جاهزة ومش متفعّلة (`00-HQ/BUDGET-API.md`)
   - [x] Pilot كامل: تاسك → QA مستقل → commit → GitHub → أرشفة → التاسك اللي بعدها — OPS-01 → OPS-02
 
@@ -163,9 +167,12 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
 
 ## 9. تقرير الصبح / تقرير الليل
 
-بيتكتب هنا أوتوماتيك الساعة 9 الصبح و 9 بالليل (بعد OPS-02). التقارير القديمة في `00-HQ/reports/`.
+كل تقرير بيوصلك كـ session اسمها «WhyNot Cut — تقرير يونس» في الـ sidebar (9 و 1 و 5 و 9)، وملخص الحالة فوق
+(الجزء الأوتوماتيك) بيتحدّث معاه. كل التقارير في `00-HQ/reports/`.
 
 ## 10. سجل التحديثات المختصر
 
 - 2026-10-20 — تأسيس نظام الـ charter فوق 00-HQ، baseline، أرشفة 8 ملفات، HOLD على الـ API، اكتشاف سبب فشل tests
   المساعدين. الأدلة: `00-HQ/reports/2026-10-20-audit.md`.
+- 2026-10-20 — اتقفل OPS-01/03/06/07 و ENV-01 (suite المساعدين 8899 OK) و OPS-02 (التقارير بتوصل لوحدها).
+  اتمسح 540 MB packages مكررة من C. الـ routines اتعملت من جديد في Bypass عشان ماتقفش على موافقة.

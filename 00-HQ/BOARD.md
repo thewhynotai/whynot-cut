@@ -33,7 +33,7 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 | STAGE3-DRAFTS | Stage 3 task specs (F1, F10, F11 skeleton) as drafts | MASTER | NOT READY (after the Gate 4 tag / 1 Nov) | — | becomes H1/H2/LANE cards |
 | ENV-01 | Engine runtime for unsandboxed processes (helper suites: 563 env errors) | MASTER | DONE_ARCHIVED (16:23; helper full suite 8899 OK, 0 fail) | `tasks/archive/ENV-01/ENV-01.md` | — |
 | OPS-01 | Status generator, Arabic reports, ops/hq GitHub mirror (pilot task) | MASTER | DONE_ARCHIVED (02:00, 25/25 tests, 2 reviews) | `tasks/archive/OPS-01/OPS-01.md` | OPS-02 |
-| OPS-02 | Schedule the 4 daily PRIMARY reports + delivery receipt test | MASTER | IN PROGRESS | `tasks/OPS-02.md` | — |
+| OPS-02 | Schedule the 4 daily PRIMARY reports + delivery receipt test | MASTER | DONE_ARCHIVED (17:10; runs 13:03 + 17:03 SENT unattended; ACK → Q-006) | `tasks/archive/OPS-02/OPS-02.md` | — |
 | OPS-03 | Fold the release-preview refresh check into the report run; retire lane-watch | MASTER | DONE_ARCHIVED (02:20, 28/28, review r1) | `tasks/archive/OPS-03/OPS-03.md` | — |
 | OPS-04 | After the tag: move 00-HQ into the repo; fix 3 repo references to archived docs | EXECUTOR | NOT READY (after the v3.0.0-p4 tag) | `tasks/OPS-04.md` | — |
 | OPS-05 | First observed cross-account cycle: H1 DONE → H2 peer review → intake verdict | MASTER (observe) | IN PROGRESS (steps 1-4 seen on BL-16; merge pending) | `tasks/OPS-05.md` | — |
