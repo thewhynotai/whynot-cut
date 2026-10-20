@@ -241,7 +241,8 @@ class TestOtherKinds(unittest.TestCase):
         """Review 40ba427 P2-1: "you can not not take your insulin" lost one "not" (a ticked cut that flips the
         meaning), for a general and a medical client alike. Any word the negation reader reads is never proposed."""
         for sent in (["it's", "not", "not", "important."], ["you", "can", "not", "not", "take", "your", "insulin."],
-                     ["don't", "don't", "stop."], ["مخدتش", "مخدتش", "الدوا."], ["ومش", "ومش", "كده."]):
+                     ["don't", "don't", "stop."], ["مخدتش", "مخدتش", "الدوا."], ["ومش", "ومش", "كده."],
+                     ["it's", "Not", "not", "safe."], ["it's", "not,", "not", "safe."]):     # review a26dfed P3-1
             for rule in (None, {"never": True}, {"never": False}):
                 res = C.compute(words([(w, 200, 60) for w in sent]), rule=rule, lang="en" if sent[-1][0] < "ء" else "ar")
                 self.assertNotIn("repeat_word", [p["kind"] for p in res["proposals"]], (sent, rule))
