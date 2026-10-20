@@ -26,7 +26,7 @@ FILES = {(k, l): NOTICES / f"{k}.{l}.md" for k in KINDS for l in LANGS}
 
 ALLOWED_PLACEHOLDERS = {
     "contact", "recipient", "date", "sender_org", "our_repo", "their_product", "their_location",
-    "our_mark", "deadline_days", "commit_history", "release_hashes", "tag_names", "evidence",
+    "our_mark", "deadline_days", "evidence",
 }
 BANNER = {
     "en": (r"not legal advice", r"lawyer"),
