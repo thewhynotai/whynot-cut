@@ -716,9 +716,12 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
         used.update(range(i, j + 1))
 
     # repeated words --------------------------------------------------------------------------------------------------
+    from .safety.numbers import fold
+    from .safety.risk_words import _negation
     for i in range(n - 1):
         t = toks[i]
         if i in used or i + 1 in used or not t or t != toks[i + 1] or t in EMPHASIS or LAUGHTER.fullmatch(t) \
+                or _negation(fold(ws[i]["word"]), fold(ws[i + 1]["word"])) \
                 or ws[i].get("speaker") != ws[i + 1].get("speaker"):     # two people saying it is no repeat
             continue
         if gap_after(i) > V["repeat_max_gap_ms"]:

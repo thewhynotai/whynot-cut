@@ -237,6 +237,15 @@ class TestOtherKinds(unittest.TestCase):
         res = C.compute(words([("٣", 300, 60), ("3", 300, 60), ("حبايات.", 300, 60)]))
         self.assertEqual([(p["kind"], p["default"]) for p in res["proposals"]], [("repeat_word", "keep")])
 
+    def test_a_negation_said_twice_is_never_a_repeat(self):
+        """Review 40ba427 P2-1: "you can not not take your insulin" lost one "not" (a ticked cut that flips the
+        meaning), for a general and a medical client alike. Any word the negation reader reads is never proposed."""
+        for sent in (["it's", "not", "not", "important."], ["you", "can", "not", "not", "take", "your", "insulin."],
+                     ["don't", "don't", "stop."], ["مخدتش", "مخدتش", "الدوا."], ["ومش", "ومش", "كده."]):
+            for rule in (None, {"never": True}, {"never": False}):
+                res = C.compute(words([(w, 200, 60) for w in sent]), rule=rule, lang="en" if sent[-1][0] < "ء" else "ar")
+                self.assertNotIn("repeat_word", [p["kind"] for p in res["proposals"]], (sent, rule))
+
     def test_pauses_from_the_pause_map(self):
         res = C.compute(words([("قال", 300, 900), ("كده.", 300, 60)]), [[400, 1100], "junk", [5, 2], [1, "x"]])
         self.assertEqual([(p["kind"], p["start_ms"], p["end_ms"]) for p in res["proposals"]], [("pause", 400, 1100)])
