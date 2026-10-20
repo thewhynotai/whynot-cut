@@ -1,16 +1,17 @@
 # خطة المشروع التنفيذية — WhyNot Cut (Adobe Premiere Pro Plugin)
 
 <!-- AUTO:STATUS START -->
-> آخر تحديث فعلي: 2026-10-20 21:58 — Africa/Cairo
-> مصدر التحديث: hq_status.py / info@ / release/3.0 @ 1cb5eabb
+> آخر تحديث فعلي: 2026-10-20 22:01 — Africa/Cairo
+> مصدر التحديث: hq_status.py / info@ / release/3.0 @ 17729fc2
 > حالة التشغيل: RUNNING
-> حالة المزامنة: HQ = LOCAL+GITHUB_VERIFIED · release/3.0 = LOCAL_AHEAD 81
+> حالة المزامنة: HQ = LOCAL+GITHUB_VERIFIED · release/3.0 = LOCAL_AHEAD 83
 
 | Task | Owner | Status (BOARD) |
 |---|---|---|
 | SETUP-H1 | H1 (Mayar) | ACCEPTED |
 | BL-16 | H1 | FIX |
 | BL-02 | H1 | READY |
+| S6b | H1 | READY |
 | BL-17 | H1 | READY |
 | BL-19 | H1 | READY |
 | SETUP-H2 | H2 (marketing@) | ACCEPTED |
@@ -20,7 +21,6 @@
 | BL-18 | EXECUTOR (done) | MERGED |
 | BL-14 | EXECUTOR | MERGED |
 | (lane 1) | — | STOPPED |
-| S6b | H1 | NOT READY |
 | STAGE3-DRAFTS | MASTER | NOT READY |
 | ENV-01 | MASTER | DONE_ARCHIVED |
 | OPS-01 | MASTER | DONE_ARCHIVED |
