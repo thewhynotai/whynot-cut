@@ -60,6 +60,14 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
    them back on — the Command Center does it in an attended session).
 4. Open **Helpers LIVE** and check both show `AUTO ON  loop running`.
 
+## 5b. After a usage-limit cut (OPS-07)
+- The intake recovers by itself (MASTER-INTAKE step 0.1): a lock whose run is dead (`get_session` isRunning false)
+  is renamed `intake.lock.stale-<HHMM>`, and `00-HQ/tools/stale_suites.py end-tag <dead session id>` ends only the
+  processes tagged `WNC_RUN=<that id>` (its review suites, running or queued). A live run is never touched.
+- By hand (any session): `python -X utf8 00-HQ\tools\stale_suites.py scan-tag <session id>` lists, `end-tag` ends.
+- Not covered (known limits): helper peer-review and executor suites are not tagged, so a frozen one is still ended by
+  hand after checking its CPU on the CHILD python (the venv `python.exe` launcher always shows 0 CPU).
+
 ## 6. Incidents
 - 2026-10-20 03:54 → 06:00: Yunus's account hit its usage limit (reset 06:00). The intake run of 03:37 died holding
   `intake.lock` until 09:38 and its suite `review-BL-16` frozen in a heavy slot (140 min), blocking `h1-setup4` and

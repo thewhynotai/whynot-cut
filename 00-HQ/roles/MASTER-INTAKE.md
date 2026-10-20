@@ -15,12 +15,23 @@ reading and testing.
 - `HEAVY` = `C:/Users/LOQ/AppData/Roaming/Claude/side-session-notes/local_263cabbf-75e3-42a1-b384-1753a7bd4dad/heavy.sh`
 
 ## 0. Lock, then a quick exit when there is nothing to do
-1. **The lock.** `HQ\intake\intake.lock` holds one line: `until <YYYY-MM-DD HH:MM>`.
-   - If the lock exists and its `until` time is still in the future, stop at once ("intake already running").
-     Otherwise it is stale (for example a run cut by a usage limit): replace it.
-   - Write `until` = now + 30 min. Before each own Opus review (step 1B), rewrite it as now + 6 h. After each
-     report is finished, set it back to now + 30 min.
-   - Delete the lock at the end of the run, whatever happens.
+1. **The lock.** `HQ\intake\intake.lock` holds one line: `until <YYYY-MM-DD HH:MM> session <this run's session id>`
+   (get the id with `mcp__ccd_session_mgmt__get_session` "self"). Old locks may lack the `session` part.
+   - If the lock exists and names a session, call `mcp__ccd_session_mgmt__get_session` on that id. The tested rule
+     is `00-HQ/tools/stale_suites.py` `lock_stale` / `parse_lock`:
+     - `isRunning: true` → NOT stale, even if `until` has passed (a long review may outlast it): stop at once
+       ("intake already running").
+     - `isRunning: false` → stale (a run cut by a usage limit).
+     - the session cannot be looked up, or the lock has no `session` (old format) → judged by `until` only.
+     - the line cannot be read → stale.
+   - Stale → rename it to `intake.lock.stale-<HHMM>`. Only when `get_session` said `isRunning: false`, run
+     `python -X utf8 "<HQ>\tools\stale_suites.py" end-tag <that session id>`: it ends ONLY processes whose command
+     carries `WNC_RUN=<that session id>` (that dead run's own review suites, running or still queued in heavy.sh).
+     Never run `end-tag` on a lock judged by time alone.
+   - Write `until` = now + 30 min (with `session`). Before each own Opus review (step 1B), rewrite it as now + 6 h.
+     After each report is finished, set it back to now + 30 min.
+   - Delete the lock at the end of the run, whatever happens, but ONLY if it still names this run's session id
+     (another run may have taken it over).
 2. **Find the pending work.** List `HQ\inbox\h1\*.md` and `HQ\inbox\h2\*.md` with their modified times. Compare
    with `HQ\intake\state.json`, which maps each report path (exactly as listed) to
    `{"mtime": <int seconds>, "status": "...", "verdict": "...", "at": "..."}`. Always compare mtimes as whole
@@ -94,7 +105,10 @@ never review yourself. Give it the card, the spec, the report, the sha, the patc
   Revert every mutant you make.
 - **Tests.** Run the focused tests, then the **FULL suite** through the queue with the same command as SETUP-H1
   step 3:
-  `bash HEAVY suite review-<ID> -- env PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 ~/.whynot-cut/venv/Scripts/python.exe -B -m unittest discover -s whynot-cut/tests`
+  `bash HEAVY suite review-<ID> -- env WNC_RUN=<this intake run's session id> PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 ~/.whynot-cut/venv/Scripts/python.exe -B -m unittest discover -s whynot-cut/tests`
+  (the `WNC_RUN` tag lets the next intake end this suite if this run is cut by a usage limit, OPS-07; give the
+  reviewer subagent the id). Spawn the reviewer in the FOREGROUND (`run_in_background: false`) and wait for it in
+  this turn, so this run stays `isRunning: true` while its review lives.
   run from `D:\WNC-work\review`.
 - **Mutants.** HIGH tier only: kill at least 3 mutants of the new logic. LIGHT tier: no mutation run.
 - **Coverage.** Verify every acceptance line of the card and every done criterion and pre-mortem line of the spec.

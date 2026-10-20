@@ -36,7 +36,7 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 | OPS-04 | After the tag: move 00-HQ into the repo; fix 3 repo references to archived docs | EXECUTOR | NOT READY (after the v3.0.0-p4 tag) | `tasks/OPS-04.md` | — |
 | OPS-05 | First observed cross-account cycle: H1 DONE → H2 peer review → intake verdict | MASTER (observe) | NOT READY (needs ENV-01) | `tasks/OPS-05.md` | — |
 | OPS-06 | Effort per tier in helper runs (HIGH → high, LIGHT/setup → medium); owner rule 10-19 21:00 | MASTER | DONE_ARCHIVED (02:12, 30/30, review r1) | `tasks/archive/OPS-06/OPS-06.md` | — |
-| OPS-07 | A usage-limit cut must not freeze the intake lock or the heavy queue (incident 10-20 03:54) | MASTER | READY | `tasks/OPS-07.md` | — |
+| OPS-07 | A usage-limit cut must not freeze the intake lock or the heavy queue (incident 10-20 03:54) | MASTER | DONE_ARCHIVED (06:25, 6/6 + sim, reviews r1/r2) | `tasks/archive/OPS-07/OPS-07.md` | — |
 | API-500 | The single paid API job (Stage 3 mechanical part) | LANE | PLANNED_NOT_AUTHORIZED (waits for «نفذ خطة الـ API») | `BUDGET-API.md` | — |
 
 ## Old-system tracks still running on Yunus's account (no change until their END)
