@@ -377,24 +377,35 @@ def anchor_tails(p) -> list[str]:
     return ["/".join(parts[i:]) for i, s in enumerate(parts) if s.lower() in ANCHORS and i < len(parts) - 1]
 
 
+def _really_inside(p: str, root) -> bool:
+    """Is `p` under the client root once `..` and every link are followed (realpath)? (review 0d84730 P2-1, P3-2)"""
+    from . import client_move_paths as cmp
+    return inside_root(cmp.real(p), cmp.real(str(root)))
+
+
 def resolve(root, v):
     """A stored value -> a path this computer can open: relative -> under the root; absolute inside the root -> kept;
     absolute elsewhere -> the same file under this root when its tail from an anchor folder exists here (a client
-    copied or moved by hand), else kept as it is (never invented)."""
+    copied or moved by hand), else kept as it is (never invented). A value that names a place in the client but
+    really lands outside it (a link, `..`) and one that names no place we can place (`../x`, `C:x`, `\\x`) give None:
+    missing (review 0d84730 P2-1, P3-2, P3-3)."""
     from pathlib import Path, PurePosixPath, PureWindowsPath
     if not isinstance(v, str) or not v:
         return v
     root = Path(root)
     if is_relative(v):
-        return str(root.joinpath(*PurePosixPath(v.replace("\\", "/")).parts))
+        cand = str(root.joinpath(*PurePosixPath(v.replace("\\", "/")).parts))
+        return cand if _really_inside(cand, root) else None
     win = bool(PureWindowsPath(v).drive) or "\\" in v
-    if not win and not PurePosixPath(v).is_absolute():
-        return v                                   # "../x" and the like: not a path we resolve
+    if not (PureWindowsPath(v) if win else PurePosixPath(v)).is_absolute():
+        return None                                # "../x", "C:x", "\x": relative to whatever folder runs it
     if inside_root(v, str(root)):
-        return v
+        return v if not native_abs(v) or _really_inside(v, root) else None
     for tail in anchor_tails(PureWindowsPath(v) if win else PurePosixPath(v)):
+        if ".." in tail.split("/"):
+            continue
         cand = root.joinpath(*tail.split("/"))
-        if cand.exists():
+        if cand.exists() and _really_inside(str(cand), root):
             return str(cand)
     return v
 

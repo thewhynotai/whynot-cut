@@ -133,7 +133,7 @@ def analyze_all(paths: Paths, refs: list[Path], durations: dict) -> dict:
         sheets = hit.get("contact_sheets") if isinstance(hit, dict) else None
         return isinstance(sheets, list) and isinstance(hit.get("shot_durations_s"), list) and \
             all(k in hit for k in SUMMARY_KEYS) and \
-            all(isinstance(s, str) and Path(client_db.resolve(root, s)).exists() for s in sheets)
+            all(isinstance(s, str) and (r := client_db.resolve(root, s)) and Path(r).exists() for s in sheets)
     results = []
     for v in refs:
         st = Path(v).stat()

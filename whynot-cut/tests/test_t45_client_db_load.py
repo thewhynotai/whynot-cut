@@ -199,6 +199,117 @@ class TestDarwinPrivateVar(unittest.TestCase):
                                             fold=True, sep="/"))
 
 
+class TestResolveConfinement(Base):
+    """Review 0d84730 (After Effects loads what `resolve` gives): a value that names a place in the client never lands
+    outside it, by `..` or through a link (P2-1, P3-2); a value that names no place we can place counts as missing
+    (P3-3); a font role given as a file keeps its weight once the family's file is resolved (P3-1)."""
+
+    def outside(self) -> Path:
+        out = self.tmp / "outside"
+        out.mkdir(exist_ok=True)
+        (out / "x.ttf").write_bytes(b"ttf outside")
+        return out
+
+    def junction(self, at: Path, target: Path) -> None:
+        """mklink /J at -> target; removed as a link only (os.rmdir), before tearDown's rmtree, target checked."""
+        import subprocess
+        r = subprocess.run(["cmd", "/c", "mklink", "/J", str(at), str(target)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+        def unlink():                                         # called by the test itself (tearDown's rmtree is after)
+            os.rmdir(at)                                      # the link only, never what it points to
+            self.assertTrue((target / "x.ttf").is_file())
+        self._unlink = unlink
+
+    def test_an_anchor_tail_with_dotdot_never_leaves_the_client(self):        # P2-1
+        out = self.outside()                                  # <root>\assets\..\..\outside\x.ttf exists: next to it
+        self.assertTrue((self.root / "assets" / ".." / ".." / "outside" / "x.ttf").is_file())
+        for v in (r"Z:\g\assets\..\..\outside\x.ttf", "/g/assets/../../outside/x.ttf"):
+            got = CDB.resolve(self.root, v)
+            self.assertEqual(got, v, v)                                   # never re-anchored: kept, names nothing here
+            self.assertNotEqual(os.path.realpath(got), os.path.realpath(out / "x.ttf"), v)
+        self.assertEqual(Path(CDB.resolve(self.root, r"Z:\Old\C\assets\Brand\logo.png")),   # a tail without `..`:
+                         self.root / "assets/Brand/logo.png")                                 # re-anchored as before
+        v = r"Z:\g\assets\x\..\Brand\logo.png"                         # a tail with `..` is never re-anchored, even
+        self.assertEqual(CDB.resolve(self.root, v), v)                  # one that would stay inside
+
+    def test_dotdot_and_drive_relative_values_count_as_missing(self):        # P3-3
+        for v in ("../../x.ttf", "..\\..\\outside\\x.ttf", "assets/../../outside/x.ttf", "C:x.ttf", "\\x.ttf"):
+            self.assertIsNone(CDB.resolve(self.root, v), v)
+        self.manifest("assets/Brand/logo.png", "../../logo_display.jpg")
+        a = CDB.load(self.paths, "asset-manifest.json")["assets"][0]
+        self.assertIsNone(a["display_derivative"])
+        self.assertEqual(Path(a["file"]), self.root / "assets/Brand/logo.png")
+        self.assertEqual(CDB.to_stored(self.root, "../../x.ttf"), "../../x.ttf")     # a writer keeps it as it is
+        for v in ("", None, 3):
+            self.assertEqual(CDB.resolve(self.root, v), v)
+
+    @unittest.skipUnless(os.name == "nt", "a junction (mklink /J) is Windows")
+    def test_a_value_through_a_junction_out_of_the_client_is_refused(self):  # P3-2
+        out = self.outside()
+        junc = self.root / "assets" / "junc"
+        self.junction(junc, out)
+        try:
+            self.assertTrue((junc / "x.ttf").is_file())                      # the link really reaches outside
+            self.assertIsNone(CDB.resolve(self.root, "assets/junc/x.ttf"))
+            self.assertIsNone(CDB.resolve(self.root, str(junc / "x.ttf")))   # the absolute form inside by name
+            self.assertEqual(CDB.resolve(self.root, r"Z:\Old\C\assets\junc\x.ttf"), r"Z:\Old\C\assets\junc\x.ttf")
+            self.assertEqual(Path(CDB.resolve(self.root, "assets/Brand/Brand-Bold.ttf")),
+                             self.root / "assets/Brand/Brand-Bold.ttf")      # a real file inside: as before
+            write_json(self.db / "branding/typography.json", {"families": {"B": {"weights": [
+                {"style": "Bold", "file": "assets/junc/x.ttf", "postscript_name": "B-Bold"}]}}})
+            self.assertIsNone(CDB.load(self.paths, "branding/typography.json")["families"]["B"]["weights"][0]["file"])
+        finally:
+            self._unlink()
+        self.assertTrue((out / "x.ttf").is_file())
+
+    def typography(self, file_of, role_file):
+        fonts = self.root / "assets" / "Fonts"
+        fonts.mkdir(exist_ok=True)
+        for n in ("B-Regular", "B-Bold"):
+            (fonts / f"{n}.ttf").write_bytes(b"ttf")
+        write_json(self.db / "branding/typography.json", {"families": {"B": {"weights": [
+            {"style": "Regular", "file": file_of("B-Regular"), "postscript_name": "B-Regular"},
+            {"style": "Bold", "file": file_of("B-Bold"), "postscript_name": "B-Bold"}]}},
+            "roles": {"body": {"file": role_file}}})
+        from lib import font_roles
+        return font_roles.resolve(CDB.load(self.paths, "branding/typography.json"), "body")
+
+    def test_a_role_given_as_a_file_keeps_its_weight(self):                  # P3-1
+        rel = lambda n: f"assets/Fonts/{n}.ttf"
+        old = lambda n: rf"Z:\Old\Dr Test\assets\Fonts\{n}.ttf"           # a 2.x value from the folder it was copied from
+        for file_of, role in ((rel, "assets/Fonts/B-Bold.ttf"), (old, old("B-Bold")), (rel, old("B-Bold")),
+                              (old, "assets\\Fonts\\B-Bold.ttf"), (rel, "B-Bold.ttf"),
+                              (rel, "ASSETS/FONTS/B-BOLD.TTF")):                  # names compare case folded
+            with self.subTest(role=role):
+                face = self.typography(file_of, role)
+                self.assertEqual(face["ps"], "B-Bold")
+                self.assertEqual(face["source"], "typography.json roles")
+                shutil.rmtree(self.root / "assets" / "Fonts")
+        face = self.typography(rel, "assets/Other/B-Bold.ttf")             # another folder's file of that name: no
+        self.assertEqual(face["ps"], "B-Regular")
+        self.assertEqual(face["source"], "default")
+
+
+    def test_a_cached_reference_with_a_sheet_we_cannot_place_is_analysed_again(self):
+        """`resolve` may now give None (P3-3): the reference cache's own check treats that sheet as missing."""
+        from lib import ref_analysis
+        ref = self.root / "data" / "References" / "ref.mp4"
+        ref.parent.mkdir(parents=True)
+        ref.write_bytes(b"r" * 64)
+        st = ref.stat()
+        key = CDB.to_stored(self.root, str(ref.resolve())) + f"|{st.st_size}|{int(st.st_mtime)}"
+        entry = {"video": "data/References/ref.mp4", "duration_s": 1.0, "cut_count": 0, "cuts_per_minute": 0.0,
+                 "shot_stats": {}, "first_cut_s": None, "contact_sheets": ["../../sheet_00.jpg"],
+                 "shot_durations_s": [1.0]}
+        write_json(self.db / "reference_analysis" / "cache.json", {key: entry})
+        fresh = dict(entry, contact_sheets=[])
+        with mock.patch.object(ref_analysis, "analyze_reference", return_value=fresh) as again, \
+                mock.patch.object(ref_analysis, "log"):
+            ref_analysis.analyze_all(self.paths, [ref], {})
+        self.assertEqual(again.call_count, 1)
+
+
 class TestReaders(Base):
     """The readers swapped to client_db.load find the files of a client whose database stores relative paths."""
 

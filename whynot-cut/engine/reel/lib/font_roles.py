@@ -60,12 +60,26 @@ def _stem(path) -> str:
     return re.split(r"[\\/]", _lc(path))[-1]
 
 
+def _tails(path) -> set[str]:
+    """A font file's tails from each anchor folder (assets | data | output), case folded: the same file stored
+    root-relative, absolute from an old folder, or resolved under the client root (client_db.load) compares equal
+    (review 0d84730 P3-1)."""
+    from pathlib import PurePosixPath, PureWindowsPath
+    from .client_db import anchor_tails
+    s = str(path or "")
+    p = PureWindowsPath(s) if (PureWindowsPath(s).drive or "\\" in s) else PurePosixPath(s)
+    return {t.casefold() for t in anchor_tails(p)}
+
+
 def _by_name(fs: list[dict], name) -> dict | None:
-    """A face named exactly: PostScript name, font file (path or file name)."""
+    """A face named exactly: PostScript name, font file (path or file name; a path compared by its tail from an
+    anchor folder, so a root-relative role still names a family file the database resolved)."""
     n = _lc(name)
     if not n:
         return None
-    return next((f for f in fs if n in (_lc(f["ps"]), _lc(f["file"]), _stem(f["file"]))), None)
+    tails = _tails(name)
+    return next((f for f in fs if n in (_lc(f["ps"]), _lc(f["file"]), _stem(f["file"])) or
+                 tails & _tails(f["file"])), None)
 
 
 def _target(fs: list[dict], spec) -> tuple[dict | None, int | None, str | None]:
