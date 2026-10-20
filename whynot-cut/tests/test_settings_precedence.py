@@ -23,6 +23,7 @@ SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
 from lib import plat, settings as S  # noqa: E402
+from lib import lead_steps  # noqa: E402  BL-15: a lead-only step runs with the guard's token
 
 CTX = SK / "hooks" / "session_context.py"
 CLI = SK / "engine" / "reel" / "cli.py"
@@ -318,6 +319,7 @@ class TestFilesHoldOnlyWhatIsSet(Base):
 
     def reel(self, *args):
         env = dict(os.environ)
+        lead_steps.issue_for(args, env)     # BL-15: the lead's token
         r = subprocess.run([sys.executable, "-B", str(CLI), *args], capture_output=True, text=True, encoding="utf-8",
                            env=env)
         return r

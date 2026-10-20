@@ -18,6 +18,7 @@ SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
 from lib.common import Paths, read_json, write_json  # noqa: E402
+from lib import lead_steps  # noqa: E402  BL-15: a lead-only step runs with the guard's token
 from lib.plan import plan_fingerprint  # noqa: E402
 
 CLI = SK / "engine/reel/cli.py"
@@ -41,6 +42,7 @@ def base_spec() -> dict:
 
 
 def cli(root: Path, *args):
+    lead_steps.issue_for(["--root", str(root), "--video-id", "CLIP1", *args])     # BL-15: the lead's token
     return subprocess.run([sys.executable, "-B", str(CLI), "--root", str(root), "--video-id", "CLIP1", *args],
                           capture_output=True, text=True)
 

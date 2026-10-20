@@ -29,6 +29,7 @@ SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
 from lib import common  # noqa: E402
+from lib import lead_steps  # noqa: E402  BL-15: a lead-only step runs with the guard's token
 from lib.common import Paths, read_json, write_json  # noqa: E402
 
 CLI = SK / "engine/reel/cli.py"
@@ -44,7 +45,9 @@ def reel(root, *argv, video_id=None, episode=None):
     """The CLI as a subprocess: (exit code, stdout JSON or text, stderr)."""
     cmd = [sys.executable, "-B", str(CLI)] + (["--root", str(root)] if root else []) + \
         (["--video-id", video_id] if video_id else []) + (["--episode", episode] if episode else []) + list(argv)
-    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=env())
+    e = env()
+    lead_steps.issue_for(cmd[3:], e)        # BL-15: the lead's token, as the guard issues it
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", env=e)
     try:
         return r.returncode, json.loads(r.stdout), r.stderr
     except ValueError:
@@ -62,6 +65,7 @@ def run_main(m, argv):
     """cli.main(argv) in this process: (exit code, stdout, stderr)."""
     so, se = io.StringIO(), io.StringIO()
     code = 0
+    lead_steps.issue_for(argv)              # BL-15: the lead's token, as the guard issues it
     with contextlib.redirect_stdout(so), contextlib.redirect_stderr(se):
         try:
             m.main(argv)

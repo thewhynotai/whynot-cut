@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .common import Paths, project_prefix, frame_size, frame_to_tc, load_config, now_iso, read_json, seq_fps, write_text
+from .common import Paths, project_prefix, frame_size, frame_to_tc, load_config, log, now_iso, read_json, seq_fps, write_text
 
 
 def aspect_label(w: int, h: int) -> str:
@@ -353,8 +353,21 @@ def build(paths: Paths) -> dict:
          f"- [ ] Export `{exp['file_name']}`: {exp['video']}; audio {exp['audio']}",
          f"- [ ] Deliver to `{exp['folder']}`" if exp.get("folder") else "- [ ] Deliver where the client expects it"]
     write_text(paths.p("09_handoff/final-editor-checklist.md"), "\n".join(C) + "\n")
+    _auto_prune(paths)
     return {"readme": str(paths.p("09_handoff/README.md")), "checklist": str(paths.p("09_handoff/final-editor-checklist.md")),
             "export": exp}
+
+
+def _auto_prune(paths: Paths) -> None:
+    """T4.15: after a handoff the engine cache goes back under its cap and the logs are rotated. Best effort: a
+    problem is one log line, never a failed handoff."""
+    try:
+        from .housekeeping import auto_prune
+        errs = auto_prune().get("errors") or []
+    except Exception as e:  # noqa: BLE001  the handoff is written; tidying the cache must never undo that
+        errs = [f"{type(e).__name__}: {e}"]
+    if errs:
+        log(paths, "engine cache tidy-up after the handoff: " + "; ".join(errs[:3]))
 
 
 def motion_readme(paths: Paths) -> Path:

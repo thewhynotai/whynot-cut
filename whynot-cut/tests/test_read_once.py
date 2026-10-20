@@ -943,6 +943,9 @@ class TestSourceAndRegistration(unittest.TestCase):
         return cfg, rows
 
     IF_FORM = re.compile(r"^(?P<tool>[A-Z][A-Za-z]*)\(//\*\*/(?P<glob>(?:[^/()\[\]]|\[[^\]/]+\])+)/\*\*\)$")
+    # the guard's own filters may also name files under the folder (BL-15: <claude config>/projects/**/*.jsonl)
+    GUARD_FORM = re.compile(r"^(?P<tool>[A-Z][A-Za-z]*)\(//\*\*/(?:(?:[^/()\[\]]|\[[^\]/]+\])+)/\*\*"
+                            r"(?:/(?:[^/()\[\]]|\[[^\]/]+\])+)?\)$")
 
     def test_if_filter_has_the_guards_form(self):
         got = self.registered()
@@ -955,7 +958,7 @@ class TestSourceAndRegistration(unittest.TestCase):
                   if "guard.py" in h.get("command", "") and "if" in h]
         self.assertTrue(guards)
         for g in guards:                             # the live-checked reference forms really match the pattern
-            self.assertRegex(g, self.IF_FORM)
+            self.assertRegex(g, self.GUARD_FORM)
         self.assertIn(f"//**/{case_class('assets')}/**", "".join(guards))   # and "the guard's style" means this
         post = [(m, h) for ev, m, h in rows if ev == "PostToolUse"]
         self.assertTrue(post, "read_once.py needs a PostToolUse registration")

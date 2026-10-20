@@ -453,6 +453,10 @@ def cmd_plan(a):
                                 "note": rs["step"] or "; ".join(rs["notices"])}
     if r["ok"]:
         spec = read_json(p.p("01_analysis/timeline-spec.json"))
+        from lib import rules_loop                            # T4.3: the client rules this plan follows
+        rules = rules_loop.applied(p.root, spec)
+        if rules:
+            r["client_rules"] = rules
         pend = [e["event_id"] for e in spec["events"] if e["approval_required"]]
         set_status(p, "EDIT_PLAN_READY", f"{r['events']} events, {r['cues']} cues", "plan",
                    [p.p("01_analysis/timeline-spec.json")])
@@ -664,6 +668,52 @@ def cmd_review_flags(a):
          "lines_total": doc["lines_total"], "flagged": len(doc["items"]),
          "carried": sum(1 for it in doc["items"] if it.get("carried")), "dropped": doc["dropped"],
          "cleared": doc["cleared"], "verdicts": counts, "domain": doc["domain"], "plan_fingerprint": doc["plan_fingerprint"]})
+
+
+def cmd_rules(a):
+    """T4.3 learning loop (lib/rules_loop.py): --record (this video's revise comments, labelled, from --from FILE|-),
+    --propose (recurring or standing feedback as proposals, with conflicts, refusals and the active rules), --add <id>
+    (the editor confirmed: a dated rule in reel-profile/rules.json + notes.md, and the T4.2 knob in style.json),
+    --dismiss <id> (the editor said no: not shown again until a new comment joins it), --list, --remove <id>,
+    --phrases (read-only: the engine's preference vocabulary, {area: {phrase id: {group, en, ar}}}: a learned
+    preference is only an area and one of these ids). --record, --add, --dismiss and --remove are the lead's (the
+    guard)."""
+    from lib import rules_loop
+    from lib.errors import Guidance
+    if not a.root:
+        raise Guidance("`reel rules` needs --root", "name the client folder with --root \"<CLIENT_FOLDER>\"")
+    root = Path(a.root).expanduser()
+    if not a.add and (a.value is not None or a.replace is not None):
+        raise Guidance("--value and --replace go with --add only", "run `reel rules --add <id> --value <v>`; "
+                       "nothing was written")
+    if a.record:
+        if not a.video_id:
+            raise Guidance("`reel rules --record` needs --video-id", "name the video the comments are about")
+        if not a.rules_from:
+            raise Guidance("`reel rules --record` needs --from FILE|-", 'send [{"text": "...", "intent": {...}}] '
+                           "on standard input with --from -")
+        out(rules_loop.record(root, a.video_id, read_findings(a.rules_from)))
+    elif a.add:
+        value = None
+        if a.value is not None:
+            try:
+                value = json.loads(a.value)
+            except json.JSONDecodeError:
+                value = a.value
+            if value is None:
+                raise Guidance("--value null is not a value", "give the value the editor chose (e.g. 80, show, false, "
+                               "#FFCC00), or leave --value out; nothing was written")
+        out(rules_loop.add(root, a.add, value=value, replace=a.replace))
+    elif a.dismiss:
+        out(rules_loop.dismiss(root, a.dismiss))
+    elif a.remove:
+        out(rules_loop.remove(root, a.remove))
+    elif a.list:
+        out(rules_loop.list_rules(root))
+    elif a.phrases:
+        out(rules_loop.phrases())
+    else:
+        out(rules_loop.propose(root))
 
 
 def cmd_episode_sheet(a):
@@ -1110,11 +1160,11 @@ def client_brief_notice(p) -> str | None:
 
 
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
-NO_ROOT = {"board", "serve", "perf-report", "setup", "doctor", "py", "model-download", "gpu-enable", "bench", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
+NO_ROOT = {"board", "serve", "perf-report", "setup", "doctor", "clean", "py", "model-download", "gpu-enable", "bench", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
            "ae-status", "ae-probe", "motion-icons", "motion-library", "validate"}
 NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox", "lock", "episode-sheet",
                    "client-brief"}
-OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (onboarding), per video with one
+OPTIONAL_ID = {"ref-analyze", "ref-style", "rules"}   # client-level without a video id (onboarding), per video with one
 
 # One writer per client folder (3.0 T1.8). Every command chooses (test_writer_lock checks each is in exactly one):
 #   CORE_WRITES  write into the client folder: take or refresh the session's lease on output/.whynot-lock
@@ -1131,7 +1181,7 @@ CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze"
                "episode-sheet", "client-brief"}
 # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
 # and works while another session holds the client (gate G2).
-CORE_READS = {"board", "serve", "perf-report", "setup", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
+CORE_READS = {"board", "serve", "perf-report", "setup", "clean", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
               "status", "next", "lock", "doctor", "validate", "brief"}
 WRITES_IF = {
     "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
@@ -1143,6 +1193,8 @@ WRITES_IF = {
     "caption-looks": lambda a: not getattr(a, "pick", None) or bool(getattr(a, "yes", False)),
     # Task 28: the recommender's stills go under 08_quality_control/previews/caption-looks/ (caption looks only)
     "looks": lambda a: getattr(a, "kind", "caption") == "caption" and not getattr(a, "no_stills", False),
+    # T4.3: --propose, --phrases and --list only read
+    "rules": lambda a: bool(a.record or a.add or a.remove or a.dismiss),
 }
 
 
@@ -1519,6 +1571,14 @@ def cmd_doctor(a):
     out(rep)
 
 
+def cmd_clean(a):
+    """`reel clean` (T4.15): what can go from the engine home and how big it is (a dry run by default); --apply
+    removes it, --models also unused Whisper models, --uv-cache also uv's downloaded packages (the next setup downloads
+    them again). Client folders and a model in use are never touched."""
+    from lib.housekeeping import clean
+    out(clean(apply=a.apply, models=a.models, uv_cache=a.uv_cache))
+
+
 def cmd_scaffold(a):
     from lib.onboard import scaffold
     if not a.root:
@@ -1672,6 +1732,7 @@ CORE_COMMANDS: dict[str, str] = {
     "model-download": "download a Whisper model once (large-v3 is about 3 GB)",
     "gpu-enable": "install NVIDIA cuBLAS so Whisper runs on an NVIDIA GPU",
     "bench": "measure how fast Whisper runs on this computer (real-time factor, shown by doctor)",
+    "clean": "free up space in the engine home: shows what can go and its size; --apply removes it (only after the editor's yes), --models also unused Whisper models, --uv-cache also uv's downloads (the next setup downloads them again)",
     "profile": "show which client profile applies and where its values come from",
     "client-init": "create the client's reel-profile from a shipped profile or the blank template",
     "discover": "inventory of the client folder: inputs, footage, brand files, environment",
@@ -1701,6 +1762,9 @@ CORE_COMMANDS: dict[str, str] = {
                     "event ids (the lead runs it with the medical-reviewer's table)",
     "removed-review": "render a short MP4 of only what the plan removes, with a slate per part (words, reason) and "
                       "the words whose loss changes meaning listed first",
+    "rules": "the client's standing rules learned from feedback: --record this video's comments, --propose, "
+             "--add <id> (the editor confirmed), --dismiss <id> (the editor said no), --list, --remove <id>, "
+             "--phrases (the engine's preference phrases a rule can be made of)",
     "approve-plan": "record the approval of the compiled plan (editor or delegated)",
     "auto-approve": "record the approval a standing `approval: auto` gives (by auto; refused unless this client's "
                     "merged preferences say auto); medical and religious lines are never covered",
@@ -1863,6 +1927,26 @@ def main(argv: list[str] | None = None):
                                  'only the changed lines); `-` reads it from standard input (UTF-8). Each line is keyed by the '
                                  'event id of the plan '
                                  '(a motion video: the scene id); its text and times come from that plan')
+        if name == "rules":
+            m = sp.add_mutually_exclusive_group()
+            m.add_argument("--record", action="store_true",
+                           help="add this video's revise comments (--from FILE|-: a JSON list of {text, intent, scope, "
+                                "source}) to its 01_analysis/revision-notes.json")
+            m.add_argument("--propose", action="store_true",
+                           help="list proposals, conflicts, refusals and the active rules (the default; writes "
+                                "nothing; no editor words)")
+            m.add_argument("--add", metavar="PROPOSAL_ID", help="the editor confirmed this proposal: write the rule")
+            m.add_argument("--dismiss", metavar="PROPOSAL_ID",
+                           help="the editor said no to this proposal: not shown again until a new comment joins it")
+            m.add_argument("--phrases", action="store_true",
+                           help="print the engine's preference phrases ({area: {phrase id: {group, en, ar}}}): a "
+                                "learned preference is only an area and one of these ids (reads only)")
+            m.add_argument("--list", action="store_true", help="the active rules and their history")
+            m.add_argument("--remove", metavar="RULE_ID", help="the editor dropped this rule")
+            sp.add_argument("--from", dest="rules_from", metavar="FILE|-", help="the comments for --record")
+            sp.add_argument("--value", help="with --add: the knob value the editor chose (e.g. 80, show, false, #FFCC00)")
+            sp.add_argument("--replace", metavar="RULE_ID",
+                            help="with --add: the active rule this one replaces (the editor picked the new one)")
         if name == "auto-approve":
             sp.add_argument("--note", "--notes", dest="note",
                             help="default: standing preference approval: auto from <where the preference is set>")
@@ -1878,6 +1962,10 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--sheet", help="evidence image to record against (e.g. Premiere frame sheet)")
         if name in EXTRAS:
             sp.add_argument("--extras", action="store_true", help="confirm the editor explicitly asked for After Effects/Photoshop")
+        if name == "clean":
+            sp.add_argument("--apply", action="store_true", help="remove what the dry run lists (default: a dry run, nothing removed)")
+            sp.add_argument("--models", action="store_true", help="also unused Whisper models (never the one in use; only with the editor's yes)")
+            sp.add_argument("--uv-cache", action="store_true", help="also uv's downloaded packages (uv cache clean; the next setup downloads them again; only with the editor's yes)")
         if name == "setup":
             sp.add_argument("--no-bridge", action="store_true")
             sp.add_argument("--force", action="store_true", help="re-install the runtime from the lock even when it matches")
@@ -2009,6 +2097,11 @@ def main(argv: list[str] | None = None):
         cmd_py(argparse.Namespace(cmd="py", pyargs=pyargs))
         return
     a = ap.parse_args(argv)
+    from lib import lead_steps
+    refused = lead_steps.engine_check(a, argv)      # BL-15: a lead-only step needs the guard's token for this call
+    if refused:
+        out(refused)
+        raise SystemExit(2)
     if a.cmd != "serve":                # T4.11: background work at BelowNormal (setting); the panel's engine stays Normal
         try:
             priority.apply()

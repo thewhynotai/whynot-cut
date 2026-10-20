@@ -31,8 +31,6 @@ S1_VERBS = {
 }
 PENDING = {          # verb -> the hook set that registers it
     "review-scan": r"lane4\hooks\task50 (after Task 50 closes)",
-    "rules": r"hooks\S1-T4.3 (security integration with BL-15)",
-    "clean": r"hooks\T4.15 r3 (security integration with BL-15)",
     "cut-proposals": r"lane2\hooks\K-T7 (after Task 25 closes)",
     "takes": r"lane2\hooks\K-T7 (after Task 25 closes)",
     "safezone-check": r"lane2\hooks\K-T4",

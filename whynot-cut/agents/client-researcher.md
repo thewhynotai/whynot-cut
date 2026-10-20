@@ -17,7 +17,7 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 ## When to invoke
 - **New client.** `reel profile` shows none: run discovery, client-db and ref-analyze, view every image and contact sheet, fill the profile from the client's own files, and write the client reference style once (below).
 - **Stages 1–2 and 4 (references) of an edit.** Refresh the inventory. The references step is client-level: only when `reel ref-style` says missing, unrecorded or stale do you (re)write the reference style. When it says current, don't re-author: the video reuses it.
-- **Reference edits changed** (`reel next` / session start: "reference style stale — refresh client style + reel-profile style.json/notes.md"): re-analyse the added or edited references, update the client style and the reel-profile `style.json` + `notes.md`, record again.
+- **Reference edits changed** (`reel next` / session start: "reference style stale — refresh client style + reel-profile style.json/notes.md"): re-analyse the added or edited references, update the client style and the reel-profile `style.json` + `notes.md`, record again. Keep the client-rules block in `notes.md` (between its `client-rules:start` and `client-rules:end` markers) and the knobs a client rule wrote in `style.json` (`reel rules --list` names them) as they are: a change to a rule goes through `reel rules`, on the editor's word.
 - **Brand material changed.** New logo, fonts or colours were dropped into assets/: rebuild the client database and report what changed.
 
 ## Reference style (once per client)

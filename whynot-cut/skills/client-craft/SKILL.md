@@ -30,7 +30,8 @@ reel ref-style   --root "<CLIENT>" --record --by client-researcher   # after wri
     `01_analysis/editing-style-overrides.json`.
   - **stale** (a reference was added, removed or edited since the record; `reel next` and the session start say so):
     refresh the three files from the changed references, refresh `reel-profile/style.json` and `notes.md` where the
-    standing style changed, then `--record` again. `--record` warns when the profile files were not touched.
+    standing style changed (keep the client-rules block in `notes.md` and the knobs a client rule wrote, which
+    `reel rules --list` names: a rule changes only through `reel rules`), then `--record` again. `--record` warns when the profile files were not touched.
   - No reference edits at all: write the three files from the profile's `style.json`/`notes.md` and the editor's own
     words, marked "no reference edits", and record them.
   - **Old videos with their own style** (2.x authored `01_analysis/editing-style.json` per video): seed or extend the

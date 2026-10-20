@@ -15,14 +15,23 @@
           {"type": "command", "if": "Write(//**/[Dd][Aa][Tt][Aa]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
           {"type": "command", "if": "Write(//**/*.whynot-*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
           {"type": "command", "if": "Write(//**/*[Aa][Ff][Tt][Ee][Rr] [Ee][Ff][Ff][Ee][Cc][Tt][Ss]*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "Write(//**/[Ll][Ee][Aa][Dd]-[Tt][Oo][Kk][Ee][Nn][Ss]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "Write(//**/[Ll][Ee][Aa][Dd]-[Tt]~*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "Write(//**/[Pp][Rr][Oo][Jj][Ee][Cc][Tt][Ss]/**/*.[Jj][Ss][Oo][Nn][Ll])", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
           {"type": "command", "if": "Edit(//**/[Aa][Ss][Ss][Ee][Tt][Ss]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
           {"type": "command", "if": "Edit(//**/[Dd][Aa][Tt][Aa]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
           {"type": "command", "if": "Edit(//**/*.whynot-*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
           {"type": "command", "if": "Edit(//**/*[Aa][Ff][Tt][Ee][Rr] [Ee][Ff][Ff][Ee][Cc][Tt][Ss]*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "Edit(//**/[Ll][Ee][Aa][Dd]-[Tt][Oo][Kk][Ee][Nn][Ss]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "Edit(//**/[Ll][Ee][Aa][Dd]-[Tt]~*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "Edit(//**/[Pp][Rr][Oo][Jj][Ee][Cc][Tt][Ss]/**/*.[Jj][Ss][Oo][Nn][Ll])", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
           {"type": "command", "if": "NotebookEdit(//**/[Aa][Ss][Ss][Ee][Tt][Ss]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
           {"type": "command", "if": "NotebookEdit(//**/[Dd][Aa][Tt][Aa]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
           {"type": "command", "if": "NotebookEdit(//**/*.whynot-*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
-          {"type": "command", "if": "NotebookEdit(//**/*[Aa][Ff][Tt][Ee][Rr] [Ee][Ff][Ff][Ee][Cc][Tt][Ss]*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10}
+          {"type": "command", "if": "NotebookEdit(//**/*[Aa][Ff][Tt][Ee][Rr] [Ee][Ff][Ff][Ee][Cc][Tt][Ss]*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "NotebookEdit(//**/[Ll][Ee][Aa][Dd]-[Tt][Oo][Kk][Ee][Nn][Ss]/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "NotebookEdit(//**/[Ll][Ee][Aa][Dd]-[Tt]~*/**)", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10},
+          {"type": "command", "if": "NotebookEdit(//**/[Pp][Rr][Oo][Jj][Ee][Cc][Tt][Ss]/**/*.[Jj][Ss][Oo][Nn][Ll])", "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/run_python.sh\" \"${CLAUDE_PLUGIN_ROOT}/hooks/guard.py\"", "timeout": 10}
         ]
       },
       {

@@ -225,10 +225,27 @@ def mlx_model_source(model: str) -> str:
         return str(model)
     snap = mlx_snapshot_dir(model)
     if snap:
+        _mark_used(_repo_dir(MLX_REPOS.get(model)))
         return str(snap)
     repo = MLX_REPOS.get(model) or model
     from huggingface_hub import snapshot_download
-    return str(snapshot_download(repo_id=repo, cache_dir=str(models_dir())))
+    src = str(snapshot_download(repo_id=repo, cache_dir=str(models_dir())))
+    _mark_used(_repo_dir(repo))
+    return src
+
+
+def _mark_used(repo_dir: Path | None) -> None:
+    """T4.15: stamp the model folder, so `reel clean --models` keeps a model used in the last 24 h (the CPU lane
+    holds no GPU lock). A stamp that can't be written only weakens that guard; the model loads anyway."""
+    if repo_dir is None or not repo_dir.is_dir():
+        return
+    try:
+        from .housekeeping import mark_model_used
+        ok, why = mark_model_used(repo_dir), "the folder refused it (a link, or read-only)"
+    except Exception as e:  # noqa: BLE001  the model is loaded; a stamp must never fail the transcription
+        ok, why = False, f"{type(e).__name__}: {e}"
+    if not ok:
+        log(None, f"model last-used stamp not written for {repo_dir.name}: {why}")
 
 
 # --------------------------------------------------------------------------- CTranslate2 loading
@@ -296,9 +313,12 @@ def load_ct2(model_size: str, compute_type: str = "int8", device: str | None = N
     last = None
     for dev, ct in tries:
         try:
-            return WhisperModel(str(snap) if snap else model_size, device=dev, compute_type=ct, **kw), dev, ct
+            m = WhisperModel(str(snap) if snap else model_size, device=dev, compute_type=ct, **kw)
         except Exception as e:  # noqa: BLE001  (e.g. CUDA runtime libraries missing -> CPU)
             last = e
+            continue
+        _mark_used(_repo_dir(_ct2_repo(model_size)))
+        return m, dev, ct
     if not snap and partial_download(model_size):
         raise RuntimeError(f"Whisper model {model_size} is incomplete (an interrupted download) and could not be "
                            f"completed ({type(last).__name__}: {last}): {how}") from last

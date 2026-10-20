@@ -19,6 +19,7 @@ SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
 from lib import common  # noqa: E402
+from lib import lead_steps  # noqa: E402  BL-15: a lead-only step runs with the guard's token
 from lib.common import Paths, write_json, read_json  # noqa: E402
 
 SHEET = """---
@@ -232,6 +233,7 @@ class TestChunkedTranscription(unittest.TestCase):
         transcribe_episode(ep, "small", run_chunk=fake, chunk_ms=8000, force=True)
         self.assertEqual(len(calls), 3)
         # the clip transcript commands work on the episode project with --episode
+        lead_steps.issue_for(["--root", str(self.root), "--episode", "EP12", "transcript-verify", "--by", "editor"])
         r = subprocess.run([sys.executable, "-B", str(SK / "engine/reel/cli.py"), "--root", str(self.root), "--episode",
                             "EP12", "transcript-verify", "--by", "editor"], capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stderr[-600:])

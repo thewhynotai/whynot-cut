@@ -21,6 +21,7 @@ SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
 from lib import writer_lock  # noqa: E402
+from lib import lead_steps  # noqa: E402  BL-15: a lead-only step runs with the guard's token
 
 CLI = SK / "engine/reel/cli.py"
 GUARD = SK / "hooks" / "guard.py"
@@ -76,8 +77,10 @@ class LockFixture(unittest.TestCase):
         return rec
 
     def reel(self, *args, session="me-session", **extra):
+        e = env_for(session, **extra)
+        lead_steps.issue_for(["--root", str(self.root), *args], e)     # BL-15: the lead's token
         return subprocess.run([sys.executable, str(CLI), "--root", str(self.root), *args], capture_output=True,
-                              text=True, encoding="utf-8", env=env_for(session, **extra))
+                              text=True, encoding="utf-8", env=e)
 
     def log_text(self) -> str:
         f = self.root / "output/logs/pipeline.log"

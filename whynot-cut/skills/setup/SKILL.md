@@ -1,6 +1,6 @@
 ---
 name: setup
-description: "Install or repair WhyNot Cut on a Mac or PC: \"install the engine\", \"reel: command not found\", \"Premiere bridge not responding\", «المحرك مش متثبت», «نقلت على جهاز جديد». New user: /whynot-cut:start."
+description: "Install/repair WhyNot Cut, free up space (Mac/PC): \"reel: command not found\", \"Premiere bridge not responding\", «المحرك مش متثبت», «نقلت على جهاز جديد», «فضّي مساحة». New user: /whynot-cut:start."
 allowed-tools: Bash(reel *), PowerShell(reel *)
 ---
 
@@ -72,7 +72,16 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 7. **Fonts:** each client's fonts come from their `assets/` folder. The editor installs them (macOS: double-click →
    Install Font; Windows: right-click → Install). `reel inbox --root "<CLIENT>"` then `reel client-db --root "<CLIENT>"`
    report any that are missing. After Effects needs the brand fonts installed too.
-8. Report what is ready and what needs the editor. If something fails twice, spawn `whynot-cut:setup-doctor` with the
+8. **Free up space** («فضّي مساحة», "the disk is full", the panel's "Free up space"): run `reel clean` (a dry
+   run: nothing is removed). Tell the editor what a yes frees (`removable_bytes`, never the kept items' sizes) and
+   each item's size and why. Only after the editor says yes, run `reel clean --apply` yourself (a subagent may not;
+   it may run the dry run). Unused Whisper models go only with `reel clean --apply --models` and their own yes (each one is
+   about 1.5-3 GB to download again). uv's downloaded packages go only with `reel clean --apply --uv-cache` and
+   their own yes: say «التثبيت الجاي هيحمّل تاني» (the next setup downloads them again) with the size the dry run
+   shows. Client folders, the model in use and anything outside the engine home are
+   never touched. An item that could not be removed (a file another program holds) shows an `error` line: close
+   that program, then run it again.
+9. Report what is ready and what needs the editor. If something fails twice, spawn `whynot-cut:setup-doctor` with the
    exact output instead of trying variations.
 
 Platform details and fixes: `${CLAUDE_SKILL_DIR}/references/platform-setup.md`. Pipeline failures: `${CLAUDE_PLUGIN_ROOT}/skills/edit/references/troubleshooting.md`.

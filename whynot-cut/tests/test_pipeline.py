@@ -21,6 +21,7 @@ SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
 from lib import common, srt as srtlib  # noqa: E402
+from lib import lead_steps  # noqa: E402  BL-15: a lead-only step runs with the guard's token
 from lib.common import Paths, ms_to_frame, parse_ts, fmt_ts, write_json  # noqa: E402
 
 from lib.plat import font_dirs  # noqa: E402
@@ -299,6 +300,7 @@ class TestPlanToXML(unittest.TestCase):
         self.assertIn("not approved", blocked.stdout)
         blocked_ae = subprocess.run(nh + ["ae-build", "--extras"], capture_output=True, text=True)
         self.assertIn("not approved", blocked_ae.stdout)
+        lead_steps.issue_for(nh[2:] + ["approve-plan", "--by", "editor"])      # BL-15: the lead's token
         subprocess.run(nh + ["approve-plan", "--by", "editor"], check=True, capture_output=True)
         from lib import verify
         vb = verify.build(self.p)
@@ -318,6 +320,7 @@ class TestPlanToXML(unittest.TestCase):
         self.assertTrue(any("approved" in f["check"] for f in run_qc(self.p)["failed"]))
         write_json(self.p.p("01_analysis/edit-decisions.json"), self.decisions())
         compile_plan(self.p)
+        lead_steps.issue_for(nh[2:] + ["approve-plan", "--by", "delegated", "--note", "test"])
         subprocess.run(nh + ["approve-plan", "--by", "delegated", "--note", "test"], check=True, capture_output=True)
         self.assertTrue(run_qc(self.p)["ok"])
         # watchable preview of the plan: same layers as the Premiere build, real H.264 + AAC of the sequence length

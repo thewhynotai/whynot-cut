@@ -19,6 +19,7 @@ SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
 from lib import plat  # noqa: E402
+from lib import lead_steps  # noqa: E402  BL-15: a lead-only step runs with the guard's token
 
 GUARD = SK / "hooks" / "guard.py"
 
@@ -262,13 +263,16 @@ class TestReviewHardening(unittest.TestCase):
         cli = [sys.executable, str(SK / "engine/reel/cli.py"), "settings"]
         with tempfile.TemporaryDirectory() as t:
             env = {k: v for k, v in os.environ.items() if k not in ("WHYNOT_CLIENTS_ROOT", "CLAUDE_PLUGIN_OPTION_CLIENTS_ROOT")}
+            lead_steps.issue_for(cli[2:] + ["--init", t, "--set", "approval=always"], env)      # BL-15
             bad = subprocess.run(cli + ["--init", t, "--set", "approval=always"], capture_output=True, text=True, env=env)
             self.assertNotEqual(bad.returncode, 0)
+            lead_steps.issue_for(cli[2:] + ["--init", t, "--set", "aproval=auto"], env)
             bad = subprocess.run(cli + ["--init", t, "--set", "aproval=auto"], capture_output=True, text=True, env=env)
             self.assertIn("unknown preference", bad.stderr)
             clients = Path(t) / "clients"
             (clients / "Dr X/assets").mkdir(parents=True)
             (clients / "Dr X/data").mkdir()
+            lead_steps.issue_for(cli[2:] + ["--init", t, "--set", f"clients_root={clients.as_posix()}"], env)
             ok = subprocess.run(cli + ["--init", t, "--set", f"clients_root={clients.as_posix()}"],
                                 capture_output=True, text=True, env=env)
             self.assertEqual(ok.returncode, 0, ok.stderr)

@@ -33,6 +33,7 @@ SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
 from lib import common  # noqa: E402
+from lib import lead_steps  # noqa: E402  BL-15: a lead-only step runs with the guard's token
 from lib import plat  # noqa: E402
 from lib import review_flags as RF  # noqa: E402
 from lib import schemas  # noqa: E402
@@ -77,8 +78,10 @@ def env(session="t47-me"):
 
 
 def reel(root, *argv, session="t47-me"):
+    e = env(session)
+    lead_steps.issue_for(["--root", str(root), *argv], e)              # BL-15: the lead's token
     r = subprocess.run([sys.executable, "-B", str(CLI), "--root", str(root), *argv], capture_output=True, text=True,
-                       encoding="utf-8", env=env(session))
+                       encoding="utf-8", env=e)
     try:
         doc = json.loads(r.stdout)
     except ValueError:

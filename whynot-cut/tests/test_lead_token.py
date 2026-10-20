@@ -54,7 +54,7 @@ STEP_ROWS = [
     (["rules", "--propose"], None),
     (["rules", "--list"], None),
     (["rules", "--record"], "rules --record"),
-    (["rules", "--dismiss"], "rules --dismiss"),
+    (["rules", "--dismiss", "P1"], "rules --dismiss"),
     (["clean", "--apply"], "clean --apply"),
     (["clean"], None),
     (["transcript-verify"], "transcript-verify"),

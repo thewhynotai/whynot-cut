@@ -58,7 +58,7 @@ def known_commands() -> set:
 def step_argv(step: str, opts: tuple) -> list[str]:
     """One call of a table step with what it needs (values only where the option takes one)."""
     extra = {"--init": ["X"], "--adopt": ["C1"], "--record": [], "--pick": ["bold"], "--add": ["P1"],
-             "--remove": ["R1"]}
+             "--remove": ["R1"], "--dismiss": ["P1"]}
     argv = [step]
     for o in opts:
         argv += [o] + extra.get(o, [])

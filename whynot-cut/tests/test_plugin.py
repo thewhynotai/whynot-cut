@@ -639,7 +639,7 @@ class TestHeartbeat(ClientFixture):
 
     @unittest.skipUnless(os.name == "nt", "Git Bash is only needed on Windows")
     def test_git_bash_found_looks_where_claude_code_looks(self):
-        """Only where Claude Code itself looks (review f2ca516 P2): CLAUDE_CODE_GIT_BASH_PATH (environment, else the
+        r"""Only where Claude Code itself looks (review f2ca516 P2): CLAUDE_CODE_GIT_BASH_PATH (environment, else the
         Claude settings env) naming bash.exe / sh.exe, `git` on an absolute PATH folder (<git>\..\..\bin\bash.exe),
         and the two literal Program Files folders. A per-user Git under %LOCALAPPDATA% counts only through the settings
         entry the installer writes, because Claude Code never looks there by itself."""

@@ -313,6 +313,20 @@ def accelerator(video: dict | None = None, gpu: dict | None = None, *, backend: 
     return {"video": video, "transcription": dev, "line": f"Video: {v} · transcription: {tx}"}
 
 
+def disk_summary(home: Path | None = None) -> dict:
+    """The doctor's disk line (T4.15): what `reel clean` reports, without removing anything. {removable_bytes (what
+    `reel clean --apply` frees), items: {key: bytes}, how}; a scan that fails is an `error` line, never a failed
+    doctor."""
+    try:
+        from .housekeeping import scan
+        rep = scan(home)
+    except Exception as e:  # noqa: BLE001  the doctor reports, it never stops on its disk line
+        return {"error": f"{type(e).__name__}: {e}"}
+    return {"removable_bytes": rep["removable_bytes"],
+            "items": {i["key"]: i["bytes"] for i in rep["items"]},
+            "how": "reel clean lists what can go; reel clean --apply frees it after the editor's yes"}
+
+
 def doctor() -> dict:
     from . import settings as S
     mods = {}
@@ -341,9 +355,12 @@ def doctor() -> dict:
            "premiere_bridge": br, "settings_file": st["_file"], "settings_problems": st["_problems"],
            "clients_root": str(cr) if cr else None}
     rt = rep["runtime"] = runtime_report()
+    rep["disk"] = disk_summary()                           # T4.15: what `reel clean --apply` would free (read-only)
     rep["isolated"] = rt["isolated"]
     gh = guard_heartbeat()
     rep["guard_active"], rep["guard_heartbeat"] = gh["active"], gh
+    from . import lead_steps
+    lt = rep["lead_tokens"] = lead_steps.doctor_check()      # BL-15: lead-only steps need the guard's approvals
     rep["transcription_speed"] = transcription_speed()
     rep["accelerator"] = accelerator(gpu=rep["gpu"])      # T4.10: GPU (NVENC/NVDEC, VideoToolbox) or CPU, in one line
     fixes = []
@@ -434,6 +451,11 @@ def doctor() -> dict:
     elif not gh["active"]:
         fixes.append({"item": "WhyNot Cut guard hooks not confirmed running (no guard-ok heartbeat in the last 24 h): "
                               "assets/ and data/ may not be protected", "who": "editor", "fix": gh["fix"]})
+    if not lt["ok"]:
+        fixes.append({"item": "lead-only steps (approve-plan, handoff --delivered, ...) would be refused: "
+                              + ("the guard hook is not registered" if not lt["registered"]
+                                 else "approvals cannot be written in the engine home"),
+                      "who": "editor", "fix": lt["fix"]})
     rep["ready"] = {"engine": rep["venv_ok"] and all(v is True for v in mods.values()) and bool(rep["ffmpeg"]),
                     "premiere_build": bool(apps["premiere"]) and br["loads"] and br["alive"],
                     "preview_and_xml": rep["venv_ok"] and bool(rep["ffmpeg"]), "reel_command": rc["ok"]}

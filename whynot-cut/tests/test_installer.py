@@ -3759,6 +3759,26 @@ class TestSettingsAndDoctor(unittest.TestCase):
         self.assertEqual(sets, [f"clients_root={self.home / 'Documents' / 'WhyNot Clients'}", "language=ar",
                                 "whisper_model=large-v3"])  # the strongest, also without an NVIDIA GPU
 
+    def test_settings_issues_the_lead_token_for_exactly_its_call(self):
+        """BL-15: `settings --init` is a lead-only step; the installer starts it itself, so it issues the engine's
+        approval token for exactly that call, in the engine home the child sees (one token, consumable once)."""
+        lib = self.fx.plugin_root / "engine" / "reel" / "lib"
+        lib.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(SK / "engine" / "reel" / "lib" / "lead_steps.py", lib / "lead_steps.py")
+        ctx = self.ctx()
+        self.assertEqual(self.sy.step_settings(ctx).status, "ok")
+        [argv] = self.calls()
+        toks = sorted((ctx.paths.whynot / "run" / "lead-tokens").glob("*.tok"))
+        self.assertEqual(len(toks), 1)
+        sys.path.insert(0, str(SK / "engine" / "reel"))
+        from lib import lead_steps
+        cwd = ctx.paths.whynot if ctx.paths.whynot.is_dir() else Path(os.getcwd())
+        env = ctx.paths.child_env()
+        with mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": env.get("CLAUDE_CODE_SESSION_ID", "")}):
+            self.assertTrue(toks[0].name.startswith(lead_steps.key(argv, str(cwd)) + "."))
+            self.assertTrue(lead_steps.consume(argv, str(cwd), home=ctx.paths.whynot))
+            self.assertFalse(lead_steps.consume(argv, str(cwd), home=ctx.paths.whynot))
+
     def test_a_saved_model_choice_is_kept(self):
         touch(self.home / ".claude" / "whynot-cut.local.md",
               b"---\nlanguage: en\nwhisper_model: medium\nclients_root: ''\n---\n")

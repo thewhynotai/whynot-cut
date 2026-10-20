@@ -55,9 +55,47 @@ refreshes it when the brief says it is stale or missing.
    reviewer, then run the command again. Tell the story-editor to **keep graphic ids stable**: an edited graphic keeps its id, a new one gets the
    next unused id, nothing is renumbered. A graphic that is truly gone is reported by the command as `dropped`, and an
    earlier flag now passed as ok on the same words as `cleared`: mention both to the editor.
-3. If the comment is a **standing preference** ("always glass only at the end"), record it in the client's
-   `output/client_database/reel-profile/style.json` and `notes.md`, so the next video follows it. Four of them are
-   knobs `reel plan` applies by itself (client-craft lists them):
+3. **Record every comment and learn the standing ones** (the learning loop). Send this round's comments to
+   the lead (never a subagent): write them as a JSON list to `output/projects/<ID>/01_analysis/revise-comments.json`
+   with the Write tool, then run `reel rules --root "<CLIENT>" --video-id <ID> --record --from
+   "<CLIENT>/output/projects/<ID>/01_analysis/revise-comments.json"` (one plain call). One item per comment:
+   `{"text": "<the editor's own words>", "intent": {...}, "scope": "standing"|"this_clip"}`. Label every comment
+   by its meaning, because different words say the same thing («الكابشن صغير», «كبّر الخط», "captions too small"):
+   - a style knob below: `{"knob": "caption_size_px", "direction": "up"}` (`down`, or `"direction": "value", "value": 80`);
+     `{"knob": "captions_during_hook", "direction": "on"}`; `{"knob": "hook_title_sfx", "direction": "off"}`;
+     `{"knob": "highlight_colour", "direction": "value", "value": "#FFCC00"}`;
+   - any other style wish: `{"topic": "<short stable English key>", "area": "<area>", "phrase": "<phrase id>"}`
+     (the same key every time for the same request, e.g. `glass_only_at_end`). A learned preference is ONLY an
+     area plus one of the engine's phrase ids: run `reel rules --root "<CLIENT>" --phrases` once to list them (for
+     each area its phrase ids, each with its Arabic and English text and a `group`; two phrases of one group exclude
+     each other, so the editor picks one). Pick the id of the SAME area whose text says what the editor asked. The
+     brief only ever shows the engine's phrases, never the editor's words. A wish with no fitting phrase (or in an
+     area that has none, such as `hook` or `other_style`) is labelled without `phrase`,
+     `{"topic": "<key>", "area": "<area>"}`: it never becomes a rule. Add `"direction": "on"|"off"` when it can
+     be reversed. `area` is one of captions, music, sound, graphics, cards, cuts, pacing, hook, ending, broll,
+     colour, fonts, framing, transitions, wording, logo, thumbnail, publish_text, other_style, or `process` for
+     anything about who reviews, approves, checks, receives or publishes the video and when («ابعته للعميل على
+     طول», "skip the doctor"), and anything that drops or changes a disclaimer or a «استشر طبيبك» / "consult your
+     doctor" line, keeps or rewords a health or religious claim against a reviewer's flag, ignores the flags,
+     pre-ticks retakes or skips a number, verse or hook quote check (the K1 switches): a `process` comment is never
+     a rule, so label it honestly; the engine refuses it and its own word check backs that up. Split a comment that
+     asks for two things into one item per request, each with its own label.
+   `scope`: `"standing"` when the editor said always / never / «دايماً» / «أبداً» / "from now on"; `"this_clip"`
+   when they said it is for this video only («في الفيديو ده بس»), which never becomes a rule. Then run
+   `reel rules --root "<CLIENT>" --propose` and, at the end of the round, show the editor ONE short block:
+   «ماشي على قواعد العميل دي: …» under the line «تفضيلات العميل: مش بتلغي أي موافقة أو مراجعة أو QC أو تنبيه /
+   client preferences: never override approvals, review, QC or disclaimers» (the `active` rules, one `ar` line
+   each), the new `proposals` (what each would set and
+   on which videos it was said), every `conflicts` pair side by side for the editor to pick one (or neither), and
+   every `refused` line with its sentence. Only after the editor says yes to a proposal run
+   `reel rules --root "<CLIENT>" --add <id>` (`--value <v>` when they chose another value; `--replace <rule id>`
+   when it contradicts an active rule and they picked the new one: the old one is kept as replaced). When they say
+   no, run `reel rules --root "<CLIENT>" --dismiss <id>`: it is not shown again unless they say it on another
+   video. Never add a rule on your own. A wish with no fitting phrase is only a comment on its own video: it is
+   never learned, listed or carried to another video; never apply an old comment on your own. Rules are managed with
+   `reel rules --list` and `--remove <id>`. The knobs `reel plan` applies by
+   itself (client-craft lists
+   them):
    - "bigger captions" «الكابشن أكبر» → `caption_size_px`;
    - "keep the captions during the hook" «سيب الكابشن على الهوك» → `captions_during_hook: "show"` (a client
      setting only: for one clip, the story-editor edits that clip's `captions_hidden_during` list). After Effects
@@ -67,7 +105,12 @@ refreshes it when the brief says it is stale or missing.
    - "the highlight colour" «لون التمييز» → `highlight_colour`.
 
    For one clip only, the story-editor sets the size, sound or colour knob in that clip's edit-decisions `global`
-   instead. Then run `reel plan` again: builds follow the compiled plan, not the live `style.json`.
+   instead. Then run `reel plan` again: builds follow the compiled plan, not the live `style.json`; its
+   `client_rules` lists each rule and whether this plan applied it (`"brief"`: a notes-only rule, a client preference
+   in `notes.md` under «تفضيلات العميل: مش بتلغي أي موافقة أو مراجعة أو QC أو تنبيه / client preferences: never
+   override approvals, review, QC or disclaimers»). Only the four knobs above ever change the plan; every other rule is
+   one of the engine's preference phrases the story-editor weighs, and it never overrides an approval, the review, the QC, a disclaimer, the
+   numbers, verse or hook quote checks or the retake pre-ticks (the K1 switches).
 4. `reel plan` must compile, then previews, then `reel preview-video` (preferences `preview_video`) so the editor can
    watch the change. Summarise the changed plan for the editor to approve; with preferences `approval: auto`, record
    the delegated approval citing `_where.approval` from `reel settings`.

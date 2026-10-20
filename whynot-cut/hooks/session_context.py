@@ -92,7 +92,11 @@ GUARDED_TOOLS = ("Bash", "PowerShell", "Write", "Edit", "MultiEdit", "NotebookEd
 # allow anyway, so a Write outside them starts no process. `X/**` also matches X itself (seen live, CLI 2.1.295).
 FILE_IF_TOOLS = ("Write", "Edit", "NotebookEdit")
 FILE_IF_PATTERNS = ("//**/[Aa][Ss][Ss][Ee][Tt][Ss]/**", "//**/[Dd][Aa][Tt][Aa]/**", "//**/*.whynot-*/**",
-                    "//**/*[Aa][Ff][Tt][Ee][Rr] [Ee][Ff][Ff][Ee][Cc][Tt][Ss]*/**")
+                    "//**/*[Aa][Ff][Tt][Ee][Rr] [Ee][Ff][Ff][Ee][Cc][Tt][Ss]*/**",
+                    # BL-15: the lead-step tokens (run/lead-tokens) and that folder's 8.3 short name
+                    "//**/[Ll][Ee][Aa][Dd]-[Tt][Oo][Kk][Ee][Nn][Ss]/**", "//**/[Ll][Ee][Aa][Dd]-[Tt]~*/**",
+                    # BL-15: Claude Code's session transcripts (<claude config>/projects/**/*.jsonl)
+                    "//**/[Pp][Rr][Oo][Jj][Ee][Cc][Tt][Ss]/**/*.[Jj][Ss][Oo][Nn][Ll]")
 
 
 def _glob_rx(pattern: str) -> str:

@@ -435,6 +435,28 @@ def chosen_model(ctx: base.Ctx) -> str:
     return m if m in MODELS else resolve_answers(ctx)["whisper_model"]
 
 
+def lead_token(ctx: base.Ctx, args: list) -> str:
+    """`settings --init` is a lead-only step: the engine runs it only with an approval token for exactly that call
+    (BL-15). The installer starts it itself, on the editor's own answers, so it issues that token the way the panel
+    does: through the plugin's own engine/reel/lib/lead_steps.py, in the engine home and with the session the engine
+    child will see (ctx.paths.child_env()), for the folder it runs in. A plugin without that module has no such wall.
+    Returns "" or the error, which the step reports if the engine then refuses."""
+    lib = ctx.plugin_root / "engine" / "reel" / "lib" / "lead_steps.py"
+    if not lib.is_file():
+        return ""
+    try:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("wnc_lead_steps", lib)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        cwd = _cwd(ctx)
+        mod.issue_for([str(a) for a in args], ctx.paths.child_env(), cwd=str(cwd) if cwd else os.getcwd(),
+                      issuer="installer")
+    except Exception as e:  # noqa: BLE001  reported with the step's result when the engine refuses
+        return f"{type(e).__name__}: {e}"
+    return ""
+
+
 def step_settings(ctx: base.Ctx) -> base.StepResult:
     a = ctx.answers or resolve_answers(ctx)
     model = chosen_model(ctx)
@@ -445,9 +467,11 @@ def step_settings(ctx: base.Ctx) -> base.StepResult:
     if _engine_missing(ctx):
         return _record(ctx, "settings", "amber", "the engine runtime is missing; your preferences were not written",
                        "run the installer again")
+    token_error = lead_token(ctx, args)
     rc, out = base.run_cmd(ctx, engine_cmd(ctx, *args), ENGINE_TIMEOUT, _cwd(ctx))
     if rc != 0:
-        return _record(ctx, "settings", "amber", f"reel settings failed (exit {rc}: {base.tail(out)})",
+        return _record(ctx, "settings", "amber", f"reel settings failed (exit {rc}: {base.tail(out)})"
+                       + (f"; approval token not written ({token_error})" if token_error else ""),
                        "set them later with /whynot-cut:preferences in Claude")
     return _record(ctx, "settings", "ok", f"preferences written: clients folder {a['clients_root']}, language "
                                           f"{a['language']}, Whisper {model}")

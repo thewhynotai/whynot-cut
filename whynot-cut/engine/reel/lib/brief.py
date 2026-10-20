@@ -550,7 +550,7 @@ KEEP_ALWAYS = ("ok", "status", "error", "where", "how", "log", "refused", "block
 FULL_KEYS = {
     "previews": ("previews", "contact_sheet", "warnings"),
     "plan": ("ok", "errors", "warnings", "events", "cues", "main_segments", "edit_plan", "caption_look_suggestion",
-             "reference_style", "missing_semantic_files", "how"),
+             "reference_style", "missing_semantic_files", "how", "client_rules"),
     "ppro-build": ("status", "ok", "checks", "project", "bridge", "premiere_error", "previous_version_backup",
                    "previous_restored", "closed_previous", "job_data", "result", "at", "prproj_mtime", "how",
                    "warnings", "stills_redrawn", "qc_frames", "qc_frames_note", "parked_previous", "content_signature",
@@ -564,7 +564,7 @@ FULL_KEYS = {
 SHORT_KEYS = {
     "previews": ("previews", "contact_sheet", "warnings"),
     "plan": ("ok", "errors", "warnings", "events", "cues", "main_segments", "edit_plan", "caption_look_suggestion",
-             "reference_style", "missing_semantic_files", "how"),
+             "reference_style", "missing_semantic_files", "how", "client_rules"),
     "ppro-build": ("status", "ok", "checks", "project", "premiere_error", "previous_version_backup", "how",
                    "warnings", "stills_redrawn", "qc_frames", "qc_frames_note", "parked_previous", "detail", "blocked",
                    "refused", "fix", "missing", "error", "editor_message"),

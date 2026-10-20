@@ -313,14 +313,31 @@ def python_runs(py: Path, timeout: int = 60) -> bool:
         return False
 
 
-def prune(home: Path, keep: set[str]) -> dict:
+PRUNE_LINK_SAFE = True   # T4.15: prune removes through lib/linksafe.py and has a candidates-only mode (dry_run)
+
+
+def prune(home: Path, keep: set[str], *, dry_run: bool = False) -> dict:
     """Delete runtimes/<id> folders other than `keep` (current + one previous, for rollback). Only folders that are
     runtimes (a pyvenv.cfg or a WHYNOT_RUNTIME inside, a valid id) and not being built (no .<id>.building lock).
-    A folder that cannot be removed (in use) is reported, never an error. {removed: [...], kept: [...], failed: {}}."""
-    import shutil
+    A folder that cannot be removed (in use) is reported, never an error. {removed: [...], kept: [...], failed: {}}.
+    dry_run: only list what would go (`reel clean`). Removal goes through lib/linksafe.py anchored at the home's
+    real path within runtimes/ (COORDINATION rule 15): a runtime that is a link is removed as a name, never entered.
+    The runtime `current` names NOW is always kept, whatever the caller computed earlier."""
+    keep = set(keep) | ({plat.current_runtime_id(home)} - {None})
     out = {"removed": [], "kept": sorted(keep), "failed": {}}
     d = runtimes_dir(home)
     if not d.is_dir():
+        return out
+    try:
+        from . import linksafe
+    except ImportError:                 # setup/setup_env.py imports this file as a plain module (lib/ on sys.path)
+        reel = str(Path(__file__).resolve().parents[1])     # engine/reel: linksafe needs its package (lib.errors)
+        if reel not in sys.path:
+            sys.path.insert(0, reel)
+        from lib import linksafe  # type: ignore[no-redef]
+    anchor = os.path.abspath(home)       # as given; linksafe resolves it once (the home may be a junction)
+    if linksafe.is_link(d):
+        out["failed"]["runtimes"] = "the runtimes folder is a link; nothing is removed through it"
         return out
     for rt in sorted(d.iterdir()):
         rid = rt.name
@@ -329,18 +346,14 @@ def prune(home: Path, keep: set[str]) -> dict:
             continue
         if not ((rt / "pyvenv.cfg").is_file() or (rt / STAMP).is_file()) or (d / f".{rid}.building").exists():
             continue
-        def _chmod_retry(fn, path, _exc):
-            try:
-                os.chmod(path, 0o700)
-                fn(path)
-            except OSError:
-                pass
+        if dry_run:
+            out["removed"].append(rid)
+            continue
         try:
-            shutil.rmtree(rt, **({"onexc": _chmod_retry} if sys.version_info >= (3, 12) else
-                                 {"onerror": _chmod_retry}))
-        except OSError:
+            linksafe.remove(rt, anchor, within=plat.RUNTIMES_DIR)
+        except linksafe.Guidance:        # RemoveIncomplete (a file in use) or a refused path: reported below
             pass
-        if rt.exists():
+        if os.path.lexists(rt):
             out["failed"][rid] = "in use or locked; removed on a later reel setup"
         else:
             out["removed"].append(rid)

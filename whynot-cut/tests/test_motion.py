@@ -22,6 +22,7 @@ SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
 from lib import common  # noqa: E402
+from lib import lead_steps  # noqa: E402  BL-15: a lead-only step runs with the guard's token
 from lib.common import Paths, write_json, read_json  # noqa: E402
 from test_pipeline import assert_js_syntax  # noqa: E402  (functions only: importing classes would run them twice)
 from test_podcast import SHEET, ff, make_episode_client, run_guard, validated_plan  # noqa: E402,F401
@@ -1128,6 +1129,7 @@ class TestMotionPlan(unittest.TestCase):
         from lib.motion_plan import fingerprint
         self.assertTrue(self.compile(good_script())["ok"])
         cli = SK / "engine" / "reel" / "cli.py"
+        lead_steps.issue_for(["approve-plan", "--root", str(self.root), "--video-id", "EP12_R01_MO", "--by", "editor"])
         r = subprocess.run([sys.executable, "-B", str(cli), "approve-plan", "--root", str(self.root), "--video-id",
                             "EP12_R01_MO", "--by", "editor"], capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -2226,6 +2228,7 @@ class TestMotionQC(CompiledMotion):
         cli = SK / "engine" / "reel" / "cli.py"
         base = [sys.executable, "-B", str(cli), "verify", "--record", "--verdict", "pass", "--notes", "x",
                 "--root", str(self.root), "--video-id", "EP12_R01_MO"]
+        lead_steps.issue_for(base[3:])      # BL-15: the lead's token
         r = subprocess.run(base, capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stderr)
         rec = read_json(self.reel.p("08_quality_control/visual-verification.json"))
@@ -2233,6 +2236,7 @@ class TestMotionQC(CompiledMotion):
         _t.sleep(1.1)
         from lib import motion_build
         motion_build.render_path(self.reel).touch()
+        lead_steps.issue_for(base[3:])      # the refusal below must be the stale render's, not a missing token
         r = subprocess.run(base, capture_output=True, text=True, encoding="utf-8")
         self.assertNotEqual(r.returncode, 0)
 

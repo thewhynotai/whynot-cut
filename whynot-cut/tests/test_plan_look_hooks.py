@@ -28,6 +28,7 @@ sys.path.insert(0, str(SK / "engine" / "reel"))
 sys.path.insert(0, str(SK / "tests"))
 
 from lib import common  # noqa: E402
+from lib import lead_steps  # noqa: E402  BL-15: a lead-only step runs with the guard's token
 from lib.common import read_json, write_json  # noqa: E402
 
 WORDS_SEQ = "02_transcription/words-seq.json"
@@ -201,6 +202,7 @@ class TestLookVerbs(PlanHookCase):
         import cli
         so, se = io.StringIO(), io.StringIO()
         code = 0
+        lead_steps.issue_for(["--root", str(self.root), "--video-id", "CLIP1", *argv])    # BL-15: the lead's token
         with contextlib.redirect_stdout(so), contextlib.redirect_stderr(se):
             try:
                 cli.main(["--root", str(self.root), "--video-id", "CLIP1", *argv])

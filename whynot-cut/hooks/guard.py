@@ -10,7 +10,8 @@ Rules enforced in code (prose rules get forgotten in long sessions):
      left alone (engine/reel/lib/client_marker.py).
   2. Whole project folders are not deleted by the agent (rm -r on output/ or output/projects/<ID>).
   3. After Effects / Photoshop builds are opt-in extras: `reel ae-*|ps-*|mogrt-build` need --extras.
-  4. Roles: subagents never approve the plan (`approve-plan`, `auto-approve`), record a verification verdict or
+  4. Roles: subagents never approve the plan (`approve-plan`, `auto-approve`), record comments or add, dismiss
+     or remove a client rule (`rules --record|--add|--dismiss|--remove`, 3.0 T4.3), record a verification verdict or
      verify a transcript as the editor (the lead does, after looking); WhyNot Cut's reviewer agents (matched on the
      full `whynot-cut:<name>`) are read-only (also no `needs-you --write`); setup-doctor diagnoses and never installs.
   5. Adobe preferences (PlayerDebugMode, After Effects prefs) are the editor's to change.
@@ -41,6 +42,11 @@ before the parsing above and denies by text: a gated step (BACKSTOP_STEPS, the w
 gate rules) anywhere in the lowercased command is refused however it is spelled or launched; only plain read-only text
 searches may name one (backstop()). Code a subagent writes and then runs, and Python that imports the engine, are out
 of scope by design: the second wall is the engine-side write gate (L-T8).
+For the lead-only steps (LEAD_STEPS below, a copy of engine/reel/lib/lead_steps.py's table, pinned equal by a test) the
+engine has its own wall (BL-15): when this guard allows the LEAD's own plain call of such a step it writes a
+single-use approval token for exactly that call (lead_steps.hook_issue, imported only then), and the engine runs the
+step only when it consumes one. Nothing may write into a token folder (run/lead-tokens, judged by the real path), and a
+subagent's shell command may not name it.
 """
 from __future__ import annotations
 
@@ -66,6 +72,16 @@ PLUGIN_AGENT = "whynot-cut:"           # role rules apply to this plugin's own a
 READ_ONLY_AGENTS = {"medical-reviewer", "claim-checker", "frame-inspector", "graphic-checker",
                     "segment-proofreader", "qc-reviewer", "intake-inspector", "setup-doctor", "moment-scout"}
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
+# BL-15: the steps only the lead editor runs, (step, the options that make it lead-only). A COPY of
+# engine/reel/lib/lead_steps.py LEAD_STEPS (tests/test_lead_token_guard.py pins them equal); transcript-verify (an
+# allow-list of --by values) has its own rule in check_reel and backstop()
+LEAD_STEPS = (
+    ("approve-plan", ()), ("auto-approve", ()), ("reels-select", ()),
+    ("lock", ("--release",)), ("settings", ("--init",)), ("handoff", ("--delivered",)),
+    ("verify", ("--record",)), ("ae-probe", ("--record",)), ("ref-style", ("--adopt", "--yes")),
+    ("caption-looks", ("--pick", "--yes")), ("rules", ("--add",)), ("rules", ("--remove",)),
+    ("rules", ("--record",)), ("rules", ("--dismiss",)), ("clean", ("--apply",)))
+TOKEN_DIR = ("run", "lead-tokens")                  # <engine home>/run/lead-tokens: the guard's approval tokens
 QC_FORBIDDEN = {"ppro-build", "approve-plan", "plan", "previews", "audio-clean", "transcribe",
                 "transcript-correct", "client-init", "client-db", "sfx", "premiere", "handoff",
                 "reels-select", "reels-plan", "episode-transcribe", "publish-check",
@@ -73,7 +89,9 @@ QC_FORBIDDEN = {"ppro-build", "approve-plan", "plan", "previews", "audio-clean",
 # `transcript-verify --by` values a subagent may record (plus its own role name); anything else, or no --by (the CLI
 # records a missing --by as "editor"), is the lead's (T4.7 review)
 SUBAGENT_VERIFY_BY = frozenset({"agent", "claude"})
-SETUP_DOCTOR_FORBIDDEN = {"setup", "model-download", "gpu-enable", "ppro-install"}
+# setup-doctor diagnoses without changing anything: the steps it may not run, and (step, option) pairs for a step whose
+# plain form it may run: `reel clean` is its dry run, `reel clean --apply` (any opt-in) deletes (T4.15 review 41bc006)
+SETUP_DOCTOR_FORBIDDEN = {"setup", "model-download", "gpu-enable", "ppro-install", ("clean", "--apply")}
 GLOBAL_VALUE_OPTS = ("--root", "--video-id", "--profile", "--episode")
 MUTATE_ALL = {"rm", "mv", "touch", "chmod", "chown", "truncate", "unlink", "rmdir", "shred", "dot_clean",
               "setfile", "srm"}
@@ -338,6 +356,10 @@ def protected(path_str: str, cwd: Path, writing: bool = True, recursive: bool = 
         return None
     if writing and ae_pref_path(path_str.strip("'\"")):
         block(AE_PREFS_MSG)             # every caller is about to write there: not a client-folder message
+    if writing and token_target(path_str, cwd):
+        block(TOKEN_MSG)                # BL-15: only the guard writes approval tokens
+    if writing and transcript_target(path_str, cwd):
+        block(TRANSCRIPT_MSG)           # BL-15: the guard reads the lead's calls there
     t = tainted(path_str)
     if t:
         return t[0]
@@ -346,6 +368,94 @@ def protected(path_str: str, cwd: Path, writing: bool = True, recursive: bool = 
         if hit:
             return hit
     return None
+
+
+TOKEN_MSG = ("the approval-token folder (run/lead-tokens) is written only by the guard itself, never by hand: a "
+             "lead-only step is approved by running it as one plain call from the main conversation.")
+
+
+def in_token_dir(p) -> bool:
+    """The REAL path (links, junctions, 8.3 names resolved; any case) lies in a run/lead-tokens folder (the same rule
+    as lead_steps.in_token_dir)."""
+    try:
+        parts = [x.lower() for x in re.split(r"[\\/]+", os.path.realpath(p))]
+    except (OSError, ValueError):
+        return False
+    return any(parts[i:i + 2] == list(TOKEN_DIR) for i in range(len(parts) - 1))
+
+
+def _names(text: str, name: str) -> bool:
+    """The text names `name` (a file or folder name, lower case): as written or with the spelling stripped
+    (_text_forms: escapes, joined quotes, carets, backticks), or through a glob segment that matches it (`lead-tok*`,
+    `gua*.py`); a glob with fewer than 6 literal characters (`*`, `*lead*`, `*token*`) names nothing."""
+    for t in _text_forms(text.lower().translate(_DASHES)):
+        if name in t:
+            return True
+        for tok in re.split(r"[\s;|&<>()\"'`]+", t):
+            for seg in re.split(r"[\\/]", tok):
+                if any(c in seg for c in "*?[") and len(re.sub(r"\[[^\]]*\]|[*?]", "", seg)) >= 6 \
+                        and fnmatch.fnmatchcase(name, seg):
+                    return True
+    return False
+
+
+def names_token_dir(text: str) -> bool:
+    """The text names the approval-token folder (run/lead-tokens), in any spelling _names sees."""
+    return _names(text, TOKEN_DIR[-1])
+
+
+HOOK_SCRIPT = "guard.py"
+
+
+def names_hook_script(text: str) -> bool:
+    """The text names this hook script (guard.py): a subagent may not run it by hand, with a payload of its own, to
+    get a lead token (BL-15 review r3 P2-1). Reading it goes through the Read tool."""
+    return _names(text, HOOK_SCRIPT)
+
+
+TRANSCRIPT_MSG = ("Claude Code's transcript store (<claude config>/projects; only <project>/memory is open) is never "
+                  "written by hand: the guard reads the lead's calls there.")
+
+
+def _fold(p: str) -> str:
+    """A real path in comparable form: normcase (Windows), and lower case on macOS too (APFS ignores case)."""
+    p = os.path.normcase(p)
+    return p.lower() if sys.platform == "darwin" else p
+
+
+def in_transcript_store(path) -> bool:
+    """Whether a path's REAL location (links and junctions resolved; case folded on Windows and macOS) lies inside
+    <claude config>/projects (CLAUDE_CONFIG_DIR, else ~/.claude), anywhere but Claude Code's own <project>/memory/**."""
+    store = _fold(os.path.realpath(
+        Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser() / "projects"))
+    folded = _fold(os.path.realpath(path))
+    if folded != store and not folded.startswith(store.rstrip("\\/") + os.sep):
+        return False
+    rest = [x for x in folded[len(store):].replace("\\", "/").split("/") if x]
+    return not (len(rest) >= 2 and rest[1] == "memory" and not folded.lower().endswith(".jsonl"))
+
+
+_EXTRACT = re.compile(r"(?<![\w.-])(?:tar|bsdtar|unzip|7z|7za|7zr|unrar|jar|expand-archive)(?:\.exe)?(?![\w-])", re.I)
+
+
+def transcript_target(path_str: str, cwd: Path) -> bool:
+    """A write target whose real path lies inside Claude Code's transcript store (any name: a .jsonl, a new or an
+    existing folder, a moved folder), except <project>/memory/**: the guard confirms the lead's calls there (BL-15;
+    review 8d04064 P2-1)."""
+    try:
+        return any(in_transcript_store(p) for p in paths_of(path_str, cwd))
+    except (OSError, ValueError):
+        return False
+
+
+def token_target(path_str: str, cwd: Path) -> bool:
+    """A write target inside a token folder: by its words, or by the real path of what it expands to."""
+    if names_token_dir(path_str):
+        return True
+    try:
+        return any(in_token_dir(p) for p in paths_of(path_str, cwd))
+    except (OSError, ValueError):
+        return False
 
 
 def first_source(tokens: list[str], cwd: Path) -> tuple[str, str] | None:
@@ -1514,6 +1624,10 @@ def check_reel(exe: str, argv: list[str], agent: str | None, cwd: Path | None = 
         if agent:                       # gate rules: every subagent, whatever plugin it comes from
             if sub == "approve-plan":
                 block("only the lead editor (main conversation) records plan approval, after the editor approves.")
+            if sub == "rules" and any(has_opt(argv, o) for o in ("--add", "--remove", "--record", "--dismiss")):
+                block("only the lead editor records the editor's comments or adds, dismisses or removes a client "  # T4.3
+                      "rule (`reel rules --record/--add/--dismiss/--remove`), on the editor's word. Report the "
+                      "comments or the proposal instead.")
             if sub == "auto-approve":                                      # 3.0 T4.7
                 block("only the lead editor (main conversation) records the approval a standing `approval: auto` "
                       "gives. Report that the plan is ready instead.")
@@ -1548,11 +1662,22 @@ def check_reel(exe: str, argv: list[str], agent: str | None, cwd: Path | None = 
                       "--yes) instead.")
             if sub == "ae-probe" and has_opt(argv, "--record"):
                 block("only the lead editor records the After Effects probe verdict, after viewing the probe frames itself.")
+            for pair in SETUP_DOCTOR_FORBIDDEN:          # T4.15: a step setup-doctor may run only without the option
+                if role == "setup-doctor" and isinstance(pair, tuple) and sub == pair[0] and has_opt(argv, pair[1]):
+                    block(f"setup-doctor diagnoses without changing anything: it may not run `reel {pair[0]} "
+                          f"{pair[1]}`. Give the lead what `reel {pair[0]}` shows instead.")
+            if sub == "clean" and has_opt(argv, "--apply"):               # T4.15 review 41bc006 P2-1
+                block("only the lead editor runs `reel clean --apply` (with or without --models / --uv-cache), after "
+                      "the editor's yes. Run the dry run `reel clean` and report what it lists instead.")
             if role == "qc-reviewer" and sub in QC_FORBIDDEN:
                 block(f"qc-reviewer is independent and read-only: it may not run `reel {sub}`. Report the issue instead.")
             if role == "setup-doctor" and (sub in SETUP_DOCTOR_FORBIDDEN or (sub == "doctor" and has_opt(argv, "--fix"))):
                 block(f"setup-doctor diagnoses without changing anything: it may not run `reel {sub}`. Give the lead "
                       f"the exact fix instead.")
+            for step, opts in LEAD_STEPS:                 # BL-15: the whole table (e.g. caption-looks --pick --yes)
+                if sub == step and all(has_opt(argv, o) for o in opts):
+                    block(f"only the lead editor runs `reel {' '.join((step,) + opts)}`, on the editor's word. "
+                          f"Report to the lead instead.")
             if sub == "py" and (_REEL_PY_CLI.search(" ".join(rest).lower().replace("\\", "/")) or
                                 any(is_reel_script(a, cwd if cwd is not None else Path.cwd()) for a in rest)):
                 block("a subagent's `reel py` may not start the engine CLI (reel.cli, engine/reel/cli, runpy). Run "
@@ -1955,6 +2080,27 @@ LOCK_WRITE = re.compile(r">|(?<![\w-])-delete\b|\b(rm|del|erase|rd|rmdir|unlink|
 LOCK_SHORT = {"sc", "ac", "mi", "ni", "ri", "py", "sh"}         # 2-letter aliases: only as a command's first word
 _STREAM_REDIR = re.compile(r"[0-9]?>&[0-9-]|[0-9*]>>?\s*(\"[^\"]*\"|'[^']*'|[^\s;|&]+)")
 WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+# 3.0 T4.3: the client rules registry and the recorded comments (never editing-rules.json / publish-rules.json)
+RULES_NAMES = ("rules.json", "revision-notes.json")
+_RULES_NAME_RX = re.compile(r"(?<![\w-])(?:rules\.json|revision-notes\.json)|(?<![\w-])(?:rules|revisi)~\d+\.jso")
+_RULES_VAR_PATH = re.compile(r"(?:reel-profile|01_analysis)[\\/]+[^\s\"']*[$%]")
+
+
+def names_rules_file(text: str) -> bool:
+    """The text names rules.json or revision-notes.json in any spelling the guard reads: as written, through any
+    path (relative, ./, .., quoted, \\), with the spelling stripped (_text_forms: joined quotes, escapes, carets,
+    'a' + 'b'), as a glob that spells the name (`rule?.json`, `r*s.json`; 6+ literal characters), as its 8.3 short
+    name, or as a variable inside a reel-profile / 01_analysis path (`.../reel-profile/$f.json`)."""
+    low = str(text).lower()
+    for t in _text_forms(low) | {low, re.sub(r"\\(?=[^\w\\/])", "", low)}:     # `rules\.json` too
+        if _RULES_NAME_RX.search(t) or _RULES_VAR_PATH.search(t):
+            return True
+        for tok in re.split(r"[\s;|&<>()\"'`,]+", t):
+            seg = re.split(r"[\\/]", tok)[-1]
+            if any(c in seg for c in "*?[") and len(re.sub(r"\[[^\]]*\]|[*?]", "", seg)) >= 6 \
+                    and any(fnmatch.fnmatchcase(n, seg) for n in RULES_NAMES):
+                return True
+    return False
 
 
 def names_lock(text: str) -> bool:
@@ -1981,13 +2127,16 @@ def lock_write(text: str) -> bool:
 # --------------------------------------------------------------------------- subagent backstop (deny by text)
 # the gate rules of check_reel as (step, the options it needs, the roles it applies to; None = every subagent);
 # transcript-verify (an allow-list of --by values) is checked in backstop() itself
-BACKSTOP_STEPS = (
-    ("approve-plan", (), None), ("auto-approve", (), None), ("reels-select", (), None),
-    ("lock", ("--release",), None), ("settings", ("--init",), None), ("handoff", ("--delivered",), None),
-    ("verify", ("--record",), None), ("ae-probe", ("--record",), None), ("ref-style", ("--adopt", "--yes"), None),
+BACKSTOP_STEPS = tuple((step, opts, None) for step, opts in LEAD_STEPS) + (            # BL-15: one table
     ("needs-you", ("--write",), READ_ONLY_AGENTS), ("ref-style", ("--record",), {"qc-reviewer"}),
     ("ref-style", ("--apply",), {"qc-reviewer"}), ("doctor", ("--fix",), {"setup-doctor"}))
 TEXT_TOOLS = {"rg", "grep", "findstr", "select-string", "get-content", "cat", "type", "head", "tail"}
+# T4.15 (review 41bc006 P2-1): `reel clean --apply` deletes from the engine home, so it is the lead's, after the
+# editor's yes; the dry run `reel clean` stays open. With BL-15 this row belongs in LEAD_STEPS (both copies), which
+# builds it into BACKSTOP_STEPS above; then this adds nothing.
+CLEAN_APPLY_STEP = ("clean", ("--apply",), None)
+if CLEAN_APPLY_STEP not in BACKSTOP_STEPS:
+    BACKSTOP_STEPS += (CLEAN_APPLY_STEP,)
 _NOT_PLAIN = re.compile(r"[$&`%!(]|@\(|--pre\b|(?<![\w.-])(?:iex|eval|env|xargs|python[\w.]*|pyw?|node|deno|bun|ruby|"
                         r"perl|php|lua|bash|sh|zsh|dash|ksh|pwsh|powershell|cmd|wscript|cscript|mshta|osascript|uvx?|"
                         r"conda|pipx)(?![\w-])")
@@ -2010,6 +2159,12 @@ def _text_forms(t: str) -> set[str]:
     return {t, s}
 
 
+# a token with a / or \ followed by a name is a path (BL-15 follow-up 2): a client folder named like a step
+# (--root ".../Clean Skin", ".../Rules Clinic") is never read as that step. Shell separators end a token, so
+# `cd /x;reel${IFS}clean` still shows `clean`, and `\clean` is caught in the stripped form.
+_BS_PATH = re.compile(r"[^\s;&|(){}$<>]*[\\/][\w.~-][^\s;&|(){}$<>]*")
+
+
 def _bs_word(t: str, w: str) -> bool:
     return re.search(r"(?<![\w.-])" + re.escape(w) + r"(?![\w.-])", t) is not None
 
@@ -2028,17 +2183,29 @@ def backstop(text: str, agent: str):
     role = own_role(agent)
     mine = SUBAGENT_VERIFY_BY | ({role} if role else set())
     for f in _text_forms(t):
+        words = _BS_PATH.sub(" ", f)                    # a step is a word of its own, never part of a path
         for step, opts, roles in BACKSTOP_STEPS:
-            if (roles is None or role in roles) and _bs_word(f, step) and all(_bs_opt(f, o) for o in opts):
+            if (roles is None or role in roles) and _bs_word(words, step) and all(_bs_opt(f, o) for o in opts):
                 block(f"this command names `{' '.join((step,) + opts)}`, a step only the lead editor runs, so a "
                       f"subagent may not run it in any form. Report to the lead instead (plain read-only searches "
                       f"with rg, grep, findstr, Select-String, Get-Content, cat, type, head or tail may name it).")
+        if "rules_loop" in f:                       # 3.0 T4.3: the module behind `rules --add/--remove`
+            block("this command names the engine's rules module (rules_loop), whose writes only the lead runs, through "
+                  "`reel rules`. Use `reel rules --propose` or `--list` to read the rules.")
         if _bs_word(f, "transcript-verify"):
             bys = [v.strip("'\"") for v in re.findall(r"(?<![\w-])--by?(?:=|\s+)([^\s;|&]+)", f)]
             if not bys or any(v not in mine for v in bys):
                 block("only the lead editor records `transcript-verify --by editor` (or without --by). A subagent "
                       "may only name itself (--by " + ", ".join(sorted(mine)) + "), in a command of its own. Report "
                       "the corrections instead.")
+
+
+def names_lead_step(data: dict) -> bool:
+    """Cheap first look before the token module is loaded: the command names a LEAD_STEPS step as a word together
+    with each of its options, or transcript-verify."""
+    words = set(re.findall(r"[\w-]+", str((data.get("tool_input") or {}).get("command") or "")))
+    return "transcript-verify" in words or any(step in words and all(o in words for o in opts)
+                                                for step, opts in LEAD_STEPS)
 
 
 def main():
@@ -2061,6 +2228,12 @@ def main():
         if guarded:
             block(f"could not check this {tool} call ({type(e).__name__}: {str(e)[:200]}), so it is blocked. "
                   f"Simplify the command or split it; report it if a plain command is refused.")
+    if tool in ("Bash", "PowerShell") and not data.get("agent_type") and names_lead_step(data):
+        try:                            # BL-15: the lead's plain call of a lead-only step gets its approval token
+            import lead_steps           # noqa: PLC0415  (only here: its import would cost every guarded call)
+            lead_steps.hook_issue(data)     # checks plain form, the transcript and the table itself; never raises
+        except Exception:  # noqa: BLE001  an allowed call never fails because of the token (the engine says why)
+            pass
     try:
         deliver_pending(data)           # allowed: hand over a waiting CwdChanged context (never blocks)
     except Exception:  # noqa: BLE001
@@ -2090,6 +2263,11 @@ def check_call(data: dict, tool: str):
         block("subagents may not change, move or delete the client's writer lock (output/.whynot-lock); reading it is "
               "fine (`reel lock --status`). Report it to the lead instead: only the lead runs `reel lock --release`, "
               "on the editor's word.")
+    if agent and names_rules_file(text) and (tool in WRITE_TOOLS or (tool in ("Bash", "PowerShell") and
+                                                                  lock_write(text))):
+        block("subagents may not change the client's rules or the recorded comments (reel-profile/rules.json, "
+              "01_analysis/revision-notes.json); reading them is fine. Only the lead records comments and adds or "
+              "removes a rule, with `reel rules` on the editor's word.")
     if tool in WRITE_TOOLS:
         fp = ti.get("file_path") or ti.get("notebook_path") or ""
         if own_role(agent) in READ_ONLY_AGENTS:
@@ -2101,7 +2279,20 @@ def check_call(data: dict, tool: str):
             block(f"the client's source folder ({hit}) is read-only. Write outputs under <client>/output/.")
         return
     if agent and tool in ("Bash", "PowerShell"):
+        if names_token_dir(str(ti.get("command") or "")):
+            block("subagents may not touch the approval-token folder (run/lead-tokens). Report to the lead instead.")
+        if names_hook_script(str(ti.get("command") or "")):
+            block("subagents may not run or touch the plugin's hook script (guard.py) from a shell; read it with the "
+                  "Read tool. Report to the lead instead.")
         backstop(str(ti.get("command") or ""), agent)
+    if tool in ("Bash", "PowerShell") and (lock_write(str(ti.get("command") or ""))
+                                           or _EXTRACT.search(str(ti.get("command") or ""))):
+        try:
+            here = in_transcript_store(cwd)
+        except (OSError, ValueError):
+            here = False
+        if here:                        # BL-15: e.g. an archive extracted with the store as the working folder
+            block(TRANSCRIPT_MSG)
     if tool == "Bash":
         check_bash(ti.get("command", ""), cwd, agent)
     elif tool == "PowerShell":

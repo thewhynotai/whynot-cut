@@ -28,6 +28,7 @@ SK = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SK / "engine" / "reel"))
 
 from lib import common  # noqa: E402
+from lib import lead_steps  # noqa: E402  BL-15: a lead-only step runs with the guard's token
 from lib import ref_style as RS  # noqa: E402
 from lib.common import Paths, read_json, write_json  # noqa: E402
 from lib.errors import Guidance  # noqa: E402
@@ -484,6 +485,7 @@ class TestCli(Base):
     def reel(self, *argv):
         cmd = [sys.executable, "-B", str(CLI), "--root", str(self.root), "ref-style", *argv]
         e = {k: v for k, v in env().items() if k not in ("PYTHONUTF8", "PYTHONIOENCODING")}
+        lead_steps.issue_for(cmd[3:], e)    # BL-15: the lead's token
         r = subprocess.run(cmd, capture_output=True, env=e)
         return r.returncode, r.stdout.decode("utf-8"), r.stderr.decode("utf-8", "replace")
 
