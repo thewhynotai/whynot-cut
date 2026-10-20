@@ -113,7 +113,12 @@ Agents don't see this conversation, so give them what they need. Start every Age
 | 11 Verify | `whynot-cut:qc-reviewer` (independent, fresh context) | ppro-frames, qc | per-frame verdicts returned |
 | 12 Record + hand off | **you** | `verify --record --verdict pass\|fail --note "…"`, qc, handoff | you viewed the evidence; qc ok **in this message** |
 
-Stage 7, the claims: `whynot-cut:medical-reviewer` is read-only, so you record what it reports. When its table comes back,
+Stage 7, the claims: first run `reel review-scan --root "<CLIENT>" --video-id <ID>` (read-only, no model) and give the
+medical-reviewer its `lines`: each on-screen line with the review domains whose words hit there (on screen or in the
+speech it cites, e.g. a price in a doctor's clip) and the flags its review must cover (`required`). They are pointers,
+never a filter: the reviewer still reads every line. `reel review-scan` refusing for an unknown domain in the client's
+profile is the editor's to fix (it names the domain).
+`whynot-cut:medical-reviewer` is read-only, so you record what it reports. When its table comes back,
 put it through `reel review-flags --root "<CLIENT>" --video-id <ID> --from -` with the table as JSON on standard input:
 `{"items": [{"event_id": "<the graphic id from its table>", "flag": "medical" or "religious", "verdict": "ok",
 "needs-doctor-approval", "reword-to-match" or "remove", "reason": "<its reason>"}]}`. It takes only the flags the client's

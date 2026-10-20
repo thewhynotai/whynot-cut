@@ -716,6 +716,14 @@ def cmd_rules(a):
         out(rules_loop.propose(root))
 
 
+def cmd_review_scan(a):
+    """Addendum M1-T1: per on-screen line of the compiled plan, the review domains whose triggers hit (on screen, in the
+    transcript evidence it cites, or an AI-generated asset) and the flags the reviewer must cover. Deterministic, no LLM,
+    writes nothing; the hints point the reviewer at lines, never filter them."""
+    from lib import review_domains
+    out(review_domains.scan(P(a)))
+
+
 def cmd_episode_sheet(a):
     """T4.4: a podcast episode's sheet template in output/episodes/<EP>/ for the editor to fill in and move into
     data/Episodes/ (the engine never writes into data/)."""
@@ -1182,7 +1190,7 @@ CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze"
 # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
 # and works while another session holds the client (gate G2).
 CORE_READS = {"board", "serve", "perf-report", "setup", "clean", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
-              "status", "next", "lock", "doctor", "validate", "brief"}
+              "status", "next", "lock", "doctor", "validate", "brief", "review-scan"}
 WRITES_IF = {
     "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
                                                 / "output/discovery/input-inventory.json").exists(),
@@ -1765,6 +1773,8 @@ CORE_COMMANDS: dict[str, str] = {
     "rules": "the client's standing rules learned from feedback: --record this video's comments, --propose, "
              "--add <id> (the editor confirmed), --dismiss <id> (the editor said no), --list, --remove <id>, "
              "--phrases (the engine's preference phrases a rule can be made of)",
+    "review-scan": "list each on-screen line's review domains (medical, religious, business, ai) and the flags its "
+                   "review must cover, from the trigger lexicons; read-only, the reviewer still reads every line",
     "approve-plan": "record the approval of the compiled plan (editor or delegated)",
     "auto-approve": "record the approval a standing `approval: auto` gives (by auto; refused unless this client's "
                     "merged preferences say auto); medical and religious lines are never covered",
