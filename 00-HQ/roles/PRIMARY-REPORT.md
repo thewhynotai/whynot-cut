@@ -11,8 +11,10 @@ Keep this run small and cheap: no project work, no file edits by hand, no subage
    `whynot-cut-auto-resume-2`, `whynot-cut-primary-report-2` are disabled. You cannot re-enable them from an unattended run:
    list them under "المطلوب من PRIMARY" with the one step "Claude app → Routines → switch it on".
    Also load `mcp__scheduled-tasks__list_task_runs` and call it (limit 1) for `whynot-cut-hq-intake` and
-   `whynot-cut-auto-resume-2`: if the newest run is `running` and started more than 60 minutes ago (the intake: more
-   than 7 hours, its reviews are long), it is STUCK and
+   `whynot-cut-auto-resume-2`: if the newest run is `running`, measure its age with ONE Bash call
+   `python -X utf8 "D:\0 Work\0 Pegasus IMC Agency\00 TWN\0 TWN AI\Editing Plugin\00-HQ\tools\stale_suites.py" age <its started_at>`
+   (never compute times yourself: started_at is UTC, the shell clock is Cairo labelled "EDT"). Age > 60 (watchdog)
+   or > 420 (intake; its reviews are long) means it is STUCK and
    blocks every later run of that routine. Stop it with `mcp__ccd_session_mgmt__stop_session` (its session id) and
    say so in one line ("stopped stuck <routine> run <id>"); the routine's next scheduled run then works again.
 3. Load `mcp__ccd_session_mgmt__get_session` and call it with "self" to get this run's session id. Mark the delivery:

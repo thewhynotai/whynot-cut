@@ -7,6 +7,7 @@ launcher stub at 0 CPU while its child works, so CPU heuristics would kill live 
 
   python -X utf8 stale_suites.py scan-tag <session id>   list the env.exe launchers carrying WNC_RUN=<session id>
   python -X utf8 stale_suites.py end-tag  <session id>   end those process trees (re-checked just before the kill)
+  python -X utf8 stale_suites.py age <ISO time>         minutes since a zoned timestamp (e.g. list_task_runs started_at)
 Lock helpers (the tested rules behind MASTER-INTAKE step 0.1): lock_line / parse_lock / lock_stale.
 """
 import datetime as dt, json, re, subprocess, sys
@@ -22,6 +23,19 @@ def tagged(procs, session_id):
     pat = re.compile(rf"(^|\s)WNC_RUN={re.escape(session_id)}(\s|$)")
     # env.exe = a running suite; bash.exe = heavy.sh still waiting in the queue with the tagged command (r2 P2-2)
     return [p["pid"] for p in procs if p["name"].lower() in ("env.exe", "bash.exe") and pat.search(p["cmd"] or "")]
+
+
+def age_minutes(iso, now=None):
+    """Whole minutes since an ISO timestamp WITH a zone ('…Z' from list_task_runs, or '+03:00'); None if no zone.
+    Routines must use this instead of doing time arithmetic themselves (2026-10-20 11:40 incident)."""
+    try:
+        t = dt.datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+    if t.tzinfo is None:
+        return None
+    now = now or dt.datetime.now(dt.timezone.utc)
+    return int((now - t).total_seconds() // 60)
 
 
 def lock_line(until, session_id):
@@ -56,6 +70,10 @@ def _env_procs():
 
 
 def main(argv):
+    if len(argv) == 2 and argv[0] == "age":
+        m = age_minutes(argv[1])
+        print("unknown (timestamp has no zone)" if m is None else m)
+        return 0 if m is not None else 2
     if len(argv) == 2 and argv[0] in ("scan-tag", "end-tag"):
         pids = tagged(_env_procs(), argv[1])
         for pid in pids:

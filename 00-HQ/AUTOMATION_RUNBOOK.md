@@ -83,7 +83,7 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
   while one is "in progress"). Effect: no 09:00 report; no watchdog after the 06:00 reset, so the executor (stopped
   05:15) was never resumed. 11:23 Command Center stopped both stuck runs and ran both routines by hand. Detection now
   in every report (PRIMARY-REPORT step 2: a routine whose newest run is `running` for > 60 min = STUCK).
-  Prevention (11:45, on the plan session's evidence that all 4 watchdog hangs were on its step-1 PowerShell call):
+  Prevention (11:40, on the plan session's evidence that all 4 watchdog hangs were on its step-1 PowerShell call):
   the auto-resume prompt is now shell-free (tag check by Glob/Grep on `.git`), time-boxed (any step > 2 min or a
   permission prompt → end the run), treats an idle work track with an unreadable (empty) transcript as STOPPED
   after 60 min, and tells resumed tracks to re-queue heavy jobs lost at a limit and to use `tools/test.sh`.

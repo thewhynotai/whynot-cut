@@ -52,5 +52,20 @@ class Lock(unittest.TestCase):
         self.assertFalse(ss.lock_stale(later, DEAD, None, NOW))          # session state unknown: respect it
 
 
+class Age(unittest.TestCase):
+    """2026-10-20 11:40 incident: the watchdog read UTC run times against a Cairo clock and stopped 3-minute-old runs."""
+
+    def test_utc_z_timestamps(self):
+        now = dt.datetime(2026, 10, 20, 8, 43, tzinfo=dt.timezone.utc)
+        self.assertEqual(ss.age_minutes("2026-10-20T08:40:16.320Z", now), 2)
+        self.assertEqual(ss.age_minutes("2026-10-20T01:40:16Z", now), 422)
+
+    def test_offset_timestamps_and_garbage(self):
+        now = dt.datetime(2026, 10, 20, 8, 43, tzinfo=dt.timezone.utc)
+        self.assertEqual(ss.age_minutes("2026-10-20T11:40:00+03:00", now), 3)
+        self.assertIsNone(ss.age_minutes("yesterday", now))
+        self.assertIsNone(ss.age_minutes("2026-10-20 11:40", now))   # no zone: refuse to guess
+
+
 if __name__ == "__main__":
     unittest.main()
