@@ -1,6 +1,6 @@
 # SETUP-H2 — first session of Helper 2
 
-- **Assigned:** H2 (marketing@)    **Model:** Sonnet 5.5 high    **Size:** S    **Status:** READY
+- **Assigned:** H2 (marketing@)    **Model:** Sonnet 5.5 high    **Size:** S    **Status:** ACCEPTED
 - **Tier:** LIGHT (baseline)
 
 Same as `SETUP-H1.md`, with `h2` everywhere:
@@ -43,3 +43,7 @@ Master decision on the BLOCKED report `inbox\h2\2026-10-20-SETUP-H2.md`:
   If your worktree shows none, fast-forward or branch from the current release/3.0 first.
 - Then do the card's steps: the baseline suite (`h2-setup3`), `npm ci`, and one rendered screen. In the report, state
   the account e-mail, the suite numbers and the failure names.
+
+## Decision (2026-10-20 11:40)
+ACCEPTED (report `inbox\h2\2026-10-20-1133-SETUP-H2.md`, review `reviews/SETUP-H2-r1.md`). 8753 run, 77 failures, all in
+the known environment classes (ENV-01). No code, nothing to merge.
