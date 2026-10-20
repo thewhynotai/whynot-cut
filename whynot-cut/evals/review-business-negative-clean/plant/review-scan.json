@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "plan_kind": "timeline",
-  "plan_fingerprint": "d7623be90b410260",
+  "plan_fingerprint": "0d79c762970dc487",
   "key": "ai+business+medical",
   "client_set": [
     "ai",
@@ -28,8 +28,8 @@
     },
     {
       "event_id": "G02",
-      "text": "الكورس فيه ٦ محاضرات عن أجهزة الليزر",
-      "evidence": "الكورس فيه ٦ محاضرات عن أجهزة الليزر",
+      "text": "الكورس ده معمول للتمريض اللي شغالين في العيادات",
+      "evidence": "الكورس ده معمول للتمريض اللي شغالين في العيادات",
       "start_s": 6.0,
       "end_s": 10.0,
       "detected": {},

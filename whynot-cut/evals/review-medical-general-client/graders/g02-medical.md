@@ -1,7 +1,9 @@
 ---
 type: regex
-target: trace
+target:
+  source: file
+  path: example-coach/output/projects/C0302/review-input.json
 match: contains
 ---
 
-"name":"Write"[^{]*?"input":\{(?:"file_path":"[^"]*C0302[\\/]+review-input\.json","content":"(?:[^"\\]|\\.)*?\{(?=(?:[^{}"\\]|\\.)*?\\"event_id\\"\s*:\s*\\"G02\\")(?=(?:[^{}"\\]|\\.)*?\\"flag\\"\s*:\s*\\"(?:medical)\\")(?=(?:[^{}"\\]|\\.)*?\\"verdict\\"\s*:\s*\\"(?:needs-doctor-approval|remove)\\")|"content":"(?:[^"\\]|\\.)*?\{(?=(?:[^{}"\\]|\\.)*?\\"event_id\\"\s*:\s*\\"G02\\")(?=(?:[^{}"\\]|\\.)*?\\"flag\\"\s*:\s*\\"(?:medical)\\")(?=(?:[^{}"\\]|\\.)*?\\"verdict\\"\s*:\s*\\"(?:needs-doctor-approval|remove)\\")(?:[^"\\]|\\.)*","file_path":"[^"]*C0302[\\/]+review-input\.json")
+\{(?=[^{}]*"event_id"\s*:\s*"G02")(?=[^{}]*"flag"\s*:\s*"(?:medical)")(?=[^{}]*"verdict"\s*:\s*"(?:needs-doctor-approval|remove)")

@@ -1,7 +1,9 @@
 ---
 type: regex
-target: trace
+target:
+  source: file
+  path: example-talks/output/projects/C0305/review-input.json
 match: contains
 ---
 
-"name":"Write"[^{]*?"input":\{(?:"file_path":"[^"]*C0305[\\/]+review-input\.json","content":"(?:[^"\\]|\\.)*?\{(?=(?:[^{}"\\]|\\.)*?\\"event_id\\"\s*:\s*\\"G02\\")(?=(?:[^{}"\\]|\\.)*?\\"flag\\"\s*:\s*\\"(?:religious)\\")(?=(?:[^{}"\\]|\\.)*?\\"verdict\\"\s*:\s*\\"(?:reword-to-match|needs-approval|remove)\\")|"content":"(?:[^"\\]|\\.)*?\{(?=(?:[^{}"\\]|\\.)*?\\"event_id\\"\s*:\s*\\"G02\\")(?=(?:[^{}"\\]|\\.)*?\\"flag\\"\s*:\s*\\"(?:religious)\\")(?=(?:[^{}"\\]|\\.)*?\\"verdict\\"\s*:\s*\\"(?:reword-to-match|needs-approval|remove)\\")(?:[^"\\]|\\.)*","file_path":"[^"]*C0305[\\/]+review-input\.json")
+\{(?=[^{}]*"event_id"\s*:\s*"G02")(?=[^{}]*"flag"\s*:\s*"(?:religious)")(?=[^{}]*"verdict"\s*:\s*"(?:reword-to-match|needs-approval|remove)")

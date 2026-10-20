@@ -1,7 +1,9 @@
 ---
 type: regex
-target: trace
+target:
+  source: file
+  path: example-talks/output/projects/C0308/review-input.json
 match: contains
 ---
 
-"name":"Write"[^{]*?"input":\{(?:"file_path":"[^"]*C0308[\\/]+review-input\.json","content":"(?:[^"\\]|\\.)*?\{(?=(?:[^{}"\\]|\\.)*?\\"event_id\\"\s*:\s*\\"G02\\")(?=(?:[^{}"\\]|\\.)*?\\"flag\\"\s*:\s*\\"(?:religious)\\")(?=(?:[^{}"\\]|\\.)*?\\"verdict\\"\s*:\s*\\"(?:ok|needs-approval)\\")|"content":"(?:[^"\\]|\\.)*?\{(?=(?:[^{}"\\]|\\.)*?\\"event_id\\"\s*:\s*\\"G02\\")(?=(?:[^{}"\\]|\\.)*?\\"flag\\"\s*:\s*\\"(?:religious)\\")(?=(?:[^{}"\\]|\\.)*?\\"verdict\\"\s*:\s*\\"(?:ok|needs-approval)\\")(?:[^"\\]|\\.)*","file_path":"[^"]*C0308[\\/]+review-input\.json")
+\{(?=[^{}]*"event_id"\s*:\s*"G02")(?=[^{}]*"flag"\s*:\s*"(?:religious)")(?=[^{}]*"verdict"\s*:\s*"(?:needs-approval)")

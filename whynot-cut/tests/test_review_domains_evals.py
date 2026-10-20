@@ -3,23 +3,27 @@
 """3.0 Phase 4 Task 53 = Addendum M1-T5: the review-domain eval cases (evals/review-<domain>-<name>/) and their engine pins.
 
 Grader design (executor ruling Q53-1, option C): the eval session has no shell, so the reviewer writes the exact table
-`reel review-flags --from` takes to `<item>/review-input.json` with the Write tool. Each expected (event id, flag,
-verdict) tuple is one `regex` grader on `target: trace`, anchored inside that Write call's JSON input and inside ONE row
-object of the table (a flag on another line, a wrong verdict or a table written anywhere else never matches), and each
-case has one `not_contains` grader for a flag that must NOT be there. The runner joins the child's stream-json messages,
-each JSON.stringify-ed, one per line (CLI 2.1.299), so the table sits in the trace JSON-escaped (\\" and \\n).
+`reel review-flags --from` takes to `<item>/review-input.json` with the Write tool. The counted graders read the table
+LEFT ON DISK (`target: {source: file, path: <client>/output/projects/<id>/review-input.json}`, resolved in the run's
+sandbox cwd; review 6275496 P2-2): each expected (event id, flag, verdict) tuple is one `regex` grader anchored inside
+ONE row object of that file; each case has one `not_contains` grader for a flag that must NOT be there and one for two
+rows on the same (line, flag), which review_flags.write() refuses ("listed twice").
 
 This file pins, per case, on the case's own planted files (plant/, copied into the eval workspace by the fixture
 function add_review_case in evals/_fixtures/example-clinic.sh):
   * the planted review-scan.json IS `review_domains.scan()` of the planted plan (the hints the reviewer reads are true);
   * the expected answer passes `review_flags.write()` on that plan, with every expected tuple in the written file;
   * each wrong answer (a missing flag row) is refused, or leaves that line uncovered for that flag;
-  * every trace grader passes on the expected answer written with Write (pretty or compact, keys in any order) and
-    fails on each mutation: the row missing, a wrong verdict, the flag moved to another line (a partial key match), the
-    table written to another file or only seen in a tool result; each negative grader fails when its forbidden row is
-    there;
-  * 3 positive + 1 negative case per shipped domain (owner decision 2026-10-19), and no domain lacks its eval
-    (`structure_problems()`).
+  * each case's graders are exactly the ones in GRADERS below (a table kept apart from the grader files), so loosening
+    a grader's verdict set or deleting a grader goes red (review 6275496 P2-1); every flagged expected row has exactly
+    one grader, and no such grader accepts `ok`; a hadith on screen is never accepted as `ok` (P1, the owner's human
+    religious approval gate); a guarantee has one contract in every case (P2-4);
+  * every grader passes the expected table (pretty or compact JSON, keys in any order) and fails each mutation: the row
+    missing, a wrong verdict, the flag on another line or another flag (a partial key match), keys split across rows,
+    near-miss key names, a later overwrite with a wrong table, no file; each negative grader fails on its forbidden
+    row; the duplicate grader fails on a contradicting row;
+  * 3 positive + 1 negative case per shipped domain (owner decision 2026-10-19), no verse text (no marker and no
+    verse-phrase detection), and no domain lacks its eval (`structure_problems()`).
 Run:  bash tools/test.sh -p test_review_domains_evals.py
 """
 import sys as _sys
@@ -144,7 +148,71 @@ CASES = {
         [("a line not listed", ["G03"], ("G03", "medical"))]),
 }
 
-WRITE_PATH = "C:\\Users\\eval\\home\\cwd\\example-clinic\\output\\projects\\{id}\\review-input.json"
+# The graders each case must have, kept apart from the grader files (review 6275496 P2-1): case -> (client folder,
+# {tuple grader: (event id, accepted flags, accepted verdicts)}, negative grader). A grader whose set is loosened, a
+# grader deleted or added, or a case moved to another file path fails test_graders_are_the_pinned_ones.
+MED_OK, REL_OK, BIZ_OK = ("medical", "ok"), ("religious|medical", "ok"), ("business", "ok")
+GRADERS = {
+    "review-medical-dose-claim": ("example-clinic", {
+        "g01-ok": ("G01", *MED_OK), "g02-medical": ("G02", "medical", "reword-to-match|needs-doctor-approval|remove"),
+        "g03-ok": ("G03", *MED_OK)}, "no-business-flag-on-g02"),
+    "review-medical-general-client": ("example-coach", {
+        "g01-ok": ("G01", *MED_OK), "g02-medical": ("G02", "medical", "needs-doctor-approval|remove"),
+        "g03-ok": ("G03", *MED_OK)}, "no-medical-ok-on-g02"),
+    "review-medical-cure-promise": ("example-clinic", {
+        "g01-ok": ("G01", *MED_OK), "g02-medical": ("G02", "medical", "needs-doctor-approval|remove"),
+        "g02-business": ("G02", "business", "needs-approval"), "g03-ok": ("G03", *MED_OK)},
+        "no-business-flag-on-g01-g03"),
+    "review-medical-negative-clean": ("example-clinic", {
+        "g01-ok": ("G01", *MED_OK), "g02-ok": ("G02", *MED_OK), "g03-ok": ("G03", *MED_OK)},
+        "no-medical-flag-on-g01-g02-g03"),
+    "review-religious-hadith-attribution": ("example-talks", {
+        "g01-ok": ("G01", *REL_OK), "g02-religious": ("G02", "religious", "reword-to-match|needs-approval|remove"),
+        "g03-ok": ("G03", *REL_OK)}, "no-business-flag-on-g02"),
+    "review-religious-ruling": ("example-talks", {
+        "g01-ok": ("G01", *REL_OK), "g02-religious": ("G02", "religious", "needs-approval|reword-to-match|remove"),
+        "g03-ok": ("G03", *REL_OK)}, "no-business-flag-on-g02"),
+    "review-religious-hadith-and-dose": ("example-clinic", {
+        "g01-ok": ("G01", *MED_OK), "g02-religious": ("G02", "religious", "needs-approval"),
+        "g02-medical": ("G02", "medical", "reword-to-match|needs-doctor-approval|remove"), "g03-ok": ("G03", *MED_OK)},
+        "no-business-flag-on-g02"),
+    "review-religious-business-word-in-hadith": ("example-talks", {
+        "g01-ok": ("G01", *REL_OK), "g02-religious": ("G02", "religious", "needs-approval"),
+        "g03-ok": ("G03", *REL_OK)}, "no-business-flag-on-g01-g02-g03"),
+    "review-business-roi": ("example-clinic", {
+        "g01-ok": ("G01", *BIZ_OK), "g02-business": ("G02", "business", "needs-evidence"), "g03-ok": ("G03", *BIZ_OK)},
+        "no-medical-flag-on-g02"),
+    "review-business-guarantee": ("example-clinic", {
+        "g01-ok": ("G01", *MED_OK), "g02-business": ("G02", "business", "needs-approval"), "g03-ok": ("G03", *MED_OK)},
+        "no-business-flag-on-g01-g03"),
+    "review-business-doctor-price": ("example-clinic", {
+        "g01-ok": ("G01", *MED_OK), "g02-business": ("G02", "business", "reword-to-match|needs-approval"),
+        "g03-ok": ("G03", *MED_OK)}, "no-business-flag-on-g01-g03"),
+    "review-business-negative-clean": ("example-clinic", {
+        "g01-ok": ("G01", *BIZ_OK), "g02-ok": ("G02", *BIZ_OK), "g03-ok": ("G03", *BIZ_OK)},
+        "no-business-flag-on-g01-g02-g03"),
+    "review-ai-accuracy-claim": ("example-clinic", {
+        "g01-ok": ("G01", *MED_OK), "g02-ai": ("G02", "ai", "needs-approval"), "g03-ok": ("G03", *MED_OK)},
+        "no-ai-flag-on-g01-g03"),
+    "review-ai-broll-no-label": ("example-clinic", {
+        "g01-ok": ("G01", *MED_OK), "g02-ai": ("G02", "ai", "needs-disclosure"), "g03-ok": ("G03", *MED_OK)},
+        "no-ai-flag-on-g01-g03"),
+    "review-ai-voice-claim": ("example-clinic", {
+        "g01-ok": ("G01", *MED_OK), "g02-ai": ("G02", "ai", "reword-to-match|remove|needs-approval"),
+        "g03-ok": ("G03", *MED_OK)}, "no-ai-flag-on-g01-g03"),
+    "review-ai-negative-clean": ("example-clinic", {
+        "g01-ok": ("G01", *MED_OK), "g02-ok": ("G02", *MED_OK), "g03-ok": ("G03", *MED_OK)},
+        "no-ai-flag-on-g01-g02-g03"),
+}
+COMMON = {"skill-fired", "no-gate-jargon", "criteria", "no-duplicate-rows"}
+CITATION_LINES = {"review-religious-hadith-attribution": "G02", "review-religious-hadith-and-dose": "G02",
+                  "review-religious-business-word-in-hadith": "G02"}      # «قال رسول الله ﷺ …» on screen
+WAITS_FOR_TASK52 = {"review-business-guarantee": "business-claims.md",          # P2-5; cure-promise since P2-4
+                    "review-medical-cure-promise": "business-claims.md",
+                    "review-ai-broll-no-label": "ai-claims-and-disclosure.md"}
+# expected flagged rows a case deliberately does not grade: the medical side of a business or AI claim (the
+# judge text says the doctor "may be named too"; the reviewer may also clear it)
+UNGRADED = {("review-business-guarantee", "G02", "medical"), ("review-ai-accuracy-claim", "G02", "medical")}
 
 
 def without(rows: list, drop: list) -> list:
@@ -154,46 +222,15 @@ def without(rows: list, drop: list) -> list:
     return [r for r in rows if not gone(r)]
 
 
-def stringify(obj) -> str:
-    """JSON.stringify: no spaces, non-ASCII kept, null for None."""
-    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
-
-
-def write_trace(rows: list, vid: str, *, indent=2, path: str | None = None, content_first=False, tool="Write",
-                reorder=False) -> str:
-    """The trace a run leaves when the agent writes `rows` as the review table: system init, the Write tool_use
-    (assistant message), its tool_result, and the final answer; one JSON.stringify-ed message per line."""
-    if reorder:                                     # keys in another order inside each row
+def table(rows: list, *, indent=2, reorder=False) -> str:
+    """The review-input.json the reviewer writes (pretty or compact; keys in another order on request)."""
+    if reorder:
         rows = [{k: r[k] for k in ("verdict", "reason", "flag", "event_id")} for r in rows]
-    content = json.dumps({"items": rows}, ensure_ascii=False, indent=indent)
-    fp = path if path is not None else WRITE_PATH.format(id=vid)
-    inp = {"content": content, "file_path": fp} if content_first else {"file_path": fp, "content": content}
-    msgs = [{"type": "system", "subtype": "init", "tools": ["Read", "Glob", "Grep", "Skill", "Write"]},
-            {"type": "assistant", "message": {"id": "msg_1", "type": "message", "role": "assistant", "model": "m",
-                                              "content": [{"type": "tool_use", "id": "toolu_1", "name": tool,
-                                                           "input": inp}]},
-             "parent_tool_use_id": None, "session_id": "s"},
-            {"type": "user", "message": {"role": "user", "content": [
-                {"tool_use_id": "toolu_1", "type": "tool_result", "content": "File created successfully at: " + fp}]},
-             "parent_tool_use_id": None, "session_id": "s"},
-            {"type": "assistant", "message": {"id": "msg_2", "type": "message", "role": "assistant", "model": "m",
-                                              "content": [{"type": "text", "text": "تمام"}]},
-             "parent_tool_use_id": None, "session_id": "s"}]
-    return "\n".join(stringify(m) for m in msgs)
+    return json.dumps({"items": rows}, ensure_ascii=False, indent=indent)
 
 
-def read_only_trace(rows: list, vid: str) -> str:
-    """The table seen only in a Read tool result (never written by the agent)."""
-    content = json.dumps({"items": rows}, ensure_ascii=False, indent=2)
-    msgs = [{"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_9", "name": "Read",
-                                                           "input": {"file_path": WRITE_PATH.format(id=vid)}}]}},
-            {"type": "user", "message": {"content": [{"tool_use_id": "toolu_9", "type": "tool_result",
-                                                      "content": content}]}}]
-    return "\n".join(stringify(m) for m in msgs)
-
-
-def graders(case: str) -> dict:
-    """grader name -> (frontmatter, pattern body) for the case's trace regex graders."""
+def graders(case: str, *, every=False) -> dict:
+    """grader name -> (frontmatter, pattern body): the case's regex graders on review-input.json (every=True: all)."""
     out = {}
     for g in sorted((EVALS / case / "graders").glob("*.md")):
         text = g.read_text(encoding="utf-8")
@@ -201,20 +238,27 @@ def graders(case: str) -> dict:
         lines = text.splitlines()
         end = next(i for i in range(1, len(lines)) if lines[i].strip() == "---")
         body = "\n".join(lines[end + 1:]).strip()
-        if fm.get("type") == "regex" and fm.get("target") == "trace":
+        if every or (fm.get("type") == "regex" and isinstance(fm.get("target"), dict)):
             out[g.stem] = (fm, body)
     return out
 
 
-def passes(fm: dict, body: str, trace: str) -> bool:
-    hit = re.search(body, trace) is not None
+def passes(fm: dict, body: str, content) -> bool:
+    """The runner's verdict on the file's content (None: the reviewer wrote no file, so the grader cannot pass)."""
+    if content is None:
+        return False
+    hit = re.search(body, content) is not None
     return hit if fm.get("match", "contains") == "contains" else not hit
 
 
+def case_passes(case: str, content) -> bool:
+    return all(passes(fm, body, content) for fm, body in graders(case).values())
+
+
 # what a grader's pattern holds (the generator writes every alternative as a (?:...) group)
-G_EID = re.compile(r'event_id\\\\"\\s\*:\\s\*\\\\"(?:\(\?:)?([G0-9|]+)\)?\\\\"')
-G_FLAGS = re.compile(r'flag\\\\"\\s\*:\\s\*\\\\"\(\?:([a-z|]+)\)\\\\"')
-G_VERDICTS = re.compile(r'verdict\\\\"\\s\*:\\s\*\\\\"\(\?:([a-z|-]+)\)\\\\"')
+G_EID = re.compile(r'"event_id"\\s\*:\\s\*"(?:\(\?:)?([G0-9|]+)\)?"')
+G_FLAGS = re.compile(r'"flag"\\s\*:\\s\*"\(\?:([a-z|]+)\)"')
+G_VERDICTS = re.compile(r'"verdict"\\s\*:\\s\*"\(\?:([a-z|-]+)\)"')
 NEGATIVE = re.compile(r"no-([a-z]+)-(flag|ok)-on-((?:g\d\d-?)+)")
 ALL_VERDICTS = ("ok", "remove", "reword-to-match", "needs-approval", "needs-evidence", "needs-disclosure",
                 "needs-doctor-approval")
@@ -275,11 +319,18 @@ class TestCaseLayout(unittest.TestCase):
                     self.assertNotIn('"verdict"', leak.read_text(encoding="utf-8"), leak)
 
     def test_no_verse_text_in_any_case(self):
-        """Owner decision 2026-10-18: no verse in any fixture (the editor adds verses by hand)."""
+        """Owner decision 2026-10-18: no verse in any fixture (the editor adds verses by hand). Markers, and the
+        religious lexicon's own verse rules (review 6275496 P3-3: a bare verse without markers)."""
+        lex = RD.lexicon("religious")
+        verse_rules = {"verse-phrase", "quran-verse"}
+        self.assertLessEqual(verse_rules, {r["id"] for r in lex["rules"]} | {z["id"] for z in lex.get("zones", [])})
         for f in EVALS.glob("review-*/**/*"):
             if f.is_file():
                 text = f.read_text(encoding="utf-8")
-                self.assertNotRegex(text, "[\ufd3e\ufd3f]|قال تعالى|سورة", f)
+                self.assertNotRegex(text, "[﴾﴿]|قال تعالى|سورة", f)
+                for line in text.splitlines():
+                    hits = {h["rule"] for h in RD.detect(line).get("religious", [])}
+                    self.assertFalse(hits & verse_rules, (f, line))
 
 
 class TestPlantedScan(CaseBase):
@@ -330,92 +381,172 @@ class TestEnginePins(CaseBase):
                         continue
                     self.assertNotIn(flag, self.covered(doc, eid), (case, what))
 
-    def test_a_ruling_passed_as_medical_ok_is_caught_by_the_eval_not_the_engine(self):
-        """A known limit, pinned: «حرام» alone is not detected (everyday speech: «حرام عليك تهمل صحتك»), and for a
-        religious client a medical row covers religious by T4.13's implied coverage, so the engine accepts a ruling
-        passed as `medical: ok`. Only the eval's g02-religious grader catches that answer."""
-        case = "review-religious-ruling"
-        vid, _pol, rows, _w = CASES[case]
-        lazy = without(rows, ["G02"]) + ok("G02", "medical")
-        doc = RF.write(self.client(case), {"items": lazy}, by="eval")
-        self.assertIn("religious", self.covered(doc, "G02"))
-        fm, body = graders(case)["g02-religious"]
-        self.assertFalse(passes(fm, body, write_trace(lazy, vid)))
+    def test_a_religious_line_passed_as_medical_ok_is_caught_by_the_eval_not_the_engine(self):
+        """A known engine gap, pinned (review 6275496 P2-3; leftover for the executor). For a religious client (key
+        ai+medical+religious) ONE `medical: ok` row clears the line for religious too (T4.13's implied coverage,
+        `review_flags._cover`): the exemption that makes ai need its own row does not apply to religious, so this holds
+        even when the line's words DO trigger religious (a «قال رسول الله ﷺ …» citation), not only for the undetected
+        «حرام». On a medical client the same row is refused («list G02 for religious»). The engine accepts it, NEEDS-YOU
+        lists nothing, and only the eval's g02-religious grader (and the editor's read) catches it."""
+        for case in ("review-religious-ruling", "review-religious-hadith-attribution",
+                     "review-religious-business-word-in-hadith"):
+            with self.subTest(case=case):
+                vid, _pol, rows, _w = CASES[case]
+                p = self.client(case)
+                detected = {x["event_id"]: sorted(x["detected"]) for x in RD.scan(p)["lines"]}
+                if case != "review-religious-ruling":
+                    self.assertIn("religious", detected["G02"])      # the citation IS detected, and still cleared
+                lazy = without(rows, ["G02"]) + ok("G02", "medical")
+                doc = RF.write(p, {"items": lazy}, by="eval")
+                self.assertIn("religious", self.covered(doc, "G02"))
+                fm, body = graders(case)["g02-religious"]
+                self.assertFalse(passes(fm, body, table(lazy)))
+        vid, _pol, rows, _w = CASES["review-religious-hadith-and-dose"]       # the medical client: refused
+        with self.assertRaises(Guidance) as cm:
+            RF.write(self.client("review-religious-hadith-and-dose"),
+                     {"items": without(rows, ["G02"]) + ok("G02", "medical")}, by="eval")
+        self.assertIn("religious", str(cm.exception))
 
 
-class TestTraceGraders(unittest.TestCase):
-    """Every counted decision is a regex on the trace, anchored in the Write call and in one row (Q53-1)."""
+class TestGraders(unittest.TestCase):
+    """The counted decision is a regex on the final review-input.json, one grader per expected row (Q53-1, review
+    6275496 P2-1/P2-2)."""
 
     def setUp(self):
         self.g = {c: graders(c) for c in CASES}
 
-    def test_each_case_has_tuple_graders_and_one_negative(self):
-        for case, gs in self.g.items():
-            neg = [n for n, (fm, _b) in gs.items() if fm.get("match") == "not_contains"]
-            pos = [n for n, (fm, _b) in gs.items() if fm.get("match", "contains") == "contains"]
-            self.assertEqual(len(neg), 1, case)
-            self.assertGreaterEqual(len(pos), 3, case)
-            for n, (_fm, body) in gs.items():
-                self.assertIn('"name":"Write"', body, (case, n))
-                self.assertIn("review-input\\.json", body, (case, n))
-                self.assertIn(CASES[case][0], body, (case, n))
+    def parsed(self, body: str):
+        return (G_EID.search(body).group(1), G_FLAGS.search(body).group(1), G_VERDICTS.search(body).group(1))
 
-    def test_expected_answer_passes_every_trace_grader(self):
-        for case, (vid, _pol, rows, _wrong) in CASES.items():
-            for kw in ({}, {"indent": None}, {"content_first": True}, {"reorder": True}):
-                t = write_trace(rows, vid, **kw)
+    def test_graders_are_the_pinned_ones(self):
+        for case, (folder, tuples, neg) in GRADERS.items():
+            with self.subTest(case=case):
+                vid = CASES[case][0]
+                self.assertEqual(set(graders(case, every=True)), set(tuples) | {neg} | COMMON)
                 for n, (fm, body) in self.g[case].items():
-                    self.assertTrue(passes(fm, body, t), (case, n, kw))
+                    self.assertEqual(fm["target"], {"source": "file",
+                                                    "path": f"{folder}/output/projects/{vid}/review-input.json"}, n)
+                    if n in tuples:
+                        self.assertEqual(fm.get("match", "contains"), "contains", n)
+                        self.assertEqual(self.parsed(body), tuples[n], n)
+                    else:
+                        self.assertEqual(fm["match"], "not_contains", n)
+                sc = (EVALS / case / "scaffold.sh").read_text(encoding="utf-8")
+                self.assertIn(f"add_review_case {folder} {vid} ", sc)
+
+    def test_every_flagged_row_has_exactly_one_strict_grader(self):
+        for case, (_vid, _pol, rows, _w) in CASES.items():
+            tuples = GRADERS[case][1]
+            for r in rows:
+                mine = [n for n, (eid, flags, v) in tuples.items()
+                        if eid == r["event_id"] and r["flag"] in flags.split("|")
+                        and (r["verdict"] == "ok") == (v == "ok")]
+                if not mine and (r["verdict"] == "ok" or (case, r["event_id"], r["flag"]) in UNGRADED):
+                    continue                     # an extra ok row (a business client's medical ok), or UNGRADED
+                self.assertEqual(len(mine), 1, (case, r))
+                verdicts = tuples[mine[0]][2].split("|")
+                self.assertIn(r["verdict"], verdicts, (case, r))
+                if r["verdict"] != "ok":
+                    self.assertNotIn("ok", verdicts, (case, r))
+        for case, eid, flag in UNGRADED:          # each exception is a real, flagged row of the expected table
+            self.assertTrue(any((r["event_id"], r["flag"]) == (eid, flag) and r["verdict"] != "ok"
+                                for r in CASES[case][2]), (case, eid, flag))
+
+    def test_a_hadith_on_screen_is_never_accepted_as_ok(self):
+        """Review 6275496 P1, the owner's rule: the human religious approval gate stays on, so a citation line is
+        never cleared as `religious: ok` (the two cases that speak of a cited hadith want needs-approval only)."""
+        for case, eid in CITATION_LINES.items():
+            with self.subTest(case=case):
+                _vid, _pol, rows, _w = CASES[case]
+                self.assertTrue(case_passes(case, table(rows)))
+                auto = without(rows, [(eid, "religious")]) + [row(eid, "religious", "ok", "x")]
+                self.assertFalse(case_passes(case, table(auto)))
+                lazy = [dict(r, verdict="ok") for r in rows]           # an all-ok table
+                self.assertFalse(case_passes(case, table(lazy)))
+        for case in ("review-religious-hadith-and-dose", "review-religious-business-word-in-hadith"):
+            self.assertEqual(GRADERS[case][1]["g02-religious"][2], "needs-approval")
+
+    def test_a_guarantee_has_one_contract(self):
+        """Review 6275496 P2-4: «نتيجة مضمونة ١٠٠٪» and «علاج نهائي ١٠٠٪» are guarantees: business needs-approval in both
+        cases (Task 52's business-claims.md rule 4; the strongest verdict, needs-approval, wins)."""
+        got = {c: GRADERS[c][1]["g02-business"][2]
+               for c in ("review-business-guarantee", "review-medical-cure-promise")}
+        self.assertEqual(set(got.values()), {"needs-approval"}, got)
+        for c in got:
+            fm, body = self.g[c]["g02-business"]
+            self.assertEqual(self.parsed(body)[2], "needs-approval")
+
+    def test_cases_that_wait_for_task52_say_so(self):
+        """Review 6275496 P2-5: their verdicts come from Task 52's guidance, which HEAD lacks; tagged pending so the
+        >= 2/3 bar does not count them until it lands."""
+        for case in CASES:
+            text = (EVALS / case / "case.yaml").read_text(encoding="utf-8")
+            if case in WAITS_FOR_TASK52:
+                self.assertIn("pending", text, case)
+                self.assertIn("needs-task52", text, case)
+                self.assertIn(WAITS_FOR_TASK52[case], text, case)
+            else:
+                self.assertNotIn("pending", text, case)
+
+    def test_expected_answer_passes_every_grader(self):
+        for case, (_vid, _pol, rows, _wrong) in CASES.items():
+            for kw in ({}, {"indent": None}, {"reorder": True}):
+                content = table(rows, **kw)
+                for n, (fm, body) in self.g[case].items():
+                    self.assertTrue(passes(fm, body, content), (case, n, kw))
 
     def test_each_tuple_grader_fails_on_each_mutation(self):
-        for case, (vid, _pol, rows, _wrong) in CASES.items():
+        for case, (_vid, _pol, rows, _wrong) in CASES.items():
             for n, (fm, body) in self.g[case].items():
-                if fm.get("match", "contains") != "contains":
+                if n not in GRADERS[case][1]:
                     continue
-                hits = [r for r in rows if re.search(body, write_trace([r], vid))]
+                hits = [r for r in rows if re.search(body, table([r]))]
                 self.assertEqual(len(hits), 1, (case, n, hits))          # one grader = one expected row
                 r = hits[0]
-                eid, flags, verdicts = (G_EID.search(body).group(1), G_FLAGS.search(body).group(1).split("|"),
-                                        G_VERDICTS.search(body).group(1).split("|"))
-                self.assertEqual((eid, r["flag"] in flags, r["verdict"] in verdicts), (r["event_id"], True, True))
-                self.assertEqual(n, f"{eid.lower()}-{r['flag'] if r['verdict'] != 'ok' else 'ok'}", case)
-                bad_v = next(v for v in ALL_VERDICTS if v not in verdicts)
-                bad_f = next(f for f in ("business", "religious", "medical", "ai") if f not in flags)
+                _eid, flags, verdicts = self.parsed(body)
+                bad_v = next(v for v in ALL_VERDICTS if v not in verdicts.split("|"))
+                bad_f = next(f for f in ("business", "religious", "medical", "ai") if f not in flags.split("|"))
                 others = [x for x in rows if x is not r]
                 muts = {
-                    "row missing": write_trace(others, vid),
-                    "wrong verdict": write_trace(others + [dict(r, verdict=bad_v)], vid),
-                    "flag on another line": write_trace(others + [dict(r, event_id="G09")], vid),
-                    "another flag": write_trace(others + [dict(r, flag=bad_f)], vid),
-                    "keys split across rows": write_trace(others + [dict(r, flag=bad_f), dict(r, event_id="G09")],
-                                                          vid),
-                    "near-miss key names": write_trace(others + [{"eventid": r["event_id"], "flags": r["flag"],
-                                                                  "verdict_": r["verdict"], "reason": ""}], vid),
-                    "written elsewhere": write_trace(rows, vid, path=WRITE_PATH.format(id=vid).replace(
-                        "review-input.json", "notes.json")),
-                    "another project": write_trace(rows, vid, path=WRITE_PATH.format(id="C0999")),
-                    "only read, never written": read_only_trace(rows, vid),
-                    "not the Write tool": write_trace(rows, vid, tool="Edit"),
+                    "no file": None,
+                    "row missing": table(others),
+                    "wrong verdict": table(others + [dict(r, verdict=bad_v)]),
+                    "flag on another line": table(others + [dict(r, event_id="G09")]),
+                    "another flag": table(others + [dict(r, flag=bad_f)]),
+                    "keys split across rows": table(others + [dict(r, flag=bad_f), dict(r, event_id="G09")]),
+                    "near-miss key names": table(others + [{"eventid": r["event_id"], "flags": r["flag"],
+                                                            "verdict_": r["verdict"], "reason": ""}]),
                 }
-                for what, t in muts.items():
-                    self.assertFalse(passes(fm, body, t), (case, n, what))
+                if r["verdict"] != "ok":                 # a right first Write, then a wrong overwrite: the file counts
+                    muts["overwritten by a later all-ok table"] = table([dict(x, verdict="ok") for x in rows])
+                for what, content in muts.items():
+                    self.assertFalse(passes(fm, body, content), (case, n, what))
 
     def test_each_negative_grader_fails_when_its_forbidden_row_is_there(self):
-        for case, (vid, _pol, rows, _wrong) in CASES.items():
-            neg = [(n, fm, b) for n, (fm, b) in self.g[case].items() if fm.get("match") == "not_contains"]
-            n, fm, body = neg[0]
+        for case, (_vid, _pol, rows, _wrong) in CASES.items():
+            n = GRADERS[case][2]
+            fm, body = self.g[case][n]
             m = NEGATIVE.fullmatch(n)
-            self.assertIsNotNone(m, (case, n))
             flag, kind, eids = m.group(1), m.group(2), m.group(3).upper().split("-")
             bad = "ok" if kind == "ok" else next(v for v in RD.registry()[flag]["verdicts"] if v != "ok")
             for eid in eids:
-                t = write_trace(without(rows, [(eid, flag)]) + [row(eid, flag, bad, "x")], vid)
-                self.assertFalse(passes(fm, body, t), (case, n, eid))
+                content = table(without(rows, [(eid, flag)]) + [row(eid, flag, bad, "x")])
+                self.assertFalse(passes(fm, body, content), (case, n, eid))
                 if kind == "flag":                    # an ok row for that flag is fine (the line was cleared for it)
-                    t = write_trace(without(rows, [(eid, flag)]) + [row(eid, flag, "ok", "x")], vid)
-                    self.assertTrue(passes(fm, body, t), (case, n, eid))
-            self.assertTrue(passes(fm, body, write_trace(rows, vid)), (case, n))
-            self.assertTrue(passes(fm, body, write_trace(rows, vid, indent=None, reorder=True)), (case, n))
+                    content = table(without(rows, [(eid, flag)]) + [row(eid, flag, "ok", "x")])
+                    self.assertTrue(passes(fm, body, content), (case, n, eid))
+            self.assertTrue(passes(fm, body, table(rows, indent=None, reorder=True)), (case, n))
+
+    def test_the_duplicate_grader_fails_on_a_contradicting_row(self):
+        """Review 6275496 P2-2: a flagged row plus an `ok` row for the same (line, flag) in one table passed every grader;
+        review_flags.write() refuses it ("listed twice")."""
+        for case, (_vid, _pol, rows, _wrong) in CASES.items():
+            fm, body = self.g[case]["no-duplicate-rows"]
+            self.assertTrue(passes(fm, body, table(rows)), case)
+            for r in rows:
+                twin = dict(r, verdict="needs-approval" if r["verdict"] == "ok" else "ok")
+                self.assertFalse(passes(fm, body, table(rows + [twin])), (case, r))
+                self.assertFalse(passes(fm, body, table([twin] + rows, indent=None)), (case, r))
 
 
 if __name__ == "__main__":
