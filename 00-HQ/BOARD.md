@@ -20,6 +20,7 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 | SETUP-H1 | First login (mayar@) + full suite baseline | H1 (Mayar) | ACCEPTED — closed, no code (nothing to merge) | `tasks/SETUP-H1.md` | r3 2026-10-20 08:26: 8226 run, 51 env/timing; ENV-01 gaps routed |
 | BL-16 | Safe ASCII engine home for a non-ASCII Windows user (Gate 4, high) | H1 | FIX (round 1, 2026-10-20 08:24) | `tasks/BL-16.md` | H1 fixes P1 patch + 2×P2 |
 | BL-02 | Licence files, notices generator, SPDX tool (tool only) (Gate 4, high) | H1 | READY | `tasks/BL-02.md` | — |
+| S6b | Gate 4 eval cases for the Phase 4 skills (LIGHT) | H1 | READY (22:20; executor froze rules, episode sheet, autopilot, music + review-scan) | `tasks/S6b.md` | after BL-16 FIX |
 | BL-17 | Second install must not overwrite the first install's pointer files (Gate 5) | H1 | READY | `tasks/BL-17.md` | — |
 | BL-19 | Root-normalised fingerprints, so a client move keeps its approvals (Stage 2) | H1 | READY | `tasks/BL-19.md` | — |
 | SETUP-H2 | First login (marketing@) + full suite baseline | H2 (marketing@) | ACCEPTED — closed, no code (nothing to merge) | `tasks/SETUP-H2.md` | r1 2026-10-20 11:40: 8753 run, 77 env/timing (ENV-01 classes); npm ci + 296 panel tests + 1 render OK |
@@ -29,7 +30,6 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 | BL-18 | Two wrong fix lines in installer/onboarding (Gate 4) | EXECUTOR (done) | MERGED (f2ca516 on release/3.0, 2026-10-20) | `tasks/BL-18.md` | H2 does NOT take it |
 | BL-14 | Portable client copy | EXECUTOR | MERGED (API-200 closed it: 5 commits + executor hooks 7f0c00a; `tracks\API-200-BL-14-HANDOVER.md`) | — | not a card |
 | (lane 1) | API lane 1 | — | STOPPED (owner budget ruling 10-19 10:03); BL-16 and BL-04 moved to cards above | — | — |
-| S6b | Gate 4 eval cases for the Phase 4 skills (LIGHT) | H1 | NOT READY (card written 22:05; asked the executor which skills are frozen) | `tasks/S6b.md` | READY after the answer |
 | STAGE3-DRAFTS | Stage 3 task specs (F1, F10, F11 skeleton) as drafts | MASTER | NOT READY (after the Gate 4 tag / 1 Nov) | — | becomes H1/H2/LANE cards |
 | ENV-01 | Engine runtime for unsandboxed processes (helper suites: 563 env errors) | MASTER | DONE_ARCHIVED (16:23; helper full suite 8899 OK, 0 fail) | `tasks/archive/ENV-01/ENV-01.md` | — |
 | OPS-01 | Status generator, Arabic reports, ops/hq GitHub mirror (pilot task) | MASTER | DONE_ARCHIVED (02:00, 25/25 tests, 2 reviews) | `tasks/archive/OPS-01/OPS-01.md` | OPS-02 |

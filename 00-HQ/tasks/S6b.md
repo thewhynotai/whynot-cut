@@ -1,6 +1,6 @@
 # S6b — Gate 4 eval cases for the Phase 4 skills
 
-- **Assigned:** H1    **Model:** Opus 5.5 high    **Size:** M    **Status:** NOT READY (waits for the executor's freeze answer, asked 2026-10-20 22:05)
+- **Assigned:** H1    **Model:** Opus 5.5 high    **Size:** M    **Status:** READY (2026-10-20 22:20, executor answer below)
 - **Tier:** LIGHT (eval cases: dev workflow; they test the product, they don't change it)
 - **Stage / gate:** Gate 4 (`WhyNotCut/PROGRESS.md` line "Evals": "Add cases for the Phase 4 skills (rules/T4.3,
   episode sheet, autopilot, music NEEDS-YOU): S6 work for a free builder")    **Depends on:** the executor naming
@@ -16,7 +16,9 @@ the Gate 4 eval run (at the end, after code freeze, `-j 2` through heavy.sh) mea
   `evals/_fixtures` functions only.
 - Per behaviour: at least 1 positive case; and 1 negative case where a wrong trigger is plausible.
 - Graders: one claim each, measured on the real judge (strict one-word one-sample, as in the p3 baseline note).
-- Cases list (to confirm): T4.3 rules · episode sheet · autopilot Phase 4 additions · music NEEDS-YOU.
+- Cases list (confirmed, see ## Answer): rules/T4.3 · episode sheet/T4.4 · autopilot/T4.7 · music NEEDS-YOU/T4.6 ·
+  review-scan before the medical-reviewer (edit skill stage 7). **No cases** for client-move/clone, verse/religious
+  lines, or cut proposals/takes (still in rounds).
 
 ## Fence
 `whynot-cut/evals/<new case folders>/` only, plus the expected-case list in `whynot-cut/tests/test_evals.py` if that
@@ -31,3 +33,17 @@ test enumerates cases. No skill text edits: a skill fault an eval finds goes int
 
 ## Delivery
 Branch `h1/S6b`, report `00-HQ/inbox/h1/<date>-S6b.md` (PLAYBOOK §2).
+
+## Answer
+Executor, 2026-10-20 (HEAD 17729fc):
+- **Frozen; write cases now:**
+  - rules / T4.3: client-craft and edit text, verb landed fcb7884;
+  - episode sheet / T4.4: podcast skill's episode-sheet steps;
+  - autopilot / T4.7: the autopilot skill;
+  - music NEEDS-YOU / T4.6: closed 7d0e9c0.
+- **Add one:** review-scan before the medical-reviewer, in the edit skill stage 7 (1cb5eab).
+- **NOT frozen; no cases yet:**
+  - client-move / clone (handoff skill), because BL-14 is still in review rounds;
+  - verse / religious lines (medical-accuracy, motion, podcast and agent texts), because verse fix r2 is building;
+  - cut proposals / takes (edit skill), because the K-T7 port has not landed.
+- **The fence is right:** evals + test_evals.py only.
