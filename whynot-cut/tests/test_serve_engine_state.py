@@ -435,6 +435,26 @@ class Motion(Base):
         write(self.episode, {"episode_id": "EP02", "sheet": {"guest": "Mona — CEO", "avoid": []}})
         self.assertNotEqual(self.steps(cache(self.home, now=NOW))["approve"], "done")
 
+    def test_caption_words_are_watched_and_checked(self):
+        """BL-21: captions-short.srt (read by the motion fingerprint when the plan shows captions) is watched, so a
+        caption word fixed by hand turns the cached approval back to waiting, and checked first: an oversized one is
+        never handed to the fingerprint."""
+        srt = write(self.p("02_transcription/captions-short.srt"), "1\n00:00:00,000 --> 00:00:01,000\nكلمة\n")
+        self.episode_reel()
+        write(self.p("01_analysis/motion-script.json"), {"captions": "subtitles", "scenes": [{"id": "S01"}]})
+        fp = self.motion_fp()
+        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": fp})
+        write(self.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor", "at": iso(NOW),
+                                                          "plan_fingerprint": fp, "kind": "motion", "format": APPROVAL_FORMAT})
+        cache = ES.PanelFields()
+        self.assertEqual(self.steps(cache(self.home, now=NOW))["approve"], "done")
+        write(srt, "1\n00:00:00,000 --> 00:00:01,000\nغير\n")
+        self.assertNotEqual(self.steps(cache(self.home, now=NOW))["approve"], "done")
+        write(srt, b" " * (ES.EVIDENCE_MAX + 1))
+        with mock.patch("lib.motion_plan.fingerprint", side_effect=AssertionError("called")) as called:
+            self.assertNotEqual(self.steps(self.fields())["approve"], "done")
+        self.assertEqual(called.call_count, 0)
+
     def test_an_oversized_episode_json_or_speakers_json_skips_the_motion_fingerprint(self):
         """BL-20: the helper reads them with no cap, so they are checked first like every other input (the control:
         with both fine the helper is called and the approval holds)."""

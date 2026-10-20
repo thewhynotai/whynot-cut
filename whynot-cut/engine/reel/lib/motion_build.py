@@ -133,12 +133,20 @@ def _plan_fonts(plan: dict) -> list[str]:
     return sorted(n for n in names if n)
 
 
-def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], dict]:
-    from . import ae_bridge, ae_probe, plat
+# BL-21: what the editor reads when a build of any route is refused for its approval (the 2.x case: plan.OLDER_APPROVAL)
+GATE_EDITOR = {
+    "none": {"en": "The motion plan is not approved yet. Look at the plan and the animatic, then approve it.",
+             "ar": "خطة الموشن لسه متوافقش عليها. بص على الخطة والأنيماتيك، وبعدين وافق عليها."},
+    "stale": {"en": "The motion plan changed after you approved it. Have one more look and approve it again.",
+              "ar": "خطة الموشن اتغيّرت بعد ما وافقت عليها. بص عليها بصّة كمان ووافق عليها تاني."}}
+
+
+def plan_gate(paths) -> tuple[list[str], dict | None]:
+    """The compiled plan and its approval, checked the same way for every motion build route (the bridge build,
+    --script-only, --run-script): (problems, refusal). A problem is something to fix (exit 1); the refusal
+    {blocked, how, editor_message EN/AR} is a missing, stale or 2.x approval (exit 2)."""
     from .motion_plan import fingerprint
-    probs, ctx = [], {"missing_fonts": []}
-    if not plat.newest_app("after_effects"):
-        return ["After Effects is not installed: deliver the script with `reel motion-build --script-only`"], ctx
+    probs = []
     val = read_json(paths.p("01_analysis/motion-validation.json"), {}) or {}
     fp = fingerprint(paths)
     if not paths.p("01_analysis/motion-plan.json").exists() or not val:
@@ -150,18 +158,39 @@ def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], 
     appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
     from .plan import OLDER_APPROVAL, approved_before_3
     older = approved_before_3(appr) and appr.get("plan_fingerprint") != fp          # 3.0 F2: approved under 2.x
-    gate = None
+    gate, says = None, None
     if not appr.get("approved"):
         gate = "the plan is not approved yet: the editor approves motion-plan.md and the animatic (`reel approve-plan`)"
+        says = GATE_EDITOR["none"]
     elif appr.get("plan_fingerprint") != fp:
         gate = (OLDER_APPROVAL["en"] if older else
                 "the plan approval is stale (the plan changed after approval): show the editor again")
-    if gate:                    # an approval gate is a refusal (exit 2), like ppro-build's (Gate 2 A2)
-        probs.append(gate)
-        ctx["refusal"] = {"blocked": gate, "how": "Show the editor motion-plan.md and the animatic; only with their "
-                                                  "words run `reel approve-plan --by editor`, then motion-build again"}
-        if older:
-            ctx["refusal"]["editor_message"] = dict(OLDER_APPROVAL)
+        says = OLDER_APPROVAL if older else GATE_EDITOR["stale"]
+    if not gate:
+        return probs, None
+    probs.append(gate)          # an approval gate is a refusal (exit 2), like ppro-build's (Gate 2 A2)
+    return probs, {"blocked": gate, "how": "Show the editor motion-plan.md and the animatic; only with their words "
+                                           "run `reel approve-plan --by editor`, then motion-build again",
+                   "editor_message": dict(says)}
+
+
+def _route_refused(paths) -> dict | None:
+    """BL-21: --script-only / --run-script refused like the bridge build, before any script is written or After
+    Effects is asked anything."""
+    probs, refusal = plan_gate(paths)
+    if not probs:
+        return None
+    return dict({"status": "REFUSED", "ok": False, "reasons": probs, "aep": str(aep_path(paths))}, **(refusal or {}))
+
+
+def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], dict]:
+    from . import ae_bridge, ae_probe, plat
+    ctx = {"missing_fonts": []}
+    if not plat.newest_app("after_effects"):
+        return ["After Effects is not installed: deliver the script with `reel motion-build --script-only`"], ctx
+    probs, refusal = plan_gate(paths)
+    if refusal:
+        ctx["refusal"] = refusal
     st = ae_bridge.status()
     if not st.get("alive"):
         probs.append(f"the WhyNot Cut Bridge is not running in After Effects: {st.get('detail')} (`reel ae-status`)")
@@ -361,6 +390,9 @@ def _build_locked(paths, replace_edited: bool, allow_fallback_font: bool, timeou
 
 
 def script_only(paths) -> dict:
+    refused = _route_refused(paths)
+    if refused:
+        return refused
     jsx = write_fallback_script(paths)
     return {"status": "SCRIPT_ONLY", "jsx": str(jsx), "aep": str(aep_path(paths)),
             "next": "run it in After Effects (File > Scripts > Run Script File...); it is not verified: no read-back"}
@@ -400,6 +432,9 @@ def _refusal(project: str) -> str:
 def run_script(paths, timeout: int = 900) -> dict:
     import time
     from .adobe_run import run_after_effects
+    refused = _route_refused(paths)
+    if refused:
+        return refused
     aep = aep_path(paths)
     busy = unsaved_project(_ae_titles())       # the script would refuse inside AE: say so now, not after --timeout
     if busy:

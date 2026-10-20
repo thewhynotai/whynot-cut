@@ -1343,6 +1343,150 @@ class TestEpisodeSheetBinding(unittest.TestCase):
         write_json(src_f, src)
         self.assertEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))
 
+    def test_a_bad_episode_id_is_a_plain_line(self):
+        """BL-21 item 4: an episode_id the engine refuses (hand-edited source.json) gives `reel next` a plain line,
+        never a traceback."""
+        src_f = self.reel.p("00_inputs/source.json")
+        write_json(src_f, dict(read_json(src_f), episode_id="../EP12"))
+        code, doc, err = self.reel_cli("next", "--video-id", "EP12_R01_MO")
+        self.assertNotIn("Traceback", err)
+        self.assertIn("episode id", json.dumps(doc) + err)
+
+
+# --------------------------------------------------------------------------- BL-21: the caption words shown
+def captions_script(mode="subtitles"):
+    return dict(good_script(), captions=mode)
+
+
+class TestCaptionBinding(unittest.TestCase):
+    """BL-21: the motion plan's approval covers the caption words and times it shows (02_transcription/
+    captions-short.srt as the compiler reads it), only when the plan shows captions; a rewrite that says the same
+    (renumbered, CRLF, a line break inside a cue) keeps the approval."""
+    B = TestEpisodeSheetBinding                 # its CLI helpers, not its tests
+    tearDown, reel_cli, plan_text, motion_plan, approve, state, build = (
+        B.tearDown, B.reel_cli, B.plan_text, B.motion_plan, B.approve, B.state, B.build)
+
+    def setUp(self):
+        self.B.setUp(self)
+        write_json(self.reel.p("01_analysis/motion-script.json"), captions_script())
+        self.srt = self.reel.p("02_transcription/captions-short.srt")
+
+    def shown_cue(self) -> str:
+        cues = read_json(self.reel.p("01_analysis/motion-plan.json"))["persistent"]["captions"]["cues"]
+        self.assertTrue(cues)
+        return cues[-1]["text"]
+
+    def edit_cue(self, old: str, new: str):
+        from lib import srt as srtlib
+        cues = srtlib.read_srt(self.srt)
+        hit = [c for c in cues if c["text"].replace("\n", " ") == old]
+        self.assertEqual(len(hit), 1, old)
+        hit[0]["text"] = new
+        srtlib.write_srt(self.srt, cues)
+
+    def script_only(self) -> tuple[int, dict, str]:
+        return self.reel_cli("motion-build", "--video-id", "EP12_R01_MO", "--script-only")
+
+    def test_caption_word_edited_by_hand_voids_approval(self):
+        """The editor's path: approve, fix a caption word in captions-short.srt by hand, motion-plan: the new word is
+        in the plan, the approval is stale, `reel next` asks for approve-plan, motion-build (bridge and --script-only)
+        is refused (exit 2) until the editor approves again."""
+        self.motion_plan()
+        old = self.shown_cue()
+        self.approve()
+        self.assertEqual(self.state(), "current")
+        self.edit_cue(old, "كلمةمعدلة")
+        self.motion_plan()
+        self.assertIn("كلمةمعدلة", self.plan_text())
+        self.assertEqual(self.state(), "stale")
+        code, doc, err = self.reel_cli("next", "--video-id", "EP12_R01_MO")
+        self.assertTrue(any(s.startswith("approve-plan") for s in doc.get("stale", [])), (doc, err))
+        code, doc = self.build()
+        self.assertEqual((code, doc["status"]), (2, "REFUSED"), doc)
+        self.assertIn("stale", doc["blocked"])
+        code, doc, err = self.script_only()
+        self.assertEqual((code, doc.get("status")), (2, "REFUSED"), (doc, err))
+        self.approve()
+        code, doc, err = self.script_only()
+        self.assertEqual((code, doc.get("status")), (0, "SCRIPT_ONLY"), (doc, err))
+        code, doc = self.build()
+        self.assertEqual((code, doc["status"]), (0, "PROJECT_ASSEMBLED"), doc)
+
+    def test_same_captions_rewritten_keep_approval(self):
+        """A rebuild that says the same: the same cues written again, renumbered, with CRLF line ends, a line break
+        inside a cue (the compiler shows it as a space)."""
+        from lib import srt as srtlib
+        self.motion_plan()
+        self.approve()
+        cues = srtlib.read_srt(self.srt)
+        srtlib.write_srt(self.srt, cues)
+        self.motion_plan()
+        self.assertEqual(self.state(), "current")
+        two = next(c for c in cues if " " in c["text"])
+        two["text"] = two["text"].replace(" ", "\n", 1)
+        srtlib.write_srt(self.srt, cues)
+        text = self.srt.read_text(encoding="utf-8").replace("\n", "\r\n")
+        self.srt.write_bytes(text.replace("1\r\n", "7\r\n", 1).encode("utf-8"))
+        self.motion_plan()
+        self.assertEqual(self.state(), "current")
+
+    def test_cue_text_and_times_are_bound(self):
+        from lib import srt as srtlib
+        from lib.motion_plan import fingerprint
+        common.set_context(self.root)
+        seen = {fingerprint(self.reel)}
+        cues = srtlib.read_srt(self.srt)
+        cues[0]["end_ms"] += 40
+        srtlib.write_srt(self.srt, cues)
+        seen.add(fingerprint(self.reel))
+        cues[0]["start_ms"] += 40
+        srtlib.write_srt(self.srt, cues)
+        seen.add(fingerprint(self.reel))
+        cues[1]["text"] = "غير"
+        srtlib.write_srt(self.srt, cues)
+        seen.add(fingerprint(self.reel))
+        self.assertEqual(len(seen), 4)
+
+    def test_captions_not_shown_keep_the_old_hash(self):
+        """Captions off (script, scene or recipe), or no captions file: the srt is not read and the hash is the one
+        before BL-21 (here the pre-BL-20 one: no names either)."""
+        from lib.motion_plan import fingerprint
+        common.set_context(self.root)
+        self.reel.p("00_inputs/speakers.json").unlink()
+        info_p = self.ep.p("00_inputs/episode.json")
+        info_p.unlink()
+        self.assertNotEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))      # shown: bound
+        write_json(self.reel.p("01_analysis/motion-script.json"), captions_script("off"))
+        self.assertEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))
+        s = captions_script("off")
+        s["scenes"][0]["captions"] = "off"                                               # a scene that says off too
+        write_json(self.reel.p("01_analysis/motion-script.json"), s)
+        self.assertEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))
+        s = captions_script("off")
+        s["scenes"][1]["captions"] = "subtitles"                                         # one scene shows them
+        write_json(self.reel.p("01_analysis/motion-script.json"), s)
+        self.assertNotEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))
+        s = good_script()                                                                 # the recipe decides
+        write_json(self.reel.p("01_analysis/motion-script.json"), s)
+        self.assertEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))    # drama: captions off
+        src_f = self.reel.p("00_inputs/source.json")
+        from lib.recipes import resolve
+        write_json(src_f, dict(read_json(src_f), recipe=resolve("advice")))               # advice: subtitles
+        self.assertNotEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))
+        self.srt.unlink()
+        self.assertEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))
+
+    def test_srt_edit_while_captions_off_keeps_approval(self):
+        write_json(self.reel.p("01_analysis/motion-script.json"), captions_script("off"))
+        self.motion_plan()
+        self.approve()
+        from lib import srt as srtlib
+        cues = srtlib.read_srt(self.srt)
+        cues[0]["text"] = "غير"
+        srtlib.write_srt(self.srt, cues)
+        self.motion_plan()
+        self.assertEqual(self.state(), "current")
+
 
 # --------------------------------------------------------------------------- animatic
 class TestMotionMdFullText(unittest.TestCase):
@@ -1930,7 +2074,9 @@ class TestMotionBuild(CompiledMotion):
         code, doc = self.cli()
         self.assertEqual(code, 2, doc)
         self.assertIn("stale", doc["blocked"])
-        self.assertNotIn("editor_message", doc)
+        from lib.plan import OLDER_APPROVAL
+        self.assertEqual(set(doc["editor_message"]), {"en", "ar"})      # BL-21: the plain line, not the 2.x one
+        self.assertNotEqual(doc["editor_message"], OLDER_APPROVAL)
         # 3.0 F2: a record from before 3.0 (no "format") says so plainly, in English and Arabic
         write_json(self.reel.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor",
                                                                    "plan_fingerprint": "an-older-plan"})
@@ -1949,6 +2095,46 @@ class TestMotionBuild(CompiledMotion):
         self.assertIn("--replace-edited", doc["how"])
         code, doc = self.cli(replace_edited=True)
         self.assertEqual((code, doc["status"]), (0, "PROJECT_ASSEMBLED"), doc)
+
+    def test_script_routes_need_the_current_approval(self):
+        """BL-21: --script-only and --run-script are builds too: a missing, stale or 2.x approval is refused like the
+        bridge build (exit 2, `blocked`, the plain line in English and Arabic), before any script is written or After
+        Effects is started; a plan that is stale or has errors is refused (exit 1) like the bridge build's."""
+        from unittest import mock
+        jsx = self.reel.p(f"04_after_effects/scripts/build_{self.reel.video_id}_motion.jsx")
+        appr = self.reel.p("01_analysis/plan-approval.json")
+        cases = [("missing", None, "not approved"),
+                 ("stale", {"approved": True, "by": "editor", "plan_fingerprint": "an-older-plan", "format": 3}, "stale"),
+                 ("2.x", {"approved": True, "by": "editor", "plan_fingerprint": "an-older-plan"}, "older WhyNot Cut")]
+        for route in ("script_only", "run_script"):
+            for name, rec, says in cases:
+                jsx.unlink(missing_ok=True)
+                appr.unlink(missing_ok=True)
+                if rec:
+                    write_json(appr, rec)
+                with mock.patch.object(self.mb, "_ae_titles", side_effect=AssertionError("AE queried")), \
+                        mock.patch("lib.adobe_run.run_after_effects", side_effect=AssertionError("AE started")):
+                    code, doc = self.cli(**{route: True})
+                self.assertEqual((code, doc.get("status")), (2, "REFUSED"), (route, name, doc))
+                self.assertIn(says, doc["blocked"], (route, name))
+                self.assertEqual(set(doc["editor_message"]), {"en", "ar"}, (route, name))
+                self.assertTrue(doc["editor_message"]["ar"].strip(), (route, name))
+                self.assertFalse(jsx.exists(), (route, name))
+        val_f = self.reel.p("01_analysis/motion-validation.json")
+        val = read_json(val_f)
+        try:
+            self.approve()
+            write_json(val_f, dict(val, fingerprint="older"))
+            code, doc = self.cli(script_only=True)
+            self.assertEqual((code, doc.get("status")), (1, "REFUSED"), doc)
+            self.assertIn("motion-plan", " ".join(doc["reasons"]))
+            self.assertFalse(jsx.exists())
+        finally:
+            write_json(val_f, val)
+        self.approve()
+        code, doc = self.cli(script_only=True)
+        self.assertEqual((code, doc["status"]), (0, "SCRIPT_ONLY"), doc)
+        self.assertTrue(jsx.exists())
 
     def test_cli_other_refusal_reasons_stay_exit_1(self):
         """A missing probe verdict is something to fix, not a gate: exit 1 as before."""

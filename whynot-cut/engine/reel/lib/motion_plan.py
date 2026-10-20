@@ -73,9 +73,10 @@ def fingerprint(paths) -> str:
                         ensure_ascii=True).encode())
     from .motion_audio import music_state       # T4.6: what THIS plan's music choice reads (off / hand pick / auto)
     try:
-        sm = json.loads(paths.p("01_analysis/motion-script.json").read_text(encoding="utf-8-sig")).get("music", "__auto__")
+        script = json.loads(paths.p("01_analysis/motion-script.json").read_text(encoding="utf-8-sig"))
+        sm = script.get("music", "__auto__")
     except (OSError, ValueError, AttributeError, RecursionError):
-        sm = "__auto__"
+        script, sm = None, "__auto__"
     rmood = ((src.get("recipe") or {}).get("music") or {}).get("mood") or []
     ms = music_state(paths.root, sm, [rmood] if isinstance(rmood, str) else list(rmood))
     if ms:                      # no tracks: the fingerprint stays as before T4.6 (approved plans do not go stale)
@@ -87,7 +88,28 @@ def fingerprint(paths) -> str:
     sp = paths.p("00_inputs/speakers.json")
     if sp.exists():
         h.update(b"speakers" + sp.read_bytes())
+    cues = shown_cues(paths, script, src)       # BL-21: no captions shown (or no file): as before BL-21
+    if cues is not None:
+        h.update(b"captions" + json.dumps(cues, ensure_ascii=True).encode())
     return h.hexdigest()
+
+
+def shown_cues(paths, script, src: dict) -> list | None:
+    """BL-21: the caption cues a plan shows, as _Compiler.captions reads them from 02_transcription/captions-short.srt
+    ([start_ms, end_ms, text with its line breaks as spaces]); None when no scene shows captions (the script's, a
+    scene's or the recipe's `captions`, as _finish decides) or there is no file. An unreadable script counts as
+    showing them."""
+    f = paths.p("02_transcription/captions-short.srt")
+    if not f.exists():
+        return None
+    if isinstance(script, dict) and isinstance(script.get("scenes"), list):
+        rm = (src.get("recipe") or {}).get("motion") or {}
+        video = _caption_mode(script.get("captions")) or _caption_mode(rm.get("captions", "off"))
+        if not any(((_caption_mode(sc.get("captions")) if isinstance(sc, dict) else None) or video) == "subtitles"
+                   for sc in script["scenes"]):
+            return None
+    from . import srt as srtlib
+    return [[c["start_ms"], c["end_ms"], c["text"].replace("\n", " ")] for c in srtlib.read_srt(f)]
 
 
 class _Compiler:
