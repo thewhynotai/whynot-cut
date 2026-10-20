@@ -52,3 +52,7 @@ then run the command again.
 `SCRIPT_STAGE_FAILED` (exit 1) or `REFUSED` with `refused: "ae-script-path"` (exit 2): nothing ran in AE (the script
 could not be read, or could not be copied to a path `AfterFX -r` accepts); give the editor the `how` as it is; do not
 retry on your own.
+On Windows a client path with a space or a non-ASCII letter (Arabic) runs from a staged copy of the script, since
+`AfterFX -r` ignores such paths: the result then has `script_copy_used` (the copy AE was given) and
+`script_copy_kept_until` (when a later run sweeps it); `jsx` stays the original. That copy is expected and is removed
+later on its own: it is not an error, so do not report it or delete it.

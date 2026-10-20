@@ -407,6 +407,7 @@ def run_script(paths, timeout: int = 900) -> dict:
     jsx = write_fallback_script(paths)
     t0 = time.time()
     r = run_after_effects(jsx, timeout, done=lambda: aep.exists() and aep.stat().st_mtime >= t0 - 1)
+    # Nothing ran in AE and the .aep on disk is unchanged: motion-build-result.json is kept as it was (no _record)
     if r.get("status") in ("UNSUPPORTED", "REFUSED", "SCRIPT_STAGE_FAILED"):    # nothing built is never exit 0; REFUSED:
         return dict(r, ok=False, jsx=str(jsx))           # the sandbox, or the build lock (`blocked`: exit 2)
     said = next((ln.split(REFUSED_MARK, 1)[1].strip() for ln in str(r.get("stdout") or "").splitlines()
