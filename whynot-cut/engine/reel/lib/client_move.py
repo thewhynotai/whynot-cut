@@ -91,14 +91,16 @@ REBASE_JSON = {INVENTORY, "01_analysis/edit-decisions.json", "00_inputs/input-ma
                "06_audio/dialogue/dialogue-clean-report.json", "06_audio/dialogue/cut-verification.json"}
 # the step that really writes a kept file again (review 087e8e3 P3-1), named in the delete advice while that file may
 # still be opened by the old folder's path: by the item's kind (its flag), then the part after the item's folder, an
-# exact file or a folder ending in "/" (`reel sfx` writes <kind>.provenance.json; an ae_frames run's frames.json: readers
-# take the newest run, so a new run replaces it). A kept file not here has no step that safely writes it again
-# (Claude's or the editor's own; 02_transcription/chunks/: `reel transcribe` skips while a transcript exists and --force
-# throws the corrections away; `reel ppro-frames` writes only images; `reel audio-clean` never: see REBASE_JSON): the
-# old folder is kept for it
-STEP_OF = {"projects": ("--video-id", {"06_audio/sfx/": "reel sfx",
-                                       "08_quality_control/ae_frames/": "reel motion-frames"}),
+# exact file or a folder ending in "/" (`reel sfx` writes <kind>.provenance.json). A kept file not here has no step
+# that safely writes it again (Claude's or the editor's own; 02_transcription/chunks/: `reel transcribe` skips while a
+# transcript exists and --force throws the corrections away; `reel ppro-frames` writes only images; `reel audio-clean`
+# never: see REBASE_JSON): the old folder is kept for it
+STEP_OF = {"projects": ("--video-id", {"06_audio/sfx/": "reel sfx"}),
            "episodes": ("--episode", {"00_inputs/episode.json": "reel episode-prep"})}
+# an After Effects frames run's record (motion_render.frames): its `render` path is never opened (the panel and the
+# frame checks read its frame names), and `reel motion-frames` again would turn a recorded visual pass into pending
+# (review 291b5d1 P3-1): kept like a log, never in the delete advice
+AE_FRAMES_RECORD = re.compile(r"output/projects/[^/]+/08_quality_control/ae_frames/run-[^/]+/frames\.json")
 # inside the client database only these (besides client_db.migrate's own files) are rewritten: everything else there is
 # bound to its bytes (the reference style every video's copy is checked against, the sealed rules registry) or written
 # by the editor or Claude, and none of it is opened as media
@@ -1248,14 +1250,16 @@ def _old_folder(src: Path, dest: Path, kept: list[dict], projects: list[dict]) -
     relinked or rebuilt; every distinct step that really writes a kept file a step may still open by the path it
     stores runs again (STEP_OF); a kept file no step writes again keeps the old folder until it is fixed by hand. A
     log (history), the client database's citations (never opened; its brand tokens and status are), the takes history
-    (an undo refuses either way) and the editor's sealed revise comments (a path in them is text) need nothing."""
+    (an undo refuses either way), the editor's sealed revise comments (a path in them is text) and an After Effects
+    frames run's record (AE_FRAMES_RECORD) need nothing."""
     from .rules_loop import NOTES_REL
     from .safety.takes import HISTORY
     delete = (f"left in place at {src}: check the new folder (`reel next --root \"{dest}\"`), then delete the old one "
               "yourself")
     due = sorted(k["file"] for k in kept if os.path.splitext(k["file"])[1].casefold() not in LOG_EXT
                  and not (k["file"].startswith("output/client_database/") and k["file"] not in DB_REBASE + (BRAND_TOKENS,))
-                 and not k["file"].endswith(("/" + HISTORY, "/" + NOTES_REL)))
+                 and not k["file"].endswith(("/" + HISTORY, "/" + NOTES_REL))
+                 and not AE_FRAMES_RECORD.fullmatch(k["file"]))
     runs: dict = {}
     by_hand = []
     for rel in due:

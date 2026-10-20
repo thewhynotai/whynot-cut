@@ -1245,14 +1245,21 @@ class TestReview087e8e3(Base):
 
     # the engine's own files, in the shape their writers give them (review b690c54 P3-3): the keys and every path field
     # copied from the writer named in each, never invented JSON
-    def clean_report(self, vid: str) -> dict:                  # audio_clean.clean, audio_clean.py:423-428
+    def clean_report(self, vid: str) -> dict:                  # audio_clean.clean, audio_clean.py:409-428
+        qc = f"output/projects/{vid}/08_quality_control/audio"
+        stats = lambda n, s: {"noise_floor_db": n, "speech_level_db": s, "speech_to_noise_db": round(s - n, 1)}
         return {"generated": "2026-10-20T10:00:00+0300", "source": self.old("data/Raw/clip 1.mp4"),
                 "output": self.old(f"output/projects/{vid}/06_audio/dialogue/dialogue_clean.wav"),
                 "source_assessment": {"speech_to_noise_db": 31.2}, "decisions": [
                     "one channel used: the file is mono", "no hum notches (no mains hum stands out in the pauses)",
                     "no spectral denoise: the source is already clean (31.2 dB speech-to-noise)"],
-                "channel_plan": {"mono": True}, "regions_ms": {"speech": [[0, 4000]], "pauses": [[4000, 4600]]},
-                "chain": ["highpass=f=80", "loudnorm"], "loudness_target": -16, "metrics": {"lufs": -16.1},
+                "channel_plan": [{"start_ms": 0, "end_ms": 4600, "channel": 1}],
+                "regions_ms": [[0, 4600, 1]], "chain": ["highpass=f=80", "loudnorm"], "loudness_target": -16,
+                "metrics": {"before_selected_mic": stats(-58.4, -22.1), "after": stats(-66.0, -20.3),    # evidence(),
+                            "lufs_before": -21.7, "lufs_after": -16.1,                                  # :466-469
+                            "spectrograms": [self.old(f"{qc}/spectrogram_before.png"),
+                                             self.old(f"{qc}/spectrogram_after.png")],
+                            "denoise_only_main_mic": stats(-61.2, -21.0)},                              # :414
                 "loudness": {"gain_db": 2.5, "lufs": -16.1, "true_peak_dbtp": -1.5},
                 "note": "Original camera audio is kept (muted) in the Premiere project for A/B."}
 
@@ -1305,8 +1312,7 @@ class TestReview087e8e3(Base):
             self.put(rel, doc)
         doc = self.moved()
         d = self.dest
-        runs = [f'`reel episode-prep --root "{d}" --episode EP01`', f'`reel sfx --root "{d}" --video-id R01`',
-                f'`reel motion-frames --root "{d}" --video-id R02`']
+        runs = [f'`reel episode-prep --root "{d}" --episode EP01`', f'`reel sfx --root "{d}" --video-id R01`']
         hand = ["output/projects/R01/09_handoff/delivery.json"]      # the fixture's own: no step writes it
         prj = f"{self.PRPROJ} (File > Link Media)"
         self.assertEqual(doc["old_folder"],
@@ -1318,6 +1324,7 @@ class TestReview087e8e3(Base):
                          + self.delete_line())
         self.assertNotIn("reel transcribe", doc["old_folder"])     # a no-op there; --force drops the corrections
         self.assertNotIn("chunks", doc["old_folder"])               # a chunk plan stores no path
+        self.assertNotIn("ae_frames", doc["old_folder"])            # a frames record: nothing opens its render path
 
     def test_audio_clean_is_never_advised_after_a_move(self):
         """Review b690c54 P2-1: every cleaned clip's report names the footage and the cleaned wav. A move rewrites it
@@ -1337,7 +1344,12 @@ class TestReview087e8e3(Base):
             self.assertEqual(rep["source"], str(self.dest / "data" / "Raw" / "clip 1.mp4"))
             self.assertEqual(rep["output"], str(self.dest.joinpath("output", "projects", vid, "06_audio", "dialogue",
                                                                    "dialogue_clean.wav")))
-            self.assertEqual(rep["metrics"], {"lufs": -16.1})                   # what qc reads: as it was
+            was = self.clean_report(vid)["metrics"]
+            for k in ("before_selected_mic", "after", "lufs_before", "lufs_after", "denoise_only_main_mic"):
+                self.assertEqual(rep["metrics"][k], was[k], k)                  # what qc reads: as it was
+            qc = self.dest.joinpath("output", "projects", vid, "08_quality_control", "audio")
+            self.assertEqual(rep["metrics"]["spectrograms"], [str(qc / "spectrogram_before.png"),
+                                                              str(qc / "spectrogram_after.png")])
         self.assertEqual(doc["old_folder"], self.delete_line())
         for rel in ("06_audio/dialogue/dialogue-clean-report.json", "06_audio/dialogue/cut-verification.json"):
             self.assertIsNone(CM._rewritable(f"output/projects/R01/{rel}", ".json"), rel)
@@ -1354,17 +1366,38 @@ class TestReview087e8e3(Base):
         self.assertNotIn("ppro-frames", adv)
         self.assertIn(f"made again: {rel}. ", adv)
 
+    def test_a_motion_frames_record_is_history(self):
+        """Review 291b5d1 P3-1: an ae_frames run's frames.json stores the render's path, but nothing opens it (the panel
+        reads its frame names); `reel motion-frames` again would only turn a recorded visual pass into pending. Kept
+        like a log, never advised; any other file there is no record of that step."""
+        (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
+        (self.src / self.PRPROJ).unlink()
+        for vid, run in (("R01", "run-20261020-100300"), ("R01", "run-20261020-110300"), ("R02", "run-20261020-100300")):
+            self.put(f"output/projects/{vid}/08_quality_control/ae_frames/{run}/frames.json", self.ae_frames(vid))
+        doc = self.moved()
+        kept = [k["file"] for k in doc["outside_database"]["kept"]]
+        self.assertIn("output/projects/R02/08_quality_control/ae_frames/run-20261020-100300/frames.json", kept)
+        self.assertEqual(doc["old_folder"], self.delete_line())
+        self.assertNotIn("reel motion-frames", [v for _f, t in CM.STEP_OF.values() for v in t.values()])
+        other = make_client(self.tmp, "Other")
+        rel = "output/projects/R01/08_quality_control/ae_frames/run-20261020-100300/notes.json"
+        f = other.joinpath(*rel.split("/"))
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps({"seen": str(other / "data" / "Raw" / "clip 1.mp4")}), encoding="utf-8")
+        self.hold(other)
+        adv = CM.move(other, self.tmp / "E drive" / "Other2", apply=True)["old_folder"]
+        self.assertIn(f"made again: {rel}, output/projects/R01/09_handoff/delivery.json. ", adv)
+
     def test_every_distinct_step_is_named_however_many_files_are_kept(self):
         raw = self.old("data/Raw/clip 1.mp4")
         for k in range(1, 8):
-            self.put(f"output/projects/R0{k}/08_quality_control/ae_frames/run-20261020-100300/frames.json",
-                     self.ae_frames(f"R0{k}"))
+            self.put(f"output/projects/R0{k}/06_audio/sfx/whoosh.provenance.json",
+                     self.provenance("whoosh", "data/SFX/whoosh_01.wav"))
             self.put(f"output/projects/R0{k}/09_handoff/delivery.json", {"sent": raw})
-        self.put("output/projects/R01/08_quality_control/ae_frames/run-20261020-110300/frames.json",
-                 self.ae_frames("R01"))
+        self.put("output/projects/R01/06_audio/sfx/hit.provenance.json", self.provenance("hit", "data/SFX/hit.wav"))
         adv = self.moved()["old_folder"]
         for k in range(1, 8):
-            self.assertEqual(adv.count(f'`reel motion-frames --root "{self.dest}" --video-id R0{k}`'), 2, (k, adv))
+            self.assertEqual(adv.count(f'`reel sfx --root "{self.dest}" --video-id R0{k}`'), 2, (k, adv))
             self.assertEqual(adv.count(f"output/projects/R0{k}/09_handoff/delivery.json"), 2, (k, adv))
         self.assertNotIn("more", adv)
 
@@ -1394,6 +1427,9 @@ class TestReview087e8e3(Base):
         self.assertIn(f"{aep} (File > Dependencies > Find Missing Footage)", adv)
         self.assertIn(f"{self.PRPROJ} (File > Link Media)", adv)
         self.assertEqual(adv.count("Link Media"), 2)                          # the .prproj only, once per language
+        both = (f"{self.PRPROJ} (File > Link Media){{}}{aep} (File > Dependencies > Find Missing Footage)")
+        self.assertIn("ابنيها تاني: " + both.format("، ") + ". ", adv)       # review 291b5d1 P3-3: «،» in Arabic
+        self.assertIn("rebuild them: " + both.format(", ") + ". ", adv)
         self.assertEqual((self.dest / aep).read_bytes(), before)              # read, never edited
 
     def test_a_project_that_links_nothing_in_the_old_folder_keeps_the_advice_plain(self):
