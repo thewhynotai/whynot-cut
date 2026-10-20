@@ -63,5 +63,12 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
 ## 6. Incidents
 - 2026-10-19 ~20:40: all four recurring Claude tasks found disabled (cause unknown). 21:30: the whole account hit its
   usage limit. 00:45 reboot. Recovered by the Command Center 2026-10-20.
+- 2026-10-20 01:35 (Command Center's own mistake): while creating the `ops` worktree, a plain `git config user.name`
+  overwrote the SHARED `.git/config` [user] ("The Why Not AI <info@thewhynot.ai>"), and the "revert" then unset it,
+  wrongly assuming nothing was there before. The executor's `git commit` in the main checkout then failed ("Author
+  identity unknown"). The plan session set a main-worktree identity (`.git/config.worktree`, 10-20 ~03:00); the
+  Command Center restored the shared [user] to its original value at 03:15 (verified: shared, main, h1, h2, ops,
+  review). No commit was made with a wrong author (log checked). **Rule:** in this repo, always
+  `git config --worktree` for a worktree identity; read `git config --show-origin --get-all` BEFORE any change.
 - 2026-10-19: helper suites failed 563 tests: the engine packages existed only in Claude's sandboxed AppData. Fixed by
   ENV-01 (D-009).
