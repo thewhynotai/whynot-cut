@@ -1,6 +1,6 @@
 # STATUS (edited by the MASTER only)
 
-- **Last intake:** 2026-10-20 12:45 (Cairo). No new reports. Took over the stale lock of run local_27a4af61 (stopped after SETUP-H2 ACCEPTED r1, before ledger/STATUS); completed its ledger line. H2 queue topped up: BL-20 (skip_audit gate tool, LIGHT, S) READY. Nothing to merge.
+- **Last intake:** 2026-10-20 16:40 (Cairo). Two DONE reports: BL-03 (H2, 13:46) and BL-02-r2 (H1, 14:09). Both are awaiting-peer: no peer review yet, both under 4 h. The master reviews them itself from 17:46 / 18:09 if no valid peer review lands. Nothing to merge.
 - **10:10:** API lane 1 is stopped (owner budget ruling 10:03).
   - BL-16 → H1 (Mayar) and BL-04 → H2 (marketing@), as cards with claims reserved. If not started by 25 Oct, both
     fall back to the executor.
