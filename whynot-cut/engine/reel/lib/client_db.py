@@ -162,6 +162,44 @@ def raw_to_jpeg(src: Path, dst: Path) -> str:
         return f"rawpy failed: {type(e).__name__}"
 
 
+PAIRING_SOURCES = ("client", "table")
+PAIRING_CLASSES = ("formal", "geometric", "humanist", "handwritten", "display")
+
+
+def typography_pairing(*layers) -> tuple[dict, list]:
+    """typography.json `pairing` per role (Addendum M M2-T4): {role: {arabic, latin, latin_scale, source, score}}
+    (+ optional class / latin_class). `arabic` and `latin` name a family, a PostScript name or a font file of the
+    client; source is "client" (the editor's choice: always wins, lib/font_pairing) or "table" (taken from the curated
+    table). Layers in order, a later one winning per role: the pairing already in typography.json (set by the editor
+    or client-researcher), then branding/typography-roles.json `pairing`. A rebuild never wipes a pair. Returns
+    (pairing, issues); an entry that is not usable is left out and named in issues."""
+    out, issues = {}, []
+    for layer in layers:
+        if not isinstance(layer, dict):
+            continue
+        for role, e in layer.items():
+            if not isinstance(e, dict) or not str(e.get("arabic") or "").strip() or not str(e.get("latin") or "").strip():
+                issues.append(f"typography pairing.{role}: needs an arabic and a latin face: left out")
+                continue
+            src = e.get("source", "client")
+            if src not in PAIRING_SOURCES:
+                issues.append(f"typography pairing.{role}: source {src!r} is not client or table: left out")
+                continue
+            ent = {"arabic": str(e["arabic"]).strip(), "latin": str(e["latin"]).strip(), "source": src}
+            ls, sc = e.get("latin_scale"), e.get("score")
+            if isinstance(ls, (int, float)) and not isinstance(ls, bool) and 0.5 <= ls <= 2.0:
+                ent["latin_scale"] = float(ls)
+            elif ls is not None:
+                issues.append(f"typography pairing.{role}: latin_scale {ls!r} is outside 0.5-2.0: measured instead")
+            if isinstance(sc, (int, float)) and not isinstance(sc, bool) and 0 <= sc <= 100:
+                ent["score"] = sc
+            for k in ("class", "latin_class"):
+                if e.get(k) in PAIRING_CLASSES:
+                    ent[k] = e[k]
+            out[str(role)] = ent
+    return out, issues
+
+
 def build(paths: Paths, inventory: dict) -> dict:
     db = paths.client_db
     for sub in ("profile", "branding", "assets/derivatives", "templates"):
@@ -193,7 +231,9 @@ def build(paths: Paths, inventory: dict) -> dict:
     for fi in fonts:
         fams.setdefault(fi["typographic_family"] or fi["family"], []).append(fi)
     typ_over = read_json(db / "branding/typography-roles.json", {})
-    typography = {"generated": now_iso(), "families": {
+    pairing, pairing_issues = typography_pairing((load(paths, "branding/typography.json", {}) or {}).get("pairing"),
+                                                 typ_over.get("pairing"))
+    typography = {"generated": now_iso(), **({"pairing": pairing} if pairing else {}), "families": {
         k: {"weights": sorted([{"style": f["typographic_subfamily"] or f["subfamily"],
                                  "postscript_name": f["postscript_name"], "weight_class": f["weight_class"],
                                  "file": f["file"], "installed": f["installed"]} for f in v],
@@ -252,6 +292,7 @@ def build(paths: Paths, inventory: dict) -> dict:
                       f"citing the image, or ask the client for HEX codes.")
     elif not colors:
         issues.append("No HEX colors found in client documents.")
+    issues += pairing_issues
     if typography["missing_or_uninstalled"]:
         issues.append(f"Fonts not installed ({plat.font_install_hint()}): {typography['missing_or_uninstalled']}")
     issues += [f"Camera RAW skipped: {x}" for x in skipped_raw]

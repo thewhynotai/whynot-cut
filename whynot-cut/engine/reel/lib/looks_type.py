@@ -6,6 +6,12 @@ word-level line layout that knows where every word lands.
 Font chain, the same everywhere in R-4.1, R-6.1 and R-6.2:
   Arabic runs: the client's Arabic face for the role → the client's Arabic body face → the look's fallback → house.
   Latin runs:  the client's Latin face for the role → the client's Arabic face if it has Latin → look fallback → house.
+The M2 font pair (lib/font_pairing.pick, Addendum M M2-T4) joins the chain: the client's own
+pairing in typography.json leads both chains; any other pair (measured against the client's own role face, or a table
+pair when the client has none) fills in after the client's own faces, before
+the look fallback and the house faces. The pair's Latin face carries `scale` (latin_scale): the Typesetter draws it at
+size x scale. A table face must be installed here as a static file (variable instances wait for the renderer);
+otherwise there is no pair and the chain is exactly the one above.
 House faces: IBM Plex Sans Arabic and Inter (OFL) when installed, else the system fallbacks (lib/fonts.py).
 A run whose characters a font cannot draw (glyph id 0, .notdef) moves to the next font in its chain, then to the other
 script's chain; a character no font has is reported as U+XXXX and left out (never a silent box).
@@ -251,10 +257,45 @@ def _heavier(typography: dict, face: dict, step: int) -> tuple[dict, str | None]
     return {"file": f["file"], "index": 0, "ps": f["ps"], "family": f["family"], "style": f["style"]}, None
 
 
+def _pair_locate(face: dict) -> str | None:
+    """The file of a pair face on this computer: its own file, else the installed static face with its PostScript
+    name. A variable instance (the table's "instance") is not drawable by the engines yet: None."""
+    from pathlib import Path
+    from . import fonts
+    if face.get("instance") is not None:
+        return None
+    f = face.get("file")
+    if f and Path(str(f)).is_file():
+        return str(f)
+    hit = fonts.find(face["ps"]) if face.get("ps") else None
+    return hit["file"] if hit and hit.get("ps") == face.get("ps") else None
+
+
+def pair_faces(typography: dict, role: str, locate=None) -> dict | None:
+    """The M2 font pair for `role` as chain faces: {"arabic", "latin" (with "scale"), "source", "score", "band",
+    "note"}; None when there is no usable pair."""
+    from . import font_pairing
+    loc = locate or _pair_locate
+    p = font_pairing.pick(role, typography, locate=loc)["pair"]
+    if not p:
+        return None
+    files = {s: loc(p[s]) for s in ("arabic", "latin")}
+    if not all(files.values()):
+        return None
+    faces = {s: {"file": files[s], "index": 0, "ps": p[s].get("ps"), "family": p[s].get("family"), "style": None,
+                 "weight": p[s].get("weight_class")} for s in ("arabic", "latin")}
+    faces["latin"]["scale"] = float(p.get("latin_scale") or 1.0)
+    note = "" if p["band"] == "auto" else \
+        f"font pair {p['arabic']['family']} + {p['latin']['family']} ({p['source']}): {p['reason']}"
+    return {"arabic": faces["arabic"], "latin": faces["latin"], "source": p["source"], "score": p["score"],
+            "band": p["band"], "note": note}
+
+
 def font_chain(typography: dict, role: str = "caption", house: dict | None = None, look_fallback: dict | None = None,
-               weight_step: int = 0) -> dict:
-    """{"arabic": [faces], "latin": [faces], "notes": [...]} for a role (see the module docstring). `weight_step`
-    (weight units, e.g. 200) moves the client's faces that much heavier in their own family (the `weight` emphasis)."""
+               weight_step: int = 0, pairing: bool = True) -> dict:
+    """{"arabic": [faces], "latin": [faces], "notes": [...], "pair": {...} | None} for a role (see the module
+    docstring). `weight_step` (weight units, e.g. 200) moves the client's faces that much heavier in their own family
+    (the `weight` emphasis). `pairing` False leaves the M2 pair out."""
     house = house_faces() if house is None else house
     notes: list[str] = []
     def step(f):
@@ -266,9 +307,25 @@ def font_chain(typography: dict, role: str = "caption", house: dict | None = Non
         return g
     role_f, body_f = step(_role_face(typography, role)), step(_role_face(typography, "body"))
     client_ar = [f for f in (role_f, body_f) if f and _arabic(f)]
-    arabic = client_ar + ([look_fallback] if look_fallback and _arabic(look_fallback) else []) + list(house["arabic"])
-    latin = ([role_f] if role_f and _latin(role_f) else []) + [f for f in client_ar[:1] if _latin(f)] + \
-            ([look_fallback] if look_fallback and _latin(look_fallback) else []) + list(house["latin"])
+    pair = pair_faces(typography, role) if pairing else None
+    lead_ar, lead_lat, mid_ar, mid_lat = [], [], [], []
+    if pair:
+        pa, pl = pair["arabic"], pair["latin"]
+        from .font_roles import faces as role_faces
+        own = {f["family"] for f in role_faces(typography)}             # the client's own faces: emphasis steps them
+        pa = step(pa) if pa.get("family") in own else pa
+        pl = dict(step(pl), scale=pl["scale"]) if pl.get("family") in own else pl
+        if pair["source"] == "client":
+            lead_ar, lead_lat = [pa], [pl]
+        else:
+            mid_ar, mid_lat = [pa], [pl]
+        if pair["note"]:
+            notes.append(pair["note"])
+    arabic = lead_ar + client_ar + mid_ar + ([look_fallback] if look_fallback and _arabic(look_fallback) else []) + \
+        list(house["arabic"])
+    latin = lead_lat + ([role_f] if role_f and _latin(role_f) else []) + mid_lat + \
+        [f for f in client_ar[:1] if _latin(f)] + ([look_fallback] if look_fallback and _latin(look_fallback) else []) + \
+        list(house["latin"])
 
     def dedupe(fs):
         seen, out = set(), []
@@ -277,7 +334,18 @@ def font_chain(typography: dict, role: str = "caption", house: dict | None = Non
                 seen.add(_key(f))
                 out.append(f)
         return out
-    return {"arabic": dedupe(arabic), "latin": dedupe(latin), "notes": notes}
+    arabic, latin = dedupe(arabic), dedupe(latin)
+    summary = None
+    if pair:                        # the pair's Latin may already sit earlier in the chain (the role face): it keeps
+        key = _key(pl)              # its latin_scale there, so the Latin is drawn at the measured scale
+        latin = [dict(f, scale=pl["scale"]) if _key(f) == key else f for f in latin]
+        if weight_step:
+            notes.append("font pair measured at the role's weight: the emphasis face keeps its latin_scale")
+        first = latin[0] if latin else {}
+        summary = {"source": pair["source"], "score": pair["score"], "band": pair["band"],
+                   "arabic": pair["arabic"].get("family"), "latin": pair["latin"].get("family"),
+                   "latin_scale": float(first.get("scale") or 1.0), "latin_drawn": first.get("family")}
+    return {"arabic": arabic, "latin": latin, "notes": notes, "pair": summary}
 
 
 # --------------------------------------------------------------------------- segments and layout
@@ -365,7 +433,7 @@ class Typesetter:
 
     def _font(self, face: dict):
         eng = self._eng(face)
-        return eng, eng.font(face, self.size)
+        return eng, eng.font(face, self.size * float(face.get("scale") or 1.0))   # a pair's Latin face: latin_scale
 
     def font_for(self, face: dict):
         """(engine, font) that draws `face` at this size."""
