@@ -1,0 +1,73 @@
+{
+ "commit": "1234567890abcdef1234567890abcdef12345678",
+ "not_measured": [
+  {
+   "mode": "podcast-reel",
+   "reason": "fixture: no recorded podcast-reel run"
+  },
+  {
+   "mode": "motion",
+   "reason": "fixture: no recorded motion run"
+  }
+ ],
+ "runs": [
+  {
+   "mode": "single-clip",
+   "quality": [
+    {
+     "grader": "plan-validation",
+     "passed": true
+    },
+    {
+     "grader": "qc-frames",
+     "passed": true
+    }
+   ],
+   "run": "r1",
+   "speech_transcript": "single-clip/r1/transcript.json",
+   "status": "complete",
+   "transcripts": [
+    "single-clip/r1/D--Fixture-Clients-Zorblax-Quentaro"
+   ]
+  },
+  {
+   "mode": "single-clip",
+   "quality": [
+    {
+     "grader": "plan-validation",
+     "passed": true
+    },
+    {
+     "grader": "qc-frames",
+     "passed": true
+    }
+   ],
+   "run": "r2",
+   "speech_transcript": "single-clip/r2/transcript.json",
+   "status": "complete",
+   "transcripts": [
+    "single-clip/r2/D--Fixture-Clients-Zorblax-Quentaro"
+   ]
+  },
+  {
+   "mode": "single-clip",
+   "quality": [
+    {
+     "grader": "plan-validation",
+     "passed": true
+    },
+    {
+     "grader": "qc-frames",
+     "passed": true
+    }
+   ],
+   "run": "r3",
+   "status": "complete",
+   "transcripts": [
+    "single-clip/r3/D--Fixture-Clients-Zorblax-Quentaro"
+   ]
+  }
+ ],
+ "tool": "budget_runs",
+ "version": 1
+}

@@ -1,0 +1,1 @@
+{"agentType": "general-purpose", "description": "fixture helper", "model": "claude-sonnet-5-5", "requestNonInteractive": false, "requestShape": "default", "spawnDepth": 1, "toolUseId": "toolu_r2_A"}

@@ -1,0 +1,17 @@
+{
+ "meta": {
+  "duration_ms": 60000,
+  "language": "ar",
+  "model": "large-v3",
+  "source_video": "D:\\Fixture Clients\\Zorblax Quentaro\\data\\Raw\\EP01.mp4"
+ },
+ "segments": [
+  {
+   "end_ms": 60000,
+   "id": 0,
+   "start_ms": 0,
+   "text": "Zorblax Quentaro",
+   "words": []
+  }
+ ]
+}

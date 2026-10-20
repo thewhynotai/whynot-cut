@@ -1350,7 +1350,8 @@ class TestFixturesHaveNoDrift(unittest.TestCase):
         built = MF.build()
         on_disk = {p.relative_to(FIX).as_posix(): p.read_text(encoding="utf-8")
                    for p in FIX.rglob("*") if p.is_file() and p.name != "make_fixtures.py"
-                   and "__pycache__" not in p.parts}
+                   and "__pycache__" not in p.parts
+                   and p.relative_to(FIX).parts[0] != "budget"}   # M5-T2's own builder + drift test
         self.assertEqual(sorted(on_disk), sorted(built))
         for rel, body in built.items():
             self.assertEqual(on_disk[rel], body, rel)

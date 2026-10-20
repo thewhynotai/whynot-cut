@@ -43,6 +43,20 @@ How it counts
   * Nothing is dropped silently: a malformed or hostile line, an unreadable file, a folder that cannot be listed
     are listed in `skipped` and the report says `partial`.
 
+Budget section (M5-T2, report-only at Gate 4, binding from Gate 6): --budget RUNS reads a budget runs file
+  {"tool": "budget_runs", "version": 1, "commit": sha, "lead_model": id?, "runs": [{"mode": single-clip |
+  podcast-reel | motion, "run": name, "transcripts": [paths, relative to the runs file], "status": complete |
+  incomplete, "incomplete_reason": usage-limit | crash | aborted, "quality": [{"grader": name, "passed": bool}] | null,
+  "source": clean-run | baseline, "item": video id?, "eval_run": "<case>/<run>"?, "commit": sha?,
+  "speech_transcript": transcript.json?}], "not_measured": [{"mode", "reason"}]}
+  and prints one row per run (weighted in the M5.2 unit and at published prices, raw tokens, speech minutes from the
+  transcript's duration, per speech minute, lead context and its guard rail, commit, model mix, quality, label
+  "report-only, n=<k>") and one verdict per mode: PASS when the median of >= 3 complete clean runs is <= the M5.3
+  budget, no run is over 1.25x it and every quality grader passed; FAIL with the reasons (a token pass with a quality
+  fail, or quality not measured, is a FAIL); INSUFFICIENT (n < 3), NOT COMPARABLE (different commits or lead models),
+  NOT MEASURED (no runs, with the reason). Incomplete runs are listed and never counted; baseline rows are printed as
+  "provisional, n=<k>" and never judged. Every verdict carries binding: false. --md FILE writes the evidence block.
+
 Privacy: the output names stages, model ids, counts and anonymised video labels (item-01, ... in order of first use;
 --raw-ids prints the real ids). It never prints prompt text, tool inputs, paths or folder names; a file is named by
 its path below its project folder (<session>.jsonl, <session>/subagents/agent-<hex>.jsonl).
@@ -50,8 +64,11 @@ its path below its project folder (<session>.jsonl, <session>/subagents/agent-<h
 Usage
   python tools/token_report.py [PATH ...] [--project NAME ...] [--json FILE|-] [--lead-model ID] [--raw-ids]
                                [--marked-only] [--date YYYY-MM-DD]
+  python tools/token_report.py --budget RUNS.json [--json FILE|-] [--md FILE] [--lead-model ID] [--raw-ids]
+                               [--date YYYY-MM-DD]
   No PATH and no --project: every project folder under the projects folder. Exit 0; 2 when nothing can be read
-  (no transcript, or not one readable record), and then nothing is written.
+  (no transcript, or not one readable record), and then nothing is written; with --budget, 2 when the runs file
+  cannot be used (every problem is listed) and then nothing is written.
 """
 from __future__ import annotations
 
@@ -68,7 +85,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
 ROOT = Path(__file__).resolve().parents[1]
 GUARD_RAIL = 150_000
 CATS = ("fresh", "write_5m", "write_1h", "read", "output")
@@ -921,8 +938,8 @@ def _manifest_runs(root: Path):
     return runs, missing
 
 
-def build_report(paths, *, lead_model=None, raw_ids=False, marked_only=False, date=None, commit=None) -> dict:
-    """The full report (a JSON-ready dict) over transcript files or folders."""
+def _read_sources(paths, marked_only=False):
+    """(Reader, eval run keys, missing eval run keys) over transcript files, folders and eval_transcripts folders."""
     reader = Reader()
     run_keys, runs_missing = [], []
     plain = []
@@ -939,6 +956,12 @@ def build_report(paths, *, lead_model=None, raw_ids=False, marked_only=False, da
                 reader.read_session(key, main, subs, marked_only)
     for main, subs in discover(plain, reader.skipped):
         reader.read_session("", main, subs, marked_only)
+    return reader, run_keys, runs_missing
+
+
+def build_report(paths, *, lead_model=None, raw_ids=False, marked_only=False, date=None, commit=None) -> dict:
+    """The full report (a JSON-ready dict) over transcript files or folders."""
+    reader, run_keys, runs_missing = _read_sources(paths, marked_only)
     msgs = list(reader.msgs.values())
     lead = _choose_lead(msgs, lead_model)
     lead_row = price_row(lead, 0) if lead else None
@@ -981,6 +1004,397 @@ def build_report(paths, *, lead_model=None, raw_ids=False, marked_only=False, da
                                 "lead_context": part["lead_context"], "errors": part["errors"]}
         rep["runs_missing"] = sorted(runs_missing)
     return rep
+
+
+# --- Budget section (M5-T2: report-only at Gate 4, binding from Gate 6) -------------------------------------------
+# M5.3 budgets, per video, in the M5.2 unit (fresh x1, 5m write x1.25, 1h write x2, read x0.1, output x5, scaled per
+# model by its fresh input price over the lead's): the unit the budgets were set in (7.8M median -> 2.5M). The
+# published-price `weighted` is printed beside it. A mode passes when the median of its complete runs is <= the
+# budget and no run is over BUDGET_SLACK x the budget, with every quality grader of every run passing.
+BUDGETS = {
+    "single-clip": {"budget": 2_500_000, "stretch": 1_500_000, "placeholder": False,
+                    "scope": "raw -> Premiere project -> QC"},
+    "podcast-reel": {"budget": 2_500_000, "stretch": 1_500_000, "placeholder": False,
+                     "scope": "picked candidate -> Premiere -> QC, episode share included"},
+    "motion": {"budget": 3_500_000, "stretch": None, "placeholder": True,
+               "scope": "script -> AE render -> QC (placeholder budget until Gate 6)"},
+}
+BUDGET_SLACK = 1.25
+MIN_RUNS = 3
+BINDING_FROM = "Gate 6"
+SOURCES = ("clean-run", "baseline")          # baseline: development sessions, shown as provisional, never judged
+INCOMPLETE_REASONS = ("usage-limit", "crash", "aborted")
+COMMIT_RE = re.compile(r"[0-9a-f]{7,40}")
+EVAL_RUN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,119}/[A-Za-z0-9][A-Za-z0-9._-]{0,119}")
+BUDGET_MD_HEADER = "<!-- generated by tools/token_report.py {version} --budget: do not edit this block by hand -->"
+BUDGET_MD_END = "<!-- end of the generated block -->"
+BUDGET_ASSUMPTIONS = (
+    "budgets are judged in the M5.2 unit (the unit M5.3's budgets were set in); `weighted` at published prices is "
+    "printed beside it",
+    "report-only at Gate 4: no verdict is binding before " + BINDING_FROM,
+    "a run's tokens are every usage record of its transcripts (with `item`: only usage attributed to that video, "
+    "so usage before the first command naming it is left out)",
+    "speech minutes = the transcript's meta.duration_ms (the decoded audio length), not the talking time alone",
+)
+
+
+class BudgetError(ValueError):
+    """A runs file that cannot be used; `errors` lists every problem found."""
+    def __init__(self, errors):
+        super().__init__("; ".join(errors))
+        self.errors = list(errors)
+
+
+def _judge(x):
+    """A weighted number as the evaluator compares it: rounded to 3 decimals (float noise is never a fail)."""
+    return None if x is None else round(x, 3)
+
+
+def speech_minutes(path):
+    """(minutes, source) from a transcript.json's meta.duration_ms; (None, why) when there is none."""
+    if path is None:
+        return None, "none"
+    try:
+        with open(path, encoding="utf-8") as fh:
+            d = json.load(fh)
+    except (OSError, ValueError, RecursionError):
+        return None, "unreadable"
+    meta = d.get("meta") if isinstance(d, dict) else None
+    ms = _int(meta.get("duration_ms")) if isinstance(meta, dict) else 0
+    return (ms / 60_000, "transcript") if ms else (None, "no duration")
+
+
+def _quality(q) -> dict:
+    """The quality result of a run from its graders list; missing or empty = not measured (never a pass)."""
+    if not q:
+        return {"status": "not measured", "failed": [], "graders": 0}
+    failed = sorted(g["grader"] for g in q if g["passed"] is not True)
+    return {"status": "fail" if failed else "pass", "failed": failed, "graders": len(q)}
+
+
+def budget_verdict(mode: str, rows: list) -> dict:
+    """The verdict of one mode over its measured rows (clean runs only; baseline rows are ignored here)."""
+    spec = BUDGETS[mode]
+    b = spec["budget"]
+    cap = b * BUDGET_SLACK
+    clean = sorted((r for r in rows if r.get("source", "clean-run") == "clean-run"), key=lambda r: r["run"])
+    done = [r for r in clean if r["status"] == "complete"]
+    n = len(done)
+    v = {"budget": b, "run_cap": cap, "stretch": spec["stretch"], "placeholder": spec["placeholder"], "n": n,
+         "binding": False, "binding_from": BINDING_FROM, "label": f"report-only, n={n}", "median": None,
+         "max": None, "reasons": [], "not_measured_reason": None,
+         "excluded": [{"run": r["run"], "reason": r.get("incomplete_reason")} for r in clean
+                      if r["status"] != "complete"]}
+    vals = [_judge(r.get("weighted_m52")) if r.get("messages", 0) else None for r in done]
+    if vals and None not in vals:
+        v["median"], v["max"] = statistics.median(vals), max(vals)
+    if not clean:
+        v.update(result="NOT MEASURED", text="not measured")
+        return v
+    leads = {r.get("lead_model") for r in done if r.get("messages", 0)}     # a run without usage has no lead
+    if len({r.get("commit") for r in done}) > 1 or len(leads) > 1:
+        v.update(result="NOT COMPARABLE", text="not comparable (runs from different commits or lead models)")
+        return v
+    if n < MIN_RUNS:
+        v.update(result="INSUFFICIENT", text=f"insufficient runs (n={n})")
+        return v
+    reasons = []
+    for r, w in zip(done, vals):
+        q = r["quality"]
+        if q["status"] == "not measured":
+            reasons.append(f"{r['run']}: quality not measured")
+        elif q["status"] != "pass":
+            reasons.append(f"{r['run']}: quality ({', '.join(q['failed'])} failed)")
+        if w is None:
+            reasons.append(f"{r['run']}: tokens not measured")
+            continue
+        if r.get("unpriced"):
+            reasons.append(f"{r['run']}: tokens incomplete (an unpriced model is left out of the weighted number)")
+        if r.get("partial"):
+            reasons.append(f"{r['run']}: transcript partial (unreadable lines or files)")
+        if w > cap:
+            reasons.append(f"{r['run']}: {_fmt(w)} > {BUDGET_SLACK}x budget ({_fmt(cap)})")
+    if v["median"] is not None and v["median"] > b:
+        reasons.append(f"median {_fmt(v['median'])} > budget {_fmt(b)}")
+    v["reasons"] = reasons
+    if reasons:
+        v.update(result="FAIL", text="fail: " + "; ".join(reasons))
+    else:
+        v.update(result="PASS", text=f"pass: median {_fmt(v['median'])} <= {_fmt(b)}, max {_fmt(v['max'])} <= "
+                                     f"{_fmt(cap)}")
+    return v
+
+
+def _check_runs_doc(d, base: Path) -> list:
+    """Every problem of a budget runs file (empty list = usable)."""
+    if not isinstance(d, dict) or d.get("tool") != "budget_runs" or d.get("version") != 1:
+        return ['not a budget runs file (needs "tool": "budget_runs", "version": 1)']
+    errs = []
+    if "commit" in d and not (isinstance(d["commit"], str) and COMMIT_RE.fullmatch(d["commit"])):
+        errs.append("commit: a 7-40 character lowercase hex sha")
+    if "lead_model" in d and not isinstance(d["lead_model"], str):
+        errs.append("lead_model: a model id")
+    runs = d.get("runs")
+    if not isinstance(runs, list):
+        return errs + ["runs: a list"]
+    seen = set()
+    for i, e in enumerate(runs):
+        at = f"runs[{i}]"
+        if not isinstance(e, dict):
+            errs.append(f"{at}: an object")
+            continue
+        if e.get("mode") not in BUDGETS:
+            errs.append(f"{at}.mode: one of {', '.join(BUDGETS)}")
+        name = e.get("run")
+        if not (isinstance(name, str) and SAFE_NAME.fullmatch(name) and ".." not in name):
+            errs.append(f"{at}.run: a short name (letters, digits, . _ -)")
+        elif (e.get("mode"), name) in seen:
+            errs.append(f"{at}.run: {name} is used twice in its mode")
+        seen.add((e.get("mode"), name))
+        if e.get("source", "clean-run") not in SOURCES:
+            errs.append(f"{at}.source: one of {', '.join(SOURCES)}")
+        t = e.get("transcripts")
+        if not (isinstance(t, list) and t and all(isinstance(x, str) and x for x in t)):
+            errs.append(f"{at}.transcripts: a non-empty list of paths")
+        else:
+            for k, x in enumerate(t):
+                if not (base / x).exists():
+                    errs.append(f"{at}.transcripts[{k}]: not found")
+        st = e.get("status")
+        if st not in ("complete", "incomplete"):
+            errs.append(f"{at}.status: complete or incomplete")
+        elif st == "incomplete" and e.get("incomplete_reason") not in INCOMPLETE_REASONS:
+            errs.append(f"{at}.incomplete_reason: one of {', '.join(INCOMPLETE_REASONS)}")
+        q = e.get("quality")
+        if q is not None and not (isinstance(q, list) and all(
+                isinstance(g, dict) and isinstance(g.get("grader"), str) and SAFE_NAME.fullmatch(g["grader"])
+                and isinstance(g.get("passed"), bool) for g in q)):
+            errs.append(f'{at}.quality: null or a list of {{"grader": name, "passed": true|false}}')
+        if "item" in e and not (isinstance(e["item"], str) and ID_RE.fullmatch(e["item"])):
+            errs.append(f"{at}.item: a video id")
+        if "eval_run" in e and not (isinstance(e["eval_run"], str) and EVAL_RUN_RE.fullmatch(e["eval_run"])):
+            errs.append(f"{at}.eval_run: <case>/<run>")
+        if "commit" in e and not (isinstance(e["commit"], str) and COMMIT_RE.fullmatch(e["commit"])):
+            errs.append(f"{at}.commit: a 7-40 character lowercase hex sha")
+        if "speech_transcript" in e and not (isinstance(e["speech_transcript"], str) and e["speech_transcript"]):
+            errs.append(f"{at}.speech_transcript: a path")
+    nm = d.get("not_measured", [])
+    if not isinstance(nm, list):
+        errs.append("not_measured: a list")
+        nm = []
+    measured = {e.get("mode") for e in runs if isinstance(e, dict) and e.get("source", "clean-run") == "clean-run"}
+    for i, e in enumerate(nm):
+        at = f"not_measured[{i}]"
+        if not (isinstance(e, dict) and e.get("mode") in BUDGETS and isinstance(e.get("reason"), str)
+                and 0 < len(e["reason"]) <= 300):
+            errs.append(f"{at}: {{\"mode\": one of {', '.join(BUDGETS)}, \"reason\": text up to 300 characters}}")
+        elif e["mode"] in measured:
+            errs.append(f"{at}: {e['mode']} has clean runs and cannot also be not measured")
+    return errs
+
+
+def _measure(source, eval_run, item, lead_model):
+    """The token part of one run's row from its read sources (Reader, eval run keys)."""
+    reader, run_keys, _ = source
+    msgs = list(reader.msgs.values())
+    if eval_run is not None:
+        msgs = [m for m in msgs if m.group == eval_run]
+    if item is not None:
+        msgs = [m for m in msgs if m.ctx[1] == item]
+    lead = _choose_lead(msgs, lead_model)
+    lead_row = price_row(lead, 0) if lead else None
+    lead_in = lead_row[0] if lead_row else None
+    body, _ = _summarise(msgs, lead_in, lambda x: x)
+    t, lc = body["totals"], body["lead_context"]
+    m52 = {}
+    for m in msgs:
+        if not m.error:
+            _, w52 = _weights(m, lead_in)
+            if w52 is not None:
+                m52[m.model] = m52.get(m.model, 0.0) + w52
+    tot52 = sum(m52.values())
+    seen = sorted({m.ctx[1] for m in msgs if not m.error and m.ctx[1]})
+    return {"raw": t["raw"], "raw_total": sum(t["raw"].values()), "weighted": t["weighted"],
+            "weighted_m52": t["weighted_m52"], "messages": t["messages"], "lead_model": lead,
+            "model_mix": body["models"]["mix"],
+            "model_mix_m52": {k: v / tot52 for k, v in sorted(m52.items())} if tot52 > 0 else {},
+            "unpriced": bool(body["unpriced"]), "partial": bool(reader.skipped),
+            "errors": body["errors"]["count"],
+            "lead_context": {k: lc[k] for k in ("turns", "median", "p90", "max", "over", "guard_rail")},
+            "guard_rail": ("no lead turns" if not lc["turns"] else
+                           f"within {GUARD_RAIL:,}" if not lc["over"] else
+                           f"over on {lc['over']} of {lc['turns']} turns (max {lc['max']:,})"),
+            "_item": item or (seen[0] if len(seen) == 1 else None)}
+
+
+def build_budget_report(runs_path, *, lead_model=None, raw_ids=False, date=None, commit=None) -> dict:
+    """The budget report (a JSON-ready dict) of a budget runs file; BudgetError when the file cannot be used."""
+    runs_path = Path(runs_path)
+    try:
+        with open(runs_path, encoding="utf-8") as fh:
+            d = json.load(fh)
+    except OSError as e:
+        raise BudgetError([f"cannot read the runs file: {e.strerror or e}"])
+    except (ValueError, RecursionError):
+        raise BudgetError(["the runs file is not valid JSON"])
+    base = runs_path.parent
+    errs = _check_runs_doc(d, base)
+    if errs:
+        raise BudgetError(errs)
+    lead_model = lead_model or d.get("lead_model")
+    entries = sorted(d["runs"], key=lambda e: (list(BUDGETS).index(e["mode"]),
+                                               SOURCES.index(e.get("source", "clean-run")), e["run"]))
+    cache, rows = {}, []
+    for e in entries:
+        paths = tuple(sorted(str((base / x).resolve()) for x in e["transcripts"]))
+        if paths not in cache:
+            cache[paths] = _read_sources([Path(p) for p in paths])
+        reader, run_keys, _ = cache[paths]
+        er = e.get("eval_run")
+        if er is not None and er not in run_keys:
+            raise BudgetError([f"run {e['run']}: eval_run {er} is not a collected run of its transcripts"])
+        if er is None and len(run_keys) > 1:
+            raise BudgetError([f"run {e['run']}: its transcripts hold {len(run_keys)} eval runs: name one with "
+                               "eval_run"])
+        item = e["item"].upper() if e.get("item") else None
+        row = {"mode": e["mode"], "run": e["run"], "source": e.get("source", "clean-run"), "status": e["status"],
+               "incomplete_reason": e.get("incomplete_reason") if e["status"] == "incomplete" else None,
+               "commit": e.get("commit") or d.get("commit"), "quality": _quality(e.get("quality"))}
+        row.update(_measure(cache[paths], er, item, lead_model))
+        st = e.get("speech_transcript")
+        mins, row["speech_source"] = speech_minutes(base / st if st else None)
+        row["speech_minutes"] = mins
+        w = row["weighted_m52"]
+        row["tokens_per_speech_minute"] = w / mins if mins and w is not None else None
+        rows.append(row)
+    labels = {}
+    for r in rows:
+        it = r.pop("_item")
+        if it is not None and not raw_ids and it not in labels:
+            labels[it] = f"item-{len(labels) + 1:02d}"
+        r["item"] = None if it is None else it if raw_ids else labels[it]
+    reasons = {e["mode"]: e["reason"] for e in d.get("not_measured", [])}
+    modes = {}
+    for mode, spec in BUDGETS.items():
+        mine = [r for r in rows if r["mode"] == mode]
+        clean = [r for r in mine if r["source"] == "clean-run"]
+        base_rows = [r for r in mine if r["source"] == "baseline"]
+        v = budget_verdict(mode, clean)
+        if v["result"] == "NOT MEASURED":
+            v["not_measured_reason"] = reasons.get(mode, "no runs given")
+        for r in clean:
+            r["label"] = v["label"]
+        for r in base_rows:
+            r["label"] = f"provisional, n={len(base_rows)}"
+        modes[mode] = {"scope": spec["scope"], "budget": spec["budget"], "stretch": spec["stretch"],
+                       "placeholder": spec["placeholder"], "run_cap": spec["budget"] * BUDGET_SLACK,
+                       "verdict": v, "runs": clean, "baseline": base_rows}
+    return {"tool": "token_report", "version": VERSION, "section": "budget",
+            "report_date": date or _dt.date.today().isoformat(),
+            "commit": commit if commit is not None else repo_commit(ROOT), "binding": False,
+            "binding_from": BINDING_FROM, "gate": "Gate 4", "unit": "M5.2 unit (lead-model fresh "
+            "input equivalents, fixed multipliers 1 / 1.25 / 2 / 0.1 / 5)", "slack": BUDGET_SLACK,
+            "min_runs": MIN_RUNS, "guard_rail": GUARD_RAIL,
+            "prices": {"source": PRICES_SOURCE, "read_on": PRICES_READ_ON, "lead_model": lead_model},
+            "anonymised": not raw_ids, "assumptions": list(BUDGET_ASSUMPTIONS), "modes": modes}
+
+
+def _pct(mix) -> str:
+    return ", ".join(f"{k} {v * 100:.1f} %" for k, v in sorted(mix.items(), key=lambda kv: (-kv[1], kv[0]))) or "n/a"
+
+
+def _num(x, nd=0) -> str:
+    return "n/a" if x is None else f"{x:,.{nd}f}"
+
+
+def render_budget_summary(rep: dict) -> str:
+    lines = [f"token_report {rep['version']} budget  commit {(rep['commit'] or 'unknown')[:12]}  {rep['report_date']}",
+             f"report-only at {rep['gate']}: no verdict is binding; binding from {rep['binding_from']}",
+             f"unit: {rep['unit']}"]
+    for mode, m in rep["modes"].items():
+        v = m["verdict"]
+        extra = f"  stretch {_num(m['stretch'])}" if m["stretch"] is not None else ""
+        extra += "  (placeholder budget)" if m["placeholder"] else ""
+        why = f": {v['not_measured_reason']}" if v["result"] == "NOT MEASURED" else f": {v['text']}"
+        lines.append(f"{mode}: {v['result']} [{v['label']}] budget {_num(m['budget'])}{extra}{why}")
+        if v["excluded"]:
+            lines.append("  excluded: " + ", ".join(f"{x['run']} ({x['reason']})" for x in v["excluded"]))
+        if m["baseline"]:
+            lines.append(f"  baseline rows (provisional, n={len(m['baseline'])}): not judged")
+    return "\n".join(lines)
+
+
+def _md_rows(rows) -> list:
+    out = ["| Run | Status | Item | Weighted, M5.2 unit | Weighted, published prices | Raw tokens | Speech min | "
+           "M5.2 unit per speech min | Lead context median / p90 / max | Guard rail | Commit | Model mix (M5.2 unit) | Quality | "
+           "Label |", "|" + "---|" * 14]
+    for r in rows:
+        lc = r["lead_context"]
+        q = r["quality"]
+        qtxt = q["status"] + (f" ({', '.join(q['failed'])})" if q["failed"] else "") + \
+            (f", {q['graders']} graders" if q["graders"] else "")
+        st = r["status"] + (f" ({r['incomplete_reason']})" if r["incomplete_reason"] else "")
+        out.append(f"| {r['run']} | {st} | {r['item'] or 'n/a'} | {_num(r['weighted_m52'])} | {_num(r['weighted'])} | "
+                   f"{_num(r['raw_total'])} | {_num(r['speech_minutes'], 2)} | "
+                   f"{_num(r['tokens_per_speech_minute'])} | {_num(lc['median'])} / {_num(lc['p90'])} / "
+                   f"{_num(lc['max'])} | {r['guard_rail']} | {(r['commit'] or 'unknown')[:12]} | "
+                   f"{_pct(r['model_mix_m52'])} | {qtxt} | {r['label']} |")
+    return out
+
+
+def render_budget_md(rep: dict) -> str:
+    """The generated block of the budget evidence file (Markdown)."""
+    L = [BUDGET_MD_HEADER.format(version=rep["version"]), "",
+         f"**Report-only at {rep['gate']}.** No verdict below is binding; the budgets bind from "
+         f"{rep['binding_from']}. Tool commit {(rep['commit'] or 'unknown')[:12]}, report date {rep['report_date']}.",
+         "",
+         f"Unit: {rep['unit']}. A mode passes when the median of at least {rep['min_runs']} complete runs is <= its "
+         f"budget, no run is over {rep['slack']}x the budget and every quality grader of every run passed. "
+         f"Lead-context guard rail: {rep['guard_rail']:,} per turn (reported, not judged).", ""]
+    for mode, m in rep["modes"].items():
+        v = m["verdict"]
+        stretch = _num(m["stretch"]) if m["stretch"] is not None else "none"
+        L.append(f"### {mode}: {v['result']} ({v['label']})")
+        L.append("")
+        L.append(f"Scope: {m['scope']}. Budget {_num(m['budget'])}"
+                 + (" (placeholder)" if m["placeholder"] else "")
+                 + f", run cap {_num(m['run_cap'])}, stretch {stretch} (printed, not judged).")
+        L.append("")
+        if v["result"] == "NOT MEASURED":
+            L.append(f"Verdict: not measured ({v['not_measured_reason']}).")
+        else:
+            L.append(f"Verdict: {v['text']}. Median {_num(v['median'])}, max {_num(v['max'])}.")
+        if v["excluded"]:
+            L.append("")
+            L.append("Excluded from the median: " + ", ".join(f"{x['run']} ({x['reason']})" for x in v["excluded"])
+                     + ".")
+        if m["runs"]:
+            L += [""] + _md_rows(m["runs"])
+        if m["baseline"]:
+            L += ["", f"Baseline rows (provisional, n={len(m['baseline'])}: development sessions, an upper bound, "
+                      "never judged):", ""] + _md_rows(m["baseline"])
+        L.append("")
+    L.append("Assumptions: " + "; ".join(rep["assumptions"]) + ".")
+    L.append("")
+    L.append(BUDGET_MD_END)
+    return "\n".join(L) + "\n"
+
+
+def _write_text(text: str, path: str) -> None:
+    """Atomic like _write_json."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".token_report-", suffix=".tmp", dir=str(target.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 # --- Output -------------------------------------------------------------------------------------------------------
@@ -1050,6 +1464,8 @@ def main(argv=None) -> int:
     ap.add_argument("--raw-ids", action="store_true", help="print real video ids instead of item-NN labels")
     ap.add_argument("--marked-only", action="store_true", help="only sessions that ran a reel command")
     ap.add_argument("--date", help="report date YYYY-MM-DD (default: today)")
+    ap.add_argument("--budget", metavar="RUNS", help="the budget section (M5-T2, report-only) from a budget runs file")
+    ap.add_argument("--md", dest="md_path", help="with --budget: write the evidence block (Markdown) here")
     a = ap.parse_args(argv)
     _utf8_stdio()
 
@@ -1059,6 +1475,27 @@ def main(argv=None) -> int:
 
     if a.date and not DATE_RE.fullmatch(a.date):
         return refuse("--date must be YYYY-MM-DD")
+    if a.md_path and not a.budget:
+        return refuse("--md needs --budget")
+    if a.budget:
+        if a.paths or a.project or a.marked_only:
+            return refuse("--budget takes its transcripts from the runs file (no PATH, --project or --marked-only)")
+        try:
+            rep = build_budget_report(a.budget, lead_model=a.lead_model, raw_ids=a.raw_ids, date=a.date)
+        except BudgetError as e:
+            return refuse("budget runs file: " + "; ".join(e.errors))
+        try:
+            if a.json_path and a.json_path != "-":
+                _write_json(rep, a.json_path)
+            if a.md_path:
+                _write_text(render_budget_md(rep), a.md_path)
+        except OSError as e:
+            return refuse(f"cannot write the budget report: {e.strerror or e}")
+        if a.json_path == "-":
+            print(json.dumps(rep, indent=2, sort_keys=True, ensure_ascii=False))
+        else:
+            print(render_budget_summary(rep))
+        return 0
     paths = [Path(p) for p in a.paths]
     base = default_projects_dir()
     for name in a.project:
