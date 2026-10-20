@@ -52,6 +52,7 @@ LEAD_STEPS = (
     ("verify", ("--record",)), ("ae-probe", ("--record",)), ("ref-style", ("--adopt", "--yes")),
     ("caption-looks", ("--pick", "--yes")),                 # Task 28: the editor's caption-look swap is recorded
     ("rules", ("--add",)), ("rules", ("--remove",)),        # T4.3: a client rule is written or dropped
+    ("rules", ("--record",)), ("rules", ("--dismiss",)),    # T4.3 ruling 2: a learned note is recorded or dismissed
     ("clean", ("--apply",)))                                # T4.15: the engine-home clean-up removes files
 # transcript-verify is lead-only unless --by names a subagent (agent, claude, or a WhyNot Cut agent; the guard pins a
 # subagent to its own name)

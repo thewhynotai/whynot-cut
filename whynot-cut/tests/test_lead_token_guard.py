@@ -708,5 +708,34 @@ class TestHookAndEngine(Client):
         ours = {m for m in added if m not in sys.stdlib_module_names}
         self.assertEqual(ours, {"lead_steps", "plat"}, added)       # no engine module, no onboard/doctor
 
+@unittest.skipUnless(GUARD_HAS_TOKENS, "guard.py has no BL-15 token support yet (executor patch)")
+class TestBackstopIgnoresFolderNames(Client):
+    """Follow-up 2 (T4.15 builder, review 1d218f8 P3-2): the text backstop reads a step only as a word of its own,
+    never inside a path, so a client folder named like a step does not stop a subagent's ordinary call."""
+    LEAD_MSG = "a step only the lead editor runs"
+
+    def test_a_folder_named_like_a_step_does_not_refuse_an_ordinary_call(self):
+        for name, cmd in (("Clean Skin", "reel ref-style --apply --root \"{r}\""),
+                          ("Clean Skin", "reel ref-style --apply --root '{r}'"),
+                          ("Rules Clinic", "reel verify --check --root \"{r}\" --record-file x.json"),
+                          ("Lock Studio", "reel status --root={r} --release-notes")):
+            root = self.tmp / name
+            root.mkdir(exist_ok=True)
+            for r in (str(root), str(root).replace("\\", "/")):
+                with self.subTest(cmd=cmd, root=r):
+                    _, _, err = self.guard("Bash", {"command": cmd.format(r=r)}, agent=AGENT, recorded=True)
+                    self.assertNotIn(self.LEAD_MSG, err)
+
+    def test_the_step_itself_is_still_refused_whatever_the_folder(self):
+        r = str(self.tmp / "Clean Skin")
+        for cmd in (f'reel clean --apply --root "{r}"', f"cd '{r}' && reel clean --apply",
+                    f'cd "{r}";reel${{IFS}}clean${{IFS}}--apply', "reel \\clean --apply",
+                    f'bash -c "cd /x && reel clean --apply --root {r}"', "cd /x/y;reel clean --apply",
+                    f'reel rules --record --root "{self.tmp / "Rules Clinic"}"'):
+            with self.subTest(cmd=cmd):
+                rc, _, err = self.guard("Bash", {"command": cmd}, agent=AGENT, recorded=True)
+                self.assertEqual(rc, 2, err)
+
+
 if __name__ == "__main__":
     unittest.main()
