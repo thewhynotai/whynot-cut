@@ -23,7 +23,7 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 | BL-17 | Second install must not overwrite the first install's pointer files (Gate 5) | H1 | READY | `tasks/BL-17.md` | — |
 | BL-19 | Root-normalised fingerprints, so a client move keeps its approvals (Stage 2) | H1 | READY | `tasks/BL-19.md` | — |
 | SETUP-H2 | First login (marketing@) + full suite baseline | H2 (marketing@) | ACCEPTED — closed, no code (nothing to merge) | `tasks/SETUP-H2.md` | r1 2026-10-20 11:40: 8753 run, 77 env/timing (ENV-01 classes); npm ci + 296 panel tests + 1 render OK |
-| BL-03 | GPL-compliance + trademark notice templates (AR + EN) (Gate 4) | H2 | READY | `tasks/BL-03.md` | answered 2026-10-20 08:26: run full suite via queue, then DONE |
+| BL-03 | GPL-compliance + trademark notice templates (AR + EN) (Gate 4) | H2 | FIX (round 1, 2026-10-20 21:40) | `tasks/BL-03.md` | peer h1 FAIL: P2-1 identity-scan false green, P2-2 send checklist + soften "each source file" |
 | BL-04 | run-state.json + resume, preflight-first in `reel next` (Gate 4) | H2 | READY · fallback executor 25 Oct | `tasks/BL-04.md` | BLOCKED answered 2026-10-20 09:40: queue via wnc-locks/wait; next_doc ruling + fixture patch accepted; full suite with 3 patches, then DONE |
 | BL-20 | Gate check: no temporary dated skips in the suite (`tools/skip_audit.py`) (Gate 4 exit, LIGHT, S) | H2 | READY · fallback executor 25 Oct | `tasks/BL-20.md` | — |
 | BL-18 | Two wrong fix lines in installer/onboarding (Gate 4) | EXECUTOR (done) | MERGED (f2ca516 on release/3.0, 2026-10-20) | `tasks/BL-18.md` | H2 does NOT take it |

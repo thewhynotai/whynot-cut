@@ -1,11 +1,13 @@
 # BL-16 patches (outside H1's fence)
 
-Made with `git diff` against `h1/BL-16` (commit after the BL-16 feat commit). Apply on top of that branch, from the
-repo root: `git apply --check <patch>` then `git apply <patch>`.
+Made with `git diff` against `h1/BL-16`. Patch 2: against `a768fad`; patch 1: rebuilt in FIX round 1 against
+`e8170b0` (adds the `test_runtime_locks.py` hunk). Their target files are byte-identical at `a768fad`, `e8170b0` and
+`release/3.0` @ `d8baab0` (`git diff --stat` empty), so both apply on any of them. From the repo root:
+`git apply --check <patch>` then `git apply <patch>`.
 
 | Patch | For | What |
 |---|---|---|
-| `1-executor-setup_env-lock-on-create.patch` | executor | `reel setup` prepares the engine home through `home_acl.prepare_home` BEFORE `find_uv` (whose download writes `home\bin`): a new home outside the profile is locked; an existing one other accounts may write in, or a failed lock, stops setup with the Arabic-first line and the exact icacls command. Tests in `test_runtime.py`: `TestSetupLocksANewHome` (2, including the order prepare → find_uv) and the warning pin (names `<drive>:\WhyNotCut`, never `C:\whynot`). |
+| `1-executor-setup_env-lock-on-create.patch` | executor | `reel setup` prepares the engine home through `home_acl.prepare_home` BEFORE `find_uv` (whose download writes `home\bin`): a new home outside the profile is locked; an existing one other accounts may write in, or a failed lock, stops setup with the Arabic-first line and the exact icacls command. Tests in `test_runtime.py`: `TestSetupLocksANewHome` (2, including the order prepare → find_uv) and the warning pin (names `<drive>:\WhyNotCut`, never `C:\whynot`). FIX round 1: `test_runtime_locks.py` mocks `home_acl.prepare_home` in `TestSetup.builds` and `test_setup_without_runtime_keeps_the_current_class` (their temp home is outside the test profile on an open drive, so the real check refused it: 5 tests went red). |
 | `2-adobe-ae_render-suggested-home.patch` | ADOBE-G4 | the aerender `StageError` names `portability.suggested_home()` and `reel setup`; the old `setx TEMP C:\Temp` alternative is dropped (also a folder at the root of C:\). Test: `test_portability.TestAsciiAeStage.test_no_root_gives_a_precise_how`. |
 
 Ticket for the installer track (not a patch here, `installer/**` is outside every BL-16 fence): `bootstrap.ps1`

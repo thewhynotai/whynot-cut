@@ -34,7 +34,7 @@ index f7f0249..5194b71 100755
              rep["runtime"] = build(home, comp=comp, key=key, lock_file=ent["file"], rid=rid, by=a.by, check=a.check,
                                     force=a.force, dev_system_site=a.dev_system_site, uv=uv)
 diff --git a/whynot-cut/tests/test_runtime.py b/whynot-cut/tests/test_runtime.py
-index 9157ae1..040e7bf 100644
+index 9157ae1..e404ecb 100644
 --- a/whynot-cut/tests/test_runtime.py
 +++ b/whynot-cut/tests/test_runtime.py
 @@ -1455,9 +1455,60 @@ class TestSetupWarnsNonAsciiHome(TempHome):
@@ -82,7 +82,7 @@ index 9157ae1..040e7bf 100644
 +        self.assertNotIn("error", rep)
 +
 +    def test_a_refused_home_stops_setup(self):
-+        how = 'run in a terminal: icacls "X" /inheritance:r ...  then reel setup again'
++        how = 'run in PowerShell or Command Prompt: icacls "X" /inheritance:r ...  then reel setup again'
 +        err = SETUP.home_acl.HomeAclError("مقدرناش نقفل فولدر المحرك / could not lock the engine home", how)
 +
 +        def refuse(h):
@@ -98,3 +98,28 @@ index 9157ae1..040e7bf 100644
 +
  if __name__ == "__main__":
      unittest.main()
+diff --git a/whynot-cut/tests/test_runtime_locks.py b/whynot-cut/tests/test_runtime_locks.py
+index 63a0cd6..5a86b38 100644
+--- a/whynot-cut/tests/test_runtime_locks.py
++++ b/whynot-cut/tests/test_runtime_locks.py
+@@ -175,7 +175,9 @@ class TestSetup(unittest.TestCase):
+                 raise self.SE.Failed("cuda wheels failed")
+             return {"id": "r-x", "action": "create"}
+         out = io.StringIO()
+-        with mock.patch.object(self.SE, "build", side_effect=fake_build), \
++        # BL-16: the temp home is outside the test profile, on a drive others may write to; its lock is test_home_acl's
++        with mock.patch.object(self.SE.home_acl, "prepare_home", return_value=False), \
++                mock.patch.object(self.SE, "build", side_effect=fake_build), \
+                 mock.patch.object(self.SE.R, "platform_key", return_value=key), \
+                 mock.patch.object(self.SE, "nvidia_present", return_value=nvidia), \
+                 mock.patch.object(self.SE, "find_uv", return_value=(Path("C:/uv.exe"), None)), \
+@@ -397,7 +399,8 @@ class TestClassRuntimeKept(unittest.TestCase):
+             return {"id": rid, "action": "none"}
+         for argv, want in (([], "runtime-cuda.txt"), (["--runtime", "base"], "runtime-win-x64.lock")):
+             calls.clear()
+-            with mock.patch.object(SE, "build", side_effect=fake_build), \
++            with mock.patch.object(SE.home_acl, "prepare_home", return_value=False), \
++                    mock.patch.object(SE, "build", side_effect=fake_build), \
+                     mock.patch.object(SE.R, "platform_key", return_value="win-x64"), \
+                     mock.patch.object(SE, "nvidia_present", return_value=True), \
+                     mock.patch.object(SE, "find_uv", return_value=(Path("C:/uv.exe"), None)), \
