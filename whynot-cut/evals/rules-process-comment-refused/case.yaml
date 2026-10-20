@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: rules-process-comment-refused
+description: 'T4.3 learning loop, negative: a standing comment that skips the doctor''s review («من هنا ورايح ... من غير ما الدكتور يراجع») is a process comment: never a client rule, and the review stays.'
+tags: [revise, rules, negative, arabic]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

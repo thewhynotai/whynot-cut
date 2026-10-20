@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: episode-sheet-before-episode
+description: 'T4.4 episode sheet, positive: a sheet for an episode not recorded yet comes from reel episode-sheet --init into output/; the editor fills it in and moves it into data/Episodes; no guest detail is invented.'
+tags: [podcast, episode-sheet, positive]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: motion-music-said-licensed
+description: 'T4.6 music in motion videos, negative: the editor says a track is licensed, but a track counts as licensed only with its licence file in data/Music; Claude writes no licence and copies nothing into data/.'
+tags: [motion, music, negative, arabic]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

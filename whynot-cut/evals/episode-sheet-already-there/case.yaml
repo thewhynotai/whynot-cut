@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: episode-sheet-already-there
+description: 'T4.4 episode sheet, negative: EP12 already has its sheet in data/Episodes, so the answer reads it (guest, avoid list) and writes no new template.'
+tags: [podcast, episode-sheet, negative]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

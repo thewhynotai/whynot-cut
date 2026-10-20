@@ -188,6 +188,15 @@ class TestEvalSuite(unittest.TestCase):
                      if split_md((d / "graders/skill-fired.md").read_text(encoding="utf-8"))[0].get("max") == 0]
         self.assertTrue(negatives, "at least one should-not-trigger case")
 
+    def test_suite_has_the_phase_4_cases(self):                # S6b: a positive and a plausible-wrong-trigger case each
+        have = {d.name for d in cases(SK)}
+        for want in ("rules-standing-comment", "rules-process-comment-refused",                       # T4.3
+                     "episode-sheet-before-episode", "episode-sheet-already-there",                   # T4.4
+                     "autopilot-approval-auto", "autopilot-auto-never-picks-reels",                   # T4.7
+                     "motion-music-no-licence", "motion-music-said-licensed",                         # T4.6
+                     "claims-check-scan-first", "claims-check-scan-not-a-filter"):                    # edit stage 7
+            self.assertIn(want, have)
+
     def test_platform_parity(self):                            # G3 review M13: macOS is primary (G11)
         tags = {d.name: set(yaml_load((d / "case.yaml").read_text(encoding="utf-8")).get("tags") or [])
                 for d in cases(SK)}

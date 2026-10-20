@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: rules-standing-comment
+description: 'T4.3 learning loop, positive: a standing comment ("from now on always") is recorded with reel rules and proposed; the rule is added only after the editor says yes; a this-video-only comment never becomes a rule.'
+tags: [revise, rules, positive]
+runs: 3
+context:
+  scaffold_script: scaffold.sh
