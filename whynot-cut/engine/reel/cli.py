@@ -620,7 +620,7 @@ def cmd_approve_plan(a):
         if not val.get("ok"):
             raise SystemExit("the motion plan has errors (01_analysis/motion-plan.md): fix them before approval")
         if val.get("fingerprint") != fingerprint(p):
-            raise SystemExit("the motion plan is stale (script, words, audio or brand changed): run `motion-plan` again")
+            raise SystemExit("the motion plan is stale (script, words, audio, brand or the names shown changed): run `motion-plan` again")
         rec = {"approved": True, "by": a.by, "note": a.note or "", "at": now_iso(), "plan_fingerprint": fingerprint(p),
                "kind": "motion", "format": APPROVAL_FORMAT}
         write_json(p.p("01_analysis/plan-approval.json"), rec)

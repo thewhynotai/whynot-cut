@@ -43,9 +43,25 @@ def _system_font() -> dict | None:
     return {"file": face["file"], "index": int(face.get("index") or 0)} if face else None
 
 
+SHEET_SHOWN = ("host", "guest", "show")       # the episode sheet values a motion plan puts on screen (BL-20)
+
+
+def episode_sheet(paths, src: dict) -> dict:
+    """The episode sheet values (SHEET_SHOWN) of the reel's episode, from output/episodes/<EP>/00_inputs/episode.json:
+    names, the guest's role, the show. {} without an episode_id or before `reel episode-prep`. The compiler reads the
+    sheet only through this, so fingerprint() binds every sheet value that can reach the screen."""
+    from .episode import EpisodePaths, load_episode
+    try:
+        sheet = load_episode(EpisodePaths(paths.root, src["episode_id"])).get("sheet") or {}
+    except (SystemExit, KeyError):
+        return {}
+    return {k: sheet[k] for k in SHEET_SHOWN if k in sheet}
+
+
 def fingerprint(paths) -> str:
     """Changes when anything the compiled plan depends on changes (script, words, pauses, recipe, motion.json, brand,
-    and the data/Music tracks and licences the music choice reads)."""
+    the data/Music tracks and licences the music choice reads, and (BL-20) the names it shows: the episode sheet's
+    host / guest / show and the reel's 00_inputs/speakers.json, the speaker badge's fallback names and turns)."""
     src = msource(paths)
     h = hashlib.sha1()
     for rel in ("01_analysis/motion-script.json", "02_transcription/words.json", "06_audio/dialogue/pauses.json"):
@@ -64,12 +80,18 @@ def fingerprint(paths) -> str:
     ms = music_state(paths.root, sm, [rmood] if isinstance(rmood, str) else list(rmood))
     if ms:                      # no tracks: the fingerprint stays as before T4.6 (approved plans do not go stale)
         h.update(json.dumps(ms, sort_keys=True, ensure_ascii=True).encode())
+    # BL-20: no names shown (no sheet values, no speakers.json): the fingerprint stays as before BL-20
+    shown = episode_sheet(paths, src)
+    if shown:
+        h.update(b"sheet" + json.dumps(shown, sort_keys=True, ensure_ascii=True).encode())
+    sp = paths.p("00_inputs/speakers.json")
+    if sp.exists():
+        h.update(b"speakers" + sp.read_bytes())
     return h.hexdigest()
 
 
 class _Compiler:
     def __init__(self, paths, font_override: dict | None = None):
-        from .episode import EpisodePaths, load_episode
         from .previews import Brand
         from .timemap import TimeMap
         self.paths = paths
@@ -91,10 +113,7 @@ class _Compiler:
             raise SystemExit("06_audio/dialogue/pauses.json missing — run `reel audio-clean` for this motion project first")
         self.tmap = TimeMap(pz.get("keep_ms") or [[0, self.total_ms]])
         self.fps = seq_fps()
-        try:
-            self.sheet = (load_episode(EpisodePaths(paths.root, self.src["episode_id"])).get("sheet") or {})
-        except (SystemExit, KeyError):
-            self.sheet = {}
+        self.sheet = episode_sheet(paths, self.src)         # only what fingerprint() binds (BL-20)
         self.window_digits = set().union(*(digit_runs(w["word"]) for w in self.words)) if self.words else set()
         self.brand = Brand(paths.client_db)
         self.font_override = font_override

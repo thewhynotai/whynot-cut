@@ -146,7 +146,7 @@ def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], 
     elif not val.get("ok"):
         probs.append("the motion plan has errors: fix them (01_analysis/motion-plan.md)")
     elif val.get("fingerprint") != fp:
-        probs.append("the motion plan is stale (script, words, audio, music/licences or brand changed): run `reel motion-plan` again")
+        probs.append("the motion plan is stale (script, words, audio, music/licences, brand or the names shown changed): run `reel motion-plan` again")
     appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
     from .plan import OLDER_APPROVAL, approved_before_3
     older = approved_before_3(appr) and appr.get("plan_fingerprint") != fp          # 3.0 F2: approved under 2.x

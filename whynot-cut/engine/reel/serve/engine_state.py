@@ -594,14 +594,29 @@ class _Item:
         are watched (watched(), _music_read) but are not inputs here: the engine reads them itself with a cap (a
         licence at most 64 KB + 1 bytes, music.json 1 MB), lstat first, a regular file only, no link, one checked
         handle (lib/motion_audio.py _read_small), and hashes a track by size and head/tail only. An oversized or
-        hard-linked licence is then just an invalid licence, never a reason to drop the approval card."""
+        hard-linked licence is then just an invalid licence, never a reason to drop the approval card. BL-20: also the
+        reel's 00_inputs/speakers.json and its episode's episode.json (the names shown, motion_plan.episode_sheet)."""
         cfg = self._config_files("motion.json")
         if cfg is None:
             return None
+        ep = self._episode_json()
         return [(self.p(rel), self.base, True) for rel in (
             "00_inputs/source.json", "01_analysis/motion-script.json", "02_transcription/words.json",
-            "06_audio/dialogue/pauses.json")] + [
-            (self.paths.client_db / "branding/brand-tokens.json", self.root, True)] + cfg
+            "06_audio/dialogue/pauses.json", "00_inputs/speakers.json")] + [
+            (self.paths.client_db / "branding/brand-tokens.json", self.root, True)] + \
+            ([(ep, self.root, True)] if ep else []) + cfg
+
+    def _episode_json(self) -> Path | None:
+        """BL-20: output/episodes/<EP>/00_inputs/episode.json of the item's source.json episode_id, whose sheet names
+        the motion fingerprint reads; None without one or for an id the engine refuses (it then reads no episode)."""
+        eid = (self.json("00_inputs/source.json") or {}).get("episode_id")
+        if not isinstance(eid, str):
+            return None
+        from lib.episode import EpisodePaths
+        try:
+            return EpisodePaths(self.root, eid).p("00_inputs/episode.json")
+        except Exception:  # noqa: BLE001 — check_project_id refuses it (Guidance): the engine reads no episode either
+            return None
 
     def _approval_inputs(self, motion: bool) -> list | None:
         """lib/plan.py approval_state (:945): plan-approval.json, then the motion fingerprint's inputs (a record with
@@ -632,8 +647,11 @@ class _Item:
             "02_transcription/words.json", "06_audio/dialogue/pauses.json", "07_premiere/ppro-build-result.json",
             "04_after_effects/motion-build-result.json", "08_quality_control/visual-verification.json",
             "08_quality_control/qc-results.json", f"08_quality_control/preview/{vid}_preview.mp4",
-            f"08_quality_control/animatic/{vid}_animatic.mp4", "09_handoff/README.md")]
+            f"08_quality_control/animatic/{vid}_animatic.mp4", "09_handoff/README.md", "00_inputs/speakers.json")]
         out.append(self.paths.client_db / "branding/brand-tokens.json")
+        ep = self._episode_json()                     # BL-20: the episode sheet's names (motion fingerprint)
+        if ep:
+            out.append(ep)
         folders, lic, _all = self._music()            # T4.6: a licence or track added, edited or removed
         out += folders + lic + self._music_read()[1]  # tracks: only those the music choice reads
         for name in ("motion.json", "sequence-settings.json"):

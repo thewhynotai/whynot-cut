@@ -1141,6 +1141,209 @@ class TestMotionPlan(unittest.TestCase):
         self.assertNotEqual(rec["plan_fingerprint"], fingerprint(self.reel))
 
 
+# --------------------------------------------------------------------------- BL-20: names from the episode
+def legacy_motion_fingerprint(paths) -> str:
+    """motion_plan.fingerprint as it was before BL-20 (frozen copy): a reel whose episode sheet names no host, guest or
+    show and that has no 00_inputs/speakers.json must still hash to it, so its approval never goes stale for nothing."""
+    from lib.motion_audio import music_state
+    from lib.motion_config import motion_cfg, source as msource
+    src = msource(paths)
+    h = hashlib.sha1()
+    for rel in ("01_analysis/motion-script.json", "02_transcription/words.json", "06_audio/dialogue/pauses.json"):
+        f = paths.p(rel)
+        h.update(f.read_bytes() if f.exists() else b"-")
+    bt = paths.client_db / "branding/brand-tokens.json"
+    h.update(bt.read_bytes() if bt.exists() else b"-")
+    h.update(json.dumps([src.get("recipe"), src.get("format"), src.get("direction"), motion_cfg()], sort_keys=True,
+                        ensure_ascii=True).encode())
+    try:
+        sm = json.loads(paths.p("01_analysis/motion-script.json").read_text(encoding="utf-8-sig")).get("music", "__auto__")
+    except (OSError, ValueError, AttributeError, RecursionError):
+        sm = "__auto__"
+    rmood = ((src.get("recipe") or {}).get("music") or {}).get("mood") or []
+    ms = music_state(paths.root, sm, [rmood] if isinstance(rmood, str) else list(rmood))
+    if ms:
+        h.update(json.dumps(ms, sort_keys=True, ensure_ascii=True).encode())
+    return h.hexdigest()
+
+
+def names_script():
+    """good_script() with the guest's person card (name AND role from the sheet) in place of the list; the outro
+    shows {show} and the speaker badge names host and guest from the sheet."""
+    s = good_script()
+    s["scenes"][2] = scene("S03", "person_card", "كلمه20", who="guest")
+    return s
+
+
+class TestEpisodeSheetBinding(unittest.TestCase):
+    """BL-20: the motion plan's approval is bound to the names the compiler puts on screen from the episode sheet
+    (host, guest with role, show) and from the reel's 00_inputs/speakers.json (the badge's fallback names and turns):
+    the editor renaming the guest in data/Episodes/<EP>.md, then `reel episode-prep` + `reel motion-plan`, makes the
+    approval stale and the build refuses until the editor approves again."""
+
+    def setUp(self):
+        if test_font() is None:
+            self.skipTest("no test font for HarfBuzz fitting")
+        self.tmp = Path(tempfile.mkdtemp())
+        self.root, self.ep, self.reel = motion_plan_fixture(self.tmp)
+        write_json(self.reel.p("01_analysis/motion-script.json"), names_script())
+
+    def tearDown(self):
+        common.set_context(None)
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def reel_cli(self, *args) -> tuple[int, dict, str]:
+        cli = SK / "engine" / "reel" / "cli.py"
+        argv = [*args, "--root", str(self.root)]
+        if args[0] == "approve-plan":
+            lead_steps.issue_for(argv)
+        r = subprocess.run([sys.executable, "-B", str(cli), *argv], capture_output=True, text=True, encoding="utf-8")
+        try:
+            doc = json.loads(r.stdout)
+        except ValueError:
+            doc = {}
+        return r.returncode, doc, r.stderr
+
+    def plan_text(self) -> str:
+        return json.dumps(read_json(self.reel.p("01_analysis/motion-plan.json")), ensure_ascii=False)
+
+    def motion_plan(self):
+        code, doc, err = self.reel_cli("motion-plan", "--video-id", "EP12_R01_MO")
+        self.assertEqual(code, 0, err)
+        self.assertTrue(doc["ok"], doc)
+
+    def approve(self):
+        code, doc, err = self.reel_cli("approve-plan", "--video-id", "EP12_R01_MO", "--by", "editor")
+        self.assertEqual(code, 0, err)
+
+    def prep(self):
+        code, doc, err = self.reel_cli("episode-prep", "--episode", "EP12")
+        self.assertEqual(code, 0, err)
+
+    def state(self) -> str:
+        from lib.plan import approval_state
+        common.set_context(self.root)
+        return approval_state(self.reel)["state"]
+
+    def edit_sheet(self, old: str, new: str):
+        f = self.root / "data/Episodes/EP12.md"
+        text = f.read_text(encoding="utf-8")
+        self.assertIn(old, text)
+        f.write_text(text.replace(old, new), encoding="utf-8")
+
+    def build(self) -> tuple[int, dict]:
+        """`reel motion-build` through motion_cli against a fake After Effects (TestMotionBuild's)."""
+        import argparse
+        import contextlib
+        import io
+        from unittest import mock
+        from lib import ae_bridge, ae_probe, motion_cli, plat
+        ae = FakeAE()
+        a = argparse.Namespace(script_only=False, run_script=False, replace_edited=False, allow_fallback_font=False,
+                               timeout=30)
+        so, code = io.StringIO(), 0
+        common.set_context(self.root)
+        with mock.patch.object(ae_bridge, "submit", ae.submit), mock.patch.object(ae_bridge, "status", ae.status), \
+                mock.patch.object(ae_probe, "verdict_ok", lambda v: v == "26.0"), \
+                mock.patch.object(plat, "newest_app", lambda key: {"name": "Adobe After Effects 2026", "exe": "AfterFX.exe"}), \
+                mock.patch.object(motion_cli, "P", return_value=self.reel), contextlib.redirect_stdout(so):
+            try:
+                motion_cli.cmd_motion_build(a)
+            except SystemExit as e:
+                code = e.code if isinstance(e.code, int) else 1
+        return code, json.loads(so.getvalue())
+
+    def test_guest_renamed_in_sheet_voids_approval(self):
+        """The editor's path: approve, rename the guest in the sheet, episode-prep, motion-plan: the new name is in
+        the plan, the approval is stale, `reel next` asks for approve-plan, the build refuses (exit 2) until the
+        editor approves again."""
+        self.motion_plan()
+        self.assertIn("Sara", self.plan_text())
+        self.approve()
+        self.assertEqual(self.state(), "current")
+        self.edit_sheet("Sara — CEO", "Mona — CEO")
+        self.prep()
+        self.motion_plan()
+        self.assertIn("Mona", self.plan_text())
+        self.assertNotIn("Sara", self.plan_text())
+        self.assertEqual(self.state(), "stale")
+        code, doc, err = self.reel_cli("next", "--video-id", "EP12_R01_MO")
+        self.assertTrue(any(s.startswith("approve-plan") for s in doc.get("stale", [])), (doc, err))
+        code, doc = self.build()
+        self.assertEqual((code, doc["status"]), (2, "REFUSED"), doc)
+        self.assertIn("stale", doc["blocked"])
+        self.approve()
+        self.assertEqual(self.state(), "current")
+        code, doc = self.build()
+        self.assertEqual((code, doc["status"]), (0, "PROJECT_ASSEMBLED"), doc)
+
+    def test_prep_again_or_other_sheet_fields_keep_approval(self):
+        """No needless staleness: episode-prep again with the sheet unchanged (a new `created`, a re-run scan), or a
+        change to sheet fields the motion plan never shows (avoid, links, notes, language), keeps the approval."""
+        self.motion_plan()
+        self.approve()
+        self.prep()
+        self.motion_plan()
+        self.assertEqual(self.state(), "current")
+        self.edit_sheet("avoid: [السياسة, دين]", "avoid: [السياسة]")
+        self.edit_sheet("https://www.instagram.com/sara.ceo/", "https://www.instagram.com/sara.ceo.official/")
+        self.edit_sheet("Notes about the episode.", "Other notes.")
+        self.prep()
+        self.motion_plan()
+        self.assertEqual(self.state(), "current")
+
+    def set_sheet(self, **kw):
+        info_p = self.ep.p("00_inputs/episode.json")
+        info = read_json(info_p)
+        info["sheet"].update(kw)
+        write_json(info_p, info)
+
+    def test_each_shown_sheet_value_is_bound(self):
+        """host, the guest's ROLE (the person card shows it), and show each change the fingerprint."""
+        from lib.motion_plan import fingerprint
+        common.set_context(self.root)
+        seen = {fingerprint(self.reel)}
+        for k, v in (("host", "Omar"), ("guest", "Sara — CTO"), ("guest", "Mona — CTO"), ("show", "بودكاست تاني")):
+            self.set_sheet(**{k: v})
+            fp = fingerprint(self.reel)
+            self.assertNotIn(fp, seen, k)
+            seen.add(fp)
+        self.set_sheet(avoid=["x"], links=[], _notes="n", language="en", episode=13)
+        self.assertIn(fingerprint(self.reel), seen)
+
+    def test_speakers_json_is_bound(self):
+        """The speaker badge's names fall back to 00_inputs/speakers.json people, and its turns say who speaks when."""
+        from lib.motion_plan import fingerprint
+        common.set_context(self.root)
+        sp_f = self.reel.p("00_inputs/speakers.json")
+        before = fingerprint(self.reel)
+        sp = read_json(sp_f)
+        sp["people"]["guest"]["name"] = "Mona"
+        write_json(sp_f, sp)
+        self.assertNotEqual(fingerprint(self.reel), before)
+
+    def test_no_names_keeps_the_old_hash(self):
+        """A reel with no host/guest/show in its sheet and no speakers.json, a source without episode_id, and an
+        episode not prepped (no episode.json) all hash exactly as before BL-20: no approval goes stale for nothing."""
+        from lib.motion_plan import fingerprint
+        common.set_context(self.root)
+        self.reel.p("00_inputs/speakers.json").unlink()
+        info_p = self.ep.p("00_inputs/episode.json")
+        info = read_json(info_p)
+        info["sheet"] = {k: v for k, v in info["sheet"].items() if k not in ("host", "guest", "show")}
+        write_json(info_p, info)
+        self.assertEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))
+        info_p.unlink()
+        self.assertEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))
+        write_json(info_p, dict(info, sheet={"host": "Ahmed", "guest": "Sara — CEO", "show": "x"}))
+        self.assertNotEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))
+        src_f = self.reel.p("00_inputs/source.json")
+        src = read_json(src_f)
+        src.pop("episode_id")
+        write_json(src_f, src)
+        self.assertEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))
+
+
 # --------------------------------------------------------------------------- animatic
 class TestMotionMdFullText(unittest.TestCase):
     """T3.1 round 2 (m2): the reviewer reads motion-plan.md, so the md must carry every scene's complete on-screen text

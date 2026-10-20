@@ -413,6 +413,50 @@ class Motion(Base):
         self.assertIsNone(f["approval"])
         self.assertEqual(self.steps(f)["approve"], "pending")
 
+    def episode_reel(self, guest="Sara — CEO"):
+        """BL-20: a motion reel of episode EP02 whose sheet names the guest, compiled and approved."""
+        write(self.p("00_inputs/source.json"), {"kind": "motion_reel", "episode_id": "EP02"})
+        self.episode = self.root / "output/episodes/EP02/00_inputs/episode.json"
+        write(self.episode, {"episode_id": "EP02", "sheet": {"guest": guest, "avoid": []}})
+        write(self.p("00_inputs/speakers.json"), {"people": {"guest": {"name": "Sara"}}, "turns": []})
+        write(self.p("01_analysis/motion-script.json"), {"scenes": []})
+        write(self.p("01_analysis/motion-plan.json"), {"fps": 25, "scenes": []})
+        fp = self.motion_fp()
+        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": fp})
+        write(self.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor", "at": iso(NOW),
+                                                          "plan_fingerprint": fp, "kind": "motion", "format": APPROVAL_FORMAT})
+
+    def test_a_renamed_guest_in_the_episode_sheet_is_seen_by_the_cached_panel(self):
+        """BL-20: the episode.json the motion fingerprint reads is watched: a guest renamed by `reel episode-prep`
+        turns the cached approval from done to waiting again, with no file of the item touched."""
+        self.episode_reel()
+        cache = ES.PanelFields()
+        self.assertEqual(self.steps(cache(self.home, now=NOW))["approve"], "done")
+        write(self.episode, {"episode_id": "EP02", "sheet": {"guest": "Mona — CEO", "avoid": []}})
+        self.assertNotEqual(self.steps(cache(self.home, now=NOW))["approve"], "done")
+
+    def test_an_oversized_episode_json_or_speakers_json_skips_the_motion_fingerprint(self):
+        """BL-20: the helper reads them with no cap, so they are checked first like every other input (the control:
+        with both fine the helper is called and the approval holds)."""
+        import lib.motion_plan as mp
+        self.episode_reel()
+        with mock.patch("lib.motion_plan.fingerprint", side_effect=mp.fingerprint) as fp:
+            self.assertEqual(self.steps(self.fields())["approve"], "done")
+        self.assertGreater(fp.call_count, 0)
+        for f in (self.episode, self.p("00_inputs/speakers.json")):
+            keep = f.read_bytes()
+            write(f, b" " * (ES.EVIDENCE_MAX + 1))
+            with mock.patch("lib.motion_plan.fingerprint", side_effect=AssertionError("called")) as fp:
+                self.assertNotEqual(self.steps(self.fields())["approve"], "done", f.name)
+            self.assertEqual(fp.call_count, 0, f.name)
+            write(f, keep)
+        other = write(self.tmp / "elsewhere.json", self.episode.read_bytes())   # a hard link: another file's text
+        self.episode.unlink()
+        os.link(other, self.episode)
+        with mock.patch("lib.motion_plan.fingerprint", side_effect=AssertionError("called")) as fp:
+            self.assertNotEqual(self.steps(self.fields())["approve"], "done")
+        self.assertEqual(fp.call_count, 0, "hard-linked episode.json")
+
 
 class ReadOnly(Base):
     def test_reading_writes_nothing_anywhere(self):

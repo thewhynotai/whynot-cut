@@ -69,7 +69,7 @@ def approve(paths: Paths, note: str | None = None) -> dict:
                         "how": "Fix them and run `reel motion-plan` again; then `reel auto-approve`."}
             fp = fingerprint(paths)
             if val.get("fingerprint") != fp:
-                return {"refused": "the motion plan is stale (script, words, audio or brand changed)",
+                return {"refused": "the motion plan is stale (script, words, audio, brand or the names shown changed)",
                         "how": "Run `reel motion-plan` again; then `reel auto-approve`."}
             events, kind = None, "motion"
         else:
