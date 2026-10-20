@@ -595,6 +595,19 @@ def cmd_removed_review(a):
     out(removed_review.render(P(a)))
 
 
+def cmd_safezone_check(a):
+    """K-T4: Task 27's platform safe zones over this item's graphic and caption stills; prints the intruding element
+    ids. Exit code: 0 clean, 1 an element intrudes, 2 could not check (no stills, unknown platform, unreadable still)."""
+    from lib.safety import safezone_gate
+    try:
+        res = safezone_gate.check(P(a), a.platform or None)
+    except Exception as e:  # noqa: BLE001  (check() never raises; anything here is still "could not check")
+        res = {"exit_code": safezone_gate.EXIT_ERROR, "ids": [], "message": f"the check could not run: {e}"}
+    out(res)
+    if res["exit_code"]:
+        raise SystemExit(res["exit_code"])
+
+
 def cmd_approve_plan(a):
     from lib.plan import APPROVAL_FORMAT, plan_fingerprint
     from lib.motion_config import is_motion
@@ -1190,7 +1203,7 @@ CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze"
 # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
 # and works while another session holds the client (gate G2).
 CORE_READS = {"board", "serve", "perf-report", "setup", "clean", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
-              "status", "next", "lock", "doctor", "validate", "brief", "review-scan"}
+              "status", "next", "lock", "doctor", "validate", "brief", "review-scan", "safezone-check"}
 WRITES_IF = {
     "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
                                                 / "output/discovery/input-inventory.json").exists(),
@@ -1775,6 +1788,8 @@ CORE_COMMANDS: dict[str, str] = {
              "--phrases (the engine's preference phrases a rule can be made of)",
     "review-scan": "list each on-screen line's review domains (medical, religious, business, ai) and the flags its "
                    "review must cover, from the trigger lexicons; read-only, the reviewer still reads every line",
+    "safezone-check": "check the graphic and caption stills against the platform's UI zones; exit 0 clean, 1 an "
+                      "element intrudes (ids printed), 2 could not check",
     "approve-plan": "record the approval of the compiled plan (editor or delegated)",
     "auto-approve": "record the approval a standing `approval: auto` gives (by auto; refused unless this client's "
                     "merged preferences say auto); medical and religious lines are never covered",
@@ -1925,6 +1940,10 @@ def main(argv: list[str] | None = None):
                             help="re-exports of frames that came out as Premiere's 'Media pending' slate (0 = only report them)")
             sp.add_argument("--pending-wait", type=float, default=5.0,
                             help="seconds to wait before the first re-export (2x before the second, ...)")
+        if name == "safezone-check":
+            sp.add_argument("--platform", nargs="+", metavar="NAME",
+                            help="platform profile(s) of config/defaults/safe-zones.json (default: the plan's, the "
+                                 "client's, or the file's default; a 4:5 reel uses feed_4x5)")
         if name == "approve-plan":
             sp.add_argument("--by", required=True, choices=["editor", "delegated"])
             sp.add_argument("--note", "--notes", dest="note")

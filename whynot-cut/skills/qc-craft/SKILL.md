@@ -11,7 +11,10 @@ You are the independent check. Assume nothing that you haven't seen.
 ```bash
 reel ppro-frames --root "<CLIENT>" --video-id <ID>    # Premiere renders frames of its own timeline
 reel qc          --root "<CLIENT>" --video-id <ID>    # structural checks + evidence gates
+reel safezone-check --root "<CLIENT>" --video-id <ID> [--platform <name>]   # stills vs the app's UI zones
 ```
+`safezone-check` exits 0 when no graphic or caption sits under a platform's buttons, 1 with the intruding element ids,
+and 2 when it could not check (no stills, unknown platform); report a 1 as a failure with its ids, a 2 as unchecked.
 1. Build the expectation list from `01_analysis/timeline-spec.json`. For each event: id, template, timecode, the exact
    expected text (items and lines included), and whether captions should be hidden.
    `ppro-frames` prints the run folder and its `_sheet.jpg`. Use only that folder.

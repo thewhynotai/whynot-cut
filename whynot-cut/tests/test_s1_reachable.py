@@ -32,7 +32,6 @@ S1_VERBS = {
 PENDING = {          # verb -> the hook set that registers it
     "cut-proposals": r"lane2\hooks\K-T7 (after Task 25 closes)",
     "takes": r"lane2\hooks\K-T7 (after Task 25 closes)",
-    "safezone-check": r"lane2\hooks\K-T4",
 }
 GAPS = {}            # registered, but no skill or agent names `reel <verb>` yet
 
