@@ -1093,7 +1093,7 @@ class TestReview7fcbc1dP32(Base):
     the absolute path they store; nothing hashes their bytes (plan/motion/review fingerprints, the transcript check,
     cut proposals, reels: none reads them), so a move points them at the new folder. Whatever is still kept and may be
     opened later makes the delete advice name the step to run again first, Arabic first."""
-    BEFORE_AR = "قبل ما تمسح الفولدر القديم: شغّل"
+    BEFORE_AR = "قبل ما تمسح الفولدر القديم: "
 
     def add_late_files(self, root: Path):
         a = lambda r: str(root.joinpath(*r.split("/")))
@@ -1153,22 +1153,27 @@ class TestReview7fcbc1dP32(Base):
         self.assertEqual(read_json(self.dest / "output/projects/R01/08_quality_control/visual-verification.json")
                          ["verdict"], "pass")
 
-    def test_the_delete_advice_names_the_step_first_while_a_file_is_kept(self):
+    def test_a_kept_file_no_step_writes_keeps_the_old_folder_until_it_is_fixed(self):
+        """Review 087e8e3 P3-1: `reel handoff` never writes 09_handoff/delivery.json, so it is not named for it."""
         doc = self.moved()                                    # the fixture's 09_handoff/delivery.json: not on the list
         self.assertIn("output/projects/R01/09_handoff/delivery.json",
                       [k["file"] for k in doc["outside_database"]["kept"]])
         adv = doc["old_folder"]
         self.assertTrue(adv.startswith(self.BEFORE_AR), adv)                    # Arabic first
-        self.assertIn(f'reel handoff --root "{self.dest}" --video-id R01', adv)
+        self.assertNotIn("reel handoff", adv)
+        self.assertIn("سيب الفولدر القديم لحد ما الملفات دي تتصلّح بإيدك أو تتعمل تاني: "
+                      "output/projects/R01/09_handoff/delivery.json", adv)
+        self.assertIn("keep the old folder until these files are fixed by hand or made again: "
+                      "output/projects/R01/09_handoff/delivery.json", adv)
         self.assertIn("تاني", adv)
         self.assertLess(adv.index("تاني"), adv.index("Before you delete the old folder"))
-        self.assertIn("output/projects/R01/09_handoff/delivery.json", adv)
         self.assertIn("then delete the old one yourself", adv)
         self.assertNotIn("pipeline.log", adv)                                   # a log is history, never opened
 
     def test_the_delete_advice_is_plain_when_nothing_kept_is_opened_later(self):
         """Kept but never opened by a stored path: a log, the client reference style's citation, the takes history."""
         (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
+        (self.src / "output/projects/R01/07_premiere/project/R01_EDIT.prproj").unlink()   # no project names it
         write_json(self.src / "output/client_database/reference_style/editing-style.json",
                    {"cited": str(self.src / "data/References/ref.mp4")})
         write_json(Paths(self.src, "R01").p("01_analysis/takes-history.json"),
@@ -1182,13 +1187,146 @@ class TestReview7fcbc1dP32(Base):
                                             f"\"{self.dest}\"`), then delete the old one yourself")
         self.assertNotIn(self.BEFORE_AR, doc["old_folder"])
 
-    def test_an_unknown_kept_file_names_the_step_that_wrote_it(self):
+    def test_an_unknown_kept_file_keeps_the_old_folder_until_it_is_fixed(self):
         write_json(self.src / "output/discovery/extra-notes.json", {"seen": str(self.src / "data/Raw/clip 1.mp4")})
         (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
         adv = self.moved()["old_folder"]
         self.assertTrue(adv.startswith(self.BEFORE_AR), adv)
-        self.assertIn("الخطوة اللي كتبت output/discovery/extra-notes.json", adv)
-        self.assertIn("the step that wrote output/discovery/extra-notes.json", adv)
+        self.assertIn("بإيدك أو تتعمل تاني: output/discovery/extra-notes.json", adv)
+        self.assertIn("fixed by hand or made again: output/discovery/extra-notes.json", adv)
+        self.assertNotIn("the step that wrote", adv)
+
+
+class TestReview087e8e3(Base):
+    """Review 087e8e3: the sound-effects map is pointed at the new folder (nothing hashes it); the delete advice names
+    the step that really writes each kept file (per file, never `reel transcribe`), an episode's with --episode, every
+    distinct step however many files are kept, and the Premiere/After Effects projects that still link media in the
+    old folder first (found by a byte search, never edited). A kept file no step rewrites keeps the old folder."""
+    AR = "قبل ما تمسح الفولدر القديم: "
+    EN = "Before you delete the old folder: "
+    PRPROJ = "output/projects/R01/07_premiere/project/R01_EDIT.prproj"
+
+    def moved(self, root=None) -> dict:
+        root = root or self.src
+        self.hold(root)
+        doc = CM.move(root, self.dest, apply=True)
+        self.assertTrue(doc.get("applied"), doc)
+        return doc
+
+    def put(self, rel: str, doc) -> None:
+        f = self.src.joinpath(*rel.split("/"))
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(doc if isinstance(doc, str) else json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+
+    def old(self, rel: str) -> str:
+        return str(self.src.joinpath(*rel.split("/")))
+
+    def delete_line(self) -> str:
+        return (f"left in place at {self.src}: check the new folder (`reel next --root \"{self.dest}\"`), then delete "
+                "the old one yourself")
+
+    def test_the_sfx_map_points_under_the_new_root(self):
+        for f in ("data/SFX/whoosh_01.wav", "data/SFX/hit.wav"):
+            self.put(f, "wav")
+        rel = "output/projects/R01/06_audio/sfx-map.json"
+        self.put(rel, {"_note": "Claude's map", "whoosh": self.old("data/SFX/whoosh_01.wav"),
+                       "hit": {"file": self.old("data/SFX/hit.wav"), "gain_db": -3}})
+        doc = self.moved()
+        self.assertIn(rel, [r["file"] for r in doc["outside_database"]["rewritten"]])
+        self.assertNotIn(rel, [k["file"] for k in doc["outside_database"]["kept"]])
+        self.assertNotIn("sfx-map", doc["old_folder"])
+        os.rename(self.src, self.tmp / "deleted old folder")          # the editor deleted the old folder
+        from lib import sfx
+        m = sfx.load_map(self.dest.joinpath(*rel.split("/")))
+        self.assertEqual(sorted(m), ["hit", "whoosh"])                  # the kinds (keys) are as they were
+        self.assertEqual(m["whoosh"], str(self.dest / "data" / "SFX" / "whoosh_01.wav"))
+        self.assertEqual(m["hit"], {"file": str(self.dest / "data" / "SFX" / "hit.wav"), "gain_db": -3})
+        self.assertTrue(Path(m["whoosh"]).is_file() and Path(m["hit"]["file"]).is_file())
+
+    def test_each_kept_file_names_the_step_that_really_writes_it(self):
+        raw = self.old("data/Raw/clip 1.mp4")
+        for rel in ("output/episodes/EP01/00_inputs/episode.json",
+                    "output/episodes/EP01/02_transcription/chunks/plan.json",
+                    "output/projects/R01/06_audio/dialogue/cut-verification.json",
+                    "output/projects/R01/06_audio/dialogue/dialogue-clean-report.json",
+                    "output/projects/R01/06_audio/sfx/sfx-notes.json",
+                    "output/projects/R01/08_quality_control/premiere_frames/run-1/frames.json",
+                    "output/projects/R02/02_transcription/chunks/plan.json",
+                    "output/projects/R02/08_quality_control/ae_frames/run-1/frames.json"):
+            self.put(rel, {"source": raw})
+        doc = self.moved()
+        d = self.dest
+        runs = [f'`reel episode-prep --root "{d}" --episode EP01`', f'`reel audio-clean --root "{d}" --video-id R01`',
+                f'`reel sfx --root "{d}" --video-id R01`', f'`reel ppro-frames --root "{d}" --video-id R01`',
+                f'`reel motion-frames --root "{d}" --video-id R02`']
+        hand = ["output/episodes/EP01/02_transcription/chunks/plan.json", "output/projects/R01/09_handoff/delivery.json",
+                "output/projects/R02/02_transcription/chunks/plan.json"]
+        self.assertEqual(doc["old_folder"],
+                         self.AR + f"افتح المشاريع دي من المكان الجديد واعمل Link Media، أو ابنيها تاني: {self.PRPROJ}؛ "
+                         f"شغّل تاني: {'، '.join(runs)}؛ سيب الفولدر القديم لحد ما الملفات دي تتصلّح بإيدك أو تتعمل "
+                         f"تاني: {'، '.join(hand)}. " + self.EN + "open these projects from the new place and use Link "
+                         f"Media, or rebuild them: {self.PRPROJ}; run again: {', '.join(runs)}; keep the old folder "
+                         f"until these files are fixed by hand or made again: {', '.join(hand)}. The old folder is "
+                         + self.delete_line())
+        self.assertNotIn("reel transcribe", doc["old_folder"])     # a no-op there; --force drops the corrections
+
+    def test_every_distinct_step_is_named_however_many_files_are_kept(self):
+        raw = self.old("data/Raw/clip 1.mp4")
+        for k in range(1, 8):
+            self.put(f"output/projects/R0{k}/08_quality_control/ae_frames/run-1/frames.json", {"render": raw})
+            self.put(f"output/projects/R0{k}/09_handoff/delivery.json", {"sent": raw})
+        self.put("output/projects/R01/08_quality_control/ae_frames/run-2/frames.json", {"render": raw})
+        adv = self.moved()["old_folder"]
+        for k in range(1, 8):
+            self.assertEqual(adv.count(f'`reel motion-frames --root "{self.dest}" --video-id R0{k}`'), 2, (k, adv))
+            self.assertEqual(adv.count(f"output/projects/R0{k}/09_handoff/delivery.json"), 2, (k, adv))
+        self.assertNotIn("more", adv)
+
+    def test_a_project_linking_the_old_folder_is_named_before_the_delete(self):
+        (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
+        before = (self.src / self.PRPROJ).read_bytes()
+        doc = self.moved()
+        self.assertEqual([p["file"] for p in doc["outside_database"]["projects"]], [self.PRPROJ])
+        self.assertEqual(doc["old_folder"],
+                         self.AR + f"افتح المشاريع دي من المكان الجديد واعمل Link Media، أو ابنيها تاني: {self.PRPROJ}. "
+                         + self.EN + f"open these projects from the new place and use Link Media, or rebuild them: "
+                         f"{self.PRPROJ}. The old folder is " + self.delete_line())
+        self.assertEqual((self.dest / self.PRPROJ).read_bytes(), before)       # read, never edited
+
+    def test_a_project_that_links_nothing_in_the_old_folder_keeps_the_advice_plain(self):
+        (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
+        (self.src / self.PRPROJ).write_bytes(gzip.compress(b'<Project><Media path="E:/Elsewhere/x.mp4"/></Project>'))
+        doc = self.moved()
+        self.assertEqual(doc["outside_database"]["projects"], [])
+        self.assertEqual(doc["old_folder"], self.delete_line())
+
+    def test_an_upper_case_log_is_history(self):
+        (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
+        (self.src / self.PRPROJ).unlink()
+        self.put("output/projects/R01/logs/run.LOG", f"[t] ran on {self.old('data/Raw/clip 1.mp4')}\n")
+        doc = self.moved()
+        self.assertIn("output/projects/R01/logs/run.LOG", [k["file"] for k in doc["outside_database"]["kept"]])
+        self.assertEqual(doc["old_folder"], self.delete_line())
+
+    def test_a_damaged_brand_tokens_file_naming_the_old_folder_keeps_it(self):
+        """Review 087e8e3 P3-5: the brand tokens are opened by the paths they store, unlike the database's citations."""
+        (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
+        (self.src / self.PRPROJ).unlink()
+        rel = "output/client_database/branding/brand-tokens.json"
+        self.put(rel, '{"logo": "' + self.old("assets/Brand/logo.png").replace("\\", "\\\\") + '", ')   # cut short
+        doc = self.moved()
+        self.assertIn(rel, [k["file"] for k in doc["outside_database"]["kept"]])
+        self.assertIn(f"تاني: {rel}. ", doc["old_folder"])
+        self.assertIn(f"made again: {rel}. ", doc["old_folder"])
+
+
+class TestHandoffSkillLine(unittest.TestCase):
+    """Review 087e8e3 P3-4: after a move the EDITOR approves again; Claude only shows the NEEDS-YOU list."""
+    def test_the_editor_approves_again_never_claude(self):
+        text = (SK / "skills" / "handoff" / "SKILL.md").read_text(encoding="utf-8")
+        line = next(ln for ln in text.splitlines() if "reel client-move" in ln)
+        self.assertNotIn("وافق تاني على اللي في NEEDS-YOU", line)
+        self.assertIn("اعرض على المونتير الموافقات اللي في NEEDS-YOU، وهو اللي يوافق تاني؛ ماتوافقش بداله.", line)
 
 
 class TestFileUrls(unittest.TestCase):
