@@ -36,7 +36,7 @@ GRADER_KEYS = {"regex": {"type", "target", "pattern", "flags", "match", "weight"
                "llm": {"type", "criteria", "focus", "weight", "arm"},
                "baseline": {"type", "baseline_file", "criteria", "weight", "arm"}}
 FIXTURE_FUNCS = {"make_clinic", "add_references", "add_project", "add_episode_plan", "add_panel_approval", "add_approved_reels",
-                 "add_motion_project", "make_hugo_site"}
+                 "add_motion_project", "make_hugo_site", "add_review_case"}
 SOURCE_LINE = '. "${here%/*}/../_fixtures/example-clinic.sh"'
 # a reel command written in a regex grader: reel, reel.cmd or reel(?:\.cmd)?, whitespace, then a word or (?:a|b)
 REEL_IN_REGEX = re.compile(r"reel(?:\(\?:\\\.cmd\)\?|\.cmd)?(?:\[\\\"'\]\?|\[\"'\]\?)?(?:\\s\+|\\s\*| )"

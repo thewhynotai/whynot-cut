@@ -229,3 +229,37 @@ make_hugo_site() {
     > "$dir/layouts/index.html"
   make_still "$dir/assets/images/hero.jpg"
 }
+
+# add_review_case <client dir> <id> <case dir>: a clip whose plan is compiled and waits for the content review (3.0
+# Task 53 = Addendum M1-T5, the review-domain evals). Copies the case's own plant/ folder, never the answer:
+#   timeline-spec.json, edit-plan.md, review-scan.json (the engine's review-scan of that plan) -> <id>/01_analysis/
+#   transcript.md -> <id>/02_transcription/        profile.json (optional: another domain or review_domains) ->
+#   output/client_database/reel-profile/ (replaces the client's profile.json)
+#   asset-manifest.json (optional) -> output/client_database/        stills.txt (optional): client-relative image
+#   paths, one per line, each made with make_still (the files the plan and the manifest name)
+add_review_case() {
+  local c="$1" id="$2" src="$3/plant" p f
+  [ -d "$src" ] || die "add_review_case: no plant/ folder in $3"
+  p="$c/output/projects/$id"
+  mkdir -p "$p/01_analysis" "$p/02_transcription" "$p/08_quality_control"
+  for f in timeline-spec.json edit-plan.md review-scan.json; do
+    [ -f "$src/$f" ] || die "add_review_case: $src/$f is missing"
+    cp "$src/$f" "$p/01_analysis/$f"
+  done
+  if [ -f "$src/transcript.md" ]; then cp "$src/transcript.md" "$p/02_transcription/transcript.md"; fi
+  if [ -f "$src/profile.json" ]; then
+    mkdir -p "$c/output/client_database/reel-profile"
+    cp "$src/profile.json" "$c/output/client_database/reel-profile/profile.json"
+  fi
+  if [ -f "$src/asset-manifest.json" ]; then
+    mkdir -p "$c/output/client_database"
+    cp "$src/asset-manifest.json" "$c/output/client_database/asset-manifest.json"
+  fi
+  if [ -f "$src/stills.txt" ]; then
+    while IFS= read -r f || [ -n "$f" ]; do
+      f="${f%$'\r'}"
+      if [ -n "$f" ]; then make_still "$c/$f"; fi
+    done < "$src/stills.txt"
+  fi
+  return 0
+}
