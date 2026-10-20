@@ -176,6 +176,20 @@ def generate(paths: Paths) -> dict:
     if spec.get("fps") and abs(float(spec["fps"]) - fps) > 0.01:
         warnings.append(f"the plan was compiled at {float(spec['fps']):.5g} fps but the profile is {fps:.5g} fps: the "
                         "comps use the profile rate, so run plan again before building")
+    # review 0d84730 P3-5: a missing asset file is a warning here (the JSX only logs it and leaves the layer out)
+    used = [("logo", logo.get("display_derivative"))] if logo else []
+    used += [("image", e["params"]["image_path"]) for e in events if e["params"].get("image_path")]
+    shown = set()
+    for role, v in used:
+        if not v or (role, v) in shown or (Path(v).is_absolute() and Path(v).is_file()):
+            continue
+        shown.add((role, v))
+        rel = client_db.rel_under(v, str(paths.root)) or Path(v).name   # never an absolute path from outside
+        en, ar = {"logo": ("logo", "اللوجو"), "image": ("image", "الصورة")}[role]
+        warnings.append(f"the {en} file is missing, so After Effects leaves it out of the comps: {rel} (put the file "
+                        "back at that path, then build again)")
+        warnings.append(f"ملف {ar} مش موجود، فالأفتر إفكتس هيسيبه برّه الكومبس: {rel} (رجّع الملف في المكان ده، "
+                        "وبعدين اعمل build تاني)")
     w, h = frame_size(paths)          # Gate 2 A1: comps at the profile's frame size (4:5 -> 1080x1350), not fixed 9:16
     data = {"fps": fps, "w": w, "h": h, "brand": brand_controls(paths.client_db), "fonts": fonts_map(paths.client_db),
             "templates": tpls, "events": events, "captions": caption_data(paths, spec, ed),
