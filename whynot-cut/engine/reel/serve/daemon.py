@@ -24,9 +24,11 @@
                   before a rival is ever spawned (a rival could only exit EXIT_LOCKED and turn a healthy daemon into
                   "not_answering"); one that answers none of them (~8 s in all) is still reported not_answering. A
                   refused connection gets no slow probes. Otherwise a stale file (dead pid) is removed and a detached
-                  daemon is started with this interpreter (Windows DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP |
-                  CREATE_NO_WINDOW, with CREATE_BREAKAWAY_FROM_JOB tried first so a hook's job object cannot take it
-                  down; POSIX start_new_session=True), then it waits up to `wait` (ENSURE_WAIT) for engine.json + /status. Still
+                  daemon is started with this interpreter (Windows CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW, with
+                  CREATE_BREAKAWAY_FROM_JOB tried first so a hook's job object cannot take it down, never
+                  DETACHED_PROCESS: with it Windows ignores CREATE_NO_WINDOW and the venv launcher's interpreter gets
+                  a new VISIBLE console that kills the daemon when closed; POSIX start_new_session=True), then it
+                  waits up to `wait` (ENSURE_WAIT) for engine.json + /status. Still
                   starting after that is {ok: true, state: starting}. Two ensures at once may both spawn; the instance
                   lock lets one daemon live and the other exits at once. A daemon of another plugin version or
                   protocol (left running by a plugin update, from a stale or deleted folder) is stopped through the
@@ -421,7 +423,7 @@ def _spawn(home: Path):
         kw = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": err, "cwd": str(home),
               "env": env, "close_fds": True}
         if os.name == "nt":
-            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+            flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW   # a hidden console of its own
             try:
                 proc = _popen(cmd, creationflags=flags | subprocess.CREATE_BREAKAWAY_FROM_JOB, **kw)
             except OSError:            # the job (e.g. a hook runner's) forbids breakaway: start inside it

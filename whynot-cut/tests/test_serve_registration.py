@@ -4,7 +4,7 @@
   --foreground flags) and hands the parsed options to engine/reel/serve/cli.py unchanged (its JSON, its exit codes);
   `serve` needs no client folder and takes no writer lock; other commands never import the daemon module.
 * hooks/session_context.py spawns `serve --ensure --quiet` fully detached after its context work (Windows
-  CREATE_NO_WINDOW | DETACHED_PROCESS, POSIX start_new_session), never waits and never fails the hook; skipped when the
+  CREATE_NO_WINDOW without DETACHED_PROCESS, POSIX start_new_session), never waits and never fails the hook; skipped when the
   preference `panel_link` is off, under WHYNOT_TEST_SANDBOX, or without an engine runtime.
 Nothing here starts a real daemon: Popen is mocked, and `reel serve status` runs against a temp engine home.
 Run:  bash tools/test.sh -p test_serve_registration.py
@@ -208,15 +208,16 @@ class HookCase(unittest.TestCase):
 
 
 class TestPanelLink(HookCase):
-    def test_windows_spawns_ensure_with_no_window_fully_detached(self):
+    def test_windows_spawns_ensure_with_no_window_in_its_own_group(self):
         line, calls = self.link(windows=True)
         self.assertEqual(line, "")
         self.assertEqual(len(calls), 1)
         cmd, kw = calls[0]
         self.assertEqual(cmd, [str(self.py), "-s", "-B", "-P", str(SERVE_MAIN), "--ensure", "--quiet"])
         flags = kw["creationflags"]
-        for bit in (0x08000000, 0x00000008, 0x00000200, 0x01000000):   # NO_WINDOW, DETACHED, NEW_GROUP, BREAKAWAY
+        for bit in (0x08000000, 0x00000200, 0x01000000):               # NO_WINDOW, NEW_GROUP, BREAKAWAY
             self.assertTrue(flags & bit, hex(bit))
+        self.assertFalse(flags & 0x00000008)    # DETACHED_PROCESS: Windows then ignores NO_WINDOW (review 99f6357 P2-1)
         self.assertNotIn("start_new_session", kw)
         for k in ("stdin", "stdout", "stderr"):
             self.assertEqual(kw[k], subprocess.DEVNULL)          # never the hook's own pipes: Claude would wait on them
@@ -233,7 +234,8 @@ class TestPanelLink(HookCase):
         self.assertEqual(len(calls), 2)
         flags = calls[1][1]["creationflags"]
         self.assertFalse(flags & 0x01000000)
-        self.assertTrue(flags & 0x08000000 and flags & 0x00000008)
+        self.assertTrue(flags & 0x08000000 and flags & 0x00000200)
+        self.assertFalse(flags & 0x00000008)
 
     def test_posix_starts_a_new_session(self):
         line, calls = self.link(windows=False)

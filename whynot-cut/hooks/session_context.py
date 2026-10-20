@@ -308,7 +308,9 @@ def flush(extra: str = ""):
 WINDOWS = os.name == "nt"
 SERVE_MAIN = PLUGIN / "engine" / "reel" / "serve" / "__main__.py"
 # Windows creation flags (literal: the subprocess constants exist only on Windows)
-NO_WINDOW, DETACHED, NEW_GROUP, BREAKAWAY = 0x08000000, 0x00000008, 0x00000200, 0x01000000
+# Never DETACHED_PROCESS (0x00000008): with it Windows ignores NO_WINDOW, and the venv launcher's interpreter gets a
+# new VISIBLE console (review 99f6357 P2-1). Without it the child owns a hidden console of its own.
+NO_WINDOW, NEW_GROUP, BREAKAWAY = 0x08000000, 0x00000200, 0x01000000
 
 
 def _popen(cmd, **kw):
@@ -336,7 +338,7 @@ def panel_link(home: Path, st: dict) -> str:
         kw = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
               "close_fds": True, "cwd": str(home)}
         if WINDOWS:
-            flags = NO_WINDOW | DETACHED | NEW_GROUP
+            flags = NO_WINDOW | NEW_GROUP
             try:
                 _popen(cmd, creationflags=flags | BREAKAWAY, **kw)
             except OSError:           # the hook runner's job forbids breakaway: start inside it

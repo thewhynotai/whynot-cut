@@ -669,8 +669,11 @@ class Spawn(_Home):
         self.assertEqual(kw["env"]["WHYNOT_HOME"], str(self.home))
         self.assertEqual(kw["stdin"], subprocess.DEVNULL)
         if WIN:
-            want = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+            # review 99f6357 P2-1: DETACHED_PROCESS makes Windows ignore CREATE_NO_WINDOW (the venv launcher's python
+            # and its children get a NEW visible console; closing it kills the daemon): a hidden console of its own
+            want = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW | subprocess.CREATE_BREAKAWAY_FROM_JOB
             self.assertEqual(kw["creationflags"] & want, want)
+            self.assertFalse(kw["creationflags"] & subprocess.DETACHED_PROCESS)
         else:
             self.assertTrue(kw["start_new_session"])
         self.assertIn(4242, [p.pid for p in daemon._children])

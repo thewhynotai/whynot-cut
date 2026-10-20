@@ -201,9 +201,23 @@ class _Out(unittest.TestCase):
 
 def _scanner_copy(name: str) -> bool:
     """`TAG60_REAL30.FC772D56FE.CONFORM.HELD.JSON.tmp`: an upper-cased name of ours + `.tmp`, made by a file filter
-    outside the engine (the engine's own temp files are `.<name>.<12 hex>.tmp`, lower case, with a leading dot)."""
+    outside the engine. Our record temp files (`.<name>.<12 hex>.tmp`) get it too, leading dot kept
+    (`.TAG60_….JSON.AB12AB12AB12.TMP.tmp`); our own names are lower case, so they never match."""
     stem = name[:-4] if name.endswith(".tmp") else None
-    return bool(stem) and stem == stem.upper() and ".CONFORM" in stem and not stem.startswith(".")
+    return bool(stem) and stem == stem.upper() and ".CONFORM" in stem
+
+
+class TestScannerCopyName(unittest.TestCase):
+    """Review 99f6357 P3-6: the scanner's upper-cased copy of one of OUR record temp files keeps its leading dot, and
+    is waited out too; our own names (lower case) never are."""
+
+    def test_the_forms(self):
+        for name in ("TAG60_REAL30.FC772D56FE.CONFORM.HELD.JSON.tmp",
+                     ".TAG60_REAL30.FC772D56FE.CONFORM.JSON.AB12AB12AB12.TMP.tmp"):
+            self.assertTrue(_scanner_copy(name), name)
+        for name in (".tag60_real30.fc772d56fe.conform.json.ab12ab12ab12.tmp", "tag60_real30.fc772d56fe.conform.mp4",
+                     "NOTES.tmp", ".NOTES.tmp"):
+            self.assertFalse(_scanner_copy(name), name)
 
 
 class TestConform(_Out):

@@ -66,8 +66,9 @@ reel settings --root "<CLIENT_FOLDER>"                  # preferences in effect 
   `ntsc`; 29.97 = 30 + true). When preflight warns that the source fps differs from the sequence and the client's
   reference reels match the source, set it there (24 fps for a 29.97 client drops frames and judders).
 - **Evenly timed copy** (VFR phone/Zoom footage, a wrong frame-rate tag, HDR): preflight starts it in the background
-  in `output/`; before stage 10 run `reel conform --root "<CLIENT>" --video-id <ID> --wait` (ready, failed or not_needed;
-  failed = the original is used, say its reason line), then `ppro-build` imports the copy.
+  in `output/`; before stage 10 run `reel conform --root "<CLIENT_FOLDER>" --video-id <ID> --wait` (ready, failed or
+  not_needed; failed = the original is used, say its reason line), then `ppro-build` imports the copy. A long clip can
+  take minutes: give that Bash call a 10-minute timeout, and if it still times out, run it again.
 - **Another person on camera** (preflight: "another person is on camera … the words there may be THEIRS"): a two- or
   three-person show cut to the host or a wide shot. Those stretches are shown whole over a blurred fill. Check who
   speaks there before quoting anything on a graphic. When the reel's last words are the host's, end the range before

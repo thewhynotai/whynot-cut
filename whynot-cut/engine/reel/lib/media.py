@@ -436,7 +436,8 @@ def snap_range_points(path: Path, in_ms: int, out_ms: int, search_ms: int = 2500
 # file under output/ with no link on the way, PyAV opens it, and the source still has the size, tag and age it had;
 # anything else turns it back to `pending` and the job makes it again (reused when the sidecar still matches).
 # The job: `reel conform --wait` (also what preflight starts in the background), one per item (the OS lock on
-# 00_inputs/conform-job.lock), the GPU lane from gpu_lock.site_slot("conform"), every record written under
+# 00_inputs/conform-job.lock, plus the claim 00_inputs/conform-job.claim for volumes without OS locks), the GPU lane
+# from gpu_lock.site_slot("conform"), every record written under
 # preflight.json's own file lock (common.file_locked + the atomic write_json). A preflight.json without normalise
 # records (before Task 26) is never written. Nothing here ever fails the intake: a failure is a `failed` record.
 CONFORM_ENV = "WHYNOT_CONFORM"          # background (default) | inline | off; inside the test sandbox: inline
@@ -444,6 +445,10 @@ CONFORM_MODES = ("background", "inline", "off")
 CONFORM_KEYS = ("state", "path", "parts", "cfr_fps", "source_tag", "source_size", "reason", "lines", "at")
 INTERMEDIATES_REL = "00_inputs/intermediates"
 JOB_REL = "00_inputs/conform-job"       # its OS lock file is conform-job.lock (released by the OS when the job ends)
+CLAIM_REL = "00_inputs/conform-job.claim"   # the running job's own record (O_EXCL: pid, process start, computer): the
+                                        # exclusion where the volume takes no OS locks (macOS SMB/AFP, cloud drives)
+CLAIM_WRITING_S = 10.0                  # an unreadable claim younger than this is still being written
+JOB_START_S = 120.0                     # a `pending` record older than this with no live job: its job died
 JOB_LOG_REL = "logs/conform-job.log"
 JOB_WAIT_S = 12 * 3600.0                # `reel conform --wait` waits this long for a job that is already running
 STALE_PASSES = 2                        # a source that changes during its encode is made again, at most this often
@@ -456,6 +461,21 @@ _UNVERIFIED = ("The evenly timed / SDR copy was made but could not be checked: t
                "النسخة المظبوطة اتعملت بس ماقدرناش نتأكد منها: هنستخدم الأصلي.")
 _FAILED = ("Making the evenly timed / SDR copy failed: the original is used.",
            "عمل النسخة المظبوطة فشل: هنستخدم الأصلي.")
+_NO_COPY_ADVICE = ("Without that copy Premiere can drift out of sync or judder on this file: ask for a "
+                   "constant-frame-rate export of it (e.g. HandBrake 'Constant Framerate') before editing.",
+                   "من غير النسخة دي بريمير ممكن الصوت يبعد عن الصورة أو الحركة تتقطع في الملف ده: اطلب نسخة منه "
+                   "بمعدل فريمات ثابت (زي HandBrake «Constant Framerate») قبل المونتاج.")
+_JOB_DIED = ("The background job making the evenly timed / SDR copy stopped before it finished (it was closed or "
+             "stopped, or the computer restarted): the original is used. Run `reel conform --wait` to make it.",
+             "الشغل اللي في الخلفية بتاع النسخة المظبوطة وقف قبل ما يخلص (اتقفل أو اتوقف أو الجهاز اتعمله ريستارت): "
+             "هنستخدم الأصلي. شغّل reel conform --wait عشان تتعمل.")
+_BUILD_PENDING = ("The constant-frame-rate copy is still being made: this build uses the original file. Build again "
+                  "once it is ready.",
+                  "النسخة الثابتة لسه بتتعمل: البناء ده من الملف الأصلي. ابنِ تاني بعد ما تخلص.")   # CONTRACT.md step 3
+_BUILD_STALE = ("The evenly timed / SDR copy is out of date ({why}): this build uses the original file. Run "
+                "`reel conform --wait`, then build again.",
+                "النسخة المظبوطة مابقتش مطابقة للملف ({why}): البناء ده من الملف الأصلي. شغّل reel conform --wait "
+                "وبعدين ابنِ تاني.")
 
 
 def _read_doc(pf: Path):
@@ -510,8 +530,8 @@ def conform_windows(paths: Paths, src):
     any range, `reel range`) when `src` is its footage; None for a whole clip (the whole file is conformed)."""
     from .common import source_range
     rng = source_range(paths)
-    if not rng or rng.get("out_ms") is None or Path(src).name != Path(rng["footage"]).name:
-        return None
+    if not rng or rng.get("out_ms") is None or not _same_file(src, Path(paths.root) / rng["footage"]):
+        return None                                         # by its path: cam A's C0001.MP4 is not cam B's
     return [(int(rng["in_ms"]) / 1000, int(rng["out_ms"]) / 1000)]
 
 
@@ -531,10 +551,13 @@ def _record(paths: Paths, src, state: str, *, cfr_fps=None, path=None, parts=(),
     from . import media_normalise as MN
     facts = facts or _facts(paths, src) or {"tag": MN._source_tag(Path(src), paths.root), "size": 0}
     ln = lines or {}
+    ar, en = list(ln.get("ar") or []), list(ln.get("en") or [])
+    if state == "failed" and cfr_fps and _NO_COPY_ADVICE[0] not in en:   # no evenly timed copy: the old advice again
+        en.append(_NO_COPY_ADVICE[0])
+        ar.append(_NO_COPY_ADVICE[1])
     return {"state": state, "path": path, "parts": [dict(x) for x in parts],
             "cfr_fps": float(cfr_fps) if cfr_fps else None, "source_tag": facts["tag"],
-            "source_size": int(facts["size"]), "reason": reason,
-            "lines": {"ar": list(ln.get("ar") or []), "en": list(ln.get("en") or [])}, "at": now_iso()}
+            "source_size": int(facts["size"]), "reason": reason, "lines": {"ar": ar, "en": en}, "at": now_iso()}
 
 
 def _pending(paths: Paths, src, decision: dict, reason: str) -> dict:
@@ -619,8 +642,9 @@ def _initial_conform(paths: Paths, report: dict, old: dict | None) -> None:
                 continue
             nz["conform"] = _pending(paths, src, dec, "queued: the copy is made after the preflight")
         except Exception as e:  # noqa: BLE001  the preflight never fails because of the copy
-            nz["conform"] = _record(paths, src, "failed", reason=f"{type(e).__name__}: {str(e)[:200]}",
-                                    lines=_lines(_FAILED), facts={"tag": "0" * 10, "size": 0})
+            nz["conform"] = _record(paths, src, "failed", cfr_fps=dec.get("cfr_fps"),
+                                    reason=f"{type(e).__name__}: {str(e)[:200]}", lines=_lines(_FAILED),
+                                    facts={"tag": "0" * 10, "size": 0})
 
 
 def _measured(doc) -> list:
@@ -763,28 +787,114 @@ def conform_summary(paths: Paths) -> dict:
     return {"state": state, "files": files, "job": None, "pid": None}
 
 
+def _read_claim(cp: Path):
+    """The claim record: None when there is none, {} when it can't be read as one."""
+    import json
+    try:
+        rec = json.loads(cp.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        return {}
+    return rec if isinstance(rec, dict) else {}
+
+
+def _claim_live(cp: Path, rec=None) -> bool:
+    """Does the claim `cp` belong to a job that is still running? This computer: its pid is alive and still the same
+    process (never this process: here the OS lock's in-process part already excludes a second job). Another computer:
+    younger than JOB_WAIT_S (its pid can't be checked from here). Unreadable: younger than CLAIM_WRITING_S."""
+    import os
+    import time
+    from . import writer_lock as WL
+    rec = _read_claim(cp) if rec is None else rec
+    if rec is None:
+        return False
+    try:
+        age = time.time() - os.stat(cp).st_mtime
+    except OSError:
+        return False
+    if not rec:
+        return age < CLAIM_WRITING_S
+    if WL.same_host(rec):
+        return str(rec.get("pid")) != str(os.getpid()) and WL.pid_alive(rec.get("pid"), rec.get("pid_created"))
+    return age < JOB_WAIT_S
+
+
+def _job_claim(paths: Paths, wait_s: float):
+    """Hold the item's job claim (CLAIM_REL) for the with-block: created with O_EXCL; a claim whose job is gone
+    (_claim_live) is moved aside, checked to be the one judged, and replaced; the claim is removed at the end when it
+    is still ours. Raises LockTimeout when a live job keeps it longer than `wait_s`."""
+    import contextlib
+    import os
+    import socket
+    import time
+    from . import writer_lock as WL
+    from .file_lock import LockTimeout
+
+    @contextlib.contextmanager
+    def held():
+        cp = paths.p(CLAIM_REL)
+        me = {"pid": os.getpid(), "pid_created": WL.process_created(os.getpid()), "host": socket.gethostname(),
+              "host_id": WL.host_id(), "started_at": now_iso()}
+        deadline = time.monotonic() + max(0.0, float(wait_s))
+        while not WL._create(cp, me):                       # the writer lease's own exclusive create
+            seen = _read_claim(cp)
+            if seen is not None and not _claim_live(cp, seen):
+                aside = cp.with_name(f"{cp.name}.stale-{os.getpid()}")
+                try:
+                    os.replace(cp, aside)
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    pass
+                else:
+                    if _read_claim(aside) == seen:          # the claim judged dead, not a new one made meanwhile
+                        with contextlib.suppress(OSError):
+                            aside.unlink()
+                        continue
+                    WL._restore(aside, cp)                  # a live job's fresh claim: put back, never over another
+            if time.monotonic() >= deadline:
+                raise LockTimeout(cp, round(float(wait_s), 1))
+            time.sleep(0.25)
+        try:
+            yield cp
+        finally:
+            if _read_claim(cp) == me:
+                with contextlib.suppress(OSError):
+                    cp.unlink()
+    return held()
+
+
 def _job_running(paths: Paths) -> bool:
+    """A conform job of this item runs: it holds the OS lock (another process, or another thread here), or a live
+    claim (the volume takes no OS locks)."""
     from .file_lock import LockTimeout
     try:
         with file_locked(paths.p(JOB_REL), 0):
-            return False
+            pass
     except LockTimeout:
         return True
+    return _claim_live(paths.p(CLAIM_REL))
 
 
 def run_conform_job(paths: Paths, wait_s: float = 0.0) -> dict:
     """The conform job of one item (in this process): every pending file is made, verified and recorded; stale
-    copies found on the way are made again (STALE_PASSES). One job per item: with another one running, it waits up to
-    `wait_s` for it (`job: "running"` when it is still running). Returns conform_summary() with job "done"."""
+    copies found on the way are made again (STALE_PASSES). One job per item (the OS lock, plus the claim for volumes
+    without OS locks): with another one running, it waits up to `wait_s` for it (`job: "running"` when it is still
+    running; a dead job's claim is taken over). Returns conform_summary() with job "done"."""
     import contextlib
+    import time
     from .file_lock import LockTimeout
     pf = paths.p("00_inputs/preflight.json")
     if not _measured(_read_doc(pf)):
         return conform_summary(paths)                       # nothing to do, and an old file is never written
     stack = contextlib.ExitStack()
+    t0 = time.monotonic()
     try:
         stack.enter_context(file_locked(paths.p(JOB_REL), wait_s))
+        stack.enter_context(_job_claim(paths, max(0.0, wait_s - (time.monotonic() - t0))))
     except LockTimeout:
+        stack.close()
         return dict(conform_summary(paths), job="running")
     with stack:
         for _ in range(STALE_PASSES + 1):
@@ -799,11 +909,14 @@ def run_conform_job(paths: Paths, wait_s: float = 0.0) -> dict:
                         _store(paths, src, rec, nm, nd)
             except Exception as e:  # noqa: BLE001  a slot or a write that broke: the files left pending are failed
                 why = f"{type(e).__name__}: {str(e)[:300]}"
-                for fr in _measured(_read_doc(pf)):
-                    rec = fr["normalise"].get("conform")
-                    if isinstance(rec, dict) and rec.get("state") == "pending":
-                        _store(paths, fr["path"], _record(paths, fr["path"], "failed", cfr_fps=rec.get("cfr_fps"),
-                                                          reason=why, lines=_lines(_FAILED)))
+                try:
+                    for fr in _measured(_read_doc(pf)):
+                        rec = fr["normalise"].get("conform")
+                        if isinstance(rec, dict) and rec.get("state") == "pending":
+                            _store(paths, fr["path"], _record(paths, fr["path"], "failed", cfr_fps=rec.get("cfr_fps"),
+                                                              reason=why, lines=_lines(_FAILED)))
+                except Exception:  # noqa: BLE001  that write broke too: the records stay pending (`--wait` makes them)
+                    pass
                 break
     return dict(conform_summary(paths), job="done")
 
@@ -816,9 +929,13 @@ def _popen(cmd, **kw):
 
 def _spawn_job(paths: Paths) -> int:
     """Start `reel conform --wait` for this item as a detached process (the same interpreter and engine; Windows
-    DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW, CREATE_BREAKAWAY_FROM_JOB tried first so the
-    caller's job object can't take it down; POSIX a new session), its output appended to logs/conform-job.log. It
-    inherits WHYNOT_LOCK_SESSION, so it is the same writer of the client folder. Returns its pid."""
+    CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW, CREATE_BREAKAWAY_FROM_JOB tried first so the caller's job object
+    can't take it down; POSIX a new session), its output appended to logs/conform-job.log. Never DETACHED_PROCESS
+    (review 99f6357 P2-1): with it Windows ignores CREATE_NO_WINDOW, so the venv's python.exe launcher's interpreter
+    and every ffmpeg the job starts got a NEW visible console, and closing that window killed the job. Without it the
+    job owns a hidden console of its own, which its children inherit, and which is not the caller's terminal (closing
+    the terminal never reaches it). It inherits WHYNOT_LOCK_SESSION, so it is the same writer of the client folder.
+    Returns its pid."""
     import os
     import subprocess
     import sys
@@ -836,7 +953,7 @@ def _spawn_job(paths: Paths) -> int:
         kw = {"stdin": subprocess.DEVNULL, "stdout": logf, "stderr": logf, "cwd": str(cli.parent), "env": env,
               "close_fds": True}
         if os.name == "nt":
-            flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+            flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
             try:
                 proc = _popen(cmd, creationflags=flags | subprocess.CREATE_BREAKAWAY_FROM_JOB, **kw)
             except OSError:                                  # the caller's job forbids breakaway: start inside it
@@ -889,3 +1006,87 @@ def start_conform(paths: Paths, mode: str | None = None) -> dict:
         except Exception:  # noqa: BLE001
             pass
         return dict(conform_summary(paths), state="failed", reason=why, lines=_lines(_FAILED))
+
+
+def _age_s(iso) -> float:
+    """Seconds since an ISO time (a record's `at`); infinite when it can't be read."""
+    import datetime as dt
+    try:
+        t = dt.datetime.fromisoformat(str(iso))
+    except (TypeError, ValueError):
+        return float("inf")
+    if t.tzinfo is None:
+        t = t.astimezone()
+    return (dt.datetime.now().astimezone() - t).total_seconds()
+
+
+def _reap_dead_job(paths: Paths, src) -> dict | None:
+    """`src`'s pending record when its job died (review 99f6357 P3-2: no job of this item runs, and it was queued
+    over JOB_START_S ago): recorded as failed (_JOB_DIED), under preflight.json's lock. Returns that record; None
+    when the record is left as it is."""
+    pf = paths.p("00_inputs/preflight.json")
+    with file_locked(pf):
+        doc = _read_doc(pf)
+        fr = next((x for x in _measured(doc) if _same_file(x["path"], src)), None)
+        rec = fr["normalise"].get("conform") if fr else None
+        if not isinstance(rec, dict) or rec.get("state") != "pending" or _age_s(rec.get("at")) < JOB_START_S \
+                or _job_running(paths):
+            return None
+        new = _record(paths, src, "failed", cfr_fps=rec.get("cfr_fps"), lines=_lines(_JOB_DIED),
+                      reason="the background job stopped before the copy was made: run `reel conform --wait`")
+        fr["normalise"]["conform"] = new
+        write_json(pf, doc)
+        return new
+
+
+def conform_import(paths: Paths, src) -> dict:
+    """ppro_build's one call before it imports main footage (hooks/t26/CONTRACT.md, the Adobe half): what Premiere
+    imports for `src` (absolute, or relative to the client root; a bare file name only when exactly one measured file
+    has that name). {use: "copy" | "original", state, path, parts, reason, lines: {ar, en}}:
+      * use "copy" only for a `ready` record that is still current NOW (conform_current: the source's size, tag and
+        age, the copy a plain non-empty file under output/ with no link on the way, this item's windows covered):
+        `path` (a whole-file copy) or `parts` [{path, from_ms, to_ms}], client-relative POSIX, resolved by the caller
+        against the client root;
+      * else use "original" (path None, parts []) and `lines` = the one build warning: pending -> CONTRACT's line;
+        failed -> the engine's own lines; a ready copy no longer current -> why, and `reel conform --wait`. A pending
+        record whose job died is recorded as failed first (_reap_dead_job). state "none" (no record: a preflight.json
+        from before Task 26, or none) and "not_needed" have no lines.
+    Never raises (anything unexpected: the original, with the failure's lines)."""
+    import os
+    res = {"use": "original", "state": "none", "path": None, "parts": [], "reason": None,
+           "lines": {"ar": [], "en": []}}
+    try:
+        s = Path(src)
+        full = s if s.is_absolute() else Path(paths.root) / s
+        doc = _read_doc(paths.p("00_inputs/preflight.json")) if getattr(paths, "video_id", None) else None
+        frs = _measured(doc)
+        fr = next((x for x in frs if _same_file(x["path"], full)), None)
+        if fr is None and not s.is_absolute() and len(s.parts) == 1:
+            named = [x for x in frs if os.path.normcase(Path(x["path"]).name) == os.path.normcase(s.name)]
+            fr = named[0] if len(named) == 1 else None
+        rec = fr["normalise"].get("conform") if fr else None
+        state = rec.get("state") if isinstance(rec, dict) else None
+        if state not in ("ready", "pending", "failed", "not_needed"):
+            return res
+        res["state"] = state
+        if state == "not_needed":
+            return res
+        if state == "pending":
+            dead = _reap_dead_job(paths, fr["path"])
+            if dead is None:
+                return dict(res, reason=rec.get("reason"), lines=_lines(_BUILD_PENDING))
+            rec, state = dead, "failed"
+            res["state"] = state
+        if state == "failed":
+            ln = rec.get("lines") if isinstance(rec.get("lines"), dict) else {}
+            return dict(res, reason=rec.get("reason"), lines={"ar": list(ln.get("ar") or []),
+                                                              "en": list(ln.get("en") or [])})
+        why = conform_current(paths, fr["path"], rec, fr["normalise"]["decision"], conform_windows(paths, fr["path"]))
+        if why:
+            en, ar = _BUILD_STALE
+            return dict(res, reason=why, lines={"ar": [ar.format(why=why)], "en": [en.format(why=why)]})
+        return dict(res, use="copy", path=rec.get("path") or None, reason=rec.get("reason"),
+                    parts=[{k: x[k] for k in ("path", "from_ms", "to_ms")} for x in rec.get("parts") or []])
+    except Exception as e:  # noqa: BLE001  the build never fails because of the copy
+        return dict(res, use="original", state="failed", path=None, parts=[], reason=f"{type(e).__name__}: {e}"[:300],
+                    lines=_lines(_FAILED))
