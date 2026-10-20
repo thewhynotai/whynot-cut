@@ -27,7 +27,8 @@ from .errors import Guidance
 from .linksafe import is_link
 
 SYSTEM, ADMINS, CREATOR_OWNER = "S-1-5-18", "S-1-5-32-544", "S-1-3-0"
-# every SDDL alias that is the same SID on every machine (the domain-relative ones, DA, DU..., stay as letters)
+# the SDDL aliases of built-in accounts and groups, the same SID on every machine (the domain-relative ones, DA,
+# DU..., and the rare AS, SS, UD stay as letters: still flagged, but the fix command cannot remove their grant)
 _ALIASES = {"SY": SYSTEM, "BA": ADMINS, "WD": "S-1-1-0", "AU": "S-1-5-11", "BU": "S-1-5-32-545", "IU": "S-1-5-4",
             "CO": CREATOR_OWNER, "OW": "S-1-3-4", "BG": "S-1-5-32-546", "PU": "S-1-5-32-547", "AN": "S-1-5-7",
             "NU": "S-1-5-2", "NS": "S-1-5-20", "LS": "S-1-5-19", "AC": "S-1-15-2-1", "CG": "S-1-3-1",
