@@ -69,6 +69,11 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
   hand after checking its CPU on the CHILD python (the venv `python.exe` launcher always shows 0 CPU).
 
 ## 6. Incidents
+- 2026-10-20 03:52 → 11:23: a routine run that never finishes (the 02:01 report run waiting on a permission prompt;
+  the 03:52 auto-resume run cut by the usage limit) blocks EVERY later run of that routine (the app starts no new run
+  while one is "in progress"). Effect: no 09:00 report; no watchdog after the 06:00 reset, so the executor (stopped
+  05:15) was never resumed. 11:23 Command Center stopped both stuck runs and ran both routines by hand. Detection now
+  in every report (PRIMARY-REPORT step 2: a routine whose newest run is `running` for > 60 min = STUCK).
 - 2026-10-20 03:54 → 06:00: Yunus's account hit its usage limit (reset 06:00). The intake run of 03:37 died holding
   `intake.lock` until 09:38 and its suite `review-BL-16` frozen in a heavy slot (140 min), blocking `h1-setup4` and
   `peer-BL-16`. 06:05 Command Center: lock renamed `intake.lock.stale-0338-limit`, orphan suite ended; both waiting

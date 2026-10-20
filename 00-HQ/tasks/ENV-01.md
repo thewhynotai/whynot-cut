@@ -31,4 +31,7 @@ never use a per-user site: the packages must live inside the venv's own site-pac
 - `verify-real-env.ps1` from the real Terminal: **Ran 104 tests — OK** (was 7 failures after step 1). Acceptance 2 OK.
 - Acceptance 3 (full suite from a helper context with no env errors) → H1's `h1-setup4` re-run; Answer written in SETUP-H1 02:49. OPEN until that report.
 - Acceptance 4: same 47 versions (frozen from the sandbox view).
+- 2026-10-20 07:25 H1 `h1-setup4` (SETUP-H1-r3, ACCEPTED by the intake 08:26): 8,226 ran, 8,087 OK, **no ModuleNotFoundError**; 51 failures, 46 from two more gaps: the suite ran on the 2.x venv (Python 3.13, imageio ffmpeg 4.2.2) instead of the pinned 3.0 runtime.
+- Step 3 (11:27): the canonical runner `tools/test.sh` picks `~/.whynot-cut/runtimes/r-6e4a68a292b4` (Python 3.12, `-s`) in the REAL environment; the failing groups (TestMotionQC, test_vfr_flagged, test_cut_proof_resampling…, the unicode bracket tables) + align/structure/cli: **Ran 124 — OK** (`env-fixerify-testsh.log`). Every suite command now uses `tools/test.sh`: MASTER-INTAKE step 1B, helper_loop peer review (30/30 loop tests, RELOAD-h1/h2), PLAYBOOK §2 item 3.
+- Still open for acceptance 3: one full helper suite through `tools/test.sh` (next helper suite).
 - Cleanup left: the step-1 per-user copy (~556 MB on C) is now a duplicate; remove it when no suite runs (`pip uninstall` with the venv copy taking precedence).

@@ -10,6 +10,10 @@ Keep this run small and cheap: no project work, no file edits by hand, no subage
 2. Load `mcp__scheduled-tasks__list_scheduled_tasks` (ToolSearch select) and note which of `whynot-cut-hq-intake`,
    `whynot-cut-auto-resume`, `whynot-cut-primary-report` are disabled. You cannot re-enable them from an unattended run:
    list them under "المطلوب من PRIMARY" with the one step "Claude app → Routines → switch it on".
+   Also load `mcp__scheduled-tasks__list_task_runs` and call it (limit 1) for `whynot-cut-hq-intake` and
+   `whynot-cut-auto-resume`: if the newest run is `running` and started more than 60 minutes ago, it is STUCK and
+   blocks every later run of that routine. List it under "المطلوب من PRIMARY" with its session id (the Command
+   Center stops it).
 3. Load `mcp__ccd_session_mgmt__get_session` and call it with "self" to get this run's session id. Mark the delivery:
    `python -X utf8 "D:\0 Work\0 Pegasus IMC Agency\00 TWN\0 TWN AI\Editing Plugin\00-HQ\tools\hq_status.py" --mark-sent <report id> <session id>`
    (the report id is the `R-…` printed in the inbox row).

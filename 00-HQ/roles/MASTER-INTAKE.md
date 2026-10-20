@@ -105,7 +105,7 @@ never review yourself. Give it the card, the spec, the report, the sha, the patc
   Revert every mutant you make.
 - **Tests.** Run the focused tests, then the **FULL suite** through the queue with the same command as SETUP-H1
   step 3:
-  `bash HEAVY suite review-<ID> -- env WNC_RUN=<this intake run's session id> PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 ~/.whynot-cut/venv/Scripts/python.exe -B -m unittest discover -s whynot-cut/tests`
+  `bash HEAVY suite review-<ID> -- env WNC_RUN=<this intake run's session id> PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 bash tools/test.sh`
   (the `WNC_RUN` tag lets the next intake end this suite if this run is cut by a usage limit, OPS-07; give the
   reviewer subagent the id). Spawn the reviewer in the FOREGROUND (`run_in_background: false`) and wait for it in
   this turn, so this run stays `isRunning: true` while its review lives.
