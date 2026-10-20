@@ -85,7 +85,9 @@ reel ref-style   --root "<CLIENT>" --record --by client-researcher   # after wri
     `global.highlight_colour` in its edit-decisions); a reel that must hide captions under its hook while the client
     shows them lists `hook_title` in that reel's `global.captions_hidden_during`. These keys stay at the top level of
     `style.json`, never inside its `captions` block (that block is the caption-look choice).
-  - **Caption look, on a new client's first clip:** offer the editor the gallery, `reel caption-looks --root
+  - **Caption look, on a new client's first clip:** first `reel looks recommend --root "<CLIENT>" --video-id <ID>
+    --kind caption`: the one look that suits this clip, one reason line and the top three with their stills (it
+    changes nothing). Lead with that suggestion; the editor still picks. Then offer the gallery, `reel caption-looks --root
     "<CLIENT>" --video-id <ID>`. It draws every caption look on two frames of that clip and one sheet in
     `08_quality_control/previews/caption-looks/` (view the sheet, then show it). The editor picks by sight;
     `reel caption-looks --root "<CLIENT>" --video-id <ID> --pick <look>` prints the diff against `style.json`. Report

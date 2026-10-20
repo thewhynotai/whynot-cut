@@ -161,7 +161,9 @@ After `plan` and previews, tell the editor what the edit will do, in about 200â€
 
 When `preview_video` is on, point them to `<CLIENT_FOLDER>/output/projects/<ID>/08_quality_control/preview/<ID>_preview.mp4`
 (offer to open it: `open` on macOS, `explorer.exe "<path with backslashes>"` on Windows), `01_analysis/edit-plan.md`
-and the preview contact sheet.
+and the preview contact sheet. When the plan removes words (cuts, retakes, pauses), offer the removed-parts clip too:
+`reel removed-review --root "<CLIENT>" --video-id <ID>` renders a short MP4 of only what the plan removes, a slate per
+part, with the words whose loss changes meaning first. It changes nothing; give the editor its path.
 - Preferences `approval: ask` (default): **stop and ask.** If the editor approves: `reel approve-plan --by editor`.
 - If the editor said in this conversation to run without review ("just go", "don't ask") **while this plan is waiting
   for approval**, that approves this plan only: `reel approve-plan --by delegated --note "<their words>"`. It never

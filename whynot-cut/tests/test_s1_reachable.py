@@ -35,11 +35,7 @@ PENDING = {          # verb -> the hook set that registers it
     "takes": r"lane2\hooks\K-T7 (after Task 25 closes)",
     "safezone-check": r"lane2\hooks\K-T4",
 }
-GAPS = {             # registered, but no skill or agent names `reel <verb>` yet
-    "removed-review": "edit skill: offer the removed-parts clip before approval",
-    "client-clone": "handoff skill: next to client-move",
-    "looks": "edit / podcast skill: `reel looks recommend` before the caption look is picked",
-}
+GAPS = {}            # registered, but no skill or agent names `reel <verb>` yet
 
 
 def help_verbs() -> set:

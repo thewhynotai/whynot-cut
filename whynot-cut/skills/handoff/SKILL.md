@@ -22,3 +22,4 @@ allowed-tools: Bash(reel *), PowerShell(reel *)
 5. In your own messages, tables and file names, «الدكتور/الدكتورة» and he/she come only from people[] (reel-profile
    `profile.json`). Until a person's gender is known write «د.» or the name.
 6. نقل عميل لمكان تاني: `reel client-move --root <العميل> --to <المكان الجديد>` (تجربة)، وبعدين نفس الأمر بـ `--apply`. لو اتنقل بالإيد: `reel client-move --root <مكانه دلوقتي> --already-moved --apply`. بعد النقل: اعرض على المونتير الموافقات اللي في NEEDS-YOU، وهو اللي يوافق تاني؛ ماتوافقش بداله.
+7. عميل جديد بنفس براند عميل موجود: `reel client-clone --root <العميل> --to <فولدر جديد أو فاضي>` (تجربة، مابيكتبش حاجة)، وبعدين نفس الأمر بـ `--apply`. بينسخ قاعدة البراند بس، من غير ميديا، وعمره ما بيكتب جوه فولدر عميل.
