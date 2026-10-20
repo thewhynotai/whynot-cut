@@ -1329,6 +1329,21 @@ class RuleIdsDoNotDependOnThePath(unittest.TestCase):
         self.assertEqual(data["results"][1]["extra"]["message"], "our fixed message")
         self.assertNotIn("SECRETVALUE", json.dumps(data))
 
+    def test_our_rule_ids_have_no_dot(self):
+        """own_rule takes the last dotted segment, so it works only while every id in .semgrep/*.yml is a dot-free
+        wnc- name (review 3e5f17d m1)."""
+        import re
+        ids = []
+        for y in sorted((Path(__file__).resolve().parents[2] / ".semgrep").glob("*.yml")):
+            ids += re.findall(r"^\s*-\s*id:\s*['\"]?([^'\"\s#]+)", y.read_text(encoding="utf-8"), re.M)
+        self.assertGreater(len(ids), 10)
+        for i in ids:
+            self.assertRegex(i, r"^wnc-[a-z0-9-]+$")
+
+    def test_a_wnc_word_inside_a_registry_id_is_not_ours(self):
+        for cid in ("foo-wnc-bar", "rules.foo-wnc-bar", "rules.wncx-raw", "rules.wnc_raw", "rules.wncraw"):   # m3
+            self.assertIsNone(scan.own_rule(cid), cid)
+
 
 if __name__ == "__main__":
     unittest.main()
