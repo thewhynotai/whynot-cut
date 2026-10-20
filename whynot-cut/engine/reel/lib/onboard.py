@@ -145,6 +145,34 @@ def silent_guards() -> list[dict]:
     return out
 
 
+def git_bash_found() -> bool:
+    """Windows: is there a Git Bash where Claude Code (or the installer's settings entry) finds one? The
+    CLAUDE_CODE_GIT_BASH_PATH value (environment, else <claude config>/settings.json env), `git` on PATH
+    (<git>\\..\\..\\bin\\bash.exe), %ProgramFiles%\\Git, %ProgramFiles(x86)%\\Git, %LOCALAPPDATA%\\Programs\\Git and the
+    installer's own %LOCALAPPDATA%\\WhyNotCut\\git."""
+    import os
+    import shutil
+    val = os.environ.get("CLAUDE_CODE_GIT_BASH_PATH") or ""
+    if not val.strip():
+        cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+        try:
+            doc = read_json(cfg / "settings.json", {})
+        except (ValueError, OSError):               # an unreadable settings file: look at the other places
+            doc = {}
+        env = doc.get("env") if isinstance(doc, dict) else None
+        val = str(env.get("CLAUDE_CODE_GIT_BASH_PATH") or "") if isinstance(env, dict) else ""
+    cands = [Path(val.strip().strip('"'))] if val.strip() else []
+    git = shutil.which("git", path=os.environ.get("PATH", ""))
+    if git:
+        cands.append(Path(git).parent.parent / "bin" / "bash.exe")
+    cands += [Path(os.environ[v]) / "Git" / "bin" / "bash.exe" for v in ("ProgramFiles", "ProgramFiles(x86)")
+              if os.environ.get(v)]
+    if os.environ.get("LOCALAPPDATA"):
+        lad = Path(os.environ["LOCALAPPDATA"])
+        cands += [lad / "Programs" / "Git" / "bin" / "bash.exe", lad / "WhyNotCut" / "git" / "bin" / "bash.exe"]
+    return any(c.is_file() for c in cands)
+
+
 def guard_heartbeat(now: float | None = None) -> dict:
     """Is the PreToolUse guard running? guard.py touches <plugin data>/guard-ok on every tool call it inspects, and
     hooks/run_python.sh touches hooks-ok whenever it found Python (the runner). No fresh guard-ok (< 24 h) means the
@@ -161,6 +189,9 @@ def guard_heartbeat(now: float | None = None) -> dict:
         fix = (f"the installed WhyNot Cut {vers} guard writes no heartbeat (that check came with 3.0), so `reel "
                "doctor` cannot see it run: type /hooks in Claude Code - when WhyNot Cut's PreToolUse hook is listed, "
                "the guard is on. Updating the plugin to 3.0 makes this check automatic.")
+    elif not active and plat.IS_WIN and git_bash_found():    # BL-18 (ii): Git Bash is there, no session ran yet
+        fix = ("no WhyNot Cut session has run the guard yet: open or restart Claude Code, then /hooks to check "
+               "WhyNot Cut's hooks are listed, and `reel doctor` again.")
     elif not active:
         fix = ("install Git for Windows (https://git-scm.com/download/win), then restart Claude Code: WhyNot Cut's "
                "guard hooks run through Git Bash. Then run /hooks to check they are listed, and `reel doctor` again."

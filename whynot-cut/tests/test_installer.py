@@ -1982,9 +1982,20 @@ class TestGpu(unittest.TestCase):
         ctx = self.ctx()
         r = self.rt.step_gpu(ctx)
         self.assertEqual(r.status, "skipped")
-        self.assertIn("NVIDIA", r.detail)
+        self.assertIn("sandbox: GPU not probed", r.detail)       # BL-18 (i): a sandbox never probes, so no "not found"
+        self.assertNotIn("no NVIDIA GPU found", r.detail)
         self.assertFalse(self.argv_file.exists())
         self.assertFalse(ctx.facts["nvidia"])
+
+    def test_win_real_home_without_nvidia_says_not_found(self):
+        import dataclasses
+        ctx = self.ctx()
+        ctx.paths = dataclasses.replace(ctx.paths, sandbox=False)
+        with mock.patch.object(self.rt, "_nvidia_present", return_value=False):
+            r = self.rt.step_gpu(ctx)
+        self.assertEqual(r.status, "skipped")
+        self.assertIn("no NVIDIA GPU found (nvidia-smi)", r.detail)
+        self.assertNotIn("sandbox", r.detail)
 
     def test_win_with_nvidia_runs_gpu_enable(self):
         with mock.patch.dict(os.environ, {"WNC_TEST_NVIDIA": "1"}):

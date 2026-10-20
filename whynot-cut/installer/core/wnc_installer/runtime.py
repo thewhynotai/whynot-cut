@@ -382,6 +382,8 @@ def step_gpu(ctx: base.Ctx) -> base.StepResult:
         return base.StepResult("gpu", "skipped", "dry run: with an NVIDIA GPU, would run reel gpu-enable")
     ctx.facts["nvidia"] = _nvidia_present(ctx)
     if not ctx.facts["nvidia"]:
+        if ctx.paths.sandbox:  # _nvidia_present never probes in a sandbox: say so, not "not found"
+            return base.StepResult("gpu", "skipped", "sandbox: GPU not probed; Whisper uses the CPU")
         return base.StepResult("gpu", "skipped", "no NVIDIA GPU found (nvidia-smi); Whisper uses the CPU")
     py = ctx.runtime_python
     if py is None:

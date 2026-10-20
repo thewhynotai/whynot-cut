@@ -569,10 +569,11 @@ class TestHeartbeat(ClientFixture):
         from lib import onboard
         cfg = Path(self.tmp.name) / "cfg"
         env = {"CLAUDE_CONFIG_DIR": str(cfg), "CLAUDE_PLUGIN_DATA": ""}
-        with mock.patch.dict(os.environ, env):
+        with mock.patch.dict(os.environ, env), mock.patch.object(onboard, "git_bash_found", return_value=False):
             st = onboard.guard_heartbeat()
             self.assertFalse(st["active"])
             self.assertIn("Git for Windows" if os.name == "nt" else "restart Claude Code", st["fix"])
+        with mock.patch.dict(os.environ, env):
             runner = cfg / "plugins/data/whynot-cut-thewhynot-ai/hooks-ok"     # the runner alone is not the guard
             runner.parent.mkdir(parents=True)
             runner.write_text("1", encoding="utf-8")
@@ -620,6 +621,54 @@ class TestHeartbeat(ClientFixture):
             st = onboard.guard_heartbeat()
             self.assertIs(st["active"], False)
             self.assertEqual(st["silent_guards"], [])
+
+    @unittest.skipUnless(os.name == "nt", "Git Bash is only needed on Windows")
+    def test_no_heartbeat_with_git_bash_says_open_claude_not_install_git(self):
+        """BL-18 (ii), installer dogfood 2026-10-19: with Git for Windows installed and no session yet, doctor said
+        "install Git for Windows". It may say so only when Git Bash is really missing."""
+        from unittest import mock
+        from lib import onboard
+        cfg = Path(self.tmp.name) / "cfg_gb"
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(cfg), "CLAUDE_PLUGIN_DATA": ""}), \
+                mock.patch.object(onboard, "git_bash_found", return_value=True):
+            st = onboard.guard_heartbeat()
+        self.assertFalse(st["active"])
+        self.assertNotIn("Git for Windows", st["fix"])
+        self.assertIn("no WhyNot Cut session has run the guard yet: open or restart Claude Code, then /hooks", st["fix"])
+
+    @unittest.skipUnless(os.name == "nt", "Git Bash is only needed on Windows")
+    def test_git_bash_found_looks_where_claude_code_looks(self):
+        from unittest import mock
+        from lib import onboard
+        t = Path(self.tmp.name) / "gb"
+        empty = {"PATH": str(t / "nopath"), "ProgramFiles": str(t / "pf"), "ProgramFiles(x86)": str(t / "pf86"),
+                 "LOCALAPPDATA": str(t / "lad"), "CLAUDE_CODE_GIT_BASH_PATH": "", "CLAUDE_CONFIG_DIR": str(t / "cfg")}
+        with mock.patch.dict(os.environ, empty):
+            self.assertFalse(onboard.git_bash_found())
+        places = [("CLAUDE_CODE_GIT_BASH_PATH", t / "custom" / "bash.exe", None),
+                  ("PATH", t / "pg" / "bin" / "bash.exe", t / "pg" / "cmd"),
+                  ("ProgramFiles", t / "pf" / "Git" / "bin" / "bash.exe", t / "pf"),
+                  ("LOCALAPPDATA", t / "lad" / "Programs" / "Git" / "bin" / "bash.exe", t / "lad"),
+                  ("LOCALAPPDATA", t / "lad2" / "WhyNotCut" / "git" / "bin" / "bash.exe", t / "lad2")]
+        for var, bash, value in places:
+            bash.parent.mkdir(parents=True, exist_ok=True)
+            bash.write_text("", encoding="utf-8")
+            if var == "PATH":
+                value.mkdir(parents=True, exist_ok=True)
+                (value / "git.exe").write_text("", encoding="utf-8")
+            with mock.patch.dict(os.environ, {**empty, var: str(value or bash)}):
+                self.assertTrue(onboard.git_bash_found(), var)
+            bash.unlink()
+            with mock.patch.dict(os.environ, {**empty, var: str(value or bash)}):
+                self.assertFalse(onboard.git_bash_found(), var + " (removed)")
+        settings = t / "cfg" / "settings.json"                # Claude Code's own settings env, as the installer writes
+        settings.parent.mkdir(parents=True, exist_ok=True)
+        bash = t / "fromsettings" / "bash.exe"
+        bash.parent.mkdir(parents=True, exist_ok=True)
+        bash.write_text("", encoding="utf-8")
+        settings.write_text(json.dumps({"env": {"CLAUDE_CODE_GIT_BASH_PATH": str(bash)}}), encoding="utf-8")
+        with mock.patch.dict(os.environ, empty):
+            self.assertTrue(onboard.git_bash_found())
 
 
 class TestGuardReviewRound1(ClientFixture):
