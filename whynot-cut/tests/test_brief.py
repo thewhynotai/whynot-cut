@@ -337,6 +337,20 @@ class TestCap(Base):
         self.assertEqual(r["tokens"], B().estimate_tokens(r["text"]))
         self.assertEqual(B().CAP_TOKENS, 1500)
 
+    def test_b6_largest_brief_estimate_at_least_its_measured_count(self):
+        """fu1 (P2-1): the largest-fixture brief of b2db1e7 measured 1,587 real tokens against an estimate of 1,484;
+        the estimator must never count that very text below what it measured (nor any later measured brief)."""
+        cal = json.loads((FIX / "calibration/calibration.json").read_text(encoding="utf-8"))
+        briefs = {k: s for k, s in cal["held_out"].items() if k.startswith("brief_largest")}
+        self.assertEqual(briefs["brief_largest_b2db1e7"]["tokens"], 1587)
+        for name, s in briefs.items():
+            text = (FIX / "calibration" / s["file"]).read_text(encoding="utf-8")
+            with self.subTest(name):
+                self.assertTrue(text.startswith("# brief C0001 · ~"), "a brief as `reel brief` prints it")
+                self.assertGreaterEqual(B().estimate_tokens(text), s["tokens"])
+                if name != "brief_largest_b2db1e7":         # a brief printed with the raised rates: really under the cap
+                    self.assertLessEqual(s["tokens"], B().CAP_TOKENS)
+
     def test_b7_three_hundred_open_flags_first_n_then_more_line(self):
         ev = put_spec(self.p, 300)
         put_review(self.p, ev, 300)
@@ -445,6 +459,27 @@ class TestCap(Base):
         self.assertTrue(b.cut_ok("ab", 2))
         self.assertTrue(b.cut_ok("لب", 1))
 
+    def test_b9_cut_ok_flags_tag_sequences_and_hangul(self):
+        """fu1 (P3-2): never inside a regional-indicator pair (a flag), before an emoji tag character
+        (U+E0020–E007F) or inside a Hangul L/V/T syllable."""
+        b = B()
+        flags = "\U0001F1EA\U0001F1EC\U0001F1F8\U0001F1E6"               # 🇪🇬🇸🇦
+        self.assertEqual([b.cut_ok(flags, i) for i in range(1, 4)], [False, True, False])
+        self.assertTrue(b.cut_ok("a" + flags, 1))
+        tagged = "\U0001F3F4\U000E0067\U000E0062\U000E0065\U000E006E\U000E0067\U000E007F"   # 🏴 + tags (England)
+        self.assertFalse(any(b.cut_ok(tagged, i) for i in range(1, len(tagged))))
+        self.assertTrue(b.cut_ok(tagged + "x", len(tagged)))
+        L, V, T, LV, LVT = "ᄀ", "ᅡ", "ᆨ", "가", "각"
+        for s, i in ((L + V, 1), (L + L, 1), (L + LV, 1), (L + LVT, 1), (V + V, 1), (V + T, 1), (LV + V, 1),
+                     (LV + T, 1), (LVT + T, 1), (T + T, 1), (L + V + T, 2)):
+            self.assertFalse(b.cut_ok(s, i), [hex(ord(c)) for c in s])
+        for s, i in ((T + L, 1), (V + L, 1), (LV + LV, 1), (LVT + V, 1), (LVT + L, 1), ("a" + L, 1)):
+            self.assertTrue(b.cut_ok(s, i), [hex(ord(c)) for c in s])
+        word = (L + V + T) * 30 + flags * 20 + tagged * 10
+        for limit in range(1, len(word)):
+            cut = b.safe_cut(word, limit)
+            self.assertTrue(b.cut_ok(word, len(cut)), limit)
+
     def test_b9_single_long_word_cut_on_a_grapheme_boundary(self):
         b = B()
         w = "لالالالالالالا"
@@ -490,6 +525,80 @@ class TestCap(Base):
         self.assertNotIn("history note 12", " ".join(hist))
         self.assertIn("history note 12", full)
 
+    def test_b7_unread_needs_you_sources_are_open_items_never_silently_cut(self):
+        """fu1 (P2-5): a needs-you source that could not be read hides NEEDS-YOU items: it is an open item tagged
+        `needs-you unread`, so it is shown or counted in the N-more line, never trimmed as a note."""
+        from lib import needs_you
+        real = needs_you.collect
+
+        def damaged(root):
+            d = real(root)
+            d["unread"] = list(d.get("unread") or []) + [
+                {"source": f"output/projects/{VID}/state-{i}.json", "item": VID, "why": "JSONDecodeError"}
+                for i in range(12)]
+            d["skipped"] = list(d.get("skipped") or []) + [
+                {"source": f"output/projects/{VID}/needs.json", "item": VID, "why": "the list of needs is not a list"},
+                {"source": "output/projects/C0002/needs.json", "item": "C0002", "why": "other video"}]
+            return d
+        p = largest_project(self.root)
+        with mock.patch.object(needs_you, "collect", damaged):
+            r = self.brief(p)
+        f, text = r["facts"], r["text"]
+        unread = [o for o in f["open"] if o["tag"] == "needs-you unread"]
+        self.assertEqual(len(unread), 13, "12 unread + 1 skipped of this video; the other video's is not listed")
+        self.assertTrue(all(o["text"].startswith("could not read output/projects/") for o in unread))
+        self.assertFalse([n for n in f["notes"] if "could not read" in n], "no longer a note")
+        shown = self.block(text, "open items")
+        items = [l for l in shown if re.match(r"\d+\. ", l)]
+        more = [l for l in shown if l.startswith("… ")]
+        self.assertEqual(len(items) + (int(re.match(r"… (\d+) more", more[0]).group(1)) if more else 0), len(f["open"]))
+        self.assertIn(f"open items ({len(f['open'])})", text)
+        self.assertLessEqual(r["tokens"], 1500)
+
+    def test_b8_trimmed_notes_are_counted_never_cut_silently(self):
+        """fu1 (P2-5): trimmed notes leave `… N notes not shown (`reel next`)`; nothing when every note fits."""
+        p = largest_project(self.root)
+        b = B()
+        f = b.collect(p, cli_module().next_doc)
+        f["notes"] = [f"note {i}: " + "ملاحظة طويلة " * 8 for i in range(12)]
+        text, n, t, counts = b.render(f, p.root, 10 ** 6)
+        self.assertNotIn("notes not shown", text)
+        hits = 0
+        for cap in range(n, 300, -25):
+            text, n2, t, _ = b.render(f, p.root, cap)
+            line = [l for l in text.splitlines() if "notes not shown" in l]
+            with self.subTest(cap=cap):
+                if t["notes"]:
+                    hits += 1
+                    self.assertEqual(line, [f"… {t['notes']} notes not shown (`reel next`)"])
+                else:
+                    self.assertEqual(line, [])
+        self.assertGreater(hits, 2)
+
+    def test_b8_notices_count_capped_with_a_more_line(self):
+        """fu1 (P3-1): notices are never trimmed by the cap, so their count is bounded: the first NOTICES_SHOWN, then
+        `… N more notices` (the full list is in `reel brief --json`)."""
+        b = B()
+        f = b.collect(self.p, cli_module().next_doc)
+        f["notices"] = [f"output/projects/{VID}/x{i}.json: damaged file, not read (JSONDecodeError) " + "x" * 150
+                        for i in range(40)]
+        text = b.render(f, self.root, 1500)[0]
+        shown = self.block(text, "notices")
+        self.assertEqual(len([l for l in shown if l.startswith("- ")]), b.NOTICES_SHOWN)
+        self.assertIn(f"… {40 - b.NOTICES_SHOWN} more notices, see `reel brief --json`", shown)
+        f["notices"] = f["notices"][:b.NOTICES_SHOWN]
+        self.assertNotIn("more notices", b.render(f, self.root, 1500)[0])
+
+    def test_b8_over_the_cap_is_said_in_the_header(self):
+        """fu1 (P3-1): when even the untrimmable lines exceed the cap, the first line says so."""
+        ev = put_spec(self.p, 30)
+        put_review(self.p, ev, 30)
+        r = self.brief(cap=200)
+        first = r["text"].splitlines()[0]
+        self.assertGreater(r["tokens"], 200)
+        self.assertRegex(first, r"~\d+ tokens / 200 \(over the cap: ")
+        self.assertNotIn("over the cap", self.brief()["text"].splitlines()[0])
+
     def test_b10_brief_prints_its_own_size(self):
         r = self.brief()
         first = r["text"].splitlines()[0]
@@ -521,7 +630,24 @@ class TestEstimator(unittest.TestCase):
             est = B().estimate_tokens(text)
             with self.subTest(name):
                 self.assertGreaterEqual(est, s["tokens"], "the estimator must not undercount a calibration sample")
-                self.assertLessEqual(est, s["tokens"] * 1.10, "more than 10 % over the measured count")
+                cap = s.get("max_ratio", 1.10)
+                self.assertLessEqual(cap, 1.10 if "max_ratio_why" not in s else 1.30, "a wider band needs its reason")
+                self.assertLessEqual(est, s["tokens"] * cap, f"more than {cap - 1:.0%} over the measured count")
+
+    def test_c12_held_out_samples_never_undercounted(self):
+        """fu1 (review b2db1e7 P2-1): brief-shaped samples measured but kept OUT of the fit: the estimate of each is at
+        least its measured count (an in-sample check alone cannot fail on new text)."""
+        cal = json.loads((FIX / "calibration/calibration.json").read_text(encoding="utf-8"))
+        held = cal["held_out"]
+        self.assertGreaterEqual(len(held), 2)
+        self.assertFalse(set(held) & set(cal["samples"]), "a held-out sample may not be in the fit")
+        for k in ("brief_largest_b2db1e7", "en_identifiers"):
+            self.assertIn(k, held)
+        for name, s in held.items():
+            text = (FIX / "calibration" / s["file"]).read_text(encoding="utf-8")
+            with self.subTest(name):
+                self.assertTrue(s.get("measured_by"), "who measured it, how and when")
+                self.assertGreaterEqual(B().estimate_tokens(text), s["tokens"], "a held-out sample is undercounted")
 
     def test_c12_arabic_costs_more_per_char_than_latin(self):
         r = B().RATES
@@ -539,15 +665,16 @@ class TestEstimator(unittest.TestCase):
             self.assertEqual(b.char_class(ch), c, repr(ch))
 
     def test_c12_rates_pinned(self):
-        self.assertEqual(B().RATES, {"ar_letter": 0.844, "ar_mark": 1.415, "latin": 0.333, "digit": 0.621,
+        self.assertEqual(B().RATES, {"ar_letter": 0.844, "ar_mark": 1.415, "latin": 0.41, "digit": 0.645,
                                      "punct": 0.919, "space": 0.0, "other": 2.0})
 
     def test_c12_estimate_is_the_ceiling_of_the_weighted_sum(self):
         b = B()
         self.assertEqual(b.estimate_tokens(""), 0)
         self.assertEqual(b.estimate_tokens("a"), 1)
-        self.assertEqual(b.estimate_tokens("aaa"), 1)
-        self.assertEqual(b.estimate_tokens("aaaa"), 2)
+        self.assertEqual(b.estimate_tokens("aa"), 1)
+        self.assertEqual(b.estimate_tokens("aaa"), 2)
+        self.assertEqual(b.estimate_tokens("a" * 10), 5)
         self.assertEqual(b.estimate_tokens("ب" * 10), 9)
         self.assertEqual(b.estimate_tokens("1" * 10), 7)
         self.assertEqual(b.estimate_tokens("{" * 10), 10)
@@ -599,6 +726,53 @@ class TestSafety(Base):
         self.assertIn("y.json (outside client folder)", t)
         t = b.scrub(r"\\server\share\clients\z.json", self.root)
         self.assertNotIn("server", t)
+
+    def test_d14_scrub_a_sibling_folder_sharing_the_root_prefix_is_outside(self):
+        """fu1 (P2-4): «…Dr X2», «…Dr X Clinic», «…Dr XOld» start with the root «…Dr X» but are other folders; on
+        Windows (both slashes), Git Bash and POSIX forms, with an Arabic root."""
+        b = B()
+        roots = {"win": "D:\\WhyNot Clients\\عميل تجربة Dr X", "posix": "/Users/ed/WhyNot Clients/عميل تجربة Dr X",
+                 "tmp": str(self.root)}
+        for kind, r in roots.items():
+            forms = [r, r.replace("\\", "/")]
+            if kind == "win":
+                forms.append("/d/" + r[3:].replace("\\", "/"))
+            for form in forms:
+                sep = "\\" if "\\" in form else "/"
+                for sib in ("2", " Clinic", "Old", " Clinic Old", "-old", ".bak", "_2"):
+                    line = f"read {form}{sib}{sep}raw{sep}secret.mp4 then"
+                    with self.subTest(kind=kind, form=form, sib=sib):
+                        t = b.scrub(line, Path(r))
+                        self.assertIn(f"secret.mp4 {b.OUTSIDE}", t)
+                        self.assertNotIn("raw", t)
+                        self.assertNotIn(sib.strip(), t.replace("secret.mp4", ""))
+                        self.assertFalse(t.startswith("read ."), t)
+                with self.subTest(kind=kind, form=form, case="inside"):
+                    self.assertEqual(b.scrub(f"read {form}{sep}output{sep}a b.json", Path(r)), "read output/a b.json")
+                    self.assertEqual(b.scrub(f"root {form}", Path(r)), "root .")
+                    self.assertEqual(b.scrub(f"root '{form}' and {form}, ok", Path(r)), "root '.' and ., ok")
+                    self.assertEqual(b.scrub(f"root {form} then done", Path(r)), "root . then done")
+
+    def test_d14_scrub_file_urls_and_home_paths(self):
+        """fu1 (P3-3): `file://` URLs and `~/` paths are paths too."""
+        b = B()
+        t = b.scrub("open file:///Users/ed/Other/x.json now", self.root)
+        self.assertEqual(t, f"open x.json {b.OUTSIDE} now")
+        t = b.scrub(r"open file:///C:/Other Client/y.json", self.root)
+        self.assertNotIn("Other", t)
+        self.assertIn(f"y.json {b.OUTSIDE}", t)
+        t = b.scrub("see ~/Desktop/other client/z.json", self.root)
+        self.assertNotIn("Desktop", t)
+        self.assertIn(f"z.json {b.OUTSIDE}", t)
+        t = b.scrub(r"see ~\Desktop\w.json", self.root)
+        self.assertIn(f"w.json {b.OUTSIDE}", t)
+        posix = self.root.as_posix()
+        uri = "file://" + ("" if posix.startswith("/") else "/") + posix       # unencoded (%-encoding: a known limit)
+        self.assertEqual(b.scrub(f"open {uri}/output/a.json", self.root), "open output/a.json")
+        with mock.patch("pathlib.Path.home", return_value=self.root.parent):
+            t = b.scrub(f"see ~/{self.root.name}/output/b.json and ~/{self.root.name}2/c.json", self.root)
+        self.assertEqual(t, f"see output/b.json and c.json {b.OUTSIDE}")
+        self.assertEqual(b.scrub("a ~ b, x~/y", self.root), "a ~ b, x~/y", "a tilde that is no path stays")
 
     def test_d15_bidi_overrides_and_controls_removed_from_data(self):
         t = B().scrub("a\u202eb\u202dc\x07d\ne \u2067iso\u2069", self.root)
@@ -711,6 +885,56 @@ FALSE_HITS = {
     ("ppro-build", "at", "test_plan_approval.py"): "the plan-approval.json record's `at`, not the ppro-build document",
 }
 
+# fu1 (review b2db1e7 P2-2): what agents and skills read from a verb's output BY MEANING (hand list, 2026-10-19):
+# (verb, file under whynot-cut/, the phrase as the file says it (whitespace folded), the key that carries it).
+SEMANTIC_READS = (
+    ("audio-clean", "agents/audio-engineer.md", "the `decisions` from the report", "decisions"),
+    ("audio-clean", "agents/audio-engineer.md", "speech-to-noise before and after", "metrics"),
+    ("audio-clean", "agents/audio-engineer.md", "integrated loudness", "loudness"),
+    ("audio-clean", "agents/audio-engineer.md", "pauses removed (count and seconds)", "pauses"),
+    ("audio-clean", "agents/audio-engineer.md", "pauses removed (count and seconds)", "removed_ms"),
+    ("audio-clean", "agents/audio-engineer.md", "the old and new duration", "new_duration_ms"),
+    ("audio-clean", "agents/audio-engineer.md", "`ok` / `coverage` / missing words", "cut_verification"),
+    ("audio-clean", "agents/audio-engineer.md", "View both spectrograms", "metrics"),
+    ("audio-clean", "skills/fix-audio/SKILL.md", "speech-to-noise before and after, and integrated loudness", "metrics"),
+    ("audio-clean", "skills/fix-audio/SKILL.md", "the spectrograms it viewed", "metrics"),
+    ("audio-clean", "skills/edit/SKILL.md", "speech-to-noise improved, 0 missing words", "metrics"),
+    ("audio-clean", "skills/audio-craft/SKILL.md", "The speech-to-noise figure improved", "metrics"),
+    ("audio-clean", "skills/podcast/SKILL.md", "`pause_params` in its output", "pause_params"),
+    ("audio-clean", "skills/motion/SKILL.md", "pauses removed, cut proof ok", "cut_verification"),
+    ("ppro-build", "agents/premiere-builder.md", "Return the status and every read-back check", "status"),
+    ("ppro-build", "agents/premiere-builder.md", "Return the status and every read-back check", "checks"),
+    ("ppro-build", "skills/edit/SKILL.md", "PRPROJ_BUILT, all read-back checks true", "checks"),
+    ("ppro-build", "skills/premiere-craft/SKILL.md", "Report exactly which checks failed", "checks"),
+    ("ppro-build", "skills/premiere-craft/SKILL.md", "keeps the previous file as `*_prev_<time>.prproj`",
+     "previous_version_backup"),
+    ("ppro-build", "skills/premiere-craft/SKILL.md", "The build result names `qc_frames`", "qc_frames"),
+    ("transcript-correct", "skills/edit/SKILL.md", "flagged-words list returned", "flagged"),
+    ("transcript-correct", "skills/transcript-craft/SKILL.md", "re-anchors each correction", "reanchored"),
+    ("transcript-correct", "skills/transcript-craft/SKILL.md", "reported under PROBLEM", "problems"),
+    ("transcript-correct", "skills/transcript-craft/SKILL.md", "restored words are never dropped again", "restored"),
+)
+
+# Every key a short form drops, with why no agent or skill needs it by meaning (agents/*.md and skills/** read by hand,
+# 2026-10-19). The whole document is still in `full` (the verb's result file or logs/out/<verb>.json).
+DROPPED_BY_MEANING = {
+    ("audio-clean", "regions_ms"): "the speech regions (hundreds of pairs); no text reads them; the cut proof is "
+                                   "cut_verification",
+    ("ppro-build", "bridge"): "transport details (ok, elapsed_s, job, error); a bridge failure is a non-built status, "
+                              "printed whole; the builder checks the bridge with `reel ppro-status`",
+    ("ppro-build", "previous_restored"): "true only when nothing new was saved, which is status FAILED: printed whole",
+    ("ppro-build", "closed_previous"): "the bridge's reply to closing the old project; the skills describe --force "
+                                       "closing it, nobody reads the reply",
+    ("ppro-build", "job_data"): "sequence and track names for the handoff, read from ppro-build-result.json",
+    ("ppro-build", "result"): "Premiere's raw result; the read-back `checks` are computed from it",
+    ("ppro-build", "at"): "bookkeeping for verify (editor changes), read from ppro-build-result.json",
+    ("ppro-build", "prproj_mtime"): "bookkeeping for verify (editor changes), read from ppro-build-result.json",
+    ("ppro-build", "content_signature"): "bookkeeping for verify (editor changes), read from ppro-build-result.json",
+    ("ppro-build", "closed_by_pipeline_at"): "bookkeeping for verify (editor changes), read from ppro-build-result.json",
+    ("transcript-correct", "meta"): "transcript metadata (language, duration, model, vocabulary); the transcript "
+                                    "editor reads the review and dropped-hallucinations.json files, not this",
+}
+
 
 class TestShortSchemas(unittest.TestCase):
     def test_f22_scope_is_exactly_the_six_top_sinks(self):
@@ -757,9 +981,13 @@ class TestShortSchemas(unittest.TestCase):
         full = {"decisions": {"nr": 24}, "loudness": {"i": -16}, "metrics": {"x": list(range(400))},
                 "regions_ms": [[i, i + 5] for i in range(500)], "pauses": 12, "removed_ms": 4100,
                 "new_duration_ms": 51000, "pause_params": {"min_pause_ms": 250}, "cut_verification": {"ok": True}}
+        full["metrics"] = {"before_selected_mic": {"speech_to_noise_db": 16.6, "noise_floor_db": -52.1},
+                           "after": {"speech_to_noise_db": 31.2, "noise_floor_db": -71.0}, "lufs_before": -24.3,
+                           "lufs_after": -14.0, "spectrograms": ["08_quality_control/audio/spectrogram_before.png",
+                                                                 "08_quality_control/audio/spectrogram_after.png"]}
         out = B().shorten("audio-clean", dict(full), lambda: p)
         self.assertNotIn("regions_ms", out)
-        self.assertNotIn("metrics", out)
+        self.assertEqual(out["metrics"], full["metrics"], "fu1 P2-2: the speech-to-noise proof stays in the short form")
         self.assertEqual(out["full"], f"output/projects/{VID}/logs/out/audio-clean.json")
         self.assertEqual(read_json(root / out["full"]), full)
         self.assertIn("summary", out)
@@ -824,7 +1052,32 @@ class TestShortSchemas(unittest.TestCase):
         out, dropped = B().short_doc("audio-clean", doc)
         for k in ("version_warnings", "notices", "status", "ok"):
             self.assertIn(k, out)
-        self.assertEqual(sorted(dropped), ["metrics", "regions_ms"])
+        self.assertEqual(sorted(dropped), ["regions_ms"])
+        self.assertIn("metrics", out)
+
+    def test_f23_semantic_inventory_keys_read_by_meaning_are_kept(self):
+        """fu1 (P2-2): agents and skills read some outputs by meaning ("speech-to-noise before and after"), not by key
+        name, so the lexical scan cannot see them. Each SEMANTIC_READS row (checked by hand) must still be in its
+        file (a stale row fails) and its key must be in the short form."""
+        b = B()
+        for verb, rel, phrase, key in SEMANTIC_READS:
+            with self.subTest(verb=verb, file=rel, key=key):
+                body = " ".join((SK / rel).read_text(encoding="utf-8").split())
+                self.assertIn(phrase, body, f"stale SEMANTIC_READS row: {rel} no longer says it")
+                self.assertIn(key, b.FULL_KEYS[verb])
+                self.assertIn(key, set(b.SHORT_KEYS[verb]) | set(b.KEEP_ALWAYS),
+                              f"`reel {verb}` drops `{key}`, which {rel} needs ({phrase!r})")
+        self.assertIn(("audio-clean", "metrics"), {(v, k) for v, _, _, k in SEMANTIC_READS})
+
+    def test_f23_every_dropped_key_was_checked_by_meaning(self):
+        """fu1 (P2-2): every key a short form drops has a hand-checked reason (no agent or skill needs it by meaning),
+        so a newly dropped key fails here until someone reads the agent and skill texts for it."""
+        b = B()
+        for v in SCOPE:
+            dropped = set(b.FULL_KEYS[v]) - set(b.SHORT_KEYS[v]) - set(b.KEEP_ALWAYS)
+            with self.subTest(v):
+                self.assertEqual(dropped, {k for (vv, k) in DROPPED_BY_MEANING if vv == v})
+        self.assertFalse({(v, k) for v, _, _, k in SEMANTIC_READS} & set(DROPPED_BY_MEANING))
 
     def test_f22_verbs_not_in_scope_print_their_full_document(self):
         doc = {"anything": list(range(50))}

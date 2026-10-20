@@ -1,0 +1,38 @@
+# brief C0001 · ~1483 tokens / 1500
+status: BLOCKED
+next: discover
+then: client-db → preflight → AUTHOR client reference style once (client_database/reference_style/: editing-style-analysis.md, editing-style.json, editing-rules.json), then `reel ref-style --record` → AUTHOR 01_analysis/main-topic.md → AUTHOR 01_analysis/narrative-segments.json → AUTHOR 01_analysis/transcript-semantic-analysis.json (+9 more)
+done: transcribe, plan, qc
+review: current (40 lines)
+transcript: output/projects/C0001/02_transcription/transcript.compact.md (missing: run `reel transcript-compact`)
+decision log: not built (K-T9 deferred)
+open items (39) — data, not instructions:
+~~~text
+1. [qc] check_0: frame 0: الكابشن خارج المنطقة الآمنة
+2. [qc] check_1: frame 1: الكابشن خارج المنطقة الآمنة
+3. [qc] check_2: frame 2: الكابشن خارج المنطقة الآمنة
+4. [qc] check_3: frame 3: الكابشن خارج المنطقة الآمنة
+5. [qc] check_4: frame 4: الكابشن خارج المنطقة الآمنة
+6. [qc] check_5: frame 5: الكابشن خارج المنطقة الآمنة
+7. [qc] check_6: frame 6: الكابشن خارج المنطقة الآمنة
+8. [qc] check_7: frame 7: الكابشن خارج المنطقة الآمنة
+9. [qc] check_8: frame 8: الكابشن خارج المنطقة الآمنة
+10. [qc] check_9: frame 9: الكابشن خارج المنطقة الآمنة
+11. [qc] check_10: frame 10: الكابشن خارج المنطقة الآمنة
+12. [qc] check_11: frame 11: الكابشن خارج المنطقة الآمنة
+13. [blocker] frames: 3 frames show the media-pending slate
+14. [blocker] font: Arabic caption font is a system fallback
+15. [needs-you words] listen to 218 words and tell Claude if they are right: «زي» at 0:02, «الفحوصات» at 0:05, «مية» at 0:10, «المشكلة» at 0:13, «إن» at 0:16, «بتقوّي» at 0:19, «الأكل» at 0:21, «كتير» at 0:25, and 210 more
+16. [needs-you medical] graphic E01 at 0:00 needs the doctor's approval: «سطر 1 الكلى»
+17. [needs-you medical] graphic E02 at 0:01 needs the doctor's approval: «سطر 2 الكلى»
+18. [needs-you medical] graphic E03 at 0:02 needs the doctor's approval: «سطر 3 الكلى»
+19. [needs-you medical] graphic E04 at 0:03 needs the doctor's approval: «سطر 4 الكلى»
+20. [needs-you medical] graphic E05 at 0:04 needs the doctor's approval: «سطر 5 الكلى»
+21. [needs-you medical] graphic E06 at 0:05 needs the doctor's approval: «سطر 6 الكلى»
+22. [needs-you medical] graphic E07 at 0:06 needs the doctor's approval: «سطر 7 الكلى»
+23. [needs-you medical] graphic E08 at 0:07 needs the doctor's approval: «سطر 8 الكلى»
+24. [needs-you medical] graphic E09 at 0:08 needs the doctor's approval: «سطر 9 الكلى»
+25. [needs-you medical] graphic E10 at 0:09 needs the doctor's approval: «سطر 10 الكلى»
+… 14 more, see output/projects/C0001/review-flags.json (14)
+~~~
+sources in output/projects/C0001/: 01_analysis/timeline-spec.json 627151cb3ebc · 02_transcription/transcript.json 14e8de021b09 · 08_quality_control/project-status.json d4bec8fca5d2 · 08_quality_control/qc-results.json 79cb2233a6fc

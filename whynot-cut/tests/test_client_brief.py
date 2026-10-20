@@ -403,6 +403,42 @@ class TestCap(Base):
         self.assertRegex(r["text"], r"… \d+ more people, see output/client_database/reel-profile/profile\.json")
         self.assertIn("always on: ai, medical", r["text"])
 
+    def test_b8_largest_fixture_keeps_every_protected_line_with_the_pinned_rates(self):
+        """Task 58 fu1 (rates raised for identifier-heavy text): the largest fixture still fits by cutting the other
+        parts only; every cut of them is said once, in the closing `cut to fit` line, and no protected line goes."""
+        cb = CB()
+        root = fixture(self.tmp)
+        r = self.build(root)
+        t = r["text"]
+        self.assertLessEqual(r["tokens"], 1000)
+        for part in cb.LAST:
+            self.assertEqual(r["trimmed"][part], 0, part)
+        lines = [l for l in t.splitlines() if l.startswith("cut to fit, in output/client_database/: ")]
+        self.assertEqual(len(lines), 1, "the trimmed parts are said in one line")
+        for part in cb.TRIM:
+            what, where = cb.MORE[part]
+            k = r["trimmed"][part]
+            seg = f"… {k} more {what}, see {where[len('output/client_database/'):]}"
+            with self.subTest(part):
+                if k:
+                    self.assertIn(seg, lines[0])
+                    self.assertEqual(t.count(f" more {what}, see "), 1, "said once, not in place too")
+                else:
+                    self.assertNotIn(f" more {what}, see ", t)
+        if r["trimmed"]["rules_other"] == r["counts"]["rules_other"]:
+            self.assertNotIn("prefers:", t, "no label without a line under it")
+        if r["trimmed"]["notes"] == r["counts"]["notes"]:
+            self.assertNotRegex(t, r"(?m)^## notes", "a section with every line cut is said in the cut line only")
+
+    def test_b8_over_the_cap_is_said_in_the_header(self):
+        """Task 58 fu1 (as its P3-1): when the lines that are never cut alone exceed the cap, the first line says so."""
+        root = fixture(self.tmp)
+        r = self.build(root, cap=150)
+        self.assertGreater(r["tokens"], 150)
+        self.assertIn("(over the cap: ", r["text"].splitlines()[0])
+        self.assertIn("always on: ai, medical", r["text"])
+        self.assertNotIn("over the cap", self.build(root)["text"].splitlines()[0])
+
     def test_b9_no_cut_inside_a_word_grapheme_or_line(self):
         root = fixture(self.tmp, "basic")
         prof = jget(root, PRO + "/profile.json")

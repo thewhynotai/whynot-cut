@@ -1,0 +1,40 @@
+next: client_db → ppro_build → AUTHOR 02_transcription/timeline-spec.json
+plan.content_signature = 1243; event_id=0.656
+next: client_db → client_db → AUTHOR 05_graphics/audio-clean.json
+next: audio_clean → handoff → AUTHOR 07_premiere/review-flags.json
+output/projects/C1760/09_handoff/edit-decisions.json 14993eb23486 · output/projects/C1760/logs/out/caption-cues.json 9bc7f0223413
+ppro_build.event_id = 2753; segment_id=0.612
+[qc] check_8: frame 506 at 9:05 needs missing (E13)
+next: qc → ppro_build → AUTHOR 08_quality_control/ppro-build-result.json
+reel review-scan --root "$CLIENT" --video-id C5215 --verbose  # area the
+[qc] check_31: frame 119 at 1:10 rebuild review (E11)
+reel previews --root "$CLIENT" --video-id C8894 --verbose  # again rebuild
+next: transcribe → qc → AUTHOR 07_premiere/words.json
+qc.segment_id = 1374; prproj_mtime=0.406
+output/projects/C5585/08_quality_control/transcript.json 116c0bc6124f · output/projects/C5585/logs/out/main-topic.md 7ca93cb44cd6
+next: transcribe → transcribe → AUTHOR 05_graphics/edit-decisions.json
+reel previews --root "$CLIENT" --video-id C2583 --verbose  # outside check
+reel next --root "$CLIENT" --video-id C9978 --verbose  # see result
+ppro_build.content_signature = 1108; new_duration_ms=0.589
+next: client_db → handoff → AUTHOR 02_transcription/words.json
+stale: handoff (inputs changed after it ran: 08_quality_control/ppro-build-result.json)
+previews.word_ids = 2892; content_signature=0.529
+reel brief --root "$CLIENT" --video-id C0542 --verbose  # failed rebuild
+stale: audio_clean (inputs changed after it ran: 07_premiere/ppro-build-result.json)
+reel qc --root "$CLIENT" --video-id C1743 --verbose  # caption graphic
+reel previews --root "$CLIENT" --video-id C0046 --verbose  # after area
+plan.new_duration_ms = 640; lufs_after=0.402
+next: qc → preflight → AUTHOR 01_analysis/audio-clean.json
+stale: audio_clean (inputs changed after it ran: 03_audio/caption-cues.json)
+reel brief --root "$CLIENT" --video-id C1483 --verbose  # then needs
+output/projects/C8222/03_audio/timeline-spec.json 5efad8c2b51e · output/projects/C8222/02_transcription/narrative-segments.json ad10c032a35e
+stale: previews (inputs changed after it ran: 07_premiere/transcript.json)
+output/projects/C1321/08_quality_control/audio-clean.json eb2115405608 · output/projects/C1321/09_handoff/words.json 966c8d1bfb9b
+stale: preflight (inputs changed after it ran: 09_handoff/caption-cues.json)
+next: preflight → client_db → AUTHOR 08_quality_control/timeline-spec.json
+plan.content_signature = 3522; min_pause_ms=0.151
+output/projects/C1598/logs/out/transcript.json 50a3138cf334 · output/projects/C1598/logs/out/ppro-build-result.json 3b064192dac8
+reel brief --root "$CLIENT" --video-id C0655 --verbose  # run failed
+output/projects/C3276/09_handoff/ppro-build-result.json ff4b0174f093 · output/projects/C3276/05_graphics/project-status.json 364be4f746b4
+stale: qc (inputs changed after it ran: 05_graphics/main-topic.md)
+next: ppro_build → qc → AUTHOR logs/out/timeline-spec.json

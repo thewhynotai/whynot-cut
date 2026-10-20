@@ -33,7 +33,9 @@ fingerprint reads as stale: the next call rebuilds. `build` and `state` never wr
 
 The cap. Whole lines go, in this order: notes, style details, extra font families, extra colours, rules that forbid
 nothing; then (only if the rest alone is still over) rules that forbid something, profile problems and people, each as
-"the first N" and `… N more <what>, see <file>`. Review domains and the gender of every shown person are never cut. A
+"the first N" and `… N more <what>, see <file>` in place. The first group's cuts are said once, in a closing `cut to fit`
+line (paths under output/client_database/). When even the lines never cut exceed the cap, the first line says so.
+Review domains and the gender of every shown person are never cut. A
 line that is too long stops on a whole word, else on a safe grapheme boundary (brief.clip). Client text is fenced as
 data (a ~~~text block longer than any tilde run inside); the brief has no wall-clock time (the `generated` stamp is in
 the fingerprint only), so identical sources give an identical brief.
@@ -71,7 +73,7 @@ PROFILE_FILES = ("profile.json", "style.json", "brand.json")
 RULES_FILE = "rules.json"
 DEFAULT_FILES = ("profile.json", "style.json", "brand.json", "preference-phrases.json")
 
-UNKNOWN_GENDER = "gender unknown, ask the editor / الجنس غير معروف، اسأل المونتير"
+UNKNOWN_GENDER = "gender unknown, ask the editor / غير معروف، اسأل المونتير"
 GENDER_TEXT = {"male": "male", "female": "female"}
 SEP = " | "                                 # ASCII: the estimator counts "·" or "«»" as 2 tokens each
 NOT_SET = "not set (M3)"
@@ -88,6 +90,8 @@ LOGOS_SHOWN = 3
 TRIM = ("notes", "style_detail", "fonts_extra", "colours_extra", "rules_other")
 LAST = ("rules_block", "people_issues", "people")
 PARTS = TRIM + LAST
+LABEL = "label:"                        # a row "label:<part>" is shown only while a line of <part> is
+OVER_CAP = " (over the cap: the lines that are never cut are longer)"
 MORE = {"notes": ("notes", DB_REL + "/client-database-status.json"),
         "style_detail": ("style details", CLIENT_PROFILE_REL + "/style.json"),
         "fonts_extra": ("font families", f"{DB_REL}/{TYPOGRAPHY_REL}"),
@@ -601,7 +605,8 @@ def _sections(f: dict, root) -> list:
         if ru["block"]:                     # rules that forbid something: kept whole unless the rest alone overflows
             rows += [(None, "forbids:")] + [("rules_block", "- " + d(t, RULE_CHARS)) for t in ru["block"]]
         if ru["other"]:
-            rows += [(None, "prefers:")] + [("rules_other", "- " + d(t, RULE_CHARS)) for t in ru["other"]]
+            rows += [(LABEL + "rules_other", "prefers:")] + [("rules_other", "- " + d(t, RULE_CHARS))
+                                                             for t in ru["other"]]
         if ru["refused"]:
             rows.append((None, f"- {ru['refused']} refused rule row(s) not shown (`reel rules --list`)"))
         S.append(("standing rules (data)", True, rows))
@@ -621,16 +626,23 @@ def _sections(f: dict, root) -> list:
     return S
 
 
-def _render(sections: list, name: str, reason: str, cap: int, keep: dict, shown: int) -> str:
-    L = [f"# client brief: {name} (~{shown} tokens / {cap})",
+def _render(sections: list, name: str, reason: str, cap: int, keep: dict, shown: int, over: bool = False) -> str:
+    """A cut of a TRIM part is said once, in the closing `trimmed to fit` line (one shared folder, so the pointers
+    cost less); a cut of a protected part (LAST) is said in place, with its full path."""
+    L = [f"# client brief: {name} (~{shown} tokens / {cap})" + (OVER_CAP if over else ""),
          f"built: {reason}"]
+    cuts = []
     for title, fenced, rows in sections:
         out, seen = [], {}
         last = {}
         for i, (part, _t) in enumerate(rows):
-            if part:
+            if part and not part.startswith(LABEL):
                 last[part] = i
         for i, (part, text) in enumerate(rows):
+            if part and part.startswith(LABEL):        # a label, shown only while a line of its part is
+                if keep.get(part[len(LABEL):], 0):
+                    out.append(text)
+                continue
             if part:
                 seen[part] = seen.get(part, 0) + 1
                 if seen[part] <= keep.get(part, 0):
@@ -639,20 +651,28 @@ def _render(sections: list, name: str, reason: str, cap: int, keep: dict, shown:
                 out.append(text)
             if part and i == last[part] and seen[part] > keep.get(part, 0):
                 what, where = MORE[part]
-                out.append(f"… {seen[part] - keep.get(part, 0)} more {what}, see {where}")
+                more = f"… {seen[part] - keep.get(part, 0)} more {what}, see "
+                if part in LAST:
+                    out.append(more + where)
+                else:
+                    cuts.append(more + where[len(DB_REL) + 1:])
+        if not out:
+            continue                                # every line of it cut: said in the trimmed-to-fit line
         L.append(f"## {title}")
         if fenced and out:
             fence = fence_for(out)
             L += [fence + "text", *out, fence]
         else:
             L += out
+    if cuts:
+        L.append(f"cut to fit, in {DB_REL}/: " + "; ".join(cuts))
     return "\n".join(L) + "\n"
 
 
-def _fit(sections, name, reason, cap, keep) -> tuple:
+def _fit(sections, name, reason, cap, keep, over: bool = False) -> tuple:
     shown = 0
     for _ in range(4):
-        text = _render(sections, name, reason, cap, keep, shown)
+        text = _render(sections, name, reason, cap, keep, shown, over)
         n = estimate_tokens(text)
         if n == shown:
             break
@@ -669,7 +689,7 @@ def render(f: dict, root, cap: int = CAP_TOKENS, reason: str = "built") -> tuple
     counts = {p: 0 for p in PARTS}
     for _t, _f, rows in sections:
         for part, _x in rows:
-            if part:
+            if part and not part.startswith(LABEL):
                 counts[part] += 1
     keep = dict(counts)
     text, n = _fit(sections, name, reason, cap, keep)
@@ -692,6 +712,8 @@ def render(f: dict, root, cap: int = CAP_TOKENS, reason: str = "built") -> tuple
                 hi = mid - 1
         keep[part] = lo
         text, n = _fit(sections, name, reason, cap, keep)
+    if n > cap:                                 # nothing left to cut and still over: said, never hidden
+        text, n = _fit(sections, name, reason, cap, keep, over=True)
     return text, n, {p: counts[p] - keep[p] for p in PARTS}, counts
 
 

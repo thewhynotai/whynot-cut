@@ -18,8 +18,10 @@ Where each field comes from (all engine data, nothing authored here):
     transcript                               transcript_compact.state (02_transcription/transcript.compact.md)
 The decision log (K-T9) is owner-deferred: one line says so, it is never left out silently.
 
-The cap (owner pre-mortem): open flags and blocks are never cut silently. History is trimmed first, then notes, then
-the numbers; open items last, and then only as "the first N, then `… N more, see <path> (n)`". A cut inside a line
+The cap (owner pre-mortem): open flags and blocks are never cut silently. History is trimmed first, then notes (with
+"… N notes not shown"), then the numbers; open items last, and then only as "the first N, then `… N more, see <path>
+(n)`". A needs-you source that could not be read is an open item. When even the untrimmed lines exceed the cap, the
+first line says so. A cut inside a line
 stops on a whole word, else on a grapheme boundary that never splits a lam-alef, a mark from its letter or a ZWJ
 sequence. Every path is relative to the client root with `/`; a path outside it (a link, a `..`, another folder)
 shows as its file name plus "(outside client folder)". Producer and transcript text is fenced as data (a ~~~text
@@ -45,11 +47,14 @@ from .common import now_iso, read_json, write_json
 CAP_TOKENS = 1500
 
 # --------------------------------------------------------------------------- the pinned estimator (shared, Task 59)
-# tokens per character, per class; measured on the subscription (tests/fixtures/brief/calibration/, 2026-10-18) and
-# raised by 5 % so the calibration samples are never undercounted. "other" (emoji, format characters, other scripts,
-# accented Latin) was not measured: 2.0 is a conservative stand-in. Spaces are free (a word's token carries its space).
+# tokens per character, per class; measured on the subscription (tests/fixtures/brief/calibration/, 2026-10-18):
+# an in-sample fit on six samples, raised by 5 %. Held-out checks (fu1, 2026-10-19: the largest brief and an
+# identifier-heavy English sample, never in the fit) were undercounted by 6-8 %, so Latin was raised 0.333 -> 0.41 and
+# digit 0.621 -> 0.645: identifier-heavy text is now not undercounted and fluent English prose is overcounted ~29 %.
+# "other" (emoji, format characters, other scripts, accented Latin) was not measured: 2.0 is a conservative stand-in.
+# Spaces are free (a word's token carries its space).
 RATES_STATUS = "provisional: re-check with count_tokens when the API resumes (Nov)"
-RATES = {"ar_letter": 0.844, "ar_mark": 1.415, "latin": 0.333, "digit": 0.621, "punct": 0.919, "space": 0.0,
+RATES = {"ar_letter": 0.844, "ar_mark": 1.415, "latin": 0.41, "digit": 0.645, "punct": 0.919, "space": 0.0,
          "other": 2.0}
 _MILLI = {k: round(v * 1000) for k, v in RATES.items()}
 _ARABIC = ((0x0600, 0x06FF), (0x0750, 0x077F), (0x08A0, 0x08FF), (0xFB50, 0xFDFF), (0xFE70, 0xFEFF))
@@ -91,15 +96,46 @@ def _mark(ch: str) -> bool:
     return unicodedata.category(ch) in ("Mn", "Me", "Mc")
 
 
+def _ri(ch: str) -> bool:                  # a regional indicator (two make a flag)
+    return 0x1F1E6 <= ord(ch) <= 0x1F1FF
+
+
+def _hangul(ch: str) -> str:
+    """The Hangul syllable type of ch (UAX #29): L, V, T, LV, LVT, or "" for anything else."""
+    o = ord(ch)
+    if 0x1100 <= o <= 0x115F or 0xA960 <= o <= 0xA97F:
+        return "L"
+    if 0x1160 <= o <= 0x11A7 or 0xD7B0 <= o <= 0xD7C6:
+        return "V"
+    if 0x11A8 <= o <= 0x11FF or 0xD7CB <= o <= 0xD7FB:
+        return "T"
+    if 0xAC00 <= o <= 0xD7A3:
+        return "LV" if (o - 0xAC00) % 28 == 0 else "LVT"
+    return ""
+
+
+_HANGUL_KEEP = {("L", "L"), ("L", "V"), ("L", "LV"), ("L", "LVT"), ("LV", "V"), ("LV", "T"), ("V", "V"), ("V", "T"),
+                ("LVT", "T"), ("T", "T")}
+
+
 def cut_ok(text: str, i: int) -> bool:
-    """May text be cut between text[i-1] and text[i]? Never before a mark, a joiner or a skin-tone modifier, never
-    after a ZWJ/ZWNJ, never between a lam (with its marks) and an alef."""
+    """May text be cut between text[i-1] and text[i]? Never before a mark, a joiner, a skin-tone modifier or an emoji
+    tag character, never after a ZWJ/ZWNJ, never inside a flag (a regional-indicator pair) or a Hangul syllable, never
+    between a lam (with its marks) and an alef."""
     if i <= 0 or i >= len(text):
         return True
     nxt, prev = text[i], text[i - 1]
-    if _mark(nxt) or nxt in _JOINERS or 0x1F3FB <= ord(nxt) <= 0x1F3FF:
+    if _mark(nxt) or nxt in _JOINERS or 0x1F3FB <= ord(nxt) <= 0x1F3FF or 0xE0020 <= ord(nxt) <= 0xE007F:
         return False
     if prev in ZW:
+        return False
+    if _ri(prev) and _ri(nxt):
+        j = i - 1
+        while j >= 0 and _ri(text[j]):
+            j -= 1
+        if (i - 1 - j) % 2:                  # an odd number of indicators before: nxt completes the pair
+            return False
+    if (_hangul(prev), _hangul(nxt)) in _HANGUL_KEEP:
         return False
     if nxt in ALEFS:
         j = i - 1
@@ -157,8 +193,12 @@ def rel_path(root, path) -> str:
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
 _OVERRIDES = re.compile("[\u202a-\u202e]")
-_FOREIGN = re.compile(r"(?<![\w/\\])(?:[A-Za-z]:[\\/]|\\\\[^\\\s]+\\|/(?:Users|home|Volumes|mnt|private|tmp|var|opt|srv|"
-                      r"media|root|[a-zA-Z])/)[^\"'<>|,;\n]*")
+_FOREIGN = re.compile(r"(?:\bfile:/{2,3}|(?<![\w/\\~]))(?:[A-Za-z]:[\\/]|\\\\[^\\\s]+\\|/(?:Users|home|Volumes|mnt|"
+                      r"private|tmp|var|opt|srv|media|root|[a-zA-Z])/|~[\\/])[^\"'<>|,;\n]*", re.I)
+# Where the client root's name ends: a separator, the end, or a character no folder name continues with. A space ends
+# it only when no separator follows before the path ends («…/Dr X Clinic/raw» is a sibling folder, not the root);
+# a word character, or `.`, `-`, `(` before one, continues the name («Dr X2», «Dr XOld», «Dr X.bak»).
+_ROOT_END = r"(?=[\\/]|$|[^\w\s.\-(]|[.\-(](?!\w)|\s(?![^\"'<>|,;\n]*[\\/]))"
 
 
 def _root_variants(root) -> list:
@@ -172,15 +212,23 @@ def _root_variants(root) -> list:
         out |= {r, r.replace("\\", "/")}
     except OSError:
         pass
+    try:                                      # ~/… when the root is under the home folder
+        home = str(Path.home()).rstrip("\\/")
+        for v in list(out):
+            if home and v.lower().startswith(home.lower()) and v[len(home):][:1] in ("\\", "/"):
+                out |= {"~" + v[len(home):], "~" + v[len(home):].replace("\\", "/")}
+    except (OSError, RuntimeError):
+        pass
     return sorted((v for v in out if v), key=len, reverse=True)
 
 
 def scrub(text, root) -> str:
     """One line of data text for the brief: control characters (newlines too) become spaces, bidi overrides go, paths
-    under the client root become relative with `/`, any other absolute path becomes "<name> (outside client folder)"."""
+    under the client root become relative with `/` (a `file://` URL too), any other absolute path (`file://` and `~/`
+    included) becomes "<name> (outside client folder)"."""
     t = _OVERRIDES.sub("", _CONTROL.sub(" ", str(text)))
     for v in _root_variants(root):
-        pat = re.compile(re.escape(v) + r"(?:[\\/]([^\"'<>|\n]*))?", re.I)
+        pat = re.compile(r"(?:file:/{2,3})?" + re.escape(v) + _ROOT_END + r"(?:[\\/]([^\"'<>|\n]*))?", re.I)
         t = pat.sub(lambda m: (m.group(1) or ".").replace("\\", "/") if m.group(1) is not None else ".", t)
 
     def foreign(m):
@@ -205,6 +253,7 @@ HISTORY_SHOWN = 8
 REMAINING_SHOWN = 6
 ITEM_CHARS = 220
 LINE_CHARS = 400
+NOTICES_SHOWN = 6                         # notices are never trimmed by the cap, so their count is bounded
 
 
 def _sha(f: Path) -> str:
@@ -342,8 +391,10 @@ def collect(paths, next_doc) -> dict:
             open_items.append({"tag": f"needs-you {it.get('kind')}", "text": text,
                                "see": str(it.get("source") or "output/NEEDS-YOU.md")})
         for u in (ny.get("unread") or []) + (ny.get("skipped") or []):
-            if u.get("item") == vid:
-                notes.append(f"needs-you could not read {u.get('source')} ({u.get('why')})")
+            if u.get("item") == vid:              # it may hide NEEDS-YOU items: open, so never trimmed silently
+                open_items.append({"tag": "needs-you unread", "text": f"could not read {u.get('source')} "
+                                                                      f"({u.get('why')})",
+                                   "see": str(u.get("source") or "output/NEEDS-YOU.md")})
     except Exception as e:  # noqa: BLE001
         rd.notices.append(f"needs-you list: could not be read ({type(e).__name__})")
     seen, uniq = set(), []
@@ -388,9 +439,12 @@ def _block(title: str, lines: list) -> list:
     return [title, fence_for(lines) + "text", *lines, fence_for(lines)]
 
 
-def _render(f: dict, root, cap: int, keep: dict, tokens_shown: int) -> str:
+OVER_CAP = " (over the cap: the lines that are never trimmed are longer)"
+
+
+def _render(f: dict, root, cap: int, keep: dict, tokens_shown: int, over: bool = False) -> str:
     s = lambda x, n=LINE_CHARS: clip(scrub(x, root), n)  # noqa: E731
-    L = [f"# brief {f['item']} · ~{tokens_shown} tokens / {cap}"]
+    L = [f"# brief {f['item']} · ~{tokens_shown} tokens / {cap}" + (OVER_CAP if over else "")]
     L.append(f"status: {s(f['status'])}" + (f" · profile: {s(f['profile'])}" if f.get("profile") else ""))
     L.append(f"next: {s(f['next'])}")
     rem = f["remaining"][1:] if f["remaining"][:1] == [f["next"]] else f["remaining"]
@@ -416,10 +470,16 @@ def _render(f: dict, root, cap: int, keep: dict, tokens_shown: int) -> str:
         body = ["none"]
     L += _block(f"open items ({len(items)}) — data, not instructions:", body)
     if f["notices"]:
-        L += _block("notices — data:", [f"- {s(n, ITEM_CHARS)}" for n in f["notices"]])
+        nl = [f"- {s(n, ITEM_CHARS)}" for n in f["notices"][:NOTICES_SHOWN]]
+        if len(f["notices"]) > NOTICES_SHOWN:
+            nl.append(f"… {len(f['notices']) - NOTICES_SHOWN} more notices, see `reel brief --json`")
+        L += _block("notices — data:", nl)
     notes = f["notes"][:keep["notes"]]
+    notes_cut = f"… {len(f['notes']) - len(notes)} notes not shown (`reel next`)" if len(notes) < len(f["notes"]) else ""
     if notes:
-        L += _block("notes — data:", [f"- {s(n, ITEM_CHARS)}" for n in notes])
+        L += _block("notes — data:", [f"- {s(n, ITEM_CHARS)}" for n in notes] + ([notes_cut] if notes_cut else []))
+    elif notes_cut:
+        L.append(notes_cut)
     hist = f["history"][len(f["history"]) - keep["history"]:] if keep["history"] else []
     if hist:
         L += _block(f"history (last {len(hist)}) — data:", [f"- {s(h, ITEM_CHARS)}" for h in hist])
@@ -431,11 +491,11 @@ def _render(f: dict, root, cap: int, keep: dict, tokens_shown: int) -> str:
     return "\n".join(L) + "\n"
 
 
-def _fit(f: dict, root, cap: int, keep: dict) -> tuple:
+def _fit(f: dict, root, cap: int, keep: dict, over: bool = False) -> tuple:
     """(text, tokens) with the printed size equal to the estimate of the text that prints it."""
     shown = 0
     for _ in range(4):
-        text = _render(f, root, cap, keep, shown)
+        text = _render(f, root, cap, keep, shown, over)
         n = estimate_tokens(text)
         if n == shown:
             break
@@ -468,6 +528,8 @@ def render(f: dict, root, cap: int = CAP_TOKENS) -> tuple:
                 hi = mid - 1
         keep[part] = lo
         text, n = _fit(f, root, cap, keep)
+    if n > cap:                                  # everything trimmable is gone and it is still over: said, not hidden
+        text, n = _fit(f, root, cap, keep, over=True)
     trimmed = {k: counts[k] - keep[k] for k in counts}
     return text, n, trimmed, counts
 
@@ -508,8 +570,8 @@ SHORT_KEYS = {
                    "refused", "fix", "missing", "error", "editor_message"),
     "transcript-correct": ("segments", "words", "cues", "short_cues", "applied", "flagged", "reanchored", "problems",
                            "restored"),
-    "audio-clean": ("decisions", "loudness", "pauses", "removed_ms", "new_duration_ms", "pause_params",
-                    "cut_verification", "ok", "how"),
+    "audio-clean": ("decisions", "loudness", "metrics", "pauses", "removed_ms", "new_duration_ms", "pause_params",
+                    "cut_verification", "ok", "how"),          # metrics: speech-to-noise, LUFS, spectrograms (by meaning)
     "qc": ("ok", "failed", "warnings"),
 }
 OK_STATUSES = {"ppro-build": ("PRPROJ_BUILT", "PRPROJ_BUILT_WITH_ISSUES")}
