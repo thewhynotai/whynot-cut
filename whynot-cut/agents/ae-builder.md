@@ -29,6 +29,9 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 4. Report the read-back comparison from `04_after_effects/motion-build-result.json`: every failure by name.
 5. `reel motion-render` (aerender, the saved .aep; the editor's open After Effects is untouched), then
    `reel motion-frames`. Report the render probe, warnings (loudness, missing audio) and the frames sheet path.
+6. Every warning a build or script command prints (`motion-build`, `ae-script`, `ae-build`) goes to the lead word for
+   word, EN and AR lines both, under ISSUES / NEEDS EDITOR. Never summarise one away: a missing logo or image is
+   left out of the comp, and the warning is the only place the editor learns that.
 
 ## Report format (return exactly this; keep it short; point to files, do not paste them)
 ```

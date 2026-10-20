@@ -24,5 +24,8 @@ commands (`ae-status`, `ae-probe`, `motion-*`) need no `--extras`.
   their timestamps, never by the return value (AE's DoScript always prints `0`; on Windows the launcher returns at once).
 - View every render or PSD preview: RTL order, joined Arabic, no white box around the logo.
 - If AE or PS isn't installed, deliver the JSX (SCRIPT_ONLY) and say so.
+- Report EVERY warning from `ae-script` / `ae-build` to the editor word for word, in their language (each has EN and
+  AR lines), never summarised away. A missing logo or image is one of them: it is left out of the comp, and the
+  warning is the only place the editor learns that.
 
 References: `${CLAUDE_SKILL_DIR}/references/adobe-automation.md`, `${CLAUDE_SKILL_DIR}/references/automation-matrix.md`.
