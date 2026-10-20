@@ -123,8 +123,7 @@ def _run_entry(name: str, folder: str, duration) -> dict:
     return e
 
 
-NOT_MEASURED = [{"mode": "podcast-reel", "reason": "fixture: no recorded podcast-reel run"},
-                {"mode": "motion", "reason": "fixture: no recorded motion run"}]
+NOT_MEASURED = [{"mode": "podcast-reel", "reason": "not-run"}, {"mode": "motion", "reason": "not-run"}]
 
 
 def runs_doc(planted: bool) -> dict:

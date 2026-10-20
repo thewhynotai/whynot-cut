@@ -48,6 +48,7 @@ def budget(runs, **kw):
     """The budget report of a runs file path (or a runs dict, written to a temp file next to nothing)."""
     kw.setdefault("date", DATE)
     kw.setdefault("commit", TOOL_COMMIT)
+    kw.setdefault("raw_ids", True)          # real run names in the asserts; anonymised output: test_b11 / test_r5
     if isinstance(runs, dict):
         d = Path(tempfile.mkdtemp())
         try:
@@ -198,7 +199,8 @@ class TestQualityAndCompleteness(unittest.TestCase):
         self.assertEqual(v["result"], "FAIL")
         self.assertEqual(v["reasons"], ["r2: quality (qc-frames failed)"])
         r2 = [r for r in rep["modes"]["single-clip"]["runs"] if r["run"] == "r2"][0]
-        self.assertEqual(r2["quality"], {"status": "fail", "failed": ["qc-frames"], "graders": 2})
+        self.assertEqual(r2["quality"], {"status": "fail", "failed": ["qc-frames"], "graders": 2,
+                                         "names": ["plan-validation", "qc-frames"]})
 
     def test_a5_missing_quality_is_a_fail_never_a_pass(self):
         for q in (None, []):
@@ -287,7 +289,7 @@ class TestQualityAndCompleteness(unittest.TestCase):
         for mode in ("podcast-reel", "motion"):
             v = rep["modes"][mode]["verdict"]
             self.assertEqual(v["result"], "NOT MEASURED")
-            self.assertEqual(v["not_measured_reason"], f"fixture: no recorded {mode} run")
+            self.assertEqual(v["not_measured_reason"], tr.NOT_MEASURED_REASONS["not-run"])
         rep = budget(doc(entry("r1", "r1")))
         self.assertEqual(rep["modes"]["motion"]["verdict"]["not_measured_reason"], "no runs given")
         self.assertIn("not measured", tr.render_budget_md(rep))
@@ -300,7 +302,7 @@ class TestRows(unittest.TestCase):
               "lead_model", "model_mix", "quality", "label")
 
     def test_b9_every_row_has_the_fields(self):
-        rep = budget(BF.HERE / "runs.json")
+        rep = budget(BF.HERE / "runs.json", raw_ids=False)
         rows = rep["modes"]["single-clip"]["runs"]
         self.assertEqual(len(rows), 3)
         for r in rows:
@@ -355,7 +357,9 @@ class TestRows(unittest.TestCase):
         self.assertEqual(r["speech_source"], "no duration")
 
     def test_b11_rows_are_anonymised(self):
-        rep = budget(BF.HERE / "runs-planted.json")
+        rep = budget(BF.HERE / "runs-planted.json", raw_ids=False)
+        v = rep["modes"]["single-clip"]["verdict"]
+        self.assertIn("run-02", v["reasons"][0])                  # the planted run is still named, by its label
         outs = [json.dumps(rep, ensure_ascii=False), json.dumps(rep), tr.render_budget_summary(rep),
                 tr.render_budget_md(rep)]
         for out in outs:
@@ -489,6 +493,191 @@ class TestEvidence(unittest.TestCase):
         self.assertIn(tr.BUDGET_MD_END, text)
         self.assertIn("report-only", text)
         self.assertIn("Not verified", text)
+
+
+# --- Review 512656d round 1 (fu1): every P2 through the full path, runs file -> report -------------------------------
+class TmpRuns(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def copy_run(self, folder, name):
+        """A copy of a committed fixture run's project folder; returns (project folder, main jsonl)."""
+        dst = self.tmp / name / BF.PROJECT_DIR
+        shutil.copytree(BUD / "single-clip" / folder / BF.PROJECT_DIR, dst)
+        return dst, next(dst.glob("*.jsonl"))
+
+    def sv(self, rep, mode="single-clip"):
+        return rep["modes"][mode]["verdict"]
+
+
+class TestReviewP2(TmpRuns):
+    def sonnet_lead_r2(self):
+        proj, main = self.copy_run("r2", "r2-sonnet")
+        main.write_text(main.read_text(encoding="utf-8").replace('"model": "claude-opus-5-5"',
+                                                                 '"model": "claude-sonnet-5-5"'), encoding="utf-8")
+        return proj
+
+    def test_p2_1_a_forced_lead_never_masks_a_cheaper_lead_runs_file(self):
+        e2 = entry("r2", "r2", transcripts=[str(self.sonnet_lead_r2())])
+        free = budget(doc(entry("r1", "r1"), e2, entry("r3", "r3")))
+        self.assertEqual(self.sv(free)["result"], "NOT COMPARABLE")
+        forced = budget(doc(entry("r1", "r1"), e2, entry("r3", "r3"), lead_model="claude-opus-5-5"))
+        v = self.sv(forced)
+        self.assertEqual(v["result"], "NOT COMPARABLE", v)
+        r2 = [r for r in forced["modes"]["single-clip"]["runs"] if r["run"] == "r2"][0]
+        self.assertEqual(r2["lead_model"], "claude-sonnet-5-5")          # detected, never the forced id
+        self.assertEqual(r2["pricing_lead"], "claude-opus-5-5")
+        self.assertIn("lead", v["text"])
+
+    def test_p2_1b_the_cli_lead_model_too(self):
+        runs = self.tmp / "runs.json"
+        runs.write_text(json.dumps(doc(entry("r1", "r1"), entry("r2", "r2", transcripts=[str(self.sonnet_lead_r2())]),
+                                       entry("r3", "r3"))), encoding="utf-8")
+        with redirect_stdout(io.StringIO()):
+            rc = tr.main(["--budget", str(runs), "--lead-model", "claude-opus-5-5", "--json", str(self.tmp / "o.json")])
+        self.assertEqual(rc, 0)
+        rep = json.loads((self.tmp / "o.json").read_text(encoding="utf-8"))
+        self.assertEqual(rep["modes"]["single-clip"]["verdict"]["result"], "NOT COMPARABLE")
+
+    def test_p2_1c_a_forced_lead_equal_to_the_detected_one_is_fine(self):
+        rep = budget(doc(entry("r1", "r1"), entry("r2", "r2"), entry("r3", "r3"), lead_model="claude-opus-5-5"))
+        self.assertEqual(self.sv(rep)["result"], "PASS", self.sv(rep)["reasons"])
+
+    def test_p2_2_one_run_under_several_names_counts_once(self):
+        main = BUD / "single-clip" / "r1" / BF.PROJECT_DIR / "sess-r1.jsonl"
+        rep = budget(doc(entry("a", "r1"), entry("b", "r1"), entry("c", "r1", transcripts=[str(main)]),
+                         entry("d", "r3")))
+        v = self.sv(rep)
+        self.assertEqual(v["n"], 2)
+        self.assertEqual(v["result"], "INSUFFICIENT")
+        self.assertEqual(v["excluded"], [{"run": "b", "reason": "duplicate of a"},
+                                         {"run": "c", "reason": "duplicate of a"}])
+        self.assertIn("duplicate of a", tr.render_budget_md(rep))
+
+    def test_p2_3_a_grader_a_sibling_ran_is_required(self):
+        e2 = entry("r2", "r2", quality=[{"grader": "plan-validation", "passed": True}])
+        v = self.sv(budget(doc(entry("r1", "r1"), e2, entry("r3", "r3"))))
+        self.assertEqual(v["result"], "FAIL")
+        self.assertEqual(v["reasons"], ["r2: quality (qc-frames not run)"])
+
+    def test_p2_4_an_api_error_record_marks_a_complete_run_cut(self):
+        proj, main = self.copy_run("r1", "r1-limit")
+        err = MF.asst(MF.Seq("lim"), "sess-r1", "msg_limit", MF.usage(),
+                      [MF.text("Claude AI usage limit reached")], error=True)
+        with open(main, "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(err) + "\n")
+        rep = budget(doc(entry("r1", "r1", transcripts=[str(proj)]), entry("r2", "r2"), entry("r3", "r3")))
+        v = self.sv(rep)
+        self.assertEqual(v["n"], 2)
+        self.assertEqual(v["result"], "INSUFFICIENT")
+        self.assertEqual(v["excluded"], [{"run": "r1", "reason": "cut: 1 API error record (usage limit or crash)"}])
+        r1 = rep["modes"]["single-clip"]["runs"][0]
+        self.assertEqual(r1["errors"], 1)
+        md = tr.render_budget_md(rep)
+        self.assertIn("cut: 1 API error record", md)
+        self.assertIn("API errors", md)
+
+    def test_p2_5_operator_written_text_is_anonymised(self):
+        e1 = entry("ZORBLAX_C01-r1", "r1", quality=[{"grader": "Zorblax-qc", "passed": True}])
+        e2 = entry("Zorblax-r2", "r2", quality=[{"grader": "Zorblax-qc", "passed": True}])
+        e3 = entry("Zorblax-r3", "r3", quality=[{"grader": "Zorblax-qc", "passed": True}])
+        rep = budget(doc(e1, e2, e3, not_measured=[{"mode": "motion", "reason": "no-adobe-slot"}]), raw_ids=False)
+        self.assertEqual(self.sv(rep)["result"], "PASS", self.sv(rep)["reasons"])
+        for out in (json.dumps(rep), json.dumps(rep, ensure_ascii=False), tr.render_budget_md(rep),
+                    tr.render_budget_summary(rep)):
+            self.assertNotIn("zorblax", out.lower())
+        self.assertEqual([r["run"] for r in rep["modes"]["single-clip"]["runs"]], ["run-01", "run-02", "run-03"])
+        self.assertEqual(rep["modes"]["single-clip"]["runs"][0]["quality"]["names"], ["grader-01"])
+        # a free-text reason (a path, a client name) is refused: reasons are codes with fixed text
+        with self.assertRaises(tr.BudgetError):
+            budget(doc(e1, not_measured=[{"mode": "motion",
+                                          "reason": "D:\\WhyNot Clients\\Zorblax Quentaro\\EP09 not built"}]))
+
+    def test_p2_6_an_item_filter_keeps_the_setup_and_says_so(self):
+        rep = budget(doc(*[entry(f"r{i}", f"r{i}", item=BF.VIDEO_ID) for i in (1, 2, 3)]))
+        rows = rep["modes"]["single-clip"]["runs"]
+        self.assertAlmostEqual(rows[0]["weighted_m52"], 1_900_000, places=3)   # the 57,000 setup turn is kept
+        for r in rows:
+            self.assertTrue(r["item_filtered"])
+            self.assertIn("item-filtered", r["label"])
+        self.assertIn("setup kept", tr.render_budget_md(rep))
+
+    def test_p2_6b_the_podcast_episode_share_gap_is_stated(self):
+        rep = budget(BF.HERE / "runs.json")
+        self.assertIn("episode share not included", rep["modes"]["podcast-reel"]["scope"])
+        self.assertIn("episode share not included", tr.render_budget_md(rep))
+
+
+class TestReviewP3(TmpRuns):
+    def test_p3_1_the_even_count_median_is_the_upper_middle(self):
+        v = tr.budget_verdict("single-clip", [row("a", 2_000_000), row("b", 2_400_000), row("c", 2_600_000),
+                                              row("d", 3_000_000)])
+        self.assertEqual(v["median"], 2_600_000)
+        self.assertEqual(v["result"], "FAIL")
+        self.assertIn("upper middle", tr.render_budget_md(budget(BF.HERE / "runs.json")))
+
+    def test_p3_2_no_commit_anywhere_is_not_comparable(self):
+        d = doc(entry("r1", "r1"), entry("r2", "r2"), entry("r3", "r3"))
+        del d["commit"]
+        v = self.sv(budget(d))
+        self.assertEqual(v["result"], "NOT COMPARABLE")
+        self.assertIn("commit unknown", v["text"])
+
+    def test_p3_2b_short_and_long_shas_of_one_commit_compare(self):
+        d = doc(entry("r1", "r1", commit=BF.COMMIT[:7]), entry("r2", "r2"), entry("r3", "r3", commit=BF.COMMIT[:12]))
+        self.assertEqual(self.sv(budget(d))["result"], "PASS")
+        d = doc(entry("r1", "r1", commit="abcdef1"), entry("r2", "r2"), entry("r3", "r3"))
+        self.assertEqual(self.sv(budget(d))["result"], "NOT COMPARABLE")
+
+    def test_p3_3_a_bom_runs_file_and_transcript_are_read(self):
+        t = self.tmp / "t.json"
+        t.write_bytes(b"\xef\xbb\xbf" + json.dumps({"meta": {"duration_ms": 60_000}}).encode())
+        runs = self.tmp / "runs.json"
+        runs.write_bytes(b"\xef\xbb\xbf" + json.dumps(doc(entry("r1", "r1", speech_transcript=str(t)))).encode())
+        rep = tr.build_budget_report(runs, date=DATE, commit=TOOL_COMMIT)
+        self.assertEqual(rep["modes"]["single-clip"]["runs"][0]["speech_minutes"], 1.0)
+
+    def test_p3_4_a_missing_speech_transcript_is_refused(self):
+        with self.assertRaises(tr.BudgetError):
+            budget(doc(entry("r1", "r1", speech_transcript=str(self.tmp / "nope.json"))))
+
+    def test_p3_4b_backslash_relative_paths(self):
+        shutil.copytree(BUD / "single-clip" / "r1", self.tmp / "single-clip" / "r1")
+        e = entry("r1", "r1", transcripts=["single-clip\\r1\\" + BF.PROJECT_DIR],
+                  speech_transcript="single-clip\\r1\\transcript.json")
+        runs = self.tmp / "runs.json"
+        runs.write_text(json.dumps(doc(e)), encoding="utf-8")
+        r = tr.build_budget_report(runs, date=DATE, commit=TOOL_COMMIT)["modes"]["single-clip"]["runs"][0]
+        self.assertAlmostEqual(r["weighted_m52"], 1_900_000, places=3)
+        self.assertEqual(r["speech_source"], "transcript")
+
+    def test_p3_5_more_validation(self):
+        for d in (doc(entry("r1", "r1"), not_measured=[{"mode": "motion", "reason": "not-run"},
+                                                       {"mode": "motion", "reason": "no-adobe-slot"}]),
+                  dict(doc(entry("r1", "r1")), version=True), dict(doc(entry("r1", "r1")), version=1.0)):
+            with self.assertRaises(tr.BudgetError):
+                budget(d)
+        out = self.tmp / "collected"
+        shutil.copytree(BUD / "single-clip" / "r1" / BF.PROJECT_DIR, out / "case-a" / "run-1" / "projects")
+        (out / "manifest.json").write_text(json.dumps({"tool": "eval_transcripts", "runs": [
+            {"case": "case-a", "run": "run-1", "status": "collected"}]}), encoding="utf-8")
+        with self.assertRaises(tr.BudgetError) as cm:
+            budget(doc(entry("e1", "r1", transcripts=[str(out)], eval_run="case-a/run-8"),
+                       entry("e2", "r1", transcripts=[str(out)], eval_run="case-a/run-9")))
+        self.assertEqual(len(cm.exception.errors), 2)               # every problem listed, not the first one
+
+    def test_p3_6_the_md_names_the_repo_head_not_a_tool_commit(self):
+        md = tr.render_budget_md(budget(BF.HERE / "runs.json"))
+        self.assertIn("repo HEAD " + TOOL_COMMIT[:12], md)
+        self.assertNotIn("Tool commit", md)
+
+    def test_p3_7_baseline_rows_never_enter_the_verdict_and_the_placeholder_line(self):
+        v = tr.budget_verdict("single-clip", [row("a", 1_000_000), row("b", 1_000_000), row("c", 1_000_000),
+                                              row("z", 9_000_000, source="baseline")])
+        self.assertEqual(v["result"], "PASS")
+        self.assertEqual(v["n"], 3)
+        self.assertIn("Budget 3,500,000 (placeholder)", tr.render_budget_md(budget(BF.HERE / "runs.json")))
 
 
 class TestBudgetFixturesHaveNoDrift(unittest.TestCase):

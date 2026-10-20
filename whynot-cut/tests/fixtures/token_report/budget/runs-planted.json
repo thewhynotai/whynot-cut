@@ -3,11 +3,11 @@
  "not_measured": [
   {
    "mode": "podcast-reel",
-   "reason": "fixture: no recorded podcast-reel run"
+   "reason": "not-run"
   },
   {
    "mode": "motion",
-   "reason": "fixture: no recorded motion run"
+   "reason": "not-run"
   }
  ],
  "runs": [
