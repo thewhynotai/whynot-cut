@@ -11,7 +11,7 @@ its database is relative to the client root (lib/client_db.py), and bringing it 
     new folder's writer lock, the database's paths made relative (client_db.migrate) and every other place under
     output/ that names the old folder pointed at the new one (rebase: JSON values, .md reports, interchange XMLs). The
     old folder is LEFT in place: the editor deletes it after checking the new one (and, while a project links media
-    there or a kept file may still be opened by the old folder's path, after relinking it or running its step again:
+    there or a kept file may still be opened by the old folder's path, after relinking it or fixing that file:
     `old_folder` names them).
   * clone(src, dest): a new, independent client with the same brand database: output/client_database without media
     (no assets/ or data/ files, no derivatives, no asset manifest, no reference-analysis cache), empty assets/ and data/,
@@ -88,19 +88,21 @@ REBASE_JSON = {INVENTORY, "01_analysis/edit-decisions.json", "00_inputs/input-ma
                # audio-clean's report (the footage and the cleaned wav: qc reads only its metrics) and its cut check
                # (review b690c54 P2-1): rewritten, so the advice never asks for `reel audio-clean` again, which would
                # rewrite the signed pauses.json (motion approvals stale) with the default pause settings
-               "06_audio/dialogue/dialogue-clean-report.json", "06_audio/dialogue/cut-verification.json"}
-# the step that really writes a kept file again (review 087e8e3 P3-1), named in the delete advice while that file may
-# still be opened by the old folder's path: by the item's kind (its flag), then the part after the item's folder, an
-# exact file or a folder ending in "/" (`reel sfx` writes <kind>.provenance.json). A kept file not here has no step
-# that safely writes it again (Claude's or the editor's own; 02_transcription/chunks/: `reel transcribe` skips while a
-# transcript exists and --force throws the corrections away; `reel ppro-frames` writes only images; `reel audio-clean`
-# never: see REBASE_JSON): the old folder is kept for it
-STEP_OF = {"projects": ("--video-id", {"06_audio/sfx/": "reel sfx"}),
-           "episodes": ("--episode", {"00_inputs/episode.json": "reel episode-prep"})}
-# an After Effects frames run's record (motion_render.frames): its `render` path is never opened (the panel and the
-# frame checks read its frame names), and `reel motion-frames` again would turn a recorded visual pass into pending
-# (review 291b5d1 P3-1): kept like a log, never in the delete advice
-AE_FRAMES_RECORD = re.compile(r"output/projects/[^/]+/08_quality_control/ae_frames/run-[^/]+/frames\.json")
+               "06_audio/dialogue/dialogue-clean-report.json", "06_audio/dialogue/cut-verification.json",
+               # an episode's record (episode.prep: the file and its intake sheets; its readers use sheet, media and
+               # fingerprint, nothing hashes it) (review f7793c5 P3-2): rewritten, never made again by a step, so
+               # reels-select still refuses an episode file replaced since episode-prep (reels.py:668-672)
+               "00_inputs/episode.json"}
+# kept records whose stored path is only compared or never opened: their own kept reason, never in the delete advice,
+# no step to run (reviews 291b5d1 P3-1, f7793c5 P3-1/P3-3). An After Effects frames run's record (motion_render.frames:
+# the panel and the frame checks read its frame names; `reel motion-frames` again would turn a recorded visual pass
+# into pending); a sound's provenance (sfx.install_mapped: `source` is compared to tell when to convert the sound again,
+# and `reel sfx` writes it only for the kinds the cue sheet uses now). No step of the engine is named in the advice:
+# every other kept file keeps the old folder until it is fixed by hand
+RECORDS = ((re.compile(r"output/projects/[^/]+/08_quality_control/ae_frames/run-[^/]+/frames\.json"),
+            "a frames run's record: its render path is never opened; nothing to do"),
+           (re.compile(r"output/projects/[^/]+/06_audio/sfx/[^/]+\.provenance\.json"),
+            "a sound's provenance record: its source path is only compared, never opened; nothing to do"))
 # inside the client database only these (besides client_db.migrate's own files) are rewritten: everything else there is
 # bound to its bytes (the reference style every video's copy is checked against, the sealed rules registry) or written
 # by the editor or Claude, and none of it is opened as media
@@ -555,7 +557,9 @@ def _rewritable(rel: str, ext: str) -> str | None:
                 "never opened")
     if ext != ".json" or tail in REBASE_JSON:
         return None
-    return "not on the list of files a move may rewrite: it names the old folder until its step runs again"
+    return next((why for rx, why in RECORDS if rx.fullmatch(rel)),
+                "not on the list of files a move may rewrite: it names the old folder until it is fixed by hand or made "
+                "again")
 
 
 def plausible_old(root, old, pointed: bool = True) -> str | None:
@@ -656,7 +660,7 @@ def rebase(root, olds, new=None, dry_run: bool = False, before: dict | None = No
         except (OSError, ValueError, RecursionError) as e:
             if _names(p, needles, lambda q: open(q, "rb")):
                 rep["kept"].append({"file": rel, "why": f"names the old folder but couldn't be read ({type(e).__name__})"
-                                                       ": it is refreshed when its step runs again"})
+                                                       ": it stays so until it is fixed by hand or made again"})
             continue
         if _names_text(data, needles):
             rep["kept"].append({"file": rel, "why": "still names the old folder in a form a move doesn't rewrite (a "
@@ -1245,13 +1249,13 @@ def _copy_client(src, dest, mode: str, apply: bool) -> dict:
 
 
 def _old_folder(src: Path, dest: Path, kept: list[dict], projects: list[dict]) -> str:
-    """The delete advice for the old folder, Arabic first (reviews 7fcbc1d P3-2, 087e8e3 P3-1..3). Before the delete:
-    the Premiere/After Effects projects that still link media there (`projects`: a byte search, never edited) are
-    relinked or rebuilt; every distinct step that really writes a kept file a step may still open by the path it
-    stores runs again (STEP_OF); a kept file no step writes again keeps the old folder until it is fixed by hand. A
-    log (history), the client database's citations (never opened; its brand tokens and status are), the takes history
-    (an undo refuses either way), the editor's sealed revise comments (a path in them is text) and an After Effects
-    frames run's record (AE_FRAMES_RECORD) need nothing."""
+    """The delete advice for the old folder, Arabic first (reviews 7fcbc1d P3-2, 087e8e3 P3-1..3, f7793c5). Before the
+    delete: the Premiere/After Effects projects that still link media there (`projects`: a byte search, never edited)
+    are relinked or rebuilt, and every kept file that may still be opened by the path it stores keeps the old folder
+    until it is fixed by hand (no engine step is named: none writes such a file again without voiding something or
+    losing a setting). A log (history), the client database's citations (never opened; its brand tokens and status
+    are), the takes history (an undo refuses either way), the editor's sealed revise comments (a path in them is text)
+    and the RECORDS (compared or never opened) need nothing."""
     from .rules_loop import NOTES_REL
     from .safety.takes import HISTORY
     delete = (f"left in place at {src}: check the new folder (`reel next --root \"{dest}\"`), then delete the old one "
@@ -1259,30 +1263,16 @@ def _old_folder(src: Path, dest: Path, kept: list[dict], projects: list[dict]) -
     due = sorted(k["file"] for k in kept if os.path.splitext(k["file"])[1].casefold() not in LOG_EXT
                  and not (k["file"].startswith("output/client_database/") and k["file"] not in DB_REBASE + (BRAND_TOKENS,))
                  and not k["file"].endswith(("/" + HISTORY, "/" + NOTES_REL))
-                 and not AE_FRAMES_RECORD.fullmatch(k["file"]))
-    runs: dict = {}
-    by_hand = []
-    for rel in due:
-        parts = rel.split("/")
-        flag, table = STEP_OF.get(parts[1], (None, {})) if len(parts) > 3 and parts[0] == "output" else (None, {})
-        tail = "/".join(parts[3:])
-        verb = next((v for k, v in table.items() if tail == k or k.endswith("/") and tail.startswith(k)), None)
-        if verb:
-            runs.setdefault(f"`{verb} --root \"{dest}\" {flag} {parts[2]}`")
-        else:
-            by_hand.append(rel)
+                 and not any(rx.fullmatch(k["file"]) for rx, _why in RECORDS))
     ar, en = [], []
     if projects:
         names = [f"{p['file']} ({RELINK[p['app']]})" for p in projects]       # review b690c54 P3-2
         ar.append(f"افتح المشاريع دي من المكان الجديد ووصّل الميديا تاني، أو ابنيها تاني: {'، '.join(names)}")
         en.append(f"open these projects from the new place and relink their media, or rebuild them: "
                   f"{', '.join(names)}")
-    if runs:
-        ar.append(f"شغّل تاني: {'، '.join(runs)}")
-        en.append(f"run again: {', '.join(runs)}")
-    if by_hand:
-        ar.append(f"سيب الفولدر القديم لحد ما الملفات دي تتصلّح بإيدك أو تتعمل تاني: {'، '.join(by_hand)}")
-        en.append(f"keep the old folder until these files are fixed by hand or made again: {', '.join(by_hand)}")
+    if due:
+        ar.append(f"سيب الفولدر القديم لحد ما الملفات دي تتصلّح بإيدك أو تتعمل تاني: {'، '.join(due)}")
+        en.append(f"keep the old folder until these files are fixed by hand or made again: {', '.join(due)}")
     if not ar:
         return delete
     return f"قبل ما تمسح الفولدر القديم: {'؛ '.join(ar)}. Before you delete the old folder: {'; '.join(en)}. " \

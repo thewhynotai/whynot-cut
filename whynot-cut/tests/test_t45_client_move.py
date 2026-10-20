@@ -1156,8 +1156,10 @@ class TestReview7fcbc1dP32(Base):
     def test_a_kept_file_no_step_writes_keeps_the_old_folder_until_it_is_fixed(self):
         """Review 087e8e3 P3-1: `reel handoff` never writes 09_handoff/delivery.json, so it is not named for it."""
         doc = self.moved()                                    # the fixture's 09_handoff/delivery.json: not on the list
-        self.assertIn("output/projects/R01/09_handoff/delivery.json",
-                      [k["file"] for k in doc["outside_database"]["kept"]])
+        kept = {k["file"]: k["why"] for k in doc["outside_database"]["kept"]}
+        self.assertEqual(kept["output/projects/R01/09_handoff/delivery.json"],          # review f7793c5: no step
+                         "not on the list of files a move may rewrite: it names the old folder until it is fixed by "
+                         "hand or made again")
         adv = doc["old_folder"]
         self.assertTrue(adv.startswith(self.BEFORE_AR), adv)                    # Arabic first
         self.assertNotIn("reel handoff", adv)
@@ -1299,7 +1301,9 @@ class TestReview087e8e3(Base):
         return {"fingerprint": "c" * 40 + ":{}", "chunk_ms": 600000, "total_ms": 3600000, "language": "ar",
                 "chunks": [[0, 600000], [600000, 1200000]], "created": "2026-10-20T10:05:00+0300"}
 
-    def test_each_kept_file_names_the_step_that_really_writes_it(self):
+    def test_the_engine_files_need_no_step_after_a_move(self):
+        """Review f7793c5: no step is named for any file the engine writes. The episode record is rewritten (P3-2), a
+        sound's provenance and a frames run's record are only compared or never opened (P3-1, P3-3)."""
         for rel, doc in (("output/episodes/EP01/00_inputs/episode.json", self.episode_info("EP01")),
                          ("output/episodes/EP01/02_transcription/chunks/plan.json", self.chunk_plan()),
                          ("output/projects/R01/06_audio/dialogue/cut-verification.json", self.cut_verification()),
@@ -1311,17 +1315,18 @@ class TestReview087e8e3(Base):
                           self.ae_frames("R02"))):
             self.put(rel, doc)
         doc = self.moved()
-        d = self.dest
-        runs = [f'`reel episode-prep --root "{d}" --episode EP01`', f'`reel sfx --root "{d}" --video-id R01`']
-        hand = ["output/projects/R01/09_handoff/delivery.json"]      # the fixture's own: no step writes it
+        hand = "output/projects/R01/09_handoff/delivery.json"         # the fixture's own: no step writes it
         prj = f"{self.PRPROJ} (File > Link Media)"
         self.assertEqual(doc["old_folder"],
                          self.AR + f"افتح المشاريع دي من المكان الجديد ووصّل الميديا تاني، أو ابنيها تاني: {prj}؛ "
-                         f"شغّل تاني: {'، '.join(runs)}؛ سيب الفولدر القديم لحد ما الملفات دي تتصلّح بإيدك أو تتعمل "
-                         f"تاني: {'، '.join(hand)}. " + self.EN + "open these projects from the new place and relink "
-                         f"their media, or rebuild them: {prj}; run again: {', '.join(runs)}; keep the old folder "
-                         f"until these files are fixed by hand or made again: {', '.join(hand)}. The old folder is "
-                         + self.delete_line())
+                         f"سيب الفولدر القديم لحد ما الملفات دي تتصلّح بإيدك أو تتعمل تاني: {hand}. " + self.EN +
+                         f"open these projects from the new place and relink their media, or rebuild them: {prj}; "
+                         f"keep the old folder until these files are fixed by hand or made again: {hand}. The old "
+                         "folder is " + self.delete_line())
+        self.assertNotIn("شغّل", doc["old_folder"])
+        self.assertNotIn("run again", doc["old_folder"])
+        self.assertIn("output/episodes/EP01/00_inputs/episode.json",
+                      [r["file"] for r in doc["outside_database"]["rewritten"]])
         self.assertNotIn("reel transcribe", doc["old_folder"])     # a no-op there; --force drops the corrections
         self.assertNotIn("chunks", doc["old_folder"])               # a chunk plan stores no path
         self.assertNotIn("ae_frames", doc["old_folder"])            # a frames record: nothing opens its render path
@@ -1353,8 +1358,6 @@ class TestReview087e8e3(Base):
         self.assertEqual(doc["old_folder"], self.delete_line())
         for rel in ("06_audio/dialogue/dialogue-clean-report.json", "06_audio/dialogue/cut-verification.json"):
             self.assertIsNone(CM._rewritable(f"output/projects/R01/{rel}", ".json"), rel)
-        self.assertFalse([v for _f, t in CM.STEP_OF.values() for v in t.values()
-                          if v in ("reel audio-clean", "reel transcribe")])
 
     def test_a_json_in_premiere_frames_is_kept_for_a_fix_by_hand(self):
         """Review b690c54 P3-1: `reel ppro-frames` writes only PNGs and the sheet there, so it is never named."""
@@ -1375,20 +1378,22 @@ class TestReview087e8e3(Base):
         for vid, run in (("R01", "run-20261020-100300"), ("R01", "run-20261020-110300"), ("R02", "run-20261020-100300")):
             self.put(f"output/projects/{vid}/08_quality_control/ae_frames/{run}/frames.json", self.ae_frames(vid))
         doc = self.moved()
-        kept = [k["file"] for k in doc["outside_database"]["kept"]]
-        self.assertIn("output/projects/R02/08_quality_control/ae_frames/run-20261020-100300/frames.json", kept)
+        kept = {k["file"]: k["why"] for k in doc["outside_database"]["kept"]}
+        why = kept["output/projects/R02/08_quality_control/ae_frames/run-20261020-100300/frames.json"]
+        self.assertEqual(why, "a frames run's record: its render path is never opened; nothing to do")   # P3-1
         self.assertEqual(doc["old_folder"], self.delete_line())
-        self.assertNotIn("reel motion-frames", [v for _f, t in CM.STEP_OF.values() for v in t.values()])
         other = make_client(self.tmp, "Other")
+        loose = "output/projects/R01/08_quality_control/ae_frames/old/frames.json"           # P3-4: no run-* folder
         rel = "output/projects/R01/08_quality_control/ae_frames/run-20261020-100300/notes.json"
-        f = other.joinpath(*rel.split("/"))
-        f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(json.dumps({"seen": str(other / "data" / "Raw" / "clip 1.mp4")}), encoding="utf-8")
+        for r in (loose, rel):
+            f = other.joinpath(*r.split("/"))
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(json.dumps({"seen": str(other / "data" / "Raw" / "clip 1.mp4")}), encoding="utf-8")
         self.hold(other)
         adv = CM.move(other, self.tmp / "E drive" / "Other2", apply=True)["old_folder"]
-        self.assertIn(f"made again: {rel}, output/projects/R01/09_handoff/delivery.json. ", adv)
+        self.assertIn(f"made again: {loose}, {rel}, output/projects/R01/09_handoff/delivery.json. ", adv)
 
-    def test_every_distinct_step_is_named_however_many_files_are_kept(self):
+    def test_every_kept_file_is_named_however_many_are_kept(self):
         raw = self.old("data/Raw/clip 1.mp4")
         for k in range(1, 8):
             self.put(f"output/projects/R0{k}/06_audio/sfx/whoosh.provenance.json",
@@ -1397,9 +1402,67 @@ class TestReview087e8e3(Base):
         self.put("output/projects/R01/06_audio/sfx/hit.provenance.json", self.provenance("hit", "data/SFX/hit.wav"))
         adv = self.moved()["old_folder"]
         for k in range(1, 8):
-            self.assertEqual(adv.count(f'`reel sfx --root "{self.dest}" --video-id R0{k}`'), 2, (k, adv))
             self.assertEqual(adv.count(f"output/projects/R0{k}/09_handoff/delivery.json"), 2, (k, adv))
         self.assertNotIn("more", adv)
+        self.assertNotIn("provenance", adv)
+        self.assertNotIn("reel sfx", adv)
+
+    def test_a_sound_provenance_record_needs_no_step(self):
+        """Review f7793c5 P3-3: `reel sfx` writes a provenance file again only for the kinds the cue sheet uses now, and
+        its `source` is only compared (to tell when to convert again), never opened: kept with its own reason, never
+        in the delete advice, whatever the kind. Any other file under 06_audio/sfx/ is no such record."""
+        (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
+        (self.src / self.PRPROJ).unlink()
+        for kind in ("whoosh", "oldkind"):                          # oldkind: no longer on the cue sheet
+            self.put(f"output/projects/R01/06_audio/sfx/{kind}.provenance.json",
+                     self.provenance(kind, f"data/SFX/{kind}.wav"))
+        doc = self.moved()
+        kept = {k["file"]: k["why"] for k in doc["outside_database"]["kept"]}
+        for kind in ("whoosh", "oldkind"):
+            self.assertEqual(kept[f"output/projects/R01/06_audio/sfx/{kind}.provenance.json"],
+                             "a sound's provenance record: its source path is only compared, never opened; nothing "
+                             "to do")
+        self.assertEqual(doc["old_folder"], self.delete_line())
+        other = make_client(self.tmp, "Other")
+        rel = "output/projects/R01/06_audio/sfx/notes.json"
+        f = other.joinpath(*rel.split("/"))
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps({"seen": str(other / "data" / "Raw" / "clip 1.mp4")}), encoding="utf-8")
+        self.hold(other)
+        adv = CM.move(other, self.tmp / "E drive" / "Other2", apply=True)["old_folder"]
+        self.assertIn(f"made again: {rel}, output/projects/R01/09_handoff/delivery.json. ", adv)
+
+    def test_a_replaced_episode_file_is_still_refused_after_a_move(self):
+        """Review f7793c5 P3-2 (cuts): the episode record is rewritten, never re-made by a step, so reels-select still
+        sees that the episode file changed after episode-prep (reels.py:668-672) and refuses until it is prepared,
+        transcribed and planned again."""
+        from lib import reels
+        from lib.common import sha1_head
+        from lib.episode import EpisodePaths
+        (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
+        (self.src / self.PRPROJ).unlink()
+        ep_file = self.src / "data" / "Episodes" / "EP01.mp4"
+        ep_file.parent.mkdir(parents=True)
+        ep_file.write_bytes(b"the episode as prepared" * 100)
+        info = dict(self.episode_info("EP01"), fingerprint=sha1_head(ep_file))
+        self.put("output/episodes/EP01/00_inputs/episode.json", info)
+        (self.src / "output/episodes/EP01/01_analysis").mkdir(parents=True)
+        inv = read_json(self.src / "output/discovery/input-inventory.json")
+        inv["files"].append({"rel": "data/Episodes/EP01.mp4", "path": str(ep_file), "kind": "video",
+                             "role": "episode", "media": "video", "size_bytes": ep_file.stat().st_size})
+        write_json(self.src / "output/discovery/input-inventory.json", inv)
+        ep_file.write_bytes(b"a re-export, never prepared" * 100)       # replaced after episode-prep
+        doc = self.moved()
+        self.assertEqual(doc["old_folder"], self.delete_line())       # no `reel episode-prep` to paper over it
+        moved = read_json(self.dest / "output/episodes/EP01/00_inputs/episode.json")
+        self.assertEqual(moved["file"], str(self.dest / "data" / "Episodes" / "EP01.mp4"))
+        self.assertEqual(moved["intake_sheet"], str(self.dest.joinpath("output", "episodes", "EP01", "00_inputs",
+                                                                      "intake", "_intake_sheet.jpg")))
+        self.assertEqual(moved["fingerprint"], info["fingerprint"])           # a value: as it was
+        os.rename(self.src, self.tmp / "deleted old folder")
+        with self.assertRaises(SystemExit) as cm:
+            reels.select(EpisodePaths(self.dest, "EP01"), ["R01"], [], "editor")
+        self.assertIn("the episode file changed since episode-prep", str(cm.exception))
 
     def test_a_project_linking_the_old_folder_is_named_before_the_delete(self):
         (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
@@ -1454,7 +1517,9 @@ class TestReview087e8e3(Base):
         rel = "output/client_database/branding/brand-tokens.json"
         self.put(rel, '{"logo": "' + self.old("assets/Brand/logo.png").replace("\\", "\\\\") + '", ')   # cut short
         doc = self.moved()
-        self.assertIn(rel, [k["file"] for k in doc["outside_database"]["kept"]])
+        kept = {k["file"]: k["why"] for k in doc["outside_database"]["kept"]}
+        self.assertEqual(kept[rel], "names the old folder but couldn't be read (JSONDecodeError): it stays so until "
+                                    "it is fixed by hand or made again")                  # review f7793c5: no step
         self.assertIn(f"تاني: {rel}. ", doc["old_folder"])
         self.assertIn(f"made again: {rel}. ", doc["old_folder"])
 
