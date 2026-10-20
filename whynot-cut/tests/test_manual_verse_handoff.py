@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # © 2026 The Why Not AI (thewhynot.ai)
-"""Manual verse, the handoff README (patch handoff-verse.patch, executor): with a recited verse it names the SRT the
-plan wrote without it (subtitles-seq.srt), never the transcript's subtitles.srt, and lists each verse to add by hand
-(id and time, never its words). A plain clip: as before.
+"""Manual verse, the handoff README (lib/handoff.py): with a recited verse it names the SRT the plan wrote without it
+(subtitles-seq.srt), never the transcript's subtitles.srt, and lists each verse to add by hand (id and time, never
+its words). A plain clip: as before. Self-contained (fix round 1, review c2c23e6 P2-3): its own real-clip fixture.
 Run:  bash tools/test.sh -p test_manual_verse_handoff.py
 """
 import sys as _sys
@@ -19,15 +19,36 @@ sys.path.insert(0, str(SK / "engine" / "reel"))
 sys.path.insert(0, str(SK / "tests"))
 
 from lib import common  # noqa: E402
-from test_manual_verse import has_verse  # noqa: E402
-try:  # the fixture lives with the premiere_xml-verse patch (ADOBE-G4); until it lands this test cannot run
-    from test_manual_verse_premiere_xml import NAME, video_project  # noqa: E402
-    _PENDING = None
-except ImportError:  # executor 2026-10-19 (review c2c23e6 P2-3): an explicit, dated skip, removed by the fix round
-    _PENDING = "waits for ADOBE-G4's premiere_xml-verse patch (test_manual_verse_premiere_xml)"
+from lib.common import write_json  # noqa: E402
+from test_manual_verse import SC, build_words, has_verse  # noqa: E402
+
+NAME = "آية: يضيفها المونتير يدويًا"
 
 
-@unittest.skipIf(_PENDING, _PENDING or "")
+def video_project(tmp: Path, scenario: str, domain="religious"):
+    """test_pipeline.make_project's real 12 s clip with this scenario's words, preflighted and planned."""
+    from lib.media import preflight
+    from lib.plan import compile_plan
+    from lib.transcribe import finalize
+    from test_pipeline import make_project
+    root, p, _w = make_project(tmp)
+    if domain:
+        write_json(root / common.CLIENT_PROFILE_REL / "profile.json", {"domain": domain})
+    common.set_context(root)
+    w = build_words(SC[scenario])
+    segs = [{"id": 1, "start_ms": w[0]["start_ms"], "end_ms": w[-1]["end_ms"], "text": " ".join(x["word"] for x in w),
+             "avg_logprob": -0.2, "no_speech_prob": 0.01, "compression_ratio": 1.2, "words": [x["id"] for x in w]}]
+    finalize(p, {"source_video": str(root / "data/Raw/CLIP1.mov"), "backend": "test", "model": "none", "language": "ar",
+                 "language_probability": 1.0, "duration_ms": 12000}, segs, [dict(x) for x in w])
+    preflight(p, [root / "data/Raw/CLIP1.mov"])
+    write_json(p.p("01_analysis/edit-decisions.json"), {"video_id": "CLIP1",
+                                                        "global": {"main_footage": "data/Raw/CLIP1.mov"},
+                                                        "decisions": []})
+    res = compile_plan(p)
+    assert res["ok"], res["errors"]
+    return root, p
+
+
 class TestHandoff(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="mvh_"))

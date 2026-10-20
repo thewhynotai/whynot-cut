@@ -855,54 +855,95 @@ def apply_manual_verse(inp: PlanInputs, tm: dict):
     no caption words (the "-seq" captions and words-seq.json are written without them, also on the identity clock),
     its overlapping graphics shortened, or dropped with under 600 ms left, with a warning; no SFX cue inside it; a
     graphic that repeats its words is dropped wherever it sits, evidence that repeats them is replaced; and a marker
-    in the spec («آية: يضيفها المونتير يدويًا»). Runs after the time map. No span: `tm` unchanged (byte-identical)."""
+    in the spec («آية: يضيفها المونتير يدويًا»). Fix round 1 (review c2c23e6): a span cut away whole (pauses, cut
+    words) blanks nothing, but its words stay masked everywhere (`verse_cut`, `verse_mask`); a hook title's own text
+    loses the basmala / isti'adha. Runs after the time map. No span and no hook quoting a recited cue: `tm` unchanged
+    (byte-identical)."""
     import copy
     from . import manual_verse as mv
     cfg = getattr(inp, "verse_cfg", None) or {}
     spans, errors, warnings = mv.resolve(mv.detect(inp.words, cfg), inp.ed)
     warnings = list(cfg.get("warnings") or []) + warnings
+    out = dict(tm)
+    events = copy.deepcopy(tm["events"])
+    hooks_changed = False
+    for e in events:                      # a hook title never shows the basmala / isti'adha (P2-5): rewritten
+        if e["template"] != "hook_title":
+            continue
+        for k in ("text", "headline"):
+            v = e["params"].get(k)
+            if isinstance(v, str):
+                new, changed = mv.strip_recited(v)
+                if changed:
+                    e["params"][k] = new
+                    hooks_changed = True
+                    warnings.append(f"{e['event_id']} (hook_title): the basmala or isti'adha taken out of its {k} "
+                                    "(WhyNot Cut never writes Quran text; the editor adds it by hand if wanted)")
+    empty = [e for e in events if e["template"] == "hook_title" and not "".join(onscreen_strings(e["params"])).strip()
+             and any(isinstance(x.get("params", {}).get("text"), str) for x in tm["events"] if x["event_id"] == e["event_id"])]
+    for e in empty:                       # nothing left to show: the hook goes (its sounds too)
+        warnings.append(f"{e['event_id']} (hook_title): only the basmala or isti'adha was on it -> dropped")
+    if hooks_changed:
+        gone_ids = {e["event_id"] for e in empty}
+        events = [e for e in events if e["event_id"] not in gone_ids]
+        out.update(events=events, broll=[b for b in tm["broll"] if b["asset_id"] not in gone_ids],
+                   cues=[c for c in tm["cues"] if c.get("related_visual") not in gone_ids])
+        tm = dict(tm, broll=out["broll"], cues=out["cues"])
+    if not spans:
+        return out, errors, warnings
     tmap = tm["tmap"]
     if tmap:
         seq_ms, src_frame = (lambda t: round(tmap.ms(t))), tmap.frame
     else:
         seq_ms, src_frame = (lambda t: int(t)), (lambda t: ms_to_frame(t))
-    live = [dict(s, start_ms=seq_ms(s["src_start_ms"]), end_ms=seq_ms(s["src_end_ms"])) for s in spans
-            if not (tmap and tmap.removed(s["src_start_ms"], s["src_end_ms"]))]     # a span cut away whole: nothing left
-    if not live:
-        return tm, errors, warnings
-    out = dict(tm)
-    src_r = [(s["src_start_ms"], s["src_end_ms"]) for s in live]
-    seq_r = [(s["start_ms"], s["end_ms"]) for s in live]
-    seqs = mv.span_words(live, inp.words)
-    # captions: the sequence-clock files without a word of any span (identity clock: built from the source files)
-    words_seq = tm["seq_words"] if tm["seq_words"] is not None else [
-        dict(w, src_start_ms=w["start_ms"], src_end_ms=w["end_ms"]) for w in inp.words]
-    srts = dict(tm["seq_srts"])
-    reader = getattr(inp, "read_caption", None)
-    if not tmap and not tm.get("captions_rebuilt") and reader:
-        for name in _CAPTION_SRTS:
-            got = reader(name)
-            if got is not None:
-                srts[name] = [{"start_ms": q["start_ms"], "end_ms": q["end_ms"], "text": q["text"]} for q in got]
-    out["seq_srts"] = {name: mv.filter_cues(cues_, seq_r, words_seq) for name, cues_ in srts.items()}
-    out["seq_words"] = [w for w in words_seq
-                        if not mv.in_span({"start_ms": w["src_start_ms"], "end_ms": w["src_end_ms"]}, src_r)]
+    removed = (lambda s: bool(tmap) and tmap.removed(s["src_start_ms"], s["src_end_ms"]))
+    live = [dict(s, start_ms=seq_ms(s["src_start_ms"]), end_ms=seq_ms(s["src_end_ms"])) for s in spans if not removed(s)]
+    gone = [s for s in spans if removed(s)]               # cut away whole: nothing to blank, its words still masked
+    out["verse_mask"] = [{"id": s["id"], "src_start_ms": s["src_start_ms"], "src_end_ms": s["src_end_ms"]}
+                         for s in spans]
+    if gone:
+        out["verse_cut"] = [{"id": s["id"], "src_start_ms": s["src_start_ms"], "src_end_ms": s["src_end_ms"]}
+                            for s in gone]
+    all_src = [(s["src_start_ms"], s["src_end_ms"]) for s in spans]
+    blank = live
+    src_r = [(s["src_start_ms"], s["src_end_ms"]) for s in blank]
+    seq_r = [(s["start_ms"], s["end_ms"]) for s in blank]
+    seqs = mv.span_words(blank, inp.words)
+    all_seqs = mv.span_words(spans, inp.words)
+    if blank:
+        # captions: the sequence-clock files without a word of any span (identity clock: built from the source files)
+        words_seq = tm["seq_words"] if tm["seq_words"] is not None else [
+            dict(w, src_start_ms=w["start_ms"], src_end_ms=w["end_ms"]) for w in inp.words]
+        srts = dict(tm["seq_srts"])
+        reader = getattr(inp, "read_caption", None)
+        if not tmap and not tm.get("captions_rebuilt") and reader:
+            for name in _CAPTION_SRTS:
+                got = reader(name)
+                if got is not None:
+                    srts[name] = [{"start_ms": q["start_ms"], "end_ms": q["end_ms"], "text": q["text"]} for q in got]
+        out["seq_srts"] = {name: mv.filter_cues(cues_, seq_r, words_seq) for name, cues_ in srts.items()}
+        out["seq_words"] = [w for w in words_seq
+                            if not mv.in_span({"start_ms": w["src_start_ms"], "end_ms": w["src_end_ms"]}, src_r)]
+        out["verse_blanked"] = True
     # graphics: never over a span, never repeating its words
-    events, dropped, trimmed = [], set(), {}
-    for e in copy.deepcopy(tm["events"]):
+    kept, dropped, trimmed = [], set(), {}
+    for e in events:
         eid, t = e["event_id"], e["template"]
-        if mv.repeats(" ".join(onscreen_strings(e["params"])), seqs):
+        if blank and mv.repeats(" ".join(onscreen_strings(e["params"])), seqs):
             dropped.add(eid)
             warnings.append(f"{eid} ({t}): its on-screen text repeats the words of a recited verse -> dropped "
                             "(WhyNot Cut never writes Quran text; the editor adds the verse by hand)")
             continue
-        if mv.repeats(e.get("evidence") or "", seqs):
+        if mv.repeats(e.get("evidence") or "", all_seqs):
             e["evidence"] = mv.PLACEHOLDER
-        hit = next((s for s in live if e["start_ms"] < s["end_ms"] and s["start_ms"] < e["end_ms"]), None)
-        if hit is None:
-            events.append(e)
+        # (seq a, seq b, src a, src b, span) this graphic must stay off
+        ranges = [(s["start_ms"], s["end_ms"], s["src_start_ms"], s["src_end_ms"], s) for s in blank]
+        hits = [r for r in ranges if e["start_ms"] < r[1] and r[0] < e["end_ms"]]
+        if not hits:
+            kept.append(e)
             continue
-        piece = mv.keep_piece(e["start_ms"], e["end_ms"], seq_r)
+        piece = mv.keep_piece(e["start_ms"], e["end_ms"], [(r[0], r[1]) for r in ranges])
+        hit = hits[0][4]
         if piece is None:
             dropped.add(eid)
             warnings.append(f"{eid} ({t}) overlaps the recited verse {hit['id']} at {fmt_ts(hit['start_ms'], '.')} and "
@@ -910,15 +951,15 @@ def apply_manual_verse(inp: PlanInputs, tm: dict):
             continue
         ns, ne = piece
         if ns != e["start_ms"]:
-            s_ = next(s for s in live if s["end_ms"] == ns)
-            e["start_frame"], e["start_ms"] = src_frame(s_["src_end_ms"]), int(ns)
+            r = next(x for x in ranges if x[1] == ns)
+            e["start_frame"], e["start_ms"] = src_frame(r[3]), int(ns)
             if "src_start_ms" in e:
-                e["src_start_ms"] = s_["src_end_ms"]
+                e["src_start_ms"] = r[3]
         if ne != e["end_ms"]:
-            s_ = next(s for s in live if s["start_ms"] == ne)
-            e["end_frame"], e["end_ms"] = src_frame(s_["src_start_ms"]), int(ne)
+            r = next(x for x in ranges if x[0] == ne)
+            e["end_frame"], e["end_ms"] = src_frame(r[2]), int(ne)
             if "src_end_ms" in e:
-                e["src_end_ms"] = s_["src_start_ms"]
+                e["src_end_ms"] = r[2]
         e["start_tc"], e["end_tc"] = frame_to_tc(e["start_frame"]), frame_to_tc(e["end_frame"])
         items = e["params"].get("items")
         if isinstance(items, list):
@@ -928,8 +969,8 @@ def apply_manual_verse(inp: PlanInputs, tm: dict):
         trimmed[eid] = e
         warnings.append(f"{eid} ({t}) overlapped the recited verse {hit['id']} at {fmt_ts(hit['start_ms'], '.')}: "
                         "shortened so nothing shows over it")
-        events.append(e)
-    out["events"] = events
+        kept.append(e)
+    out["events"] = kept
     out["broll"] = [dict(b, sequence_start_frame=trimmed[b["asset_id"]]["start_frame"],
                          duration_frames=trimmed[b["asset_id"]]["end_frame"] - trimmed[b["asset_id"]]["start_frame"])
                     if b["asset_id"] in trimmed else b for b in tm["broll"] if b["asset_id"] not in dropped]
@@ -945,10 +986,10 @@ def apply_manual_verse(inp: PlanInputs, tm: dict):
         warnings.append(f"no sound effect over a recited verse: {', '.join(quiet)} dropped")
     out["cues"] = cues
     tmi = tm["time_map_info"]
-    if tmi and tmi.get("words_cut"):           # a cut word inside a span is listed without its text
+    if tmi and tmi.get("words_cut"):           # a cut word inside any span is listed without its text
         tmi = copy.deepcopy(tmi)
         for wc in tmi["words_cut"]:
-            if any(a <= wc["start_ms"] < b for a, b in src_r):
+            if any(a <= wc["start_ms"] < b for a, b in all_src):
                 wc.update(word="…", in_verse=True)
         out["time_map_info"] = tmi
     recs, markers = [], []
@@ -957,16 +998,55 @@ def apply_manual_verse(inp: PlanInputs, tm: dict):
         recs.append({"id": s["id"], "src_start_ms": s["src_start_ms"], "src_end_ms": s["src_end_ms"],
                      "start_ms": s["start_ms"], "end_ms": s["end_ms"], "start_frame": f0, "end_frame": f1,
                      "start_tc": frame_to_tc(f0), "end_tc": frame_to_tc(f1), "cue": s["cue"],
-                     "cue_ar": mv.label(s["cue"]), "cue_en": mv.label(s["cue"], "en"), "end": s["end"],
+                     "cue_ar": mv.label(s["cue"], "ar", s.get("cue_text")),
+                     "cue_en": mv.label(s["cue"], "en", s.get("cue_text")), "end": s["end"],
                      "guessed_end": s["guessed_end"], "source": s["source"], **({"note": s["note"]} if "note" in s else {})})
         markers.append({"id": s["id"], "kind": "manual_verse", "name": mv.SPAN_NAME, "comment": mv.marker_comment(s),
                         "colour": mv.MARKER_COLOUR, "start_ms": s["start_ms"], "end_ms": s["end_ms"],
                         "start_frame": f0, "end_frame": f1})
         if s["guessed_end"]:
             warnings.append(f"{s['id']}: the end of the recited verse at {fmt_ts(s['src_start_ms'], '.')} is a guess (no "
-                            f"pause within {mv.CAP_MS // 1000} s): the editor finds the real end by ear")
-    out.update(manual_verse=recs, verse_markers=markers)
+                            f"pause within {mv.CAP_MS // 1000} s): the captions stay off to the next real end "
+                            f"({fmt_ts(s['src_end_ms'], '.')}); the editor finds the verse's end by ear")
+    if recs:
+        out.update(manual_verse=recs, verse_markers=markers)
     return out, errors, warnings
+
+
+_EVIDENCE_ERR = re.compile(r"^(?P<did>[^:]+): evidence not found verbatim in transcript: ")
+_RISK_IDS = re.compile(r"\(word (?P<ids>[\d, ]+),")
+
+
+def mask_verse(inp: PlanInputs, msgs: list, mask: list | None) -> list:
+    """Messages without a recited verse's words (fix round 1, P1-2): the evidence a decision over a span cites that is
+    not in the transcript, and a risk-first block on a word inside a span, by id and time only."""
+    if not mask:
+        return msgs
+    spans = [(m["src_start_ms"], m["src_end_ms"], m["id"]) for m in mask]
+    windows = {}
+    for d in inp.ed.get("decisions", []) or []:
+        a, b = _try_ms(d.get("start")), _try_ms(d.get("end"))
+        if isinstance(d.get("decision_id"), str) and a is not None and b is not None:
+            windows[d["decision_id"]] = (a, b)
+    in_ids = {w["id"]: sid for w in inp.words for a, b, sid in spans if w["start_ms"] < b and a < w["end_ms"]}
+    out = []
+    for m in msgs:
+        ev = _EVIDENCE_ERR.match(m) if isinstance(m, str) else None
+        if ev and ev.group("did") in windows:
+            a, b = windows[ev.group("did")]
+            sid = next((s for x, y, s in spans if a < y and x < b), None)
+            if sid:
+                m = (f"{ev.group('did')}: evidence not found verbatim in transcript (its window overlaps the recited "
+                     f"verse {sid}: its words are not shown here)")
+        rk = _RISK_IDS.search(m) if isinstance(m, str) else None
+        if rk:
+            sid = next((in_ids[int(i)] for i in rk.group("ids").replace(" ", "").split(",") if i and int(i) in in_ids),
+                       None)
+            if sid:
+                m = re.sub(r"«[^»]*»", "«…»", m)
+                m = re.sub(r"uses '[^']*'", "uses '…'", m) + f" (a word inside the recited verse {sid})"
+        out.append(m)
+    return out
 
 
 @_in_context
@@ -1088,14 +1168,15 @@ def assemble_spec(inp: PlanInputs, cam: dict, fr: dict, tm: dict, au: dict, reci
             "base_offset_x": float(cam["box"] or 0.0), "base_offset_y": float(cam["boy"] or 0.0), "framing": fr["framing"],
             "main_segments": tm["merged"], "events": sorted(tm["events"], key=lambda e: (e["start_frame"], e["track"])),
             "caption_source": "02_transcription/captions-short-seq.srt"
-            if tm["tmap"] or tm.get("captions_rebuilt") or tm.get("manual_verse")
+            if tm["tmap"] or tm.get("captions_rebuilt") or tm.get("verse_blanked")
             else "02_transcription/captions-short.srt",
             "caption_highlights": caption_hl, "time_map": tm["time_map_info"],
             "music": au["music"], "recipe": recipe_info,
             # T4.2: only knobs that change something, so a client at the defaults keeps a byte-identical spec
             **({"style": copy.deepcopy(knobs)} if knobs else {}),
             # manual verse: the recited spans and their timeline markers (the bridge and the XML both place them)
-            **({"manual_verse": tm["manual_verse"], "markers": tm["verse_markers"]} if tm.get("manual_verse") else {})}
+            **({"manual_verse": tm["manual_verse"], "markers": tm["verse_markers"]} if tm.get("manual_verse") else {}),
+            **({"verse_cut": tm["verse_cut"]} if tm.get("verse_cut") else {})}
 
 
 def caption_hidden_ms(spec: dict, g: dict) -> list:
@@ -1254,7 +1335,10 @@ def build_plan(inp: PlanInputs) -> dict:
     tm = step(apply_manual_verse(inp, tm))
     au = step(build_audio(inp, tm["cues"], tm["tmap"], tm["dur_f"]))
     spec = step(apply_ease(inp, assemble_spec(inp, cam, fr, tm, au, vd["recipe_info"]), fr["camera"]))
-    step(final_checks(inp, tm["events"], tm.get("manual_verse")))
+    step(final_checks(inp, tm["events"], tm.get("verse_mask")))
+    if tm.get("verse_mask"):              # manual verse: no message names a recited verse's words (fix round 1, P1-2)
+        errors[:] = mask_verse(inp, errors, tm["verse_mask"])
+        warnings[:] = mask_verse(inp, warnings, tm["verse_mask"])
     return {"ok": not errors, "errors": errors, "warnings": warnings, "spec": spec, "broll": tm["broll"],
             "cues": au["cues"], "seq_srts": tm["seq_srts"], "decisions": len(inp.ed.get("decisions", [])),
             "ctx": inp.ctx, "seq_words": tm.get("seq_words"), "global": inp.base}
@@ -1446,9 +1530,10 @@ def write_edit_plan(paths: Paths) -> Path:
         L += [""]
     mvs = spec.get("manual_verse") or []
     seqs = []
-    if mvs:                    # manual verse: evidence that repeats a recited verse's words is never printed
+    if mvs or spec.get("verse_cut"):   # manual verse: evidence that repeats a recited verse's words is never printed
         from . import manual_verse as mv
-        seqs = mv.span_words(mvs, (read_json(paths.p("02_transcription/words.json"), {}) or {}).get("words") or [])
+        seqs = mv.span_words(mvs + (spec.get("verse_cut") or []),
+                             (read_json(paths.p("02_transcription/words.json"), {}) or {}).get("words") or [])
     L += ["## Decisions", "", "| # | Time | Treatment | On-screen text | Why (speaker's words) | Approval |", "|---|---|---|---|---|---|"]
     for d in ed.get("decisions", []):
         if seqs and mv.repeats(d.get("evidence", ""), seqs):

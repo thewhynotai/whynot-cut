@@ -414,6 +414,10 @@ def check(ep) -> dict:
     verses = mv.detect(ep_words, vcfg)
     warnings += vcfg["warnings"]
     verse_words = mv.span_words(verses, ep_words)
+    # the spans the episode's reels recorded (the story-editor's included), on the episode's clock (review P2-2)
+    verse_ranges = [(s["src_start_ms"], s["src_end_ms"]) for s in verses] + mv.reel_spans(ep.root, ep.episode_id)
+    verse_words += mv.span_words([{"src_start_ms": a, "src_end_ms": b} for a, b in verse_ranges[len(verses):]],
+                                 ep_words)
 
     def no_verse(where: str, text: str):
         if verse_words and mv.repeats(text or "", verse_words):
@@ -472,8 +476,9 @@ def check(ep) -> dict:
     ytags = yt.get("tags") or []
     if count_tags_chars(ytags) > yl["tags_total_max"]:
         errors.append(f"tags: {count_tags_chars(ytags)} characters (YouTube allows {yl['tags_total_max']})")
-    for t in list(ytags) + list(tags_):
+    for k, t in enumerate(list(ytags) + list(tags_), 1):
         gender(f"tag {t}", str(t))
+        no_verse(f"tag {k}", str(t))                  # never the tag itself in the message (it would quote the verse)
     for k, dsg in enumerate((pub.get("thumbnail") or {}).get("designs") or [], 1):
         gender(f"thumbnail {k}", str(dsg.get("text") or ""))
         no_verse(f"thumbnail {k}", str(dsg.get("text") or ""))
@@ -517,9 +522,8 @@ def check(ep) -> dict:
     srt_src = ep.p("02_transcription/subtitles.srt")
     if srt_src.exists():
         dst = out / f"{ep.episode_id}.srt"
-        if verses:             # the upload SRT without a word of any recited verse (an empty gap, never a placeholder)
-            srtlib.write_srt(dst, mv.filter_cues(srtlib.read_srt(srt_src),
-                                                 [(s["src_start_ms"], s["src_end_ms"]) for s in verses], ep_words))
+        if verse_ranges:       # the upload SRT without a word of any recited verse (an empty gap, never a placeholder)
+            srtlib.write_srt(dst, mv.filter_cues(srtlib.read_srt(srt_src), verse_ranges, ep_words))
         else:
             shutil.copyfile(srt_src, dst)
         errs = srtlib.validate_cues(srtlib.read_srt(dst), total)

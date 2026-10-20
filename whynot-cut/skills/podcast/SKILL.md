@@ -116,8 +116,8 @@ It is an ordinary clip project; resume it with `reel next --root "<CLIENT>" --vi
   speaker says, and picks music only from `reel music --list` (licensed, mood-tagged). No fitting track → leave music
   for the editor.
 - The medical-reviewer runs on every reel, whatever the client's `domain` (as on every clip; it returns quickly when
-  nothing sensitive is on screen): health claims, and for a client whose profile has `domain: religious` every verse,
-  hadith, attributed story or ruling on screen, checked against
+  nothing sensitive is on screen): health claims, and for a client whose profile has `domain: religious` every
+  hadith, attributed story or ruling on screen (a verse never is: the editor adds it by hand), checked against
   `${CLAUDE_PLUGIN_ROOT}/skills/medical-accuracy/references/religious-content.md`. Its approval list goes into the plan
   you show the editor. Motion videos get the same review (`/whynot-cut:motion`).
 

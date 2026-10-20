@@ -88,8 +88,8 @@ must be. A scene whose words were all removed counts as gone. A flagged scene th
 old or a new id, as `cleared`: mention both to the editor. After a re-plan the old file is stale, so send the new
 review again. In PowerShell save the JSON as a UTF-8 file and pass its path to `--from` (a pipe garbles Arabic).
 The medical-reviewer runs on every motion video, whatever the client's `domain` (it returns quickly when nothing
-sensitive is on screen): health claims, and for a client whose profile `domain` is `religious` every verse, hadith,
-attributed story or ruling on screen, checked against
+sensitive is on screen): health claims, and for a client whose profile `domain` is `religious` every hadith,
+attributed story or ruling on screen (a verse is never on screen: the editor adds it by hand), checked against
 `${CLAUDE_PLUGIN_ROOT}/skills/medical-accuracy/references/religious-content.md`.
 From `motion-plan.md`: each scene's time, beat, type and on-screen words, with **editorial lines marked as Claude's
 words** (not the speaker's), the medical-reviewer's approval list, numbers that need confirming, icons/illustrations and their licenses, music, recipe

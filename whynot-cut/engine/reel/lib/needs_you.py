@@ -356,14 +356,16 @@ def _words(c: _Collector, cfg: _Config, p: Paths, item: str, label: tuple[str, s
                and isinstance(w.get("probability"), (int, float)) and not isinstance(w.get("probability"), bool)
                and w["probability"] < cfg.threshold]
         todo = [w for w in flagged + low if isinstance(w.get("word"), str) and w["word"].strip()]
-        verse = _verse_ranges(p, words, cfg)          # manual verse: a recited verse's words are never quoted here
+        from .safety.risk_words import needs_you_order    # K-T1: risk first (behind its switch)
+        todo = needs_you_order(todo, p)
+        # manual verse: a recited verse's words are never quoted here, also not the ones the risk-first order added
+        # (fix round 1, P1-3: this filter runs last)
+        verse = _verse_ranges(p, words, cfg)
         if verse:
             from .manual_verse import overlaps
             todo = [w for w in todo if not (isinstance(w.get("start_ms"), (int, float))
                                             and isinstance(w.get("end_ms"), (int, float))
                                             and overlaps(w["start_ms"], w["end_ms"], verse))]
-        from .safety.risk_words import needs_you_order    # K-T1: risk first (behind its switch)
-        todo = needs_you_order(todo, p)
         if not todo:
             return False
         n, shown = len(todo), todo[:SHOWN_WORDS]
@@ -388,20 +390,34 @@ def _words(c: _Collector, cfg: _Config, p: Paths, item: str, label: tuple[str, s
 
 
 def _verse_ranges(p: Paths, words: list, cfg: "_Config") -> list:
-    """Manual verse: the source ranges of this transcript's recited verses: the compiled plan's (the story-editor's
-    overrides included) when there is one, else what lib/manual_verse finds in the words (an episode, or a clip not
-    planned yet). [] when none (or the plan cannot be read: its own line says so)."""
+    """Manual verse: the source ranges of this transcript's recited verses: the compiled plan's when there is one
+    (shown and cut away whole: `verse_cut`; the story-editor's overrides included), else what
+    lib/manual_verse finds in the words with the story-editor's overrides (a clip not planned yet); an episode adds
+    the spans its reels recorded (on the episode's clock). [] when none (or the plan cannot be read: its own line
+    says so)."""
     from . import manual_verse
+    from .episode import EpisodePaths
+    out = []
     sp = p.p("01_analysis/timeline-spec.json")
+    spec = None
     if sp.exists():
         try:
             spec = read_json(sp)
-            if isinstance(spec, dict) and spec.get("events") is not None:
-                return [(s["src_start_ms"], s["src_end_ms"]) for s in spec.get("manual_verse") or []
-                        if isinstance(s, dict)]
         except Exception:  # noqa: BLE001 — named in `unread` by the timeline-spec's own read
-            pass
-    return [(s["src_start_ms"], s["src_end_ms"]) for s in manual_verse.detect(words, cfg.verse)]
+            spec = None
+    if isinstance(spec, dict) and spec.get("events") is not None:
+        out = [(s["src_start_ms"], s["src_end_ms"]) for s in (spec.get("manual_verse") or []) +
+               (spec.get("verse_cut") or []) if isinstance(s, dict)]
+    else:
+        try:
+            ed = read_json(p.p("01_analysis/edit-decisions.json"), {}) or {}
+        except Exception:  # noqa: BLE001 — a damaged file: detection alone
+            ed = {}
+        spans, _e, _w = manual_verse.resolve(manual_verse.detect(words, cfg.verse), ed)
+        out = [(s["src_start_ms"], s["src_end_ms"]) for s in spans]
+    if isinstance(p, EpisodePaths):
+        out += manual_verse.reel_spans(p.root, p.episode_id)
+    return out
 
 
 VERSE_WHY = ("WhyNot Cut never writes Quran text: the captions stay empty there and a marker on the timeline shows the "
@@ -421,9 +437,11 @@ def _verses(c: _Collector, spec: dict, vid: str, src: str):
                                                                                    mv.label(s.get("cue"), "en"))
         guessed = s.get("guessed_end") is True
         ar = (f"{vid}: آية مقروءة عند {tc}–{tc2} على التايملاين ({cue_ar}، في المصدر {stc}–{stc2}): {mv.LINE_AR}"
-              + ("؛ ونهاية الآية متخمّنة (وقفنا بعد 12 ثانية)، فحدّد نهايتها بالسمع" if guessed else ""))
+              + ("؛ ونهاية الآية متخمّنة (مفيش وقفة في أول 12 ثانية، فالكابشن متشال لحد أول وقفة بعدها)، فحدّد "
+                 "نهايتها بالسمع" if guessed else ""))
         en = (f"{vid}: a recited verse at {tc}-{tc2} on the timeline ({cue_en}; source {stc}-{stc2}): {mv.LINE_EN}"
-              + ("; the end of the verse is a guess (cut at 12 s): find the real end by ear" if guessed else ""))
+              + ("; the end of the verse is a guess (no pause in its first 12 s, so the captions stay off to the "
+                 "next pause): find the real end by ear" if guessed else ""))
         span = {"start_ms": int(s.get("start_ms") or 0), "end_ms": int(s.get("end_ms") or 0),
                 "src_start_ms": int(s.get("src_start_ms") or 0), "src_end_ms": int(s.get("src_end_ms") or 0),
                 "cue_ar": cue_ar, "cue_en": cue_en, "guessed_end": guessed}

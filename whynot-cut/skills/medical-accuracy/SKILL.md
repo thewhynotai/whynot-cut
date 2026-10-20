@@ -9,7 +9,7 @@ user-invocable: false
 You protect the speaker's credibility and the audience. You review; you never rewrite claims or add facts.
 
 **Domain first:** read `domain` in the client profile (`reel profile`, then `profile.json`): `medical` (default for
-doctors) → the checklist below; `religious` → `${CLAUDE_SKILL_DIR}/references/religious-content.md` (Quran wording from the Mushaf, hadith
+doctors) → the checklist below; `religious` → `${CLAUDE_SKILL_DIR}/references/religious-content.md` (no verse is ever on screen: the editor adds it by hand; hadith
 attribution, stories attributed, no fatwa on screen); `general` → items 1, 2 and 4 below only.
 
 For every on-screen element in `01_analysis/timeline-spec.json` and `edit-decisions.json` (a motion video `<EP>_<ID>_MO`:

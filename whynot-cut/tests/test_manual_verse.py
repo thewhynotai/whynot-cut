@@ -7,7 +7,7 @@ transcript gets empty captions, its overlapping graphics blanked or dropped (wit
 This file: detection and resolution (lib/manual_verse.py, pure) and the compiled plan (lib/plan.py). The other outputs
 (NEEDS-YOU, previews, burned captions, publish, the needs-you schema) are in test_manual_verse_outputs.py.
 The fixture verse is a placeholder of neutral words (tests/fixtures/manual_verse/speech.json): no Quran text beyond the
-common cue phrases. Case ids: D:/ClaudeData/claude-api-lane/work/manual-verse/cases.md.
+common cue phrases. Case ids: the builder's cases.md for the manual verse slot (work/manual-verse/).
 Run:  bash tools/test.sh -p test_manual_verse.py
 """
 import sys as _sys
@@ -135,7 +135,8 @@ class TestDetect(unittest.TestCase):
         a, b = verse_window(w)
         s = spans[0]
         self.assertEqual((s["src_start_ms"], s["src_end_ms"]), (a, b))      # starts AFTER «قال تعالى»
-        self.assertEqual((s["cue"], s["end"], s["guessed_end"], s["source"]), ("qala_taala", "pause", False, "detected"))
+        self.assertEqual((s["cue"], s["end"], s["guessed_end"], s["source"]), ("say", "pause", False, "detected"))
+        self.assertEqual(s["cue_text"], "قال تعالى")
 
     def test_D2_pause_right_after_the_cue_does_not_end_the_span(self):
         w = build_words(SC["after_pause"])
@@ -172,8 +173,9 @@ class TestDetect(unittest.TestCase):
         spans = MV().detect(w, cfg())
         start = w[4]["start_ms"]
         self.assertEqual(len(spans), 1, spans)
-        self.assertEqual((spans[0]["src_start_ms"], spans[0]["src_end_ms"]), (start, start + MV().CAP_MS))
-        self.assertEqual((spans[0]["end"], spans[0]["guessed_end"]), ("cap", True))
+        # fix round 1 (P1-1): past the cap the end is unknown, so the span runs on to the first real pause
+        self.assertEqual((spans[0]["src_start_ms"], spans[0]["src_end_ms"]), (start, word_at(w, "قمر", 7)["end_ms"]))
+        self.assertEqual((spans[0]["end"], spans[0]["guessed_end"]), ("cap_pause", True))
 
     def test_D8_isti_adha_basmala_verse_chain_merges(self):
         w = build_words(SC["chain"])
@@ -317,7 +319,8 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(kp(1400, 3000, [(2000, 3000)]), (1400, 2000))          # exactly 600 ms is kept
 
     def test_marker_comment_has_timecodes_and_cue_only(self):
-        s = {"id": "MV01", "src_start_ms": 3200, "src_end_ms": 7400, "cue": "qala_taala", "guessed_end": False}
+        s = {"id": "MV01", "src_start_ms": 3200, "src_end_ms": 7400, "cue": "say", "cue_text": "قال تعالى",
+             "guessed_end": False}
         c = MV().marker_comment(s)
         self.assertIn("بعد: قال تعالى", c)
         self.assertIn("00:00:03.200", c)

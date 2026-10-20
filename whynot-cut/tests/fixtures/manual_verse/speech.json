@@ -1,5 +1,5 @@
 {
-  "_about": "Manual verse fixtures (cases in D:/ClaudeData/claude-api-lane/work/manual-verse/cases.md). No Quran text: the recited span is the placeholder VERSE words (neutral nouns); only the common cue phrases are real. `|900` = a pause of 900 ms before the next word; every word lasts 350 ms with 50 ms between words.",
+  "_about": "Manual verse fixtures (case ids: the builder's cases.md for the manual verse slot). No Quran text: the recited span is the placeholder VERSE words (neutral nouns); only the common cue phrases are real. `|900` = a pause of 900 ms before the next word; every word lasts 350 ms with 50 ms between words.",
   "verse": ["شجرة", "نهر", "جبل", "سحاب", "قمر"],
   "scenarios": {
     "recited": "اهلا بيكم النهارده هنتكلم عن الصبر قال تعالى شجرة نهر جبل سحاب قمر |900 وده معناه ان الصبر مفتاح كل خير في حياتنا كلها",

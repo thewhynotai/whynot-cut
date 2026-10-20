@@ -38,10 +38,11 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 ## Recited verses (manual_verse)
 - WhyNot Cut never writes Quran text: not in a caption, a graphic, a card, the evidence or your summary. The editor
   adds every verse by hand from a trusted Mushaf.
-- `reel plan` finds a recited verse after «قال تعالى» (and «قال الله تعالى», «يقول تعالى», «قوله تعالى»), from the
-  basmala or the full isti'adha and, for a religious client, from the religious lexicon's common verse phrases. The
-  captions are empty there, a graphic over the verse is shortened or dropped, and the timeline gets a marker
-  «آية: يضيفها المونتير يدويًا». «آية», «سورة …» or «في الآية» alone never count.
+- `reel plan` finds a recited verse after a citation («قال تعالى», «قال الله عز وجل», «يقول الحق سبحانه», «قال
+  ربنا» and their kind), from the basmala or the full isti'adha and, for a religious client, from the religious
+  lexicon's common verse phrases. The captions are empty there (with no pause in 12 s, to the next pause), a graphic
+  over the verse is shortened or dropped, and the timeline gets a marker «آية: يضيفها المونتير يدويًا». A hook
+  title loses the basmala from its text. «آية», «سورة …» or «في الآية» alone never count.
 - Your decision wins. In `edit-decisions.json` (top level), `"manual_verse": [{"start_ms", "end_ms", "note"?}]` adds a
   recited span the plan missed. `"manual_verse_off": [{"start_ms", "end_ms"}]` removes a detected span that is not a
   recitation: a hadith after «قال الله تعالى», or a paraphrase. Times are source ms (or clocks). The note stays in the
