@@ -47,11 +47,19 @@ def P(a) -> Paths:
     return Paths(a.root, a.video_id)
 
 
+_RUN: dict = {}     # the parsed command main() is running (out() reads its name and --verbose; M5-T3)
+
+
 def out(obj, check: bool = True):
     """Print the command's one JSON document; a failed result (`ok: false`, a FAILED/REFUSED/BLOCKED status) exits 1,
     a refusal (`blocked`/`refused`) exits 2 (3.0 T2.2, lib/errors.py). check=False when `status` is a project state
-    (`reel status`, `reel next`), not this command's result."""
+    (`reel status`, `reel next`), not this command's result. M5-T3: the six top token sinks (lib/brief.SHORT_KEYS)
+    print their short form unless --verbose; the dropped keys go to a file named in `full` (failures stay whole)."""
     from lib.errors import emit
+    a = _RUN.get("a")
+    if a is not None and not getattr(a, "verbose", False):
+        from lib.brief import shorten
+        obj = shorten(a.cmd, obj, lambda: P(a))
     emit(obj, check)
 
 
@@ -163,7 +171,21 @@ def cmd_client_db(a):
     st = build(p, inv)
     if p.video_id and st["ready"]:
         set_status(p, "CLIENT_DATABASE_READY", "; ".join(st["issues"]), "client_db", [p.client_db])
+    from lib import client_brief                  # M5-T4: the brief's sources just changed (rebuilt only on a change)
+    from lib.errors import Guidance
+    try:
+        st["client_brief"] = client_brief.ensure(p)["summary"]
+    except (Guidance, OSError) as e:              # a brief problem never fails the database build
+        st["client_brief"] = f"not rebuilt: {getattr(e, 'error', e)} (run `reel client-brief`)"
     out(st)
+
+
+def cmd_client_brief(a):
+    """M5-T4: write output/client_database/client-brief.md (brand, people with gender and honorifics, fonts and pairs,
+    style, standing rules, review domains; at most 1,000 tokens) when it is missing or one of its sources changed
+    (lib/client_brief.py); --force rebuilds anyway. Prints the path and a one-line summary."""
+    from lib import client_brief
+    out(client_brief.ensure(Path(a.root).expanduser(), force=a.force))
 
 
 def refuse_stale_window(p: Paths):
@@ -945,6 +967,30 @@ def project_notes(p: Paths) -> dict:
     return extra
 
 
+def cmd_brief(a):
+    """M5-T3: the item's state, key numbers, open issues and next step in at most 1,500 tokens (lib/brief.py); the
+    lead reads this instead of the project's JSON files. Read-only. --json: the document with the facts."""
+    from lib import brief
+    p = P(a)
+    if getattr(p, "episode_id", None) and not a.video_id:
+        out({"refused": "`reel brief` is per video (a clip, a reel or a motion video); an episode has no brief yet",
+             "how": "Run it with --video-id <ID> of a reel (`reel reels` lists them)"})
+    doc = brief.build(p, next_doc=next_doc)
+    if a.json:
+        out(doc, check=False)
+        return
+    sys.stdout.write(doc["text"])
+
+
+def cmd_transcript_compact(a):
+    """M5-T3: write 02_transcription/transcript.compact.md when it is missing or stale (lib/transcript_compact.py);
+    prints its path and a one-line summary. transcribe and transcript-correct write it too."""
+    from lib import transcript_compact
+    r = transcript_compact.ensure(P(a))
+    r["summary"] = f"{r['segments']} lines, {r['low_confidence']} low-confidence words marked ⟨word?⟩"
+    out(r)
+
+
 def cmd_status(a):
     p = P(a)
     out(dict(load_status(p), **project_notes(p)), check=False)   # "status": "BLOCKED" is the state, not a failure
@@ -1008,7 +1054,11 @@ def next_doc(p: Paths) -> dict:
     from lib.motion_config import is_motion
     if is_motion(p):
         from lib.motion_qc import motion_next
-        return dict(motion_next(p), **project_notes(p))
+        doc = dict(motion_next(p), **project_notes(p))
+        cb = client_brief_notice(p)
+        if cb:
+            doc["notices"] = list(doc.get("notices") or []) + [cb]
+        return doc
     from lib import ref_style
     from lib.people import profile_notice as people_notice
     rs = ref_style.next_step(p)     # Stage 4 is client-level: author once, reuse, flag when the references change
@@ -1045,13 +1095,25 @@ def next_doc(p: Paths) -> dict:
     return {"status": status, "profile": active_profile(p.root), "next": todo[0] if todo else "done",
             "remaining": todo, "stale": stale,
             "reference_style": {"state": rs["client"]["state"], "video": rs["video"]["state"], "message": rs["client"]["message"]},
-            "notices": rs["notices"] + [n for n in (people_notice(p.root), parked and parked["how"]) if n], **extra}
+            "notices": rs["notices"] + [n for n in (people_notice(p.root), parked and parked["how"],
+                                                    client_brief_notice(p)) if n], **extra}
+
+
+def client_brief_notice(p) -> str | None:
+    """M5-T4: the `reel next` line when output/client_database/client-brief.md is missing or stale (read-only; None
+    when it is current or there is no client database yet). Never fails `reel next`."""
+    from lib import client_brief
+    try:
+        return client_brief.notice(p.root)
+    except Exception:  # noqa: BLE001 — a damaged brief or fingerprint is rebuilt by `reel client-brief`, not here
+        return "client brief: could not be checked: run `reel client-brief`"
 
 
 EXTRAS = {"ae-script", "ae-build", "ae-render", "ps-script", "ps-build", "mogrt-build"}
 NO_ROOT = {"board", "serve", "perf-report", "setup", "doctor", "py", "model-download", "gpu-enable", "bench", "ppro-install", "ppro-status", "ppro-probe", "profile", "scaffold", "settings",
            "ae-status", "ae-probe", "motion-icons", "motion-library", "validate"}
-NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox", "lock", "episode-sheet"}
+NO_ID = NO_ROOT | {"discover", "client-db", "client-init", "mogrt-build", "inbox", "lock", "episode-sheet",
+                   "client-brief"}
 OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (onboarding), per video with one
 
 # One writer per client folder (3.0 T1.8). Every command chooses (test_writer_lock checks each is in exactly one):
@@ -1063,14 +1125,14 @@ OPTIONAL_ID = {"ref-analyze", "ref-style"}   # client-level without a video id (
 #                cache are deterministic caches) but runs discovery when there is none yet, so it writes then.
 # scaffold creates a new folder: there is nothing to lock yet (it runs before the lock is taken).
 CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze", "preflight", "conform", "transcribe",
-               "transcript-correct", "transcript-verify", "transcript-relisten", "audio-clean", "plan",
+               "transcript-correct", "transcript-verify", "transcript-relisten", "transcript-compact", "audio-clean", "plan",
                "review-flags", "removed-review", "approve-plan", "previews", "sfx", "preview-video", "ppro-build", "ppro-frames", "premiere", "verify",
                "qc", "handoff", "mogrt-build", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build",
-               "episode-sheet"}
+               "episode-sheet", "client-brief"}
 # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
 # and works while another session holds the client (gate G2).
 CORE_READS = {"board", "serve", "perf-report", "setup", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
-              "status", "next", "lock", "doctor", "validate"}
+              "status", "next", "lock", "doctor", "validate", "brief"}
 WRITES_IF = {
     "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
                                                 / "output/discovery/input-inventory.json").exists(),
@@ -1614,6 +1676,8 @@ CORE_COMMANDS: dict[str, str] = {
     "client-init": "create the client's reel-profile from a shipped profile or the blank template",
     "discover": "inventory of the client folder: inputs, footage, brand files, environment",
     "client-db": "client database: brand colours, fonts, photos and assets",
+    "client-brief": "write output/client_database/client-brief.md (brand, people, fonts, style, rules, review domains "
+                    "in <= 1,000 tokens) when a source changed; read it before the client's files",
     "client-move": "take the client folder to another place (a dry run until --apply; the old folder is left in "
                    "place), or --already-moved: make the database of a folder moved by hand portable",
     "client-clone": "start a new client from this one's brand database (no media; a dry run until --apply)",
@@ -1628,6 +1692,8 @@ CORE_COMMANDS: dict[str, str] = {
     "transcript-correct": "apply proofread corrections to the transcript",
     "transcript-verify": "record that the transcript was proofread",
     "transcript-relisten": "re-transcribe flagged words from the audio",
+    "transcript-compact": "write 02_transcription/transcript.compact.md (segment ids, start and words; no word timing) "
+                          "when it is missing or stale; prints its path",
     "audio-clean": "clean the dialogue and remove pauses, with before/after measurements",
     "plan": "validate and compile edit-decisions.json into the build plan",
     "validate": "check an authored JSON file (edit-decisions, reels-plan, motion-script, publish...) against its schema",
@@ -1661,6 +1727,8 @@ CORE_COMMANDS: dict[str, str] = {
     "qc": "run the QC checks on the build and write the report",
     "handoff": "write the editor handoff for a finished or paused edit",
     "status": "show the project status record",
+    "brief": "the item's state, key numbers, open issues and next step in at most 1,500 tokens (read this, not the "
+             "project's JSON files); --json for the document",
     "board": "one table of every client in the clients folder: each video's state and next step (--json for the panel)",
     "next": "what the next step is (resumable workflow), with stale-input warnings",
     "lock": "one writer per client folder: show (--status) or release (--release, lead only) output/.whynot-lock",
@@ -1709,6 +1777,9 @@ def main(argv: list[str] | None = None):
     ap.add_argument("--video-id", help="stable project id (default: footage file stem)")
     ap.add_argument("--profile", help="shipped profile id to apply (default: the id in the client's own reel-profile; never matched by folder name)")
     ap.add_argument("--episode", help="podcast episode id (`reel episodes` lists them)")
+    ap.add_argument("--verbose", action="store_true",
+                    help="print the full JSON document (previews, plan, ppro-build, transcript-correct, audio-clean and "
+                         "qc print a short form by default, with the full one in the file named in `full`)")
     from lib import motion_cli, podcast_cli
     table = command_table()
     sub = ap.add_subparsers(dest="cmd", required=True, title="commands", metavar="<command>")
@@ -1719,6 +1790,7 @@ def main(argv: list[str] | None = None):
         sp.add_argument("--video-id", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
         sp.add_argument("--profile", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
         sp.add_argument("--episode", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+        sp.add_argument("--verbose", action="store_true", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
         podcast_cli.add_args(name, sp)
         motion_cli.add_args(name, sp)
         if name in ("preflight", "transcribe"):
@@ -1836,6 +1908,11 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--yes", action="store_true", help="with --adopt: write the merge")
         if name == "previews":
             sp.add_argument("--no-composite", action="store_true")
+        if name == "client-brief":
+            sp.add_argument("--force", action="store_true", help="rebuild even when no source changed")
+        if name == "brief":
+            sp.add_argument("--json", action="store_true", help="print the JSON document (text, tokens, facts) "
+                                                               "instead of the brief")
         if name == "caption-looks":
             sp.add_argument("--look", action="append", metavar="NAME",
                             help="only these looks (a comma list or repeated; the starter names clean, box, "
@@ -1995,7 +2072,11 @@ def run(a):
             if a.cmd not in OPTIONAL_ID:
                 raise SystemExit("--video-id required (found %d source files; `reel inbox` lists them)" % len(src))
     canonical_video_id(a)
-    globals()["cmd_" + a.cmd.replace("-", "_")](a)
+    _RUN["a"] = a
+    try:
+        globals()["cmd_" + a.cmd.replace("-", "_")](a)
+    finally:
+        _RUN.pop("a", None)
 
 
 if __name__ == "__main__":

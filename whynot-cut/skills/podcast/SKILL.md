@@ -19,6 +19,7 @@ reel episodes --root "<CLIENT>"                         # episodes in data/Episo
 reel episode-next --root "<CLIENT>" --episode <EP>      # what's next for this episode (resumable), stale steps, reels
 reel settings --root "<CLIENT>"                         # language, approval, whisper_model
 reel profile --root "<CLIENT>"                          # client profile (NONE -> /whynot-cut:new-client first)
+reel client-brief --root "<CLIENT>"                     # the client in <= 1,000 tokens (rebuilt only on a change)
 ```
 - Speak the editor's `language` (plugin option: `${user_config.language}`; a client or machine file overrides it,
   `reel settings` shows the one in effect): the candidates table, the plan summaries and the reports. On-screen text
@@ -33,6 +34,19 @@ reel profile --root "<CLIENT>"                          # client profile (NONE -
 - `reel inbox` lists episodes too and warns when a long 16:9 file sits in `data/Raw` (tell the editor to move it).
 - `<EP>` = the id `reel episodes` prints (Arabic file names get a short hash). Reels become clip projects named
   `<EP>_<RID>`, e.g. `EP12_R03`.
+- **Read `client-brief.md` first.** `reel client-brief --root "<CLIENT>"` writes
+  `output/client_database/client-brief.md` (brand, people with gender and honorifics, fonts and pairs, style,
+  standing rules, review domains; at most 1,000 tokens) and rebuilds it only when one of its sources changed. Every
+  video starts from it: read it, and give its path to the agents you spawn, instead of opening `profile.json`,
+  `brand-tokens.json`, `typography.json`, `style.json` or `rules.json`; open one of those only when the brief points
+  at it or you are changing it. `reel next` says when the brief is missing or stale.
+- **Read `reel brief`, not the JSON files.** `reel brief --root "<CLIENT>" --video-id <EP>_<RID>` prints the item's
+  state, key numbers, open items and next step in at most 1,500 tokens. Read it instead of opening
+  `project-status.json`, `qc-results.json`, `review-flags.json` or the timeline spec; open a file only when the brief
+  points at it. Agents (story-editor, reviewers, proofreaders) read the compact transcript for the words (context,
+  review, claims): `02_transcription/transcript.compact.md` (segment ids, start, words), not `transcript.json`; word ids
+  and exact times still come from `words.json` (proofreader chunks, story-editor timings, `cut_words`).
+  `reel transcript-compact` refreshes it when the brief says it is stale or missing.
 
 ## 1. Stages (agents in parallel where marked ∥)
 | Stage | Who | Commands | Done when |

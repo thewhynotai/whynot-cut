@@ -448,5 +448,69 @@ class TestApprovalConsent(unittest.TestCase):
         self.assertEqual(body.count("CONSENT_RULE"), 2, "both prefs_line branches (none yet / values) carry it")
 
 
+class TestBriefs(unittest.TestCase):
+    """Addendum M5-T3 (Task 58): the edit, podcast, motion, revise and status skills name `reel brief` and
+    02_transcription/transcript.compact.md and say to read them instead of the JSON files."""
+    SKILLS5 = ("edit", "podcast", "motion", "revise", "status")
+    COMPACT_FOR_WORDS = "read the compact transcript for the words (context, review, claims)"
+    IDS_AND_TIMES = ("word ids and exact times still come from `words.json` (proofreader chunks, story-editor timings, "
+                     "`cut_words`)")
+
+    def test_m5_t3_skills_name_the_brief_and_the_compact_transcript(self):
+        for name in self.SKILLS5:
+            s = text(name)
+            with self.subTest(name):
+                self.assertRegex(s, r"`reel brief --root \"<CLIENT(_FOLDER)?>\" --video-id <[^`]+`")
+                self.assertIn("transcript.compact.md", s)
+                self.assertIn("`reel transcript-compact`", s)
+                para = next((b for _, b in paragraphs(s) if "Read `reel brief`, not the JSON files" in b), "")
+                self.assertTrue(para, "the read-the-brief rule is missing")
+                for f in ("project-status.json", "qc-results.json", "transcript.json", "words.json"):
+                    self.assertIn(f, para, f"{name}: the rule must name {f}")
+                self.assertIn("instead of", para)
+                self.assertIn("1,500 tokens", para)
+                flat = " ".join(para.split())
+                # fu1 (review b2db1e7 P2-3): the compact is for reading the words; word ids and exact times are not in
+                # it, so proofreaders, the story-editor and cut_words still get them from words.json
+                for pin in (self.COMPACT_FOR_WORDS, self.IDS_AND_TIMES):
+                    self.assertIn(pin, flat, f"{name}: the compact / words.json split is not stated")
+                self.assertNotRegex(flat, r"instead of `transcript\.json` or `words\.json`",
+                                    f"{name}: the compact does not replace words.json (no word ids, no ms times)")
+
+
+
+class TestClientBrief(unittest.TestCase):
+    """Addendum M5-T4 (Task 59): the edit, podcast and motion skills run `reel client-brief` and say to read
+    client-brief.md first; the client-researcher, story-editor and motion-director agents read it first (the
+    researcher rebuilds it after a database change)."""
+    SKILLS3 = ("edit", "podcast", "motion")
+    AGENTS3 = ("client-researcher", "story-editor", "motion-director")
+
+    def test_m5_t4_skills_read_the_client_brief_first(self):
+        for name in self.SKILLS3:
+            s = text(name)
+            with self.subTest(name):
+                self.assertRegex(s, r'reel client-brief --root "<CLIENT(_FOLDER)?>"')
+                para = next((b for _, b in paragraphs(s) if "Read `client-brief.md` first" in b), "")
+                self.assertTrue(para, "the read-the-client-brief rule is missing")
+                flat = " ".join(para.split())
+                self.assertIn("1,000 tokens", flat)
+                self.assertIn("instead of", flat)
+                for f in ("profile.json", "typography.json", "style.json", "rules.json"):
+                    self.assertIn(f, flat, f"{name}: the rule must name {f} as what not to open")
+                self.assertLess(s.index("Read `client-brief.md` first"), s.index("## 1."),
+                                "the rule belongs to the start (section 0)")
+
+    def test_m5_t4_agents_read_the_client_brief_first(self):
+        for name in self.AGENTS3:
+            agent = " ".join((SK / "agents" / f"{name}.md").read_text(encoding="utf-8").split())
+            with self.subTest(name):
+                self.assertRegex(agent, r"\*\*(Read )?`output/client_database/client-brief\.md` first")
+                self.assertIn("1,000 tokens", agent)
+                self.assertIn("reel client-brief", agent)
+        researcher = " ".join((SK / "agents" / "client-researcher.md").read_text(encoding="utf-8").split())
+        self.assertIn('run `reel client-brief --root "<CLIENT>"` so it is rebuilt', researcher)
+
+
 if __name__ == "__main__":
     unittest.main()

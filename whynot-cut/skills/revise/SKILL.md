@@ -16,6 +16,14 @@ Every `reel` command for a project takes `--root "<CLIENT_FOLDER>" --video-id <I
 `reel plan --root "<CLIENT_FOLDER>" --video-id C0238`. Other options come from `reel <command> --help` or the owning
 agent: never guess an option name.
 
+**Read `reel brief`, not the JSON files.** `reel brief --root "<CLIENT>" --video-id <ID>` prints the item's state, key
+numbers, open items and next step in at most 1,500 tokens. Read it instead of opening `project-status.json`,
+`qc-results.json`, `review-flags.json` or the timeline spec; open a file only when the brief points at it. Agents
+(story-editor, reviewers, proofreaders) read the compact transcript for the words (context, review, claims):
+`02_transcription/transcript.compact.md` (segment ids, start, words), not `transcript.json`; word ids and exact times
+still come from `words.json` (proofreader chunks, story-editor timings, `cut_words`). `reel transcript-compact`
+refreshes it when the brief says it is stale or missing.
+
 ## Clip videos (Premiere)
 1. **Restate each comment** as a concrete, checkable change. "Remove all pauses" becomes `global.remove_pauses` (min 250 ms, pad 80 ms) plus re-verification that no words are lost.
    If a comment is a question ("did you make the text like the ref?"), answer it honestly first, with evidence, before changing anything.

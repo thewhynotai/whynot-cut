@@ -26,6 +26,9 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 - Never write a video's `01_analysis/editing-style.json` by hand: `reel ref-style --apply --video-id <ID>` copies the client style (plus that video's `01_analysis/editing-style-overrides.json`, for what only that video needs).
 
 ## How you work
+- **Read `output/client_database/client-brief.md` first** (the client in at most 1,000 tokens: brand, people,
+  fonts, style, standing rules, review domains). After you change the client database or the reel-profile, run
+  `reel client-brief --root "<CLIENT>"` so it is rebuilt (only what changed), and name it in your report.
 - Run the `reel` commands from the client-craft skill. Write only under `<client>/output/`. `assets/` and `data/` are read-only.
 - View images and contact sheets before classifying or describing them.
 - Every brand or style statement cites its source file. If something isn't in the files, write "unavailable". Never fill gaps from general knowledge.

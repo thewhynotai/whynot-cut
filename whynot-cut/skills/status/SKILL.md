@@ -33,15 +33,24 @@ video.
 ## One clip: is it ready?
 1. Run, in this message, so the evidence is fresh:
    ```bash
-   reel next --root "<CLIENT_FOLDER>" --video-id <ID>
-   reel qc   --root "<CLIENT_FOLDER>" --video-id <ID>
+   reel brief --root "<CLIENT_FOLDER>" --video-id <ID>
+   reel next  --root "<CLIENT_FOLDER>" --video-id <ID>
+   reel qc    --root "<CLIENT_FOLDER>" --video-id <ID>
    ```
+   **Read `reel brief`, not the JSON files.** `reel brief --root "<CLIENT_FOLDER>" --video-id <ID>` prints the item's
+   state, key numbers, open items and next step in at most 1,500 tokens. Read it instead of opening
+   `project-status.json`, `qc-results.json`, `review-flags.json` or the timeline spec; open a file only when the brief
+   points at it. Agents (story-editor, reviewers, proofreaders) read the compact transcript for the words (context,
+   review, claims): `02_transcription/transcript.compact.md` (segment ids, start, words), not `transcript.json`; word
+   ids and exact times still come from `words.json` (proofreader chunks, story-editor timings, `cut_words`).
+   `reel transcript-compact` refreshes it when the brief says it is stale or missing.
    `next` lists `stale` steps: anything whose inputs changed after it ran (e.g. audio re-cleaned after the plan).
    A stale step means the earlier "done" no longer holds. `reel status --root "<CLIENT>" --video-id <ID>` prints the
    project's status record itself (status, history, blockers). Both name a `parked_previous` Premiere project (a
    build stopped between parking the old `.prproj` and saving the new one; its `how` says how to rename it back) and
    `version_warnings` (a plan compiled by another engine version: re-run `reel plan`).
-2. Read these and compare their timestamps (a verdict older than the latest build is stale). They are all under
+2. When the brief points at one of these (or it cannot run), read it and compare their timestamps (a verdict older
+   than the latest build is stale). They are all under
    `<CLIENT_FOLDER>/output/projects/<ID>/`: list that folder (most file names don't contain the clip id, so a search
    by name finds only the raw clip). If the engine can't run, these files are your only evidence; say so.
    - `08_quality_control/qc-results.json` and `validation-report.md`

@@ -20,6 +20,10 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 - **Medical rewording.** whynot-cut:medical-reviewer asked to reword-to-match: apply the transcript wording exactly.
 
 ## How you work
+- **Read `output/client_database/client-brief.md` first**: people with gender and honorifics, brand, fonts and
+  pairs, style, standing rules and review domains in at most 1,000 tokens. It replaces opening `profile.json`,
+  `typography.json`, `brand-tokens.json` or `rules.json`; if it is missing or stale, ask the lead to run
+  `reel client-brief`.
 - Read the whole transcript, the client profile (`reel profile`, `notes.md`, `style.json`) and the reference style before writing anything: `01_analysis/editing-style.json` + `editing-rules.json` (the video's copy of the client style, made by `reel ref-style --apply`) and the client's `output/client_database/reference_style/editing-style-analysis.md`.
 - Never edit the copies or re-author the client style. When this video deliberately differs from the client's style (a list reel, a different caption size), write `01_analysis/editing-style-overrides.json` (`reason`, `style`, `rules`) and re-run `reel ref-style --apply`; a standing change goes to the lead for the client style and profile.
 - Write the analysis files and `edit-decisions.json`, then run `reel plan` until it compiles with no errors.

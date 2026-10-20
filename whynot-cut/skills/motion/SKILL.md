@@ -21,8 +21,25 @@ approve the plan.
 ```bash
 reel episode-next --root "<CLIENT>" --episode <EP>      # episode state, picked reels (motion ones end in _MO)
 reel next --root "<CLIENT>" --video-id <EP>_<ID>_MO     # the motion project's next step (resumable), stale steps
+reel brief --root "<CLIENT>" --video-id <EP>_<ID>_MO    # state, numbers, open items, next step in <= 1,500 tokens
+reel client-brief --root "<CLIENT>"                     # the client in <= 1,000 tokens (rebuilt only on a change)
 reel ae-status                                          # is the WhyNot Cut Bridge alive in After Effects?
 ```
+**Read `reel brief`, not the JSON files.** `reel brief --root "<CLIENT>" --video-id <EP>_<ID>_MO` prints the item's
+state, key numbers, open items and next step in at most 1,500 tokens. Read it instead of opening `project-status.json`,
+`qc-results.json`, `review-flags.json` or the timeline spec; open a file only when the brief points at it. Agents
+(motion-director, reviewers) read the compact transcript for the words (context, review, claims):
+`02_transcription/transcript.compact.md` (segment ids, start, words), not `transcript.json`; word ids and exact times
+still come from `words.json` (proofreader chunks, story-editor timings, `cut_words`). `reel transcript-compact`
+refreshes it when the brief says it is stale or missing.
+
+**Read `client-brief.md` first.** `reel client-brief --root "<CLIENT>"` writes
+`output/client_database/client-brief.md` (brand, people with gender and honorifics, fonts and pairs, style,
+standing rules, review domains; at most 1,000 tokens) and rebuilds it only when one of its sources changed. Every
+video starts from it: read it, and give its path to the agents you spawn, instead of opening `profile.json`,
+`brand-tokens.json`, `typography.json`, `style.json` or `rules.json`; open one of those only when the brief points
+at it or you are changing it. `reel next` says when the brief is missing or stale.
+
 Audio-only episodes (`.mp3 .wav .m4a .aac .flac` in `data/Episodes/`) can only become motion videos.
 Comments on a finished or planned motion video go through `/whynot-cut:revise` (its motion route).
 

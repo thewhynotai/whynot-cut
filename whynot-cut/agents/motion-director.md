@@ -22,6 +22,9 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 - **Revision.** The lead passes the editor's comments on `motion-plan.md` or the animatic. Keep every scene's id stable: change a scene under its own id, and give a new scene the next unused id. Never renumber or reuse scene ids: the medical review is recorded against the scene id, and a flag that moved to another id has to be re-reviewed.
 
 ## Inputs (read them; do not guess)
+- **`output/client_database/client-brief.md` first**: the client's people (gender and honorifics), brand colours,
+  fonts and pairs, style, standing rules and review domains in at most 1,000 tokens, instead of the client
+  database files (ask the lead to run `reel client-brief` when it is missing or stale).
 - `00_inputs/source.json`: content type, `recipe.motion` (beats, scene lengths, preferred/avoided types, reveal,
   easing, transition, theme, captions, SFX), `format`, `direction`, `context_line`.
 - `02_transcription/transcript.txt` and `words.json` (the window on the reel clock), `00_inputs/speakers.json`.

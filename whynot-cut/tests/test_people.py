@@ -409,7 +409,8 @@ class TestReviewRound1(unittest.TestCase):
         prof = json.loads(pj.read_text(encoding="utf-8"))
         prof["people"] = [KARIM]
         pj.write_text(json.dumps(prof, ensure_ascii=False), encoding="utf-8")
-        self.assertEqual(motion_next(), [])
+        # M5-T4: the client-brief notice (no brief built in this client yet) is the only other line
+        self.assertEqual([n for n in motion_next() if not n.startswith("client brief ")], [])
 
     def test_lead_skills_carry_the_gender_rule(self):
         for s in ("new-client", "start", "edit", "podcast", "revise", "autopilot", "handoff", "status"):

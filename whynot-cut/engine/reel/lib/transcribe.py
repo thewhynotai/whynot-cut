@@ -299,6 +299,11 @@ def finalize(paths: Paths, meta: dict, segs: list, words: list) -> dict:
     write_json(out / "words.json", {"meta": meta, "words": words})
     write_text(out / "transcript.txt", "\n".join(
         f"[{fmt_ts(s['start_ms'], '.')} --> {fmt_ts(s['end_ms'], '.')}] {s['text']}" for s in segs) + "\n")
+    try:                    # M5-T3: the compact transcript the story-editor and reviewers read (no word timing)
+        from . import transcript_compact
+        transcript_compact.write(paths)
+    except Exception:  # noqa: BLE001 — a reading aid: never blocks the transcript (`reel brief` shows it as stale)
+        pass
 
     cues, short = caption_cues(words)
     srtlib.write_srt(out / "subtitles.srt", cues)          # 1) readable 1-2 line subtitles
