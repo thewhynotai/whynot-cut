@@ -1676,5 +1676,42 @@ class TestRecordTempFiles(_Out):
             self.assertFalse(_scanner_copy(ours), ours)
 
 
+class TestT26R4CopyFile(_Out):
+    """Task 26 r4 (review 17729fc P3-3): the sidecar also names the copy file it describes (its size and time), so a
+    copy replaced under its name (a restore or a sync of that one file) is made again, never reused."""
+
+    def test_the_sidecar_names_its_copy(self):
+        m, r = self.conform("tag60_real30")
+        side, out = json.loads(Path(r["sidecar"]).read_text(encoding="utf-8")), Path(r["path"])
+        self.assertEqual((side["out_size"], side["out_mtime"]), (out.stat().st_size, out.stat().st_mtime))
+
+    def test_a_replaced_copy_is_made_again(self):
+        for case in ("an older time", "another file"):
+            with self.subTest(case):
+                m, r1 = self.conform("tag60_real30")
+                out = Path(r1["path"])
+                if case == "an older time":
+                    old = time.time() - 86400
+                    os.utime(out, (old, old))
+                else:
+                    shutil.copyfile(fx("cfr30"), out)
+                planted = out.stat().st_mtime_ns
+                m, r2 = self.conform("tag60_real30")
+                self.assertTrue(r2["ok"], r2)
+                self.assertFalse(r2["reused"])
+                self.assertNotEqual(out.stat().st_mtime_ns, planted)
+                m, r3 = self.conform("tag60_real30")
+                self.assertTrue(r3["reused"])                                       # the control: untouched
+
+    def test_a_sidecar_from_before_is_made_again(self):
+        m, r1 = self.conform("tag60_real30")
+        side = Path(r1["sidecar"])
+        rec = json.loads(side.read_text(encoding="utf-8"))
+        side.write_text(json.dumps({k: v for k, v in rec.items() if k not in ("out_size", "out_mtime")}),
+                        encoding="utf-8")
+        m, r2 = self.conform("tag60_real30")
+        self.assertFalse(r2["reused"])
+
+
 if __name__ == "__main__":
     unittest.main()

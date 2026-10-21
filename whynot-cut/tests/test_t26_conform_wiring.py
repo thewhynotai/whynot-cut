@@ -37,8 +37,8 @@ from lib.common import Paths, ffmpeg_exe, read_json, write_json  # noqa: E402
 
 FX = SK / "tests" / "fixtures" / "media_normalise"
 CLI = SK / "engine" / "reel" / "cli.py"
-KEYS = {"state", "path", "parts", "cfr_fps", "source_tag", "source_size", "source_mtime", "source_fp", "reason", "lines",
-        "at"}
+KEYS = {"state", "path", "parts", "cfr_fps", "source_tag", "source_size", "source_mtime", "source_fp", "copy_files",
+        "reason", "lines", "at"}
 ARABIC = re.compile("[؀-ۿ]")
 
 
@@ -1319,6 +1319,14 @@ class _R3(_R2):
         os.utime(cp, (old, old))
         return cp
 
+    def edit(self, f, offset, data=b"\xab" * 4096):
+        st = f.stat()
+        with open(f, "r+b") as h:
+            h.seek(offset)
+            h.write(data)
+        os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+        self.assertEqual((f.stat().st_size, f.stat().st_mtime_ns), (st.st_size, st.st_mtime_ns))
+
     def link_dir(self, link: Path, target: Path):
         """A directory junction (Windows) or symlink, removed at the end as a link only (never its target's files)."""
         try:
@@ -1380,14 +1388,6 @@ class TestR3TouchedSource(_R3):
 class TestR3SameSizeEdit(_R3):
     """P3-5: a same-size edit with the time put back (a metadata tool editing in place with «keep the date»): the
     record keeps a cheap content check (sha256 of the size and the first and last FP_BYTES), compared at every build."""
-
-    def edit(self, f, offset, data=b"\xab" * 4096):
-        st = f.stat()
-        with open(f, "r+b") as h:
-            h.seek(offset)
-            h.write(data)
-        os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
-        self.assertEqual((f.stat().st_size, f.stat().st_mtime_ns), (st.st_size, st.st_mtime_ns))
 
     def test_a_same_size_edit_with_its_time_put_back_is_never_imported(self):
         p, f = self.ready()
@@ -1513,55 +1513,106 @@ class TestR3ClaimCannotBeMade(_R3):
         self.assertGreaterEqual(len(calls), 3)
 
 
-class TestR3ForeignClaim(_R3):
-    """P3-1: where the volume takes OS locks and this job holds the item's one, another computer's claim written by a
-    job that held that OS lock too is a leftover (that job is gone), however young. A claim from a computer that had
-    no OS lock (a Mac on an SMB share without locks), or any claim on a volume without OS locks, keeps the 12 h rule."""
+class TestR4Heartbeat(_R3):
+    """Review 17729fc P3-1: the job rewrites its claim (`beat_at`) every HEARTBEAT_S while it runs. Another computer's
+    claim counts while its file time is younger than CLAIM_STALE_S, whatever locks either side has: in a OneDrive or
+    Dropbox folder each PC locks its own replica for real, and only the claim file is synced. A silent claim (a
+    crashed or sleeping computer) is gone after that bound, not after 12 h."""
 
-    def test_another_computers_claim_is_a_leftover_where_the_os_lock_is_ours(self):
+    def fast(self):
+        for name, v in (("HEARTBEAT_S", 0.2), ("CLAIM_STALE_S", 1.5)):
+            m = mock.patch.object(media, name, v, create=True)
+            m.start()
+            self.addCleanup(m.stop)
+
+    def slow_job(self, p):
+        """Machine A: the job in a thread, its encode held until `release` is set."""
+        started, release, out = threading.Event(), threading.Event(), {}
+        real = MN.conform
+
+        def slow(*a, **k):
+            started.set()
+            release.wait(60)
+            return real(*a, **k)
+        m = mock.patch.object(MN, "conform", slow)
+        m.start()
+        self.addCleanup(m.stop)
+        t = threading.Thread(target=lambda: out.update(res=media.run_conform_job(p)))
+        t.start()
+        self.addCleanup(lambda: (release.set(), t.join(60)))
+        self.assertTrue(started.wait(60))
+        return release, t, out
+
+    def test_two_computers_a_running_jobs_claim_stays_live_on_the_other(self):
+        from lib import writer_lock as WL
+        self.fast()
         p, f = self.clip("tag60_real30")
         self.preflight(p, f)
-        cp = self.foreign_claim(p, os_lock=True)
+        release, t, out = self.slow_job(p)
+        cp, beats = p.p(CLAIM), set()
+        with mock.patch.object(WL, "same_host", lambda rec: False):          # machine B: the claim is from another PC
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < 3 * media.CLAIM_STALE_S:
+                self.assertTrue(media._claim_live(cp), "a running job's claim was judged gone")
+                rec = media._read_claim(cp)
+                if rec:
+                    beats.add(rec.get("beat_at"))
+                time.sleep(0.1)
+        release.set()
+        t.join(60)
+        self.assertEqual(out["res"]["state"], "ready")
+        self.assertGreaterEqual(len(beats - {None}), 3)                        # it kept beating
+        self.assertFalse(cp.exists())
+
+    def test_a_silent_claim_from_another_computer_is_gone_after_the_bound(self):
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        cp = self.foreign_claim(p, age_s=media.CLAIM_STALE_S + 60)              # a Mac asleep mid-job, 10+ min
+        self.assertLess(media.CLAIM_STALE_S, 3600)
         self.assertFalse(media._job_running(p))
         self.assertEqual(self.job(p, wait_s=5)["state"], "ready")
         self.assertFalse(cp.exists())
 
-    def test_a_pending_record_behind_such_a_claim_is_reaped(self):
+    def test_a_pending_record_behind_a_silent_claim_is_reaped(self):
         p, f = self.clip("tag60_real30")
         self.preflight(p, f)
         self.age(p, 1800)
-        self.foreign_claim(p, os_lock=True)
+        self.foreign_claim(p, age_s=media.CLAIM_STALE_S + 60)
         self.assertOriginal(self.imp(p, f), "failed")
 
-    def test_the_twelve_hour_rule_stays_where_it_must(self):
-        for case in ("the writer had none", "an older claim", "no os lock here"):   # the lock-less one last: it stays
-            with self.subTest(case):
-                p, f = self.clip("tag60_real30", vid=f"F{len(case)}")
+    def test_a_beating_claim_from_another_computer_counts_whatever_its_locks(self):
+        for i, kw in enumerate(({"os_lock": True}, {"os_lock": False}, {}, {"os_lock": True})):
+            with self.subTest(kw=kw, os_locks_here=i < 3):
+                p, f = self.clip("tag60_real30", vid=f"B{i}")
                 self.preflight(p, f)
-                if case == "no os lock here":
-                    self.no_os_locks()
-                cp = self.foreign_claim(p, **({} if case == "an older claim" else
-                                              {"os_lock": case == "no os lock here"}))
+                if i == 3:
+                    self.no_os_locks()                                          # last: it stays on
+                cp = self.foreign_claim(p, age_s=5, **kw)                       # a synced folder: a live job there
                 before = cp.read_bytes()
                 self.assertTrue(media._job_running(p))
                 self.assertEqual(self.job(p, wait_s=0)["job"], "running")
                 self.assertEqual(cp.read_bytes(), before)
 
-    def test_the_claim_says_whether_its_job_holds_an_os_lock(self):
-        for locks in (True, False):
-            with self.subTest(locks=locks):
-                p, f = self.clip("tag60_real30", vid=f"L{int(locks)}")
-                self.preflight(p, f)
-                if not locks:
-                    self.no_os_locks()
-                real, seen = MN.conform, []
-
-                def spy(*a, **k):
-                    seen.append(json.loads(p.p(CLAIM).read_text(encoding="utf-8")))
-                    return real(*a, **k)
-                with mock.patch.object(MN, "conform", spy):
-                    self.assertEqual(self.job(p)["state"], "ready")
-                self.assertIs(seen[0]["os_lock"], locks)
+    def test_the_heartbeat_never_writes_over_another_jobs_claim(self):
+        self.fast()
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        release, t, out = self.slow_job(p)
+        cp = p.p(CLAIM)
+        other = json.loads(cp.read_text(encoding="utf-8"))
+        tmp = cp.with_name("other.tmp")
+        tmp.write_text(json.dumps(dict(other, started_at="someone else's")), encoding="utf-8")
+        for _ in range(100):                                                    # a takeover's new file (Windows
+            try:                                                                # refuses while a beat has it open)
+                os.replace(tmp, cp)
+                break
+            except PermissionError:
+                time.sleep(0.01)
+        time.sleep(1.0)                                                         # five beats
+        self.assertEqual(json.loads(p.p(CLAIM).read_text(encoding="utf-8"))["started_at"], "someone else's")
+        release.set()
+        t.join(60)
+        self.assertEqual(json.loads(p.p(CLAIM).read_text(encoding="utf-8"))["started_at"], "someone else's")
 
 
 class TestR3Takeover(_R3):
@@ -1660,6 +1711,190 @@ class TestR3MutantGaps(_R3):
         self.assertIn("FFmpeg", r["lines"]["en"][0])
         self.assertNotIn("constant-frame-rate export", " ".join(r["lines"]["en"]))
         self.assertNotIn("بمعدل فريمات ثابت", " ".join(r["lines"]["ar"]))
+
+
+# --------------------------------------------------------------------------- fix round 4 (review 17729fc)
+class TestR4StatedLimit(_R3):
+    """P3-2: the limit as CONTRACT now states it. A same-size edit in the middle of a file (outside the first and last
+    FP_BYTES) with its time put back is never caught: not at build time, not by `--wait` (a record that looks current
+    is never hashed again), not by a new preflight."""
+
+    def test_a_middle_edit_with_its_time_put_back_is_never_caught(self):
+        with mock.patch.object(media, "FP_BYTES", 4096):
+            p, f = self.ready()
+            self.edit(f, f.stat().st_size // 2, b"\xcd" * 64)
+            self.preflight(p, f)
+            self.assertEqual(self.wait(p)["state"], "ready")
+            self.assertEqual(self.imp(p, f)["use"], "copy")
+            side = next(Path(self.root / self.rec(p)["path"]).parent.glob("*.conform.json"))
+            self.assertNotEqual(json.loads(side.read_text(encoding="utf-8"))["source_sha256"],
+                                hashlib.sha256(f.read_bytes()).hexdigest())     # no full hash ran
+
+
+class TestR4CopyReplaced(_R3):
+    """P3-3: the record keeps each copy file's size and time (copy_files), so a copy replaced under its name (a
+    restore or a sync of that one file) is never imported, and `--wait` makes it again (the sidecar keeps them too)."""
+
+    def test_a_copy_replaced_under_its_name_is_never_imported(self):
+        for i, case in enumerate(("another video", "the same bytes, an older time")):
+            with self.subTest(case):
+                p, f = self.ready(vid=f"C{i}", fname=f"copy case {i}.mp4")
+                copy = self.root / self.rec(p)["path"]
+                self.assertEqual(self.rec(p)["copy_files"], [{"path": self.rec(p)["path"],
+                                                              "size": copy.stat().st_size,
+                                                              "mtime": copy.stat().st_mtime}])
+                if i == 0:
+                    shutil.copyfile(FX / "cfr30.mp4", copy)
+                    planted = copy.read_bytes()
+                else:
+                    copy.write_bytes(copy.read_bytes())
+                    old = time.time() - 86400
+                    os.utime(copy, (old, old))
+                planted_ns = copy.stat().st_mtime_ns
+                res = self.imp(p, f)
+                self.assertOriginal(res, "ready")
+                self.assertIn("copy", res["reason"])
+                self.assertEqual(self.wait(p)["state"], "ready")
+                self.assertNotEqual(copy.stat().st_mtime_ns, planted_ns)        # made again, never reused
+                if i == 0:
+                    self.assertNotEqual(copy.read_bytes(), planted)
+                self.assertEqual(self.imp(p, f)["use"], "copy")
+
+    def test_a_ready_record_without_copy_files_is_made_again(self):
+        p, f = self.ready()
+        doc = self.doc(p)
+        doc["files"][0]["normalise"]["conform"].pop("copy_files")                # written by the round-3 engine
+        write_json(p.p("00_inputs/preflight.json"), doc)
+        self.assertEqual(media.conform_current(p, f, self.rec(p)), media._WHY["old_record"][0])
+        self.assertEqual(self.wait(p)["state"], "ready")
+        self.assertEqual(self.imp(p, f)["use"], "copy")
+
+    def test_the_parts_of_a_reel_are_each_checked(self):
+        ep = make_vfr(self.root / "data" / "Episodes" / "EP3.mp4", seconds=4)
+        p = Paths(self.root, "EP3_R01")
+        p.ensure_project()
+        write_json(p.p("00_inputs/source.json"), {"footage": "data/Episodes/EP3.mp4", "in_ms": 2500, "out_ms": 5000,
+                                                  "kind": "episode_reel", "episode_id": "EP3", "reel_id": "R01"})
+        self.preflight(p, ep)
+        self.assertEqual(self.job(p)["state"], "ready")
+        r = self.rec(p)
+        self.assertEqual([x["path"] for x in r["copy_files"]], [x["path"] for x in r["parts"]])
+        part = self.root / r["parts"][0]["path"]
+        old = time.time() - 86400
+        os.utime(part, (old, old))
+        self.assertOriginal(self.imp(p, ep), "ready")
+
+
+class TestR4ReasonLines(_R3):
+    """P3-4: every reason the build line can carry has an Arabic twin; the Arabic line never carries English."""
+
+    def test_every_reason_code_has_both_languages(self):
+        self.assertGreaterEqual(len(media._WHY), 15)
+        for code, (en, ar) in media._WHY.items():
+            with self.subTest(code):
+                self.assertTrue(en and ar)
+                self.assertFalse(ARABIC.search(en), en)
+                self.assertTrue(ARABIC.search(ar), ar)
+                self.assertEqual(set(re.findall(r"{(\w+)}", en)), set(re.findall(r"{(\w+)}", ar)))
+
+    def test_the_checks_give_coded_reasons_only(self):
+        import inspect
+        for fn in (media.conform_current, media._copy_problem):
+            with self.subTest(fn.__name__):
+                self.assertEqual(re.findall(r"return\s+f?[\"']", inspect.getsource(fn)), [])
+
+    def test_the_arabic_build_line_has_an_arabic_reason(self):
+        p, f = self.ready()
+        t = f.stat().st_mtime + 60
+        os.utime(f, (t, t))
+        res = self.imp(p, f)
+        self.assertEqual(res["reason"], media._WHY["source_mtime"][0])
+        self.assertIn(media._WHY["source_mtime"][1], res["lines"]["ar"][0])
+        self.assertNotIn(res["reason"], res["lines"]["ar"][0])
+        self.assertIn(res["reason"], res["lines"]["en"][0])
+
+
+class TestR4MutantGaps(_R3):
+    """P3-5: the review's survivors R07 (a source that can't be read at build time) and R21 (the end of a file
+    between FP_BYTES and 2 x FP_BYTES long)."""
+
+    def test_a_source_that_cannot_be_read_at_build_time_is_never_imported(self):       # R07
+        p, f = self.ready()
+        with mock.patch.object(media, "_fingerprint", lambda src: None):
+            res = self.imp(p, f)
+        self.assertOriginal(res, "ready")
+        self.assertEqual(res["reason"], media._WHY["source_unreadable"][0])
+        self.assertEqual(self.imp(p, f)["use"], "copy")                          # the control
+
+    def test_the_end_of_a_file_between_one_and_two_windows_is_read(self):              # R21
+        g = self.tmp / "short phone clip.bin"
+        g.write_bytes(bytes(range(256)) * 24)                                    # 6144 bytes
+        with mock.patch.object(media, "FP_BYTES", 4096):
+            a = media._fingerprint(g)
+            for offset in (6000, 100):
+                with self.subTest(offset=offset):
+                    data = bytearray(g.read_bytes())
+                    data[offset] ^= 0xFF
+                    h = self.tmp / f"edited {offset}.bin"
+                    h.write_bytes(bytes(data))
+                    self.assertNotEqual(media._fingerprint(h), a)
+
+
+class TestR4FolderCannotBeWritten(_R3):
+    """P3-6: when the item's folder can't be written (preflight.json can't be saved either), `--wait` and the build
+    each give ONE plain line in both languages: the folder can't be written and the original is used."""
+
+    def assertNoWrite(self, lines):
+        self.assertEqual((len(lines["en"]), len(lines["ar"])), (1, 1), lines)
+        self.assertEqual(lines, {"en": [media._NO_WRITE[0]], "ar": [media._NO_WRITE[1]]})
+        self.assertIn("can't be written", lines["en"][0])
+        self.assertIn("original", lines["en"][0])
+        self.assertTrue(ARABIC.search(lines["ar"][0]))
+
+    def deny_create(self, folder: Path):
+        """A real deny-create ACE (Everyone: write data / add file, append / add folder) on `folder` only."""
+        if os.name != "nt":
+            self.skipTest("Windows ACLs")
+        r = subprocess.run(["icacls", str(folder), "/deny", "*S-1-1-0:(WD,AD)"], capture_output=True, text=True)
+        if r.returncode:
+            self.skipTest(f"icacls: {r.stdout} {r.stderr}")
+        undo = lambda: subprocess.run(["icacls", str(folder), "/remove:d", "*S-1-1-0"], capture_output=True)  # noqa
+        self.addCleanup(undo)
+        try:
+            (folder / "probe.tmp").write_bytes(b"")
+        except PermissionError:
+            return undo
+        self.skipTest("the deny ACE does not stop this user")
+
+    def test_a_folder_that_cannot_be_written(self):
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        self.age(p, 600)
+        undo = self.deny_create(p.p("00_inputs"))
+        with mock.patch.object(media, "CLAIM_CREATE_S", 0.3):
+            res = self.job(p, wait_s=5)
+        self.assertEqual((res["job"], res["state"]), ("failed", "failed"))
+        self.assertNoWrite(res["lines"])
+        res = self.imp(p, f)
+        self.assertEqual(res["use"], "original")
+        self.assertNoWrite(res["lines"])
+        undo()
+        self.assertEqual(self.wait(p)["state"], "ready")
+
+    def test_the_same_with_the_writes_refused_in_process(self):
+        from lib import writer_lock as WL
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        self.age(p, 600)
+        denied = PermissionError(13, "Access is denied")
+        with mock.patch.object(WL, "_create", side_effect=denied), mock.patch.object(media, "CLAIM_CREATE_S", 0.3), \
+                mock.patch.object(media, "write_json", side_effect=denied):
+            res = self.job(p, wait_s=5)
+            self.assertEqual((res["job"], res["state"]), ("failed", "failed"))
+            self.assertNoWrite(res["lines"])
+            res = self.imp(p, f)
+            self.assertEqual(res["use"], "original")
+            self.assertNoWrite(res["lines"])
 
 
 if __name__ == "__main__":

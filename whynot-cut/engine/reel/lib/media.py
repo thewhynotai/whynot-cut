@@ -431,24 +431,30 @@ def snap_range_points(path: Path, in_ms: int, out_ms: int, search_ms: int = 2500
 # copy (media_normalise.conform) in 00_inputs/intermediates/, recorded in preflight.json files[i].normalise.conform as
 # hooks/t26/CONTRACT.md says (the Adobe half, ppro_build, imports it only when `ready`):
 #   {state: ready | pending | failed | not_needed, path, parts: [{path, from_ms, to_ms}], cfr_fps, source_tag,
-#    source_size, source_mtime, source_fp, reason, lines: {ar, en}, at}
+#    source_size, source_mtime, source_fp, copy_files: [{path, size, mtime}], reason, lines: {ar, en}, at}
 # Paths are relative to the client root, POSIX, always inside output/ (BL-14). `ready` = the copy exists, is a plain
-# file under output/ with no link on the way, PyAV opens it, and the source still has the size, tag, modified time and
-# content check (source_fp: its first and last FP_BYTES) it had when the copy was made; anything else turns it back to
-# `pending` and the job makes it again (reused when the sidecar's full sha256 still matches, with the new time).
+# file under output/ with no link on the way, PyAV opens it, it is still the file the job verified (copy_files: its size
+# and time), and the source still has the size, tag, modified time and content check (source_fp: its first and last
+# FP_BYTES) it had when the copy was made; anything else turns it back to `pending` and the job makes it again (reused
+# when the sidecar's full sha256 and its copy's size and time still match, with the new time). Stated limit: a
+# same-size edit in the middle of the source with its time put back is never caught (_fingerprint).
 # The job: `reel conform --wait` (also what preflight starts in the background), one per item (the OS lock on
-# 00_inputs/conform-job.lock, plus the claim 00_inputs/conform-job.claim for volumes without OS locks), the GPU lane
+# 00_inputs/conform-job.lock, plus the claim 00_inputs/conform-job.claim, kept fresh by a heartbeat, for volumes
+# without OS locks and for other computers sharing a synced folder), the GPU lane
 # from gpu_lock.site_slot("conform"), every record written under
 # preflight.json's own file lock (common.file_locked + the atomic write_json). A preflight.json without normalise
 # records (before Task 26) is never written. Nothing here ever fails the intake: a failure is a `failed` record.
 CONFORM_ENV = "WHYNOT_CONFORM"          # background (default) | inline | off; inside the test sandbox: inline
 CONFORM_MODES = ("background", "inline", "off")
-CONFORM_KEYS = ("state", "path", "parts", "cfr_fps", "source_tag", "source_size", "source_mtime", "source_fp", "reason",
-                "lines", "at")
+CONFORM_KEYS = ("state", "path", "parts", "cfr_fps", "source_tag", "source_size", "source_mtime", "source_fp",
+                "copy_files", "reason", "lines", "at")
 INTERMEDIATES_REL = "00_inputs/intermediates"
 JOB_REL = "00_inputs/conform-job"       # its OS lock file is conform-job.lock (released by the OS when the job ends)
 CLAIM_REL = "00_inputs/conform-job.claim"   # the running job's own record (O_EXCL: pid, process start, computer): the
                                         # exclusion where the volume takes no OS locks (macOS SMB/AFP, cloud drives)
+HEARTBEAT_S = 60.0                      # the running job rewrites its claim (beat_at) this often
+CLAIM_STALE_S = 600.0                   # another computer's claim whose file is older than this is gone (crashed or
+                                        # asleep): ten beats, room for a cloud folder's sync delay
 CLAIM_WRITING_S = 10.0                  # an unreadable claim younger than this is still being written
 CLAIM_CREATE_S = 5.0                    # a claim that can't be created (not "taken") is retried this long: a name a
                                         # virus scanner still holds after the last job removed it; then a failed record
@@ -487,6 +493,60 @@ _NO_CLAIM = ("The background job could not create its marker file conform-job.cl
              "الشغل اللي في الخلفية ماقدرش يعمل ملف العلامة بتاعه conform-job.claim في فولدر 00_inputs بتاع الفيديو ده: "
              "هنستخدم الأصلي. اتأكد إن فولدر العميل ينفع يتكتب فيه (مش read-only ومش واقف في نص sync)، وبعدين شغّل "
              "reel conform --wait.")
+_NO_WRITE = ("This clip's 00_inputs folder can't be written (permission denied), so the evenly timed / SDR copy can't "
+             "be made or recorded: the original is used. Give this user write access to the client folder (or stop the "
+             "tool that holds it), then run `reel conform --wait`.",
+             "فولدر 00_inputs بتاع الفيديو ده مش مسموح الكتابة فيه، فالنسخة المظبوطة مش هتتعمل ولا هتتسجل: هنستخدم "
+             "الأصلي. ادّي اليوزر ده صلاحية الكتابة على فولدر العميل (أو اقفل البرنامج اللي ماسكه)، وبعدين شغّل "
+             "reel conform --wait.")
+# Why a `ready` copy can't be used (conform_current, _copy_problem): code -> (English, Arabic). The English text is the
+# record's / result's `reason`; the Arabic one goes into the Arabic build line (review 17729fc P3-4).
+_WHY = {
+    "not_ready": ("it is not ready", "لسه مش جاهزة"),
+    "source_gone": ("the source file is gone", "الملف الأصلي مش موجود"),
+    "source_size": ("the source size changed", "حجم الملف الأصلي اتغير"),
+    "source_tag": ("the source tag changed (the file was moved or renamed)",
+                   "مكان الملف الأصلي أو اسمه اتغير"),
+    "old_record": ("the record is from an older version (no content check)",
+                   "السجل ده من نسخة أقدم من البرنامج ومفيهوش فحص المحتوى"),
+    "source_mtime": ("the source's modified time changed", "وقت تعديل الملف الأصلي اتغير"),
+    "source_unreadable": ("the source file can't be read", "الملف الأصلي مش بيتقري"),
+    "source_content": ("the source's content changed (same size)", "محتوى الملف الأصلي اتغير والحجم زي ما هو"),
+    "cfr_changed": ("the frame rate to conform to changed", "معدل الفريمات المطلوب اتغير"),
+    "no_copy_named": ("the record names no copy (or both a whole copy and parts)",
+                      "السجل مش مكتوب فيه نسخة واحدة واضحة"),
+    "whole_vs_parts": ("this item uses the whole file but the record has parts",
+                       "الفيديو ده بيستخدم الملف كله والسجل فيه أجزاء بس"),
+    "parts_vs_whole": ("this item uses windows but the record has a whole-file copy",
+                       "الفيديو ده بيستخدم أجزاء والسجل فيه نسخة للملف كله"),
+    "window_uncovered": ("no part covers the window {a}-{b} s", "مفيش جزء بيغطي الفترة من {a} لـ {b} ثانية"),
+    "copy_not_relative": ("{rel} is not a client-relative path inside output/",
+                          "المسار {rel} مش جوه فولدر output بتاع العميل"),
+    "copy_outside": ("{rel} is not inside the client's output/ folder (or a link is on the way)",
+                     "{rel} مش جوه فولدر output بتاع العميل (أو في لينك في الطريق)"),
+    "copy_missing": ("{rel} is missing (or is a link)", "{rel} مش موجود (أو عبارة عن لينك)"),
+    "copy_empty": ("{rel} is empty", "{rel} فاضي"),
+    "copy_changed": ("the copy file {rel} was replaced or changed after it was made",
+                     "ملف النسخة {rel} اتبدل أو اتغير بعد ما اتعمل"),
+}
+
+
+class _Why(str):
+    """A reason (the English text, so every caller keeps a plain str) that also carries its code and Arabic text."""
+    code = ""
+    ar = ""
+
+
+def _why(code: str, **kw) -> _Why:
+    en, ar = _WHY[code]
+    w = _Why(en.format(**kw))
+    w.code, w.ar = code, ar.format(**kw)
+    return w
+
+
+def _denied(e) -> bool:
+    """A permission denial: a PermissionError, or an engine error raised from one (file_lock's lock-file Guidance)."""
+    return isinstance(e, PermissionError) or isinstance(getattr(e, "__cause__", None), PermissionError)
 
 
 class _ClaimUnavailable(Exception):
@@ -554,9 +614,11 @@ def conform_windows(paths: Paths, src):
 
 def _fingerprint(src) -> str | None:
     """The cheap content check (review 01ea9ae P3-5): sha256 of the size and the first and last FP_BYTES (an MP4's
-    header, moov, sits at one end), so a same-size edit there with the time put back is seen at build time. An edit
-    only in the middle of a file longer than 2 x FP_BYTES is not (the full sha256 is the job's, in the sidecar).
-    None when it can't be read."""
+    header, moov, sits at one end), so a same-size edit there with the time put back is seen at build time. Stated
+    limit (review 17729fc P3-2): a same-size edit only in the middle of a file longer than 2 x FP_BYTES, with its time
+    put back, is NEVER caught: not at build time, not by `reel conform --wait` (a record that looks current is not
+    hashed again), not by a new preflight. It is caught only once the size or the time changes too. None when the
+    file can't be read."""
     import hashlib
     import os
     try:
@@ -584,10 +646,18 @@ def _facts(paths: Paths, src) -> dict | None:
             "fp": _fingerprint(src)}
 
 
+def _copy_facts(paths: Paths, rel) -> dict:
+    """{path, size, mtime} of one copy file as it is now (lstat: never through a link)."""
+    import os
+    st = os.lstat(Path(paths.root) / rel)
+    return {"path": rel, "size": int(st.st_size), "mtime": st.st_mtime}
+
+
 def _record(paths: Paths, src, state: str, *, cfr_fps=None, path=None, parts=(), reason=None, lines=None,
-            facts=None) -> dict:
+            facts=None, copy_files=()) -> dict:
     """One conform record. source_mtime / source_fp are the source's when the copy was made (`facts`, taken before
-    the encode): what conform_current compares, never the copy's own time (review 01ea9ae P2-1)."""
+    the encode): what conform_current compares, never the copy's own time (review 01ea9ae P2-1). copy_files: each
+    copy file's own size and time when the job verified it (review 17729fc P3-3; empty unless `ready`)."""
     from . import media_normalise as MN
     facts = facts or _facts(paths, src) or {"tag": MN._source_tag(Path(src), paths.root), "size": 0}
     ln = lines or {}
@@ -598,7 +668,8 @@ def _record(paths: Paths, src, state: str, *, cfr_fps=None, path=None, parts=(),
     return {"state": state, "path": path, "parts": [dict(x) for x in parts],
             "cfr_fps": float(cfr_fps) if cfr_fps else None, "source_tag": facts["tag"],
             "source_size": int(facts["size"]), "source_mtime": facts.get("mtime"), "source_fp": facts.get("fp"),
-            "reason": reason, "lines": {"ar": ar, "en": en}, "at": now_iso()}
+            "copy_files": [dict(x) for x in copy_files], "reason": reason, "lines": {"ar": ar, "en": en},
+            "at": now_iso()}
 
 
 def _pending(paths: Paths, src, decision: dict, reason: str) -> dict:
@@ -606,63 +677,74 @@ def _pending(paths: Paths, src, decision: dict, reason: str) -> dict:
                    lines=_lines(_PENDING))
 
 
-def _copy_problem(paths: Paths, rel) -> str | None:
+def _copy_problem(paths: Paths, rel) -> _Why | None:
     """Why the copy named `rel` can't be used (None = it can): a client-relative output/ path, its folder inside the
     client's output/ with no link on the way (media_normalise.client_output, fails closed), a plain file (never a link
     or a hard link) with bytes in it."""
     from . import media_normalise as MN
     if not isinstance(rel, str) or not rel.startswith("output/") or "\\" in rel or ".." in rel.split("/"):
-        return f"{rel!r} is not a client-relative path inside output/"
+        return _why("copy_not_relative", rel=repr(rel))
     full = Path(paths.root) / rel
     if MN.client_output(full.parent, paths.root) is None:
-        return f"{rel} is not inside the client's output/ folder (or a link is on the way)"
+        return _why("copy_outside", rel=rel)
     if not MN._plain_file(full):
-        return f"{rel} is missing (or is a link)"
+        return _why("copy_missing", rel=rel)
     if full.stat().st_size <= 0:
-        return f"{rel} is empty"
+        return _why("copy_empty", rel=rel)
     return None
 
 
-def conform_current(paths: Paths, src, rec, decision=None, windows=None) -> str | None:
-    """None when the `ready` record `rec` still describes a usable copy of `src`, else why not: the source's size, tag
-    (its client-relative path), modified time (either way, beyond MTIME_SLACK_S) or content check changed since the
-    copy was made, the copy is gone / not a plain file under output/, the decision's rate changed, or the copies no
-    longer cover this item's windows (`windows` as conform_windows gives them; None = a whole-file copy). A time-only
-    change is stale here once; `reel conform --wait` then reuses the copy (the sidecar's full sha256) and records the
-    new time. Known limit: a same-size edit in the middle of a long file with its time put back is not seen here."""
+def conform_current(paths: Paths, src, rec, decision=None, windows=None) -> _Why | None:
+    """None when the `ready` record `rec` still describes a usable copy of `src`, else why not (a _Why: the English
+    reason, with its code and Arabic text): the source's size, tag (its client-relative path), modified time (either
+    way, beyond MTIME_SLACK_S) or content check changed since the copy was made, or the source can't be read; the
+    decision's rate changed; the copies no longer cover this item's windows (`windows` as conform_windows gives them;
+    None = a whole-file copy); a copy is gone / not a plain file under output/, or is not the file the job verified
+    (its size and time, copy_files). A time-only change is stale here once; `reel conform --wait` then re-hashes the
+    source against the sidecar, reuses the copy and records the new time. Stated limit: see _fingerprint."""
+    import os
     if not isinstance(rec, dict) or rec.get("state") != "ready":
-        return "it is not ready"
+        return _why("not_ready")
     facts = _facts(paths, src)
     if facts is None:
-        return "the source file is gone"
+        return _why("source_gone")
     if facts["size"] != rec.get("source_size"):
-        return "the source size changed"
+        return _why("source_size")
     if facts["tag"] != rec.get("source_tag"):
-        return "the source tag changed (the file was moved or renamed)"
-    if not isinstance(rec.get("source_mtime"), (int, float)) or not rec.get("source_fp"):
-        return "the record is from an older version (no content check)"
+        return _why("source_tag")
+    if not isinstance(rec.get("source_mtime"), (int, float)) or not rec.get("source_fp") \
+            or not isinstance(rec.get("copy_files"), list):
+        return _why("old_record")
     if abs(facts["mtime"] - rec["source_mtime"]) > MTIME_SLACK_S:
-        return "the source's modified time changed"
+        return _why("source_mtime")
+    if facts["fp"] is None:
+        return _why("source_unreadable")
     if facts["fp"] != rec["source_fp"]:
-        return "the source's content changed (same size)"
+        return _why("source_content")
     if decision is not None and (decision.get("cfr_fps") or None) != (rec.get("cfr_fps") or None):
-        return "the frame rate to conform to changed"
+        return _why("cfr_changed")
     whole, parts = rec.get("path"), rec.get("parts") or []
     if bool(whole) == bool(parts):
-        return "the record names no copy (or both a whole copy and parts)"
+        return _why("no_copy_named")
     if windows is None and not whole:
-        return "this item uses the whole file but the record has parts"
+        return _why("whole_vs_parts")
     if windows is not None:
         if whole:
-            return "this item uses windows but the record has a whole-file copy"
+            return _why("parts_vs_whole")
         for a, b in windows:
             if not any(isinstance(x, dict) and x.get("from_ms") is not None and x.get("to_ms") is not None
                        and x["from_ms"] <= round(a * 1000) and x["to_ms"] >= round(b * 1000) for x in parts):
-                return f"no part covers the window {a:g}-{b:g} s"
+                return _why("window_uncovered", a=f"{a:g}", b=f"{b:g}")
+    made = {x.get("path"): x for x in rec["copy_files"] if isinstance(x, dict)}
     for rel in ([whole] if whole else [x.get("path") if isinstance(x, dict) else None for x in parts]):
         why = _copy_problem(paths, rel)
         if why:
             return why
+        was = made.get(rel)
+        st = os.lstat(Path(paths.root) / rel)
+        if not was or was.get("size") != st.st_size or not isinstance(was.get("mtime"), (int, float)) \
+                or abs(st.st_mtime - was["mtime"]) > MTIME_SLACK_S:
+            return _why("copy_changed", rel=rel)
     return None
 
 
@@ -815,7 +897,7 @@ def _conform_one(paths: Paths, src, lane: str):
     if _facts(paths, src) != before:                      # the editor replaced the file during the encode
         return _pending(paths, src, nd, "the source changed while its copy was made: it is made again"), nm, nd
     return _record(paths, src, "ready", cfr_fps=cfr, path=whole, parts=parts, reason=res.get("reason"),
-                   lines=res.get("lines"), facts=before), nm, nd
+                   lines=res.get("lines"), facts=before, copy_files=[_copy_facts(paths, r) for r in rels]), nm, nd
 
 
 def conform_summary(paths: Paths) -> dict:
@@ -845,12 +927,13 @@ def _read_claim(cp: Path):
     return rec if isinstance(rec, dict) else {}
 
 
-def _claim_live(cp: Path, rec=None, os_lock: bool = False) -> bool:
+def _claim_live(cp: Path, rec=None) -> bool:
     """Does the claim `cp` belong to a job that is still running? This computer: its pid is alive and still the same
     process (never this process: here the OS lock's in-process part already excludes a second job). Another computer:
-    younger than JOB_WAIT_S (its pid can't be checked from here), unless `os_lock` (the caller holds the item's REAL OS
-    lock now) and the claim says its job held that OS lock too: then that job is gone, the OS released its lock
-    (review 01ea9ae P3-1). Unreadable: younger than CLAIM_WRITING_S."""
+    its file time is younger than CLAIM_STALE_S. A running job rewrites its claim every HEARTBEAT_S (_heartbeat), so
+    a live job's claim stays fresh on every computer, also in a cloud-synced folder where each computer's OS lock
+    covers only its own copy (review 17729fc P3-1); a crashed or sleeping computer's claim is gone after the bound.
+    Unreadable: younger than CLAIM_WRITING_S."""
     import os
     import time
     from . import writer_lock as WL
@@ -865,30 +948,48 @@ def _claim_live(cp: Path, rec=None, os_lock: bool = False) -> bool:
         return age < CLAIM_WRITING_S
     if WL.same_host(rec):
         return str(rec.get("pid")) != str(os.getpid()) and WL.pid_alive(rec.get("pid"), rec.get("pid_created"))
-    if os_lock and rec.get("os_lock") is True:
-        return False
-    return age < JOB_WAIT_S
+    return age < CLAIM_STALE_S
 
 
-def _os_locked(paths: Paths) -> bool:
-    """Inside file_locked(JOB_REL): True when that lock is a real OS lock (this volume locks, so no other process or
-    computer that locks holds it), False when file_lock fell back to the in-process lock, or it is not held here."""
-    from . import file_lock as FL
-    fd = FL._entry(FL.lock_path(paths.p(JOB_REL))).fd
-    return fd is not None and fd != FL._NO_OS_LOCK
+def _heartbeat(cp: Path, me: dict, stop) -> None:
+    """The running job's beat (a thread): every HEARTBEAT_S the claim is rewritten in place (the same file, so a
+    takeover's move-aside compare still sees it) with a new `beat_at`. Its file time stays fresh, and a cloud folder
+    syncs the change. Only while the claim is still ours: another job's claim is never written over, and the beat
+    stops once the claim is gone. `me` follows each write, so the end-of-job check still knows the claim as ours."""
+    import json
+    while not stop.wait(HEARTBEAT_S):
+        try:
+            with open(cp, "r+", encoding="utf-8") as f:
+                try:
+                    cur = json.loads(f.read())
+                except ValueError:
+                    continue                                # being written: the next beat looks again
+                if cur != me:
+                    return                                  # not ours any more
+                new = dict(me, beat_at=now_iso())
+                f.seek(0)
+                f.write(json.dumps(new, ensure_ascii=False))
+                f.truncate()
+            me.clear()
+            me.update(new)
+        except FileNotFoundError:
+            return
+        except OSError:
+            continue                                        # held for a moment (a scanner): the next beat
 
 
 def _job_claim(paths: Paths, wait_s: float):
     """Hold the item's job claim (CLAIM_REL) for the with-block: created with O_EXCL; a claim whose job is gone
-    (_claim_live) is moved aside, checked to be the one judged, and replaced; the claim is removed at the end when it
-    is still ours. The claim says whether this job holds the item's real OS lock (`os_lock`, the caller's
-    file_locked(JOB_REL)). Raises LockTimeout when a live job keeps it longer than `wait_s`, _ClaimUnavailable when it
-    can't be created at all (an OSError other than "it exists") for CLAIM_CREATE_S.
+    (_claim_live) is moved aside, checked to be the one judged, and replaced; while held, _heartbeat keeps it fresh;
+    the claim is removed at the end when it is still ours. Raises LockTimeout when a live job keeps it longer than
+    `wait_s`, _ClaimUnavailable when it can't be created at all (an OSError other than "it exists") for
+    CLAIM_CREATE_S.
     Known limit (review 01ea9ae P3-3): on a volume without OS locks, a third job can create its claim in the moment
     between the move aside and the put-back; the put-back then keeps the moved claim aside (never over the new one)."""
     import contextlib
     import os
     import socket
+    import threading
     import time
     from . import writer_lock as WL
     from .file_lock import LockTimeout
@@ -897,7 +998,7 @@ def _job_claim(paths: Paths, wait_s: float):
     def held():
         cp = paths.p(CLAIM_REL)
         me = {"pid": os.getpid(), "pid_created": WL.process_created(os.getpid()), "host": socket.gethostname(),
-              "host_id": WL.host_id(), "os_lock": _os_locked(paths), "started_at": now_iso()}
+              "host_id": WL.host_id(), "started_at": now_iso()}
         deadline = time.monotonic() + max(0.0, float(wait_s))
         failing = None                                      # when the create first failed with an error
         while True:
@@ -911,7 +1012,7 @@ def _job_claim(paths: Paths, wait_s: float):
                 time.sleep(0.25)
                 continue
             seen = _read_claim(cp)
-            if seen is not None and not _claim_live(cp, seen, os_lock=me["os_lock"]):
+            if seen is not None and not _claim_live(cp, seen):
                 aside = cp.with_name(f"{cp.name}.stale-{os.getpid()}")
                 try:
                     os.replace(cp, aside)
@@ -928,9 +1029,14 @@ def _job_claim(paths: Paths, wait_s: float):
             if time.monotonic() >= deadline:
                 raise LockTimeout(cp, round(float(wait_s), 1))
             time.sleep(0.25)
+        stop = threading.Event()
+        beat = threading.Thread(target=_heartbeat, args=(cp, me, stop), name="conform-claim-beat", daemon=True)
+        beat.start()
         try:
             yield cp
         finally:
+            stop.set()
+            beat.join(30)
             if _read_claim(cp) == me:
                 with contextlib.suppress(OSError):
                     cp.unlink()
@@ -939,22 +1045,24 @@ def _job_claim(paths: Paths, wait_s: float):
 
 def _job_running(paths: Paths) -> bool:
     """A conform job of this item runs: it holds the OS lock (another process, or another thread here), or a live
-    claim (_claim_live; with the real OS lock in hand, a claim whose job held it too is a leftover)."""
+    claim (_claim_live: the volume takes no OS locks, or the job runs on another computer)."""
     from .file_lock import LockTimeout
     try:
         with file_locked(paths.p(JOB_REL), 0):
-            os_lock = _os_locked(paths)
+            pass
     except LockTimeout:
         return True
-    return _claim_live(paths.p(CLAIM_REL), os_lock=os_lock)
+    return _claim_live(paths.p(CLAIM_REL))
 
 
 def run_conform_job(paths: Paths, wait_s: float = 0.0) -> dict:
     """The conform job of one item (in this process): every pending file is made, verified and recorded; stale
     copies found on the way are made again (STALE_PASSES). One job per item (the OS lock, plus the claim for volumes
-    without OS locks): with another one running, it waits up to `wait_s` for it (`job: "running"` when it is still
-    running; a dead job's claim is taken over). Returns conform_summary() with job "done", or "failed" when its claim
-    can't be created (the pending files are then failed with _NO_CLAIM's line: the original is used)."""
+    without OS locks and for other computers): with another one running, it waits up to `wait_s` for it (`job:
+    "running"` when it is still running; a dead job's claim is taken over). Returns conform_summary() with job "done".
+    When its lock or claim can't be made it never raises: job and state "failed", with the reason and ONE line at the
+    top level (_NO_WRITE when the folder can't be written, so not even the records could be saved; else _NO_CLAIM or
+    _FAILED, which the pending records then carry too); the original is used."""
     import contextlib
     import time
     from .file_lock import LockTimeout
@@ -963,14 +1071,17 @@ def run_conform_job(paths: Paths, wait_s: float = 0.0) -> dict:
         return conform_summary(paths)                       # nothing to do, and an old file is never written
 
     def fail_pending(why, lines):
+        """The pending records -> failed. Returns the error when that write broke (the records stay pending:
+        `--wait` makes them), else None."""
         try:
             for fr in _measured(_read_doc(pf)):
                 rec = fr["normalise"].get("conform")
                 if isinstance(rec, dict) and rec.get("state") == "pending":
                     _store(paths, fr["path"], _record(paths, fr["path"], "failed", cfr_fps=rec.get("cfr_fps"),
                                                       reason=why, lines=lines))
-        except Exception:  # noqa: BLE001  that write broke too: the records stay pending (`--wait` makes them)
-            pass
+        except Exception as e:  # noqa: BLE001
+            return e
+        return None
     stack = contextlib.ExitStack()
     t0 = time.monotonic()
     try:
@@ -979,11 +1090,14 @@ def run_conform_job(paths: Paths, wait_s: float = 0.0) -> dict:
     except LockTimeout:
         stack.close()
         return dict(conform_summary(paths), job="running")
-    except _ClaimUnavailable as e:                          # review 01ea9ae P3-2: never a traceback
+    except Exception as e:  # noqa: BLE001  the lock or the claim can't be made (01ea9ae P3-2): never a traceback
         stack.close()
-        fail_pending(f"the job's claim could not be created ({e}): run `reel conform --wait` once the folder can be "
-                     "written", _lines(_NO_CLAIM))
-        return dict(conform_summary(paths), job="failed")
+        why = (f"the job could not start ({type(e).__name__}: {str(e)[:200]}): run `reel conform --wait` once the "
+               "folder can be written")
+        lines = _lines(_NO_CLAIM if isinstance(e, _ClaimUnavailable) else _FAILED)
+        if _denied(fail_pending(why, lines)):                # 17729fc P3-6: not even the records could be saved
+            lines = _lines(_NO_WRITE)
+        return dict(conform_summary(paths), state="failed", job="failed", reason=why, lines=lines)
     with stack:
         for _ in range(STALE_PASSES + 1):
             todo = _refresh(paths, retry_failed=False)
@@ -1165,9 +1279,10 @@ def conform_import(paths: Paths, src) -> dict:
         why = conform_current(paths, fr["path"], rec, fr["normalise"]["decision"], conform_windows(paths, fr["path"]))
         if why:
             en, ar = _BUILD_STALE
-            return dict(res, reason=why, lines={"ar": [ar.format(why=why)], "en": [en.format(why=why)]})
+            return dict(res, reason=str(why), lines={"ar": [ar.format(why=getattr(why, "ar", "") or why)],
+                                                    "en": [en.format(why=why)]})   # 17729fc P3-4: Arabic reason
         return dict(res, use="copy", path=rec.get("path") or None, reason=rec.get("reason"),
                     parts=[{k: x[k] for k in ("path", "from_ms", "to_ms")} for x in rec.get("parts") or []])
     except Exception as e:  # noqa: BLE001  the build never fails because of the copy
         return dict(res, use="original", state="failed", path=None, parts=[], reason=f"{type(e).__name__}: {e}"[:300],
-                    lines=_lines(_FAILED))
+                    lines=_lines(_NO_WRITE if _denied(e) else _FAILED))   # 17729fc P3-6: a folder that refuses

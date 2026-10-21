@@ -53,6 +53,7 @@ TIMEOUT_MIN_S = 3600.0           # an encode's time limit: at least this, else t
 TIMEOUT_X, TIMEOUT_X_TONEMAP = 4.0, 12.0
 BITRATE_MBPS = 20                # the intermediate's size estimate for the disk check
 DISK_MARGIN = 5 * 1024 ** 3
+COPY_MTIME_SLACK_S = 2.0         # the copy's time as its sidecar records it, within FAT / SMB's 2 s steps
 TRC = {16: "pq", 18: "hlg"}      # AVColorTransferCharacteristic: SMPTE ST 2084, ARIB STD-B67
 BT2020 = 9
 
@@ -622,6 +623,17 @@ def _plain_file(p: Path) -> bool:
     return stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and not _is_link(p)
 
 
+def _same_copy(rec: dict, out: Path) -> bool:
+    """The sidecar `rec` still describes the copy file `out`: the size and time it had when the record was written
+    (Task 26 r4, review 17729fc P3-3: a copy replaced under its name, by a restore or a sync of that one file, is made
+    again, never reused). A record without them (written before) never matches, so that copy is made again once."""
+    try:
+        st = os.lstat(out)
+    except OSError:
+        return False
+    return rec.get("out_size") == st.st_size and isinstance(rec.get("out_mtime"), (int, float))         and abs(st.st_mtime - rec["out_mtime"]) <= COPY_MTIME_SLACK_S
+
+
 def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=None, runner=None,
             disk=shutil.disk_usage, crf: int = 16, client_root=None) -> dict:
     """Write the intermediate(s) for `decision` into out_dir, which must be the client's output/ folder or a folder
@@ -724,7 +736,7 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
                 old = {}                                   # a record that is not ours: redone, never a crash
             held = side.with_name(side.stem + ".held.json")
             record = side
-            if _plain_file(out) and all(old.get(k) == v for k, v in want.items()):
+            if _plain_file(out) and all(old.get(k) == v for k, v in want.items()) and _same_copy(old, out):
                 res["reused"] = True
                 if os.path.lexists(held):
                     clear_held(held, anchor, within)       # left by a run that stopped after its new record
@@ -812,9 +824,10 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
                     res["reason"] += restored
                     return res
                 try:
+                    ost = os.lstat(out)                        # the copy this record describes (_same_copy)
                     linksafe.replace_atomic(side, anchor, json.dumps(dict(
-                        want, reason=decision.get("actions"), encoder="libx264", lane=used), indent=1).encode("utf-8"),
-                        within)
+                        want, reason=decision.get("actions"), encoder="libx264", lane=used, out_size=ost.st_size,
+                        out_mtime=ost.st_mtime), indent=1).encode("utf-8"), within)
                 except (Guidance, OSError) as e:               # locked folder, a virus scan, a full disk: the copy
                     if client_output(given, client_root) != out_dir:   # is right; without a record never reused.
                         # Unless the folder was swapped for a link in the gap before the rename: the copy went
