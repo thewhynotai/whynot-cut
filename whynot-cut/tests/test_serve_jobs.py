@@ -146,7 +146,8 @@ class JournalFiles(unittest.TestCase):
     def test_newest_first_is_a_total_order_even_when_timestamps_are_equal(self):
         """Gate 3: a loaded machine gives two entries the same clock reading. The order is the journal's own write
         sequence (seq), the same for the snapshot, entries() and retention, and it survives a daemon restart."""
-        frozen = ("2026-10-15T08:00:00.000+00:00", 1_791_964_800.0)
+        frozen = jobs._now()     # one real reading: start() prunes on the real clock, so a fixed date ages out
+        frozen = (frozen[0], float(int(frozen[1])))
         with mock.patch.object(jobs, "_now", return_value=frozen):
             for rid in ("r-a", "r-b", "r-c", "r-d"):
                 self.j.start(rid, action="ping", session_kind="cli", route="uxp")
