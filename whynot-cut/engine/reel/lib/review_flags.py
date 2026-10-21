@@ -8,7 +8,7 @@ The medical-reviewer is read-only and reports to the lead in chat; the lead puts
 01_analysis/timeline-spec.json; a motion video: the scene id in 01_analysis/motion-plan.json).
 
     {"schema": 1, "plan_kind": "timeline" | "motion", "plan_fingerprint", "domain": "<review key, e.g. ai+medical>",
-     "coverage": 2, "written_at", "by", "checked", "lines_total",
+     "coverage": 3, "written_at", "by", "checked", "lines_total",
      "items": [{"event_id", "flag": "<a registry domain: medical | religious | business | ai>",
                 "verdict": "<one of that flag's registry verdicts, never ok>",
                 "text", "start_s", "end_s", "reason", "carried"?}],
@@ -33,9 +33,10 @@ files), and its id a plan line WITH on-screen text; anything else is refused. Ev
 and for every domain its words or AI-generated files trigger (review_domains.line_requirements, review_detect `review`,
 the default; that line only). A row covers its own flag. A medical or religious row whose flag is in the key also
 covers the key's medical, religious and ai (IMPLIED: T4.13's one row per line, the reviewer runs every check of the
-client on it), except ai or religious where the line's words or assets trigger it (a disclosure, a hadith citation or
-quoted scripture is never implied: a religious client's medical row never clears a cited hadith; `coverage` 2,
-COVERAGE: an older file's ok rows count no religious on such a line, so it is asked once). business, ai and any later
+client on it), except a flag the line's words or assets trigger (a disclosure, a hadith citation or quoted
+scripture, a dose, a drug or a cure claim is never implied: a religious client's medical row never clears a cited
+hadith, and its religious row never clears a dose; `coverage` 3, COVERAGE: an older file's ok rows count no such flag
+on such a line, so it is asked once). business, ai and any later
 domain never cover anything but themselves: an ai or business row never stands in for the medical check, and a business
 client's every line needs its own business row. An ok row's `flags` lists what the line was cleared for, minus what its
 items already cover (never a flag the line has an item for; an implied ai is not written); an ok row without `flags`
@@ -339,25 +340,27 @@ def _domain() -> str:
 
 
 # T4.13's flags. A row under one of them that is in the key covers its line for every IMPLIED flag of the key, as T4.13
-# did (one row per line: the reviewer runs every check of the client on it): medical, and religious and the always-on
-# ai unless the line's own words or assets trigger them (then each needs its own row: a disclosure, a hadith citation
-# or quoted scripture is never implied; Task 53 leftover, review 6275496 P2-3). business and any later domain are never
+# did (one row per line: the reviewer runs every check of the client on it): medical, religious and the always-on ai,
+# each unless the line's own words or assets trigger it (then it needs its own row: a disclosure, a hadith citation or
+# quoted scripture, a dose, a drug or a cure claim is never implied; Task 53 leftover, review 6275496 P2-3, and its
+# mirror, round 2). business and any later domain are never
 # implied: every line needs its own row for them, and a row under them, or under ai, covers that flag only (it never
 # stands in for the medical check).
 LEGACY = ("medical", "religious")
 IMPLIED = ("ai", "medical", "religious")
-ALWAYS_IMPLIED = ("medical",)        # implied even on a line whose words trigger it
-# The coverage rule a file was written under (its `coverage`). 2: a line whose words trigger religious needs its own
-# religious row. An older file (no `coverage`, or another number) stored the implied religious in its ok rows'
-# `flags`, so there an ok row's religious is not counted on such a line: that line is asked again, once.
-COVERAGE = 2
+# The coverage rule a file was written under (its `coverage`): from 2 a line whose words trigger religious needs its
+# own religious row, from 3 one that triggers medical its own medical row. A file written before (no `coverage`, or a
+# lower number) stored the implied flag in its ok rows' `flags`, so there an ok row's flag is not counted on a line
+# whose words trigger it (EXPLICIT_SINCE): that line is asked again, once.
+COVERAGE = 3
+EXPLICIT_SINCE = {"religious": 2, "medical": 3}
 
 
 def _cover(named, key_flags, triggered=()) -> set:
     """The flags a line is covered for, from the flags named on it (table rows, items, ok rows' `flags`)."""
     out = set(named)
     if out & set(LEGACY) & set(key_flags):
-        out |= (set(IMPLIED) & set(key_flags)) - (set(triggered) - set(ALWAYS_IMPLIED))
+        out |= (set(IMPLIED) & set(key_flags)) - set(triggered)
     return out
 
 
@@ -368,14 +371,16 @@ def _ok_flags(row: dict, key) -> tuple:
     return tuple(key.split("+")) if isinstance(key, str) and key else ()
 
 
-def _named_ok(row: dict, key, triggered=(), older: bool = False) -> set:
+def _named_ok(row: dict, key, triggered=(), coverage=COVERAGE) -> set:
     """What an ok row names for coverage: its `flags`; an older row without them, its key minus ai (the always-on ai
-    was implied there, so an AI hint that appears later on the line still asks for its own ai row). In an `older` file
-    (written before COVERAGE) of a key with religious, minus religious on a line whose words trigger it: that religious
-    may have been only implied by a medical row."""
+    was implied there, so an AI hint that appears later on the line still asks for its own ai row). In a file of a key
+    with religious whose `coverage` is under a flag's EXPLICIT_SINCE (or missing), minus that flag on a line whose
+    words trigger it: there it may have been only implied (religious by a medical row, medical by a religious row)."""
     named = set(_ok_flags(row, key)) - ({"ai"} if "flags" not in row else set())
-    if older and "religious" in triggered and isinstance(key, str) and "religious" in key.split("+"):
-        named.discard("religious")
+    if isinstance(key, str) and "religious" in key.split("+"):
+        for flag, since in EXPLICIT_SINCE.items():
+            if flag in triggered and not (type(coverage) is int and coverage >= since):
+                named.discard(flag)
     return named
 
 
@@ -447,11 +452,11 @@ def _rows(doc: dict, *, need_ok: bool = False):
 
 
 def _previous(paths: Paths, kind: str, key: str):
-    """(why it can't be used or None, flagged rows, ok rows, older) of the previous review file, stale or not. A missing
+    """(why it can't be used or None, flagged rows, ok rows, coverage) of the previous review file, stale or not. A missing
     file is usable and empty. A file that exists but cannot be used (bad JSON, another schema or plan kind, ANY damaged
     row, or a review done for another review key, a T4.13 profile domain such as `medical`, or none) carries nothing: it
     may have held flags, or its ok lines were never checked for this key, so the new table must list every line.
-    `older`: written before COVERAGE (see _named_ok)."""
+    `coverage`: the file's coverage rule (see _named_ok)."""
     f = path(paths)
     if not f.exists():
         return None, [], [], False
@@ -475,7 +480,7 @@ def _previous(paths: Paths, kind: str, key: str):
         was = f"the {was} review set" if isinstance(was, str) and was else "no named review set"
         return (f"the earlier review (review-flags.json) was done for {was} and this client's review set is now "
                 f"{key}, so nothing could be carried forward: list every line once"), [], [], False
-    return None, flagged, ok, old.get("coverage") != COVERAGE
+    return None, flagged, ok, old.get("coverage")
 
 
 def _detected(paths: Paths, kind: str, index: dict, key_flags: tuple) -> dict:
@@ -516,7 +521,7 @@ def write(paths: Paths, findings: dict, *, by: str = "lead") -> dict:
     rows = _clean(findings, index, key)
     lines = [i for i, v in index.items() if v["text"]]
     detected = _detected(paths, kind, index, key_flags)
-    unusable, old_flagged, old_ok, older = _previous(paths, kind, key)
+    unusable, old_flagged, old_ok, was_coverage = _previous(paths, kind, key)
 
     def current(eid):                     # a plan line with words; an id whose words were all removed counts as gone
         v = index.get(eid)
@@ -547,7 +552,8 @@ def write(paths: Paths, findings: dict, *, by: str = "lead") -> dict:
     for r in rows + carried:
         named.setdefault(r["event_id"], set()).add(r["flag"])
     for o in ok_carried:
-        named.setdefault(o["event_id"], set()).update(_named_ok(o, key, detected.get(o["event_id"], {}), older))
+        named.setdefault(o["event_id"], set()).update(_named_ok(o, key, detected.get(o["event_id"], {}),
+                                                                 was_coverage))
     trig = {i: set(detected.get(i, {})) for i in lines}
     cov = {i: _cover(named.get(i, ()), key_flags, trig[i]) for i in lines}
     uncovered = [i for i in lines if not named.get(i)]
@@ -627,8 +633,8 @@ def load(paths: Paths) -> dict | None:
     row (the checks `write` applies to an earlier file: any registry flag is fine), a row whose id is not a plan
     line with words or whose text is not that line's current words, no `ok` list, `checked` or `lines_total` not the
     plan's number of lines with text (an integer), or a plan line with text not covered for the key and the domains its
-    words trigger now (the write() rule; a file older than COVERAGE counts no ok-row religious on a line whose words
-    trigger religious, so NEEDS-YOU asks for that review again, never approves it silently). These catch a wiped or
+    words trigger now (the write() rule; a file older than COVERAGE counts no ok-row religious or medical on a line
+    whose words trigger it, so NEEDS-YOU asks for that review again, never approves it silently). These catch a wiped or
     carelessly edited file, not a deliberate one: a flag
     moved into `ok` by hand, with the right words, cannot be told from a real `ok` without a signature."""
     try:
@@ -661,11 +667,11 @@ def load(paths: Paths) -> dict | None:
     except Exception:  # noqa: BLE001
         return None
     named: dict = {}
-    older = doc.get("coverage") != COVERAGE
     for it in rows[0]:
         named.setdefault(it["event_id"], set()).add(it["flag"])
     for o in rows[1]:
-        named.setdefault(o["event_id"], set()).update(_named_ok(o, key, detected.get(o["event_id"], {}), older))
+        named.setdefault(o["event_id"], set()).update(_named_ok(o, key, detected.get(o["event_id"], {}),
+                                                                 doc.get("coverage")))
     for i in lines:
         trig = set(detected.get(i, {}))
         if not (set(key_flags) | trig) <= _cover(named.get(i, ()), key_flags, trig):

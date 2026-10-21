@@ -642,7 +642,8 @@ class TestAutoApprove(Base):
         self.assertEqual(rec["not_covered"], [{"event_id": "G2", "kind": "medical"}])
         self.assertEqual([i["ref"] for i in by_kind(self.collect(), "medical")], ["G2"])
         profile(self.root, "profile.json", {"domain": "religious"})
-        full_review(self.p, flag="religious")
+        RF.write(self.p, {"items": [{"event_id": i, "flag": f, "verdict": "ok", "reason": ""}   # G2 is a dose: its
+                                    for i, f in (("G1", "religious"), ("G2", "religious"), ("G2", "medical"))]})  # own medical row
         rec = AP().approve(self.p)
         self.assertEqual(rec["not_covered"], [{"event_id": "G2", "kind": "religious"}])
         self.assertEqual([i["ref"] for i in by_kind(self.collect(), "religious")], ["G2"])
