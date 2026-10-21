@@ -1455,8 +1455,59 @@ class TestSetupWarnsNonAsciiHome(TempHome):
         self.assertEqual(len(rep["warnings"]), 1, rep)
         self.assertIn("non-ASCII", rep["warnings"][0]["item"])
         self.assertIn("setx WHYNOT_HOME", rep["warnings"][0]["fix"])
+        # BL-16: an ASCII folder on a local drive, never a folder at the root of C:\ named whynot
+        self.assertRegex(rep["warnings"][0]["fix"], r"setx WHYNOT_HOME [A-Z]:\\WhyNotCut")
+        self.assertNotRegex(rep["warnings"][0]["fix"], r"(?i)c:\\whynot(?!cut)")
         self.assertIn("non-ASCII", r.stderr)
         self.assertFalse(home.exists())
+
+
+class TestSetupLocksANewHome(TempHome):
+    """BL-16: reel setup prepares the engine home through home_acl.prepare_home (a new one outside the profile is
+    locked to the user, an open one refused) BEFORE anything is written there, uv's download included; a refusal
+    stops setup before anything is installed."""
+
+    def run_main(self, prepare):
+        import contextlib
+        home = self.t / "WhyNotCut"
+        out, order = io.StringIO(), []
+
+        def find_uv(*a, **k):
+            order.append("find_uv")
+            return None, None
+
+        def prep(h):
+            order.append("prepare")
+            return prepare(h)
+        with mock.patch.object(SETUP.home_acl, "prepare_home", side_effect=prep) as made, \
+                mock.patch.object(SETUP, "build", return_value={"id": "r-x"}) as build, \
+                mock.patch.object(SETUP, "find_uv", side_effect=find_uv), \
+                mock.patch.object(SETUP.plat, "adobe_report", return_value={"all": []}), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            rc = SETUP.main(["--home", str(home)])
+        made.assert_called_once_with(home)
+        return home, build, rc, json.loads(out.getvalue()), order
+
+    def test_the_home_is_prepared_before_uv_is_looked_for(self):
+        home, build, _, rep, order = self.run_main(lambda h: h.mkdir() or True)
+        self.assertEqual(order, ["prepare", "find_uv"])                   # uv's download goes into the home
+        self.assertTrue((home / "models").is_dir())
+        build.assert_called_once()
+        self.assertNotIn("error", rep)
+
+    def test_a_refused_home_stops_setup(self):
+        how = 'run in PowerShell or Command Prompt: icacls "X" /inheritance:r ...  then reel setup again'
+        err = SETUP.home_acl.HomeAclError("مقدرناش نقفل فولدر المحرك / could not lock the engine home", how)
+
+        def refuse(h):
+            raise err
+        home, build, rc, rep, order = self.run_main(refuse)
+        self.assertEqual(rc, 1)
+        self.assertEqual(order, ["prepare"])
+        build.assert_not_called()
+        self.assertFalse(home.exists())
+        self.assertTrue(rep["error"].startswith("مقدرناش"), rep)
+        self.assertEqual(rep["how"], how)
 
 
 if __name__ == "__main__":

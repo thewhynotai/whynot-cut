@@ -43,6 +43,8 @@ sys.path.insert(0, str(PLUGIN / "engine" / "reel" / "lib"))
 import plat  # noqa: E402  (stdlib only)
 import runtime as R  # noqa: E402  (stdlib only)
 import writer_lock as WL  # noqa: E402  (stdlib only: pid_alive)
+sys.path.insert(1, str(PLUGIN / "engine" / "reel"))
+from lib import home_acl  # noqa: E402  (BL-16, stdlib only: lock a new engine home to the user)
 
 BUILD_LOCK_STALE_S = 2 * 3600
 
@@ -442,15 +444,18 @@ def main(argv=None):
             raise Failed(f"this plugin ships no runtime lock for {key or 'this platform'} ({ent['file'].name})",
                          how="WhyNot Cut runs on Windows x64 and macOS (Apple Silicon or Intel)")
         rid = R.runtime_id(ent["file"].read_bytes(), ent["declared_id"])
+        if not a.check:
+            try:      # BL-16: before anything (uv's download included) is written in the engine home
+                home_acl.prepare_home(home)
+            except home_acl.HomeAclError as e:
+                raise Failed(str(e), how=e.how) from None
+            (home / "models").mkdir(exist_ok=True)
         if a.uv:
             uv, note = Path(a.uv), None
         else:
             uv, note = find_uv(home, comp, key, allow_download=not (a.no_download or a.check))
         if note:
             rep["uv_note"] = note
-        if not a.check:
-            home.mkdir(parents=True, exist_ok=True)
-            (home / "models").mkdir(exist_ok=True)
         try:
             rep["runtime"] = build(home, comp=comp, key=key, lock_file=ent["file"], rid=rid, by=a.by, check=a.check,
                                    force=a.force, dev_system_site=a.dev_system_site, uv=uv)

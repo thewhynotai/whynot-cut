@@ -175,7 +175,9 @@ class TestSetup(unittest.TestCase):
                 raise self.SE.Failed("cuda wheels failed")
             return {"id": "r-x", "action": "create"}
         out = io.StringIO()
-        with mock.patch.object(self.SE, "build", side_effect=fake_build), \
+        # BL-16: the temp home is outside the test profile, on a drive others may write to; its lock is test_home_acl's
+        with mock.patch.object(self.SE.home_acl, "prepare_home", return_value=False), \
+                mock.patch.object(self.SE, "build", side_effect=fake_build), \
                 mock.patch.object(self.SE.R, "platform_key", return_value=key), \
                 mock.patch.object(self.SE, "nvidia_present", return_value=nvidia), \
                 mock.patch.object(self.SE, "find_uv", return_value=(Path("C:/uv.exe"), None)), \
@@ -397,7 +399,8 @@ class TestClassRuntimeKept(unittest.TestCase):
             return {"id": rid, "action": "none"}
         for argv, want in (([], "runtime-cuda.txt"), (["--runtime", "base"], "runtime-win-x64.lock")):
             calls.clear()
-            with mock.patch.object(SE, "build", side_effect=fake_build), \
+            with mock.patch.object(SE.home_acl, "prepare_home", return_value=False), \
+                    mock.patch.object(SE, "build", side_effect=fake_build), \
                     mock.patch.object(SE.R, "platform_key", return_value="win-x64"), \
                     mock.patch.object(SE, "nvidia_present", return_value=True), \
                     mock.patch.object(SE, "find_uv", return_value=(Path("C:/uv.exe"), None)), \
