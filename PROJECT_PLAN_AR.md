@@ -1,7 +1,7 @@
 # خطة المشروع التنفيذية — WhyNot Cut (Adobe Premiere Pro Plugin)
 
 <!-- AUTO:STATUS START -->
-> آخر تحديث فعلي: 2026-10-21 17:29 — Africa/Cairo
+> آخر تحديث فعلي: 2026-10-21 17:47 — Africa/Cairo
 > مصدر التحديث: hq_status.py / info@ / release/3.0 @ 11744466
 > حالة التشغيل: RUNNING
 > حالة المزامنة: HQ = LOCAL+GITHUB_VERIFIED · release/3.0 = LOCAL_AHEAD 110
@@ -11,9 +11,10 @@
 | SETUP-H1 | H1 (Mayar) | ACCEPTED |
 | BL-16 | H1 | MERGED |
 | BL-02 | H1 | READY |
-| S6b | H1 | READY |
+| S6b | H1 | FIX |
 | BL-17 | H1 | READY |
 | BL-19 | H1 | READY |
+| S1-R51 | H1 | READY |
 | SETUP-H2 | H2 (marketing@) | ACCEPTED |
 | BL-03 | H2 | FIX |
 | BL-04 | H2 | READY |
