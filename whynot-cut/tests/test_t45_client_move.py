@@ -1432,13 +1432,10 @@ class TestReview087e8e3(Base):
         adv = CM.move(other, self.tmp / "E drive" / "Other2", apply=True)["old_folder"]
         self.assertIn(f"made again: {rel}, output/projects/R01/09_handoff/delivery.json. ", adv)
 
-    def test_a_replaced_episode_file_is_still_refused_after_a_move(self):
-        """Review f7793c5 P3-2 (cuts): the episode record is rewritten, never re-made by a step, so reels-select still
-        sees that the episode file changed after episode-prep (reels.py:668-672) and refuses until it is prepared,
-        transcribed and planned again."""
-        from lib import reels
+    def prepared_episode(self, replace: bool) -> dict:
+        """EP01 prepared (episode.json with the file's fingerprint, in the inventory); `replace`: the episode file is
+        replaced after episode-prep. Returns the episode record as written."""
         from lib.common import sha1_head
-        from lib.episode import EpisodePaths
         (self.src / "output/projects/R01/09_handoff/delivery.json").unlink()
         (self.src / self.PRPROJ).unlink()
         ep_file = self.src / "data" / "Episodes" / "EP01.mp4"
@@ -1451,7 +1448,33 @@ class TestReview087e8e3(Base):
         inv["files"].append({"rel": "data/Episodes/EP01.mp4", "path": str(ep_file), "kind": "video",
                              "role": "episode", "media": "video", "size_bytes": ep_file.stat().st_size})
         write_json(self.src / "output/discovery/input-inventory.json", inv)
-        ep_file.write_bytes(b"a re-export, never prepared" * 100)       # replaced after episode-prep
+        if replace:
+            ep_file.write_bytes(b"a re-export, never prepared" * 100)   # replaced after episode-prep
+        return info
+
+    def test_an_unchanged_episode_still_passes_the_check_after_a_move(self):
+        """Review d224a9a P3-4: the move keeps the episode's bytes and its record's fingerprint, so reels-select's
+        "episode file changed" check passes at the new place (it stops later, here for the missing reels plan)."""
+        from lib import reels
+        from lib.episode import EpisodePaths
+        info = self.prepared_episode(replace=False)
+        doc = self.moved()
+        self.assertEqual(doc["old_folder"], self.delete_line())
+        self.assertEqual(read_json(self.dest / "output/episodes/EP01/00_inputs/episode.json")["fingerprint"],
+                         info["fingerprint"])
+        os.rename(self.src, self.tmp / "deleted old folder")
+        with self.assertRaises(SystemExit) as cm:
+            reels.select(EpisodePaths(self.dest, "EP01"), ["R01"], [], "editor")
+        self.assertNotIn("the episode file changed", str(cm.exception))
+        self.assertIn("reels plan", str(cm.exception))
+
+    def test_a_replaced_episode_file_is_still_refused_after_a_move(self):
+        """Review f7793c5 P3-2 (cuts): the episode record is rewritten, never re-made by a step, so reels-select still
+        sees that the episode file changed after episode-prep (reels.py:668-672) and refuses until it is prepared,
+        transcribed and planned again."""
+        from lib import reels
+        from lib.episode import EpisodePaths
+        info = self.prepared_episode(replace=True)
         doc = self.moved()
         self.assertEqual(doc["old_folder"], self.delete_line())       # no `reel episode-prep` to paper over it
         moved = read_json(self.dest / "output/episodes/EP01/00_inputs/episode.json")

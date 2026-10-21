@@ -383,19 +383,40 @@ def _really_inside(p: str, root) -> bool:
     return inside_root(cmp.real(p), cmp.real(str(root)))
 
 
+_ADMIN_SHARE = re.compile(r"^\\\\(?:localhost|127\.0\.0\.1)\\([A-Za-z])\$(\\.*)?$", re.I)
+
+
+def _alias(v: str) -> str | None:
+    r"""The plain path behind a Windows device path (\\?\X:\..., \\.\X:\..., \\?\UNC\srv\...) or this computer's
+    admin share (\\localhost\X$\...), either slash; None for any other value (review d224a9a P3-3)."""
+    w = v.replace("/", "\\")
+    if w.startswith(("\\\\?\\", "\\\\.\\")):
+        s = w[4:]
+        return "\\\\" + s[4:] if s[:4].upper() == "UNC\\" else s
+    m = _ADMIN_SHARE.match(w)
+    return f"{m.group(1)}:{m.group(2) or chr(92)}" if m else None
+
+
 def resolve(root, v):
     """A stored value -> a path this computer can open: relative -> under the root; absolute inside the root -> kept;
     absolute elsewhere -> the same file under this root when its tail from an anchor folder exists here (a client
-    copied or moved by hand), else kept as it is (never invented). A value that names a place in the client but
-    really lands outside it (a link, `..`) and one that names no place we can place (`../x`, `C:x`, `\\x`) give None:
-    missing (review 0d84730 P2-1, P3-2, P3-3)."""
+    copied or moved by hand), else kept as it is (never invented). None (missing) for: a value that names a place in
+    the client but really lands outside it (a link, `..`); one that names no place we can place (`../x`, `C:x`, `\\x`,
+    the root itself `.`); on Windows a device path or admin share of this computer (`\\\\?\\`, `\\\\.\\`,
+    `\\\\localhost\\X$\\`) unless it is really inside the root, and a POSIX-rooted `/x` unless its anchor tail is
+    here (Windows would open it on the current drive) (reviews 0d84730 P2-1, P3-2, P3-3; d224a9a P3-3, P3-4)."""
+    import os
     from pathlib import Path, PurePosixPath, PureWindowsPath
     if not isinstance(v, str) or not v:
         return v
     root = Path(root)
     if is_relative(v):
-        cand = str(root.joinpath(*PurePosixPath(v.replace("\\", "/")).parts))
-        return cand if _really_inside(cand, root) else None
+        parts = PurePosixPath(v.replace("\\", "/")).parts
+        cand = str(root.joinpath(*parts))
+        return cand if parts and _really_inside(cand, root) else None
+    plain = _alias(v)
+    if plain is not None:
+        return plain if os.name == "nt" and _really_inside(plain, root) else None
     win = bool(PureWindowsPath(v).drive) or "\\" in v
     if not (PureWindowsPath(v) if win else PurePosixPath(v)).is_absolute():
         return None                                # "../x", "C:x", "\x": relative to whatever folder runs it
@@ -407,7 +428,7 @@ def resolve(root, v):
         cand = root.joinpath(*tail.split("/"))
         if cand.exists() and _really_inside(str(cand), root):
             return str(cand)
-    return v
+    return None if os.name == "nt" and not win else v
 
 
 def _walk(node, spec: tuple, fn):
@@ -445,7 +466,23 @@ def resolved(root, rel: str, doc):
     """`doc` (the content of database file `rel`) with every path field made openable here (`resolve`), in place."""
     for spec in path_fields(rel):
         _walk(doc, spec, lambda v: resolve(root, v))
+    _role_files(rel, doc, lambda v: resolve(root, v))
     return doc
+
+
+def _role_files(rel: str, doc, fn) -> None:
+    """typography.json roles given as a font FILE (`"body": {"file": ...}` or a path string), read and stored like the
+    families' files, so a role names exactly that file (review d224a9a P3-1). A value without a folder (a style, a
+    PostScript name, a bare file name) is left as it is: it matches by name."""
+    if str(rel).replace("\\", "/") != "branding/typography.json" or not isinstance(doc, dict) or \
+            not isinstance(doc.get("roles"), dict):
+        return
+    named = lambda v: isinstance(v, str) and ("/" in v or "\\" in v)
+    for k, spec in doc["roles"].items():
+        if named(spec):
+            doc["roles"][k] = fn(spec)
+        elif isinstance(spec, dict) and named(spec.get("file")):
+            spec["file"] = fn(spec["file"])
 
 
 # --------------------------------------------------------------------------- writing portable paths (T4.5 part B)
@@ -512,6 +549,7 @@ def stored(root, rel: str, doc):
     """`doc` (the content of database file `rel`) with every path field in its stored form, in place; returns it."""
     for spec in path_fields(rel):
         _walk(doc, spec, lambda v: to_stored(root, v))
+    _role_files(rel, doc, lambda v: to_stored(root, v))
     return doc
 
 

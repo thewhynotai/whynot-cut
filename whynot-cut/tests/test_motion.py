@@ -1175,6 +1175,107 @@ def names_script():
     return s
 
 
+class TestMotionAssetsStayInTheClient(unittest.TestCase):
+    """Review d224a9a P2-1 (HIGH: which client file After Effects loads): the person card's photo and the outro's logo
+    come from the asset manifest through client_db (never a raw `root / rel`). One that is missing or outside the
+    client folder (a `../` rel, a junction to elsewhere) is never put in the comp: the photo is a compile error, the
+    logo is left out with a warning, both in plain English and Arabic."""
+
+    def setUp(self):
+        if test_font() is None:
+            self.skipTest("no test font for HarfBuzz fitting")
+        self.tmp = Path(tempfile.mkdtemp())
+        self.root, self.ep, self.reel = motion_plan_fixture(self.tmp)
+        self.out = self.root.parent / "outside"
+        self.out.mkdir()
+        for n in ("p.png", "logo.png"):
+            (self.out / n).write_bytes(b"a png from outside the client")
+        for n in ("logo.png", "p.png"):
+            (self.root / "assets" / "Brand" / n).write_bytes(b"the client's own png")
+        self.junc = None
+
+    def tearDown(self):
+        import os
+        common.set_context(None)
+        if self.junc is not None:
+            os.rmdir(self.junc)                               # the link only, never what it points to
+            self.assertTrue((self.out / "p.png").is_file())
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def manifest(self, *assets):
+        write_json(self.reel.client_db / "asset-manifest.json", {"assets": list(assets), "count": len(assets)})
+
+    def compile(self, photo=None):
+        from lib.motion_plan import compile_motion
+        script = names_script()
+        if photo:
+            script["scenes"][2]["photo"] = photo
+        write_json(self.reel.p("01_analysis/motion-script.json"), script)
+        r = compile_motion(self.reel)
+        plan = read_json(self.reel.p("01_analysis/motion-plan.json"))
+        images = {sc["id"]: [e["path"] for e in sc["elements"] if e["kind"] == "image"] for sc in plan["scenes"]}
+        return r, plan, images
+
+    def assert_nothing_outside(self, plan):
+        self.assertNotIn(str(self.out), json.dumps(plan, ensure_ascii=False))
+        self.assertNotIn("..", json.dumps([e.get("path") for sc in plan["scenes"] for e in sc["elements"]]))
+
+    def test_the_client_own_photo_and_logo_are_placed(self):
+        self.manifest({"rel": "assets/Brand/logo.png", "file": "assets/Brand/logo.png", "display_derivative": None,
+                       "category": "logo"},
+                      {"rel": "assets/Brand/p.png", "file": "assets/Brand/p.png", "display_derivative": None,
+                       "category": "person"})
+        r, plan, images = self.compile(photo="assets/Brand/p.png")
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertEqual(images["S03"], [str(self.root / "assets" / "Brand" / "p.png")])
+        self.assertEqual(images["S04"], [str(self.root / "assets" / "Brand" / "logo.png")])
+
+    def test_a_logo_given_by_dotdot_is_left_out_with_a_warning(self):
+        self.manifest({"rel": "../outside/logo.png", "file": None, "display_derivative": None, "category": "logo"})
+        r, plan, images = self.compile()
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertEqual(images["S04"], [])
+        w = next(x for x in r["warnings"] if "logo" in x)
+        self.assertIn("missing or outside the client folder", w)
+        self.assertIn("برة فولدر العميل", w)
+        self.assert_nothing_outside(plan)
+
+    def test_a_photo_given_by_dotdot_is_a_compile_error(self):
+        self.manifest({"rel": "../outside/p.png", "file": None, "display_derivative": None, "category": "person"})
+        r, plan, images = self.compile(photo="../outside/p.png")
+        self.assertFalse(r["ok"])
+        e = next(x for x in r["errors"] if "photo" in x)
+        self.assertIn("S03", e)
+        self.assertIn("missing or outside the client folder", e)
+        self.assertIn("برة فولدر العميل", e)
+        self.assertEqual(images["S03"], [])
+        self.assert_nothing_outside(plan)
+
+    @unittest.skipUnless(sys.platform == "win32", "a junction (mklink /J) is Windows")
+    def test_a_photo_and_logo_through_a_junction_stay_out_of_the_comp(self):
+        self.junc = self.root / "assets" / "junc"
+        r = subprocess.run(["cmd", "/c", "mklink", "/J", str(self.junc), str(self.out)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue((self.junc / "p.png").is_file())                     # the link really reaches outside
+        self.manifest({"rel": "assets/junc/logo.png", "file": "assets/junc/logo.png",
+                       "display_derivative": "assets/junc/logo.png", "category": "logo"},
+                      {"rel": "assets/junc/p.png", "file": "assets/junc/p.png", "display_derivative": "assets/junc/p.png",
+                       "category": "person"})
+        r, plan, images = self.compile(photo="assets/junc/p.png")
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("photo" in x and "برة فولدر العميل" in x for x in r["errors"]), r["errors"])
+        self.assertTrue(any("logo" in x and "outside the client folder" in x for x in r["warnings"]), r["warnings"])
+        self.assertEqual((images["S03"], images["S04"]), ([], []))
+        self.assertNotIn("junc", json.dumps([e.get("path") for sc in plan["scenes"] for e in sc["elements"]]))
+
+    def test_a_display_copy_that_is_gone_counts_as_missing(self):
+        self.manifest({"rel": "assets/Brand/logo.png", "file": "assets/Brand/logo.png",
+                       "display_derivative": "output/client_database/assets/derivatives/gone.png", "category": "logo"})
+        r, plan, images = self.compile()
+        self.assertEqual(images["S04"], [])
+        self.assertTrue(any("logo" in x and "missing" in x for x in r["warnings"]), r["warnings"])
+
+
 class TestEpisodeSheetBinding(unittest.TestCase):
     """BL-20: the motion plan's approval is bound to the names the compiler puts on screen from the episode sheet
     (host, guest with role, show) and from the reel's 00_inputs/speakers.json (the badge's fallback names and turns):

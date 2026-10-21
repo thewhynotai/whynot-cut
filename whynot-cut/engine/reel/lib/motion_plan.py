@@ -506,6 +506,13 @@ class _Compiler:
         from . import client_db
         return (client_db.load(self.paths, "asset-manifest.json", {"assets": []}) or {}).get("assets", [])
 
+    def _client_file(self, a: dict) -> str | None:
+        """The file of an asset manifest entry for the comp: its display copy, else its own file, both through
+        client_db (never a raw `root / rel`, review d224a9a P2-1); None when it is missing or outside the client."""
+        from . import client_db
+        p = a.get("display_derivative") or client_db.resolve(self.paths.root, a.get("rel"))
+        return p if isinstance(p, str) and Path(p).is_file() else None
+
     def _person(self, sid, sc, theme, els):
         who = sc.get("who")
         raw = str(self.sheet.get(who) or "") if who in ("host", "guest") else ""
@@ -516,12 +523,17 @@ class _Compiler:
         role = re.split(r"\s+[—–-]\s+", raw, maxsplit=1)[1].strip() if re.search(r"\s+[—–-]\s+", raw) else ""
         if sc.get("photo"):
             a = next((x for x in self._manifest() if x.get("rel") == sc["photo"]), None)
+            f = self._client_file(a) if a else None
             if not a:
                 self.err(f"{sid}: photo {sc['photo']!r} is not in the client's asset manifest (run `reel client-db`)")
+            elif not f:
+                self.err(f"{sid}: photo {sc['photo']!r} is missing or outside the client folder: put it under assets/ "
+                         f"and run `reel client-db` (الصورة {sc['photo']} مش موجودة أو برة فولدر العميل: حطّها جوّه "
+                         "assets/ وشغّل reel client-db)")
             else:
                 x, y = place("person_card", "photo", self.fmt, self.direction)
                 d = int(self.fmt["w"] * 0.42)
-                els.append({"kind": "image", "name": f"{sid}_image_1", "path": a.get("display_derivative") or str(self.paths.root / a["rel"]),
+                els.append({"kind": "image", "name": f"{sid}_image_1", "path": f,
                             "x": x, "y": y, "w": d, "h": d, "radius": d / 2})
                 self.assets.append({"ref": a["rel"], "license": "client", "attribution": ""})
         for n, (el, t) in enumerate((("name", name), ("role", role)), 1):
@@ -551,11 +563,17 @@ class _Compiler:
 
     def _outro(self, sid, sc, theme, els):
         logo = next((a for a in self._manifest() if a.get("category") == "logo"), None)
-        if logo and sc.get("show_logo", True):
+        f = self._client_file(logo) if logo and sc.get("show_logo", True) else None
+        if logo and sc.get("show_logo", True) and not f:
+            self.warnings.append(f"{sid}: the client logo {logo.get('rel')!r} is missing or outside the client folder: "
+                                 "the outro shows no logo. Put it under assets/ and run `reel client-db` (اللوجو "
+                                 f"{logo.get('rel')} مش موجود أو برة فولدر العميل: الختام من غير لوجو. حطّه جوّه "
+                                 "assets/ وشغّل reel client-db)")
+        if f:
             x, y = place("outro", "logo", self.fmt, self.direction)
             w = int(self.fmt["w"] * 0.35)
-            els.append({"kind": "image", "name": f"{sid}_image_1", "path": logo.get("display_derivative") or
-                        str(self.paths.root / logo["rel"]), "x": x, "y": y, "w": w, "h": w, "radius": 0, "fit": "contain"})
+            els.append({"kind": "image", "name": f"{sid}_image_1", "path": f, "x": x, "y": y, "w": w, "h": w,
+                        "radius": 0, "fit": "contain"})
         e = self.text_el(sid, 1, "outro", "cta", self.editorial_text(sid, "cta", sc["cta"]), theme)
         if e:
             els.append(e)
