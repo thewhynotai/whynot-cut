@@ -17,26 +17,30 @@ reading and testing.
 ## 0. Lock, then a quick exit when there is nothing to do
 1. **The lock.** `HQ\intake\intake.lock` holds one line: `until <YYYY-MM-DD HH:MM> session <this run's session id>`
    (get the id with `mcp__ccd_session_mgmt__get_session` "self"). Old locks may lack the `session` part.
-   - If the lock exists and names a session, read TWO signals (load both tools in one ToolSearch:
+   - If the lock exists and names a session, read THREE signals (load both tools in one ToolSearch:
      `select:mcp__ccd_session_mgmt__get_session,mcp__scheduled-tasks__list_task_runs`):
-     `get_session` on that id (`isRunning`), and `list_task_runs` `whynot-cut-hq-intake` limit 10 (that session's
-     `status`, or "not listed"). Combine them with `stale_suites.py` `run_alive`, then the tested rule `lock_stale` /
-     `parse_lock`. A live run that waits on its review can read `isRunning: false` (2026-10-21 08:38 and 13:38: two
-     intakes ran at once), so a run listed as `running` is ALIVE whatever `isRunning` says:
-     - alive (`isRunning: true`, or listed `running`) → NOT stale, even if `until` has passed (a long review may
-       outlast it): stop at once ("intake already running").
-     - dead (listed `failed`/`succeeded`, and `isRunning` not true) → stale (a run cut by a usage limit).
+     `get_session` on that id (`isRunning`); `list_task_runs` `whynot-cut-hq-intake` limit 10 (that session's
+     `status`, or "not listed"); and `python -X utf8 "<HQ>\tools\stale_suites.py" scan-tag <that id>` (its live
+     review suites). Combine them with `stale_suites.py` `run_alive`, then the tested rule `lock_stale` / `parse_lock`.
+     A live run that waits on its review can read `isRunning: false`, and its turn can end `succeeded` while its tagged
+     suites still wait in heavy.sh; their finish wakes it again (2026-10-21 08:38, 13:38 and 17:43):
+     - alive (`isRunning: true`; or listed `running`; or listed `succeeded` with 1+ tagged suites) → NOT stale, even
+       if `until` has passed (a long review may outlast it): stop at once ("intake already running").
+     - dead (listed `failed`, i.e. cut by a usage limit; or listed `succeeded` with 0 tagged suites) → stale.
      - not listed (started by hand, or older than the last 10 runs) and `isRunning` not true, or the lock has no
        `session` (old format) → judged by `until` only. `isRunning: false` alone never makes a run dead.
+     - `scan-tag` errors or times out → treat the suite count as unknown: judge a `succeeded` run by `until` only.
      - the line cannot be read → stale.
-   - Stale → rename it to `intake.lock.stale-<HHMM>`. Only when the run is listed `failed`/`succeeded` (the dead case above),
-     run `python -X utf8 "<HQ>\tools\stale_suites.py" end-tag <that session id>`: it ends ONLY processes whose command
+   - Stale → rename it to `intake.lock.stale-<HHMM>`. Only when the run is listed `failed` (cut by a limit;
+     a `succeeded` run has no tagged suites left), run `python -X utf8 "<HQ>\tools\stale_suites.py" end-tag
+     <that session id>`: it ends ONLY processes whose command
      carries `WNC_RUN=<that session id>` (that dead run's own review suites, running or still queued in heavy.sh).
      Never run `end-tag` on a lock judged by time alone.
    - Write `until` = now + 30 min (with `session`). Before each own Opus review (step 1B), rewrite it as now + 6 h.
      After each report is finished, set it back to now + 30 min.
    - Delete the lock at the end of the run, whatever happens, but ONLY if it still names this run's session id
-     (another run may have taken it over).
+     (another run may have taken it over). After any wake-up inside this run (a background suite or subagent
+     finished), re-read the lock first: if it no longer names this run's session id, stop at once ("lock taken over").
 2. **Find the pending work.** List `HQ\inbox\h1\*.md` and `HQ\inbox\h2\*.md` with their modified times. Compare
    with `HQ\intake\state.json`, which maps each report path (exactly as listed) to
    `{"mtime": <int seconds>, "status": "...", "verdict": "...", "at": "..."}`. Always compare mtimes as whole

@@ -50,14 +50,17 @@ def parse_lock(text):
     return dt.datetime.strptime(m.group(1), FMT), m.group(2)
 
 
-def run_alive(is_running, run_status):
+def run_alive(is_running, run_status, tagged_suites=0):
     """Is the lock's intake run alive? is_running: get_session isRunning (None if unknown); run_status: that session's
-    status in list_task_runs of whynot-cut-hq-intake (None if not listed). A live run waiting on its review can read
-    isRunning false (2026-10-21 08:38 + 13:38: two intakes ran at once), so "running" in the run list wins."""
+    status in list_task_runs of whynot-cut-hq-intake (None if not listed); tagged_suites: `scan-tag` count for it.
+    A live run waiting on its review can read isRunning false (2026-10-21 08:38 + 13:38: two intakes ran at once), and
+    its turn can end "succeeded" while its tagged suites still wait in heavy.sh (17:43); their finish wakes it again."""
     if is_running or run_status == "running":
         return True
-    if run_status in ("failed", "succeeded"):
-        return False
+    if run_status == "succeeded":
+        return tagged_suites > 0
+    if run_status == "failed":
+        return False  # cut by a usage limit: its suites are orphans (OPS-07 end-tag)
     return None  # not listed (hand-started, or older than the list): unknown, so `until` decides (review r1 P1)
 
 

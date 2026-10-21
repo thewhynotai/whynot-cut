@@ -1,6 +1,6 @@
 # S6b — Gate 4 eval cases for the Phase 4 skills
 
-- **Assigned:** H1    **Model:** Opus 5.5 high    **Size:** M    **Status:** READY (2026-10-20 22:20, executor answer below)
+- **Assigned:** H1    **Model:** Opus 5.5 high    **Size:** M    **Status:** FIX (round 1, 2026-10-21 17:55)
 - **Tier:** LIGHT (eval cases: dev workflow; they test the product, they don't change it)
 - **Stage / gate:** Gate 4 (`WhyNotCut/PROGRESS.md` line "Evals": "Add cases for the Phase 4 skills (rules/T4.3,
   episode sheet, autopilot, music NEEDS-YOU): S6 work for a free builder")    **Depends on:** the executor naming
@@ -47,3 +47,21 @@ Executor, 2026-10-20 (HEAD 17729fc):
   - verse / religious lines (medical-accuracy, motion, podcast and agent texts), because verse fix r2 is building;
   - cut proposals / takes (edit skill), because the K-T7 port has not landed.
 - **The fence is right:** evals + test_evals.py only.
+
+## FIX round 1 (2026-10-21 17:55)
+Master intake decision from the valid peer review `reviews/S6b-peer-h2-20261021-1224.md` (h2, sha 6a76a75, report-mtime
+1792557329, verdict PASS-WITH-MINORS). Fence re-checked by the master: all 77 paths under `whynot-cut/evals/` or
+`whynot-cut/tests/test_evals.py`; all 3 commits "Mayar (WhyNot Helper 1)". The peer suite's 4 failures are outside the
+diff (not counted against you). A P2 blocks ACCEPTED, so:
+1. **P2-1 (must fix):** `whynot-cut/evals/autopilot-approval-auto/graders/auto-approve-command.md:7` fails the
+   skill-faithful answer (no fixture sets `approval: auto`; default is `ask`, so the right move is
+   `reel approve-plan --by delegated …` or asking "this clip only, or from now on?"). Fix inside the fence: let the
+   grader also accept the delegated path (e.g. `reel(?:\.cmd)?\s+(?:auto-approve|approve-plan[^\n]*--by[ =]delegated)`),
+   or drop this grader and rely on `sensitive-never-auto` + `stops-at-qc`. No `_fixtures` change (outside the fence).
+2. **P3s (fix if cheap, else list under "Known limits" in your report):** P3-1 map each case to its expected
+   positive/negative tag in `test_evals.py:199-200`; P3-2 reword product finding 1 (motion/SKILL.md:111-112 already names
+   the needs_you music item; what is missing is the licence-file rule and "check data/Music first"); P3-3 say the music
+   cases measure the lead's own text only (no Agent tool); P3-4 split two-claim llm graders or record it as accepted;
+   P3-5 make `episode-sheet-before-episode`'s Skill grader record-only, or hand the description gap to the executor.
+Then: focused `test_evals.py`, the full suite through the queue, a new report with the new sha and the suite line.
+LIGHT tier: this is round 1 of at most 2.

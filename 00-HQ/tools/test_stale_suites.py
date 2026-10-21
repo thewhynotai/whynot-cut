@@ -74,6 +74,13 @@ class RunAlive(unittest.TestCase):
         self.assertFalse(ss.lock_stale(later, DEAD, ss.run_alive(False, None), NOW))                      # until respected
         self.assertTrue(ss.lock_stale(NOW - dt.timedelta(minutes=1), DEAD, ss.run_alive(False, None), NOW))  # expired
 
+    def test_succeeded_turn_with_live_tagged_suites_is_alive(self):
+        # 2026-10-21 17:43: the intake's turn ended ("succeeded", isRunning false) while 3 of its WNC_RUN-tagged
+        # review suites waited in heavy.sh; their finish wakes it again. Killing them would repeat the incident.
+        self.assertTrue(ss.run_alive(False, "succeeded", 3))
+        self.assertFalse(ss.run_alive(False, "succeeded", 0))   # truly finished, only the lock was left behind
+        self.assertFalse(ss.run_alive(False, "failed", 2))      # cut by a usage limit: its suites are orphans (OPS-07)
+
     def test_feeds_lock_stale(self):
         later = NOW + dt.timedelta(hours=3)
         self.assertFalse(ss.lock_stale(later, DEAD, ss.run_alive(False, "running"), NOW))
