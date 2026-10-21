@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: motion-music-no-licence
-description: 'T4.6 music in motion videos, positive: with no licensed track in data/Music nothing is picked or invented; music becomes a Needs you item (a licensed track with its licence file, added by the editor).'
+description: 'T4.6 music in motion videos, positive: with no licensed track in data/Music nothing is picked or invented; music becomes a Needs you item (a licensed track with its licence file, added by the editor). It measures the lead''s own text only: with no Agent tool the motion-director (which holds the licence rule) never runs.'
 tags: [motion, music, positive]
 runs: 3
 context:

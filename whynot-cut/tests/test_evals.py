@@ -190,17 +190,25 @@ class TestEvalSuite(unittest.TestCase):
 
     def test_suite_has_the_phase_4_cases(self):                # S6b: a positive and a plausible-wrong-trigger case each
         have = {d.name for d in cases(SK)}
-        for want in ("rules-standing-comment", "rules-process-comment-refused",                       # T4.3
-                     "episode-sheet-before-episode", "episode-sheet-already-there",                   # T4.4
-                     "autopilot-approval-auto", "autopilot-auto-never-picks-reels",                   # T4.7
-                     "motion-music-no-licence", "motion-music-said-licensed",                         # T4.6
-                     "claims-check-scan-first", "claims-check-scan-not-a-filter"):                    # edit stage 7
+        for want, tag in (("rules-standing-comment", "positive"), ("rules-process-comment-refused", "negative"),  # T4.3
+                          ("episode-sheet-before-episode", "positive"), ("episode-sheet-already-there", "negative"),  # T4.4
+                          ("autopilot-approval-auto", "positive"), ("autopilot-auto-never-picks-reels", "negative"),  # T4.7
+                          ("motion-music-no-licence", "positive"), ("motion-music-said-licensed", "negative"),  # T4.6
+                          ("claims-check-scan-first", "positive"), ("claims-check-scan-not-a-filter", "negative")):  # stage 7
             self.assertIn(want, have)
             tags = set(yaml_load((SK / "evals" / want / "case.yaml").read_text(encoding="utf-8")).get("tags") or [])
-            self.assertEqual(len(tags & {"positive", "negative"}), 1, want)
-        # a plain look-up is rightly answered from the sheet without a skill (S6b run 1): record-only, not scored
-        fm, _ = split_md((SK / "evals/episode-sheet-already-there/graders/skill-fired.md").read_text(encoding="utf-8"))
-        self.assertEqual(fm.get("min"), 0)
+            self.assertEqual(tags & {"positive", "negative"}, {tag}, want)
+        # the podcast skill's description names a finished episode only, so neither sheet case can count on it firing
+        # (S6b run 1; peer review P3-5): record-only, not scored
+        for case in ("episode-sheet-already-there", "episode-sheet-before-episode"):
+            fm, _ = split_md((SK / "evals" / case / "graders/skill-fired.md").read_text(encoding="utf-8"))
+            self.assertEqual(fm.get("min"), 0, case)
+        # no fixture sets approval: auto (default ask), so the skill-faithful per-plan delegation passes too (P2-1)
+        _, body = split_md((SK / "evals/autopilot-approval-auto/graders/auto-approve-command.md").read_text(encoding="utf-8"))
+        for said in ('reel auto-approve --root "<CLIENT>" --video-id C0238',
+                     'reel approve-plan --root "<CLIENT>" --video-id C0238 --by delegated --note "don\'t stop"'):
+            self.assertRegex(said, body.strip())
+        self.assertNotRegex('reel approve-plan --video-id C0238 --by editor', body.strip())
 
     def test_platform_parity(self):                            # G3 review M13: macOS is primary (G11)
         tags = {d.name: set(yaml_load((d / "case.yaml").read_text(encoding="utf-8")).get("tags") or [])
