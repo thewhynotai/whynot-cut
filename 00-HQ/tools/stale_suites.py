@@ -58,7 +58,7 @@ def run_alive(is_running, run_status):
         return True
     if run_status in ("failed", "succeeded"):
         return False
-    return is_running
+    return None  # not listed (hand-started, or older than the list): unknown, so `until` decides (review r1 P1)
 
 
 def lock_stale(until, session_id, session_running, now):

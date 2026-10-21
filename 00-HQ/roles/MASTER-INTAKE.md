@@ -25,12 +25,12 @@ reading and testing.
      intakes ran at once), so a run listed as `running` is ALIVE whatever `isRunning` says:
      - alive (`isRunning: true`, or listed `running`) → NOT stale, even if `until` has passed (a long review may
        outlast it): stop at once ("intake already running").
-     - dead (`isRunning: false` and listed `failed`/`succeeded` or not listed) → stale (a run cut by a usage limit).
-     - neither signal is known (session not found and not listed), or the lock has no `session` (old format) →
-       judged by `until` only.
+     - dead (listed `failed`/`succeeded`, and `isRunning` not true) → stale (a run cut by a usage limit).
+     - not listed (started by hand, or older than the last 10 runs) and `isRunning` not true, or the lock has no
+       `session` (old format) → judged by `until` only. `isRunning: false` alone never makes a run dead.
      - the line cannot be read → stale.
-   - Stale → rename it to `intake.lock.stale-<HHMM>`. Only when the run was judged dead by both signals, run
-     `python -X utf8 "<HQ>\tools\stale_suites.py" end-tag <that session id>`: it ends ONLY processes whose command
+   - Stale → rename it to `intake.lock.stale-<HHMM>`. Only when the run is listed `failed`/`succeeded` (the dead case above),
+     run `python -X utf8 "<HQ>\tools\stale_suites.py" end-tag <that session id>`: it ends ONLY processes whose command
      carries `WNC_RUN=<that session id>` (that dead run's own review suites, running or still queued in heavy.sh).
      Never run `end-tag` on a lock judged by time alone.
    - Write `until` = now + 30 min (with `session`). Before each own Opus review (step 1B), rewrite it as now + 6 h.

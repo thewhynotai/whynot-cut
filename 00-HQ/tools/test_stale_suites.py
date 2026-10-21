@@ -66,9 +66,13 @@ class RunAlive(unittest.TestCase):
         self.assertFalse(ss.run_alive(False, "succeeded"))
         self.assertFalse(ss.run_alive(None, "failed"))
 
-    def test_not_in_the_run_list_keeps_the_session_answer(self):
-        self.assertFalse(ss.run_alive(False, None))
+    def test_not_in_the_run_list_is_unknown(self):
+        # hand-started or older than the list: isRunning false alone is the incident's bad signal (review r1 P1)
+        self.assertIsNone(ss.run_alive(False, None))
         self.assertIsNone(ss.run_alive(None, None))
+        later = NOW + dt.timedelta(hours=3)
+        self.assertFalse(ss.lock_stale(later, DEAD, ss.run_alive(False, None), NOW))                      # until respected
+        self.assertTrue(ss.lock_stale(NOW - dt.timedelta(minutes=1), DEAD, ss.run_alive(False, None), NOW))  # expired
 
     def test_feeds_lock_stale(self):
         later = NOW + dt.timedelta(hours=3)
