@@ -9,7 +9,7 @@
 | Task | Owner | Status (BOARD) |
 |---|---|---|
 | SETUP-H1 | H1 (Mayar) | ACCEPTED |
-| BL-16 | H1 | FIX |
+| BL-16 | H1 | ACCEPTED (في الـ MERGE-QUEUE) |
 | BL-02 | H1 | READY |
 | S6b | H1 | READY |
 | BL-17 | H1 | READY |
@@ -67,14 +67,14 @@
   - [x] OPS-03 — فحص نسخة التجربة جوه التقرير — DONE_ARCHIVED — `00-HQ/tasks/archive/OPS-03/`
   - [x] OPS-06 — مستوى الـ effort حسب الـ tier في شغل المساعدين — DONE_ARCHIVED — `00-HQ/tasks/archive/OPS-06/`
   - [x] OPS-07 — الـ limit مايجمّدش الاستلام ولا طابور الـ tests — DONE_ARCHIVED (اتجرّب لوحده 12:37) — `00-HQ/tasks/archive/OPS-07/`
-  - [ ] OPS-05 — أول دورة handoff حقيقية بين H1 و H2 لحد الـ merge — IN_PROGRESS — خطوات 1–4 اتشافت على BL-16، مستني تصليح H1 والـ merge
+  - [ ] OPS-05 — أول دورة handoff حقيقية بين H1 و H2 لحد الـ merge — IN_PROGRESS — خطوات 1–5 اتشافت على BL-16 (اتقبل 03:39)، مستني merge الـ executor
 - [ ] **M1 — Gate 4 → `v3.0.0-p4` (أول build متجرّب جوه Premiere لـ 3.0)** — الـ executor — IN_PROGRESS
   - النتيجة اللي هتشوفها: build حي لـ PODCAST-TEST جوه Premiere + frames، والنسخة في `Releases`.
   - شروط الإغلاق: review مستقل 0 Critical / 0 Important، الـ suite كاملة 0 failures، `validate --strict` مرتين،
     evals، macOS CI أخضر، تجربة live، سطر الأمان، ميزانية T4.14، تقرير `GATE-4-REPORT-AR.md`، tag.
   - المفتوح (من `WhyNotCut/PROGRESS.md`): T4.1، Task 18/22 (BL-02/BL-03)، Task 25 + K-T7، Task 26 wiring، Task 29،
     Tasks 50–60، manual verse slot، «كل features الـ S1 متوصلة»، BL-01، BL-04، BL-15، **T4.14 (محتاجك: 60 ثانية تفريغ)**.
-  - تاسكات المساعدين لـ Gate 4: BL-16 (H1، FIX round 1)، BL-02 (H1، DONE مستني peer review)، BL-03 (H2، DONE مستني peer review)، BL-04 و BL-20 (H2). BL-18 اتعمله merge (f2ca516).
+  - تاسكات المساعدين لـ Gate 4: BL-16 (H1، ACCEPTED، مستني merge)، BL-02 (H1، DONE مستني peer review)، BL-03 (H2، DONE مستني peer review)، BL-04 و BL-20 (H2). BL-18 اتعمله merge (f2ca516).
 - [ ] **M1b — تجربة ماك صغيرة (ساعة)** بعد الـ tag على طول — Mac tester — BACKLOG
 - [ ] **M2 — خطة بناء V1 (Stage 2)** — Command Center — BACKLOG — الشرط: الـ tag. الناتج: خطط Stage 3–9 مكتوبة.
 - [ ] **M3 — أساس الـ panel (Stage 3) = أول plugin بيشتغل جوه Premiere بالـ UI بتاعه** — H1/H2 (+ API-500 لو اتفعّلت)
@@ -95,7 +95,7 @@
 ## 3. قائمة التنفيذ بالترتيب
 
 - [x] آخر تاسكات مكتملة: OPS-00، OPS-01، OPS-03، OPS-06، OPS-07، ENV-01، OPS-02 (كلهم في `00-HQ/tasks/archive/`)، و T4.14 (التفريغ اتصحح بكلامك).
-- [ ] **التاسك الحالية:** OPS-05 — متابعة BL-16 من تصليح H1 ← peer review ← قبول ← merge الـ executor ← SHA على GitHub.
+- [ ] **التاسك الحالية:** OPS-05 — BL-16 اتقبل (03:39) واتحط في الـ MERGE-QUEUE؛ فاضل merge الـ executor ← SHA على GitHub.
   المسؤول: Command Center (متابعة). وفي نفس الوقت: H1 و H2 بيعملوا peer review لـ BL-02 و BL-03، والـ executor بيكمّل Gate 4.
 - [ ] **اللي بعدها:** OPS-04 بعد الـ tag `v3.0.0-p4` (نقل 00-HQ جوه الـ repo).
 - [ ] **المحجوب:** API-500 (مستني أمرك)، H14 (موافقة Anthropic، مهم بس برّه الوكالة).
@@ -109,12 +109,12 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
 | الحساب | الدور | الحالة الموثّقة |
 |---|---|---|
 | **PRIMARY** = حسابك (info@) | Command Center: القرارات، الاستلام، المراجعة، التقارير، تفعيل الـ API | الشات ده |
-| **ASSISTANT_A** = H1 (mayar@) | Engine builder + peer review لشغل H2 | AUTO شغال (02:30: سلّم تصليح BL-16، وشغال على S6b) |
-| **ASSISTANT_B** = H2 (marketing@) | Product builder + peer review لشغل H1 | AUTO شغال (02:30: بيعمل peer review لتصليح BL-16، وبعده تصليحات BL-03) |
+| **ASSISTANT_A** = H1 (mayar@) | Engine builder + peer review لشغل H2 | AUTO شغال (03:55: BL-16 اتقبل، وشغال على S6b) |
+| **ASSISTANT_B** = H2 (marketing@) | Product builder + peer review لشغل H1 | AUTO شغال (03:55: خلّص peer review BL-16 (PASS)، ومستني الطابور التقيل لمراجعة BL-02) |
 
 - التسليم بين الحسابات عن طريق الملفات بس: الكارت في `00-HQ/tasks/`، والتقرير في `00-HQ/inbox/<h>/`،
   والـ review في `00-HQ/reviews/`، والـ branch `<h>/<ID>`. محدش بيكلّم حد في الشات.
-- **اتشاف فعليًا:** H1 سلّم BL-16 ← H2 راجعه من حسابه ← الاستلام إدّى FIX. فاضل الـ merge (OPS-05).
+- **اتشاف فعليًا:** H1 سلّم BL-16 ← H2 راجعه من حسابه ← الاستلام إدّى FIX ← H1 صلّح ← H2 راجع تاني ← ACCEPTED 03:39. فاضل الـ merge (OPS-05).
 
 ## 5. نسخ البرنامج والإصدارات
 
@@ -178,4 +178,4 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
   اتمسح 540 MB packages مكررة من C. الـ routines اتعملت من جديد في Bypass عشان ماتقفش على موافقة.
 - 2026-10-20 بالليل — limit تاني (لحد 9:20) ضيّع تقرير 9، فاتعاد 9:56 ووصل. الـ watchdog بقى يعيد أي تقرير يضيع بسبب
   الـ limit لوحده. كارت S6b (eval cases لمهارات Phase 4) اتكتب لـ H1 وبقى READY بعد رد الـ executor.
-- 2026-10-21 فجرًا — limit تالت (11:31 → 2:20). الشغل رجع لوحده، و H1 سلّم تصليح BL-16 وH2 بيراجعه.
+- 2026-10-21 فجرًا — limit تالت (11:31 → 2:20). الشغل رجع لوحده، واستلام 2:37 شال القفل القديم لوحده وقبل BL-16 (03:39).

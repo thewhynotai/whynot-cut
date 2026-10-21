@@ -18,7 +18,7 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 | ID | Title | Assigned | Status | Card | Next |
 |---|---|---|---|---|---|
 | SETUP-H1 | First login (mayar@) + full suite baseline | H1 (Mayar) | ACCEPTED — closed, no code (nothing to merge) | `tasks/SETUP-H1.md` | r3 2026-10-20 08:26: 8226 run, 51 env/timing; ENV-01 gaps routed |
-| BL-16 | Safe ASCII engine home for a non-ASCII Windows user (Gate 4, high) | H1 | FIX (round 1, 2026-10-20 08:24) | `tasks/BL-16.md` | H1 fixes P1 patch + 2×P2 |
+| BL-16 | Safe ASCII engine home for a non-ASCII Windows user (Gate 4, high) | H1 | ACCEPTED (2026-10-21 03:39, peer h2 PwM, LIGHT) | `tasks/BL-16.md` | MERGE-QUEUE: executor merges 37cc841 + 2 patches |
 | BL-02 | Licence files, notices generator, SPDX tool (tool only) (Gate 4, high) | H1 | READY | `tasks/BL-02.md` | — |
 | S6b | Gate 4 eval cases for the Phase 4 skills (LIGHT) | H1 | READY (22:20; executor froze rules, episode sheet, autopilot, music + review-scan) | `tasks/S6b.md` | after BL-16 FIX |
 | BL-17 | Second install must not overwrite the first install's pointer files (Gate 5) | H1 | READY | `tasks/BL-17.md` | — |
@@ -27,6 +27,7 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 | BL-03 | GPL-compliance + trademark notice templates (AR + EN) (Gate 4) | H2 | FIX (round 1, 2026-10-20 21:40) | `tasks/BL-03.md` | peer h1 FAIL: P2-1 identity-scan false green, P2-2 send checklist + soften "each source file" |
 | BL-04 | run-state.json + resume, preflight-first in `reel next` (Gate 4) | H2 | READY · fallback executor 25 Oct | `tasks/BL-04.md` | BLOCKED answered 2026-10-20 09:40: queue via wnc-locks/wait; next_doc ruling + fixture patch accepted; full suite with 3 patches, then DONE |
 | BL-20 | Gate check: no temporary dated skips in the suite (`tools/skip_audit.py`) (Gate 4 exit, LIGHT, S) | H2 | READY · fallback executor 25 Oct | `tasks/BL-20.md` | — |
+| BL-22 | AE build warnings reach NEEDS-YOU: a missing logo or image becomes a checklist line (Stage 2, LIGHT) | H2 | READY · fallback executor 28 Oct | `tasks/BL-22.md` | — |
 | BL-18 | Two wrong fix lines in installer/onboarding (Gate 4) | EXECUTOR (done) | MERGED (f2ca516 on release/3.0, 2026-10-20) | `tasks/BL-18.md` | H2 does NOT take it |
 | BL-14 | Portable client copy | EXECUTOR | MERGED (API-200 closed it: 5 commits + executor hooks 7f0c00a; `tracks\API-200-BL-14-HANDOVER.md`) | — | not a card |
 | (lane 1) | API lane 1 | — | STOPPED (owner budget ruling 10-19 10:03); BL-16 and BL-04 moved to cards above | — | — |

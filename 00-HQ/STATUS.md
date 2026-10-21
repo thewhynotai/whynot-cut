@@ -108,3 +108,8 @@
    environmental failures (test_media_normalise, test_t26_conform_wiring, the fuzz imports, bidi…). These could hide
    a real media regression. Owner: ENV-01 (see `reviews/SETUP-H1-r3.md`). Small cards are still to be written for
    the 2 darwin-only t45 tests on Windows and the fuzz modules' import-time crash.
+6. (2026-10-21 03:45 intake) Intake lock loop: the BL-02 master review was lost 3 runs in a row (21:39, 02:38, 03:38).
+   The Agent tool launches the reviewer async; the run then ended its turn while the reviewer waited on its
+   queued suite, so the session went idle (`isRunning: false`) and the NEXT run judged the lock stale and ran
+   `end-tag`, killing that review's suites. Fix in this run: the run keeps polling in the foreground until the
+   reviewer returns. MASTER-INTAKE §1B should say so explicitly (owner of the procedure: master).
