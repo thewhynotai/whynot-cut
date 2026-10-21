@@ -1,6 +1,6 @@
 schema_version: "1.1"
 name: autopilot-auto-never-picks-reels
-description: 'T4.7 autopilot, negative: approval: auto covers plan approvals, never picking the reels: EP12''s candidates wait for the editor''s pick.'
+description: 'T4.7 autopilot, negative: approval: auto covers plan approvals, never picking the reels: EP12''s candidates wait for the editor''s pick. approval: auto is stated in the prompt only (no fixture writes a preferences file).'
 tags: [autopilot, podcast, approval-auto, negative]
 runs: 3
 context:

@@ -196,6 +196,11 @@ class TestEvalSuite(unittest.TestCase):
                      "motion-music-no-licence", "motion-music-said-licensed",                         # T4.6
                      "claims-check-scan-first", "claims-check-scan-not-a-filter"):                    # edit stage 7
             self.assertIn(want, have)
+            tags = set(yaml_load((SK / "evals" / want / "case.yaml").read_text(encoding="utf-8")).get("tags") or [])
+            self.assertEqual(len(tags & {"positive", "negative"}), 1, want)
+        # a plain look-up is rightly answered from the sheet without a skill (S6b run 1): record-only, not scored
+        fm, _ = split_md((SK / "evals/episode-sheet-already-there/graders/skill-fired.md").read_text(encoding="utf-8"))
+        self.assertEqual(fm.get("min"), 0)
 
     def test_platform_parity(self):                            # G3 review M13: macOS is primary (G11)
         tags = {d.name: set(yaml_load((d / "case.yaml").read_text(encoding="utf-8")).get("tags") or [])
