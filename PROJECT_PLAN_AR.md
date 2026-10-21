@@ -110,8 +110,8 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
 | الحساب | الدور | الحالة الموثّقة |
 |---|---|---|
 | **PRIMARY** = حسابك (info@) | Command Center: القرارات، الاستلام، المراجعة، التقارير، تفعيل الـ API | الشات ده |
-| **ASSISTANT_A** = H1 (mayar@) | Engine builder + peer review لشغل H2 | AUTO شغال (03:55: BL-16 اتقبل، وشغال على S6b) |
-| **ASSISTANT_B** = H2 (marketing@) | Product builder + peer review لشغل H1 | AUTO شغال (03:55: خلّص peer review BL-16 (PASS)، ومستني الطابور التقيل لمراجعة BL-02) |
+| **ASSISTANT_A** = H1 (mayar@) | Engine builder + peer review لشغل H2 | AUTO شغال (09:00: سلّم S6b ومستني peer review؛ بيفسح الطابور التقيل لشغل Gate 4) |
+| **ASSISTANT_B** = H2 (marketing@) | Product builder + peer review لشغل H1 | AUTO شغال (09:00: سلّم تصليح BL-03 ومستني peer review؛ مراجعة BL-02 شغالة في الطابور) |
 
 - التسليم بين الحسابات عن طريق الملفات بس: الكارت في `00-HQ/tasks/`، والتقرير في `00-HQ/inbox/<h>/`،
   والـ review في `00-HQ/reviews/`، والـ branch `<h>/<ID>`. محدش بيكلّم حد في الشات.
