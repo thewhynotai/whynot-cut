@@ -78,6 +78,7 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
   hand after checking its CPU on the CHILD python (the venv `python.exe` launcher always shows 0 CPU).
 
 ## 6. Incidents
+- 2026-10-21 ~05:44 → 07:20: fourth limit. The 03:37 intake (lock valid to 09:40) died at 05:44; the 04:37-06:37 intakes failed fast. Watchdog 07:24 resumed the executor + Command Center; the Command Center resumed Builder A (idle since 04:19). BL-16 stayed ACCEPTED in MERGE-QUEUE; helpers kept going. The 07:37 intake clears the lock (OPS-07).
 - 2026-10-20 23:31 → 2026-10-21 02:20: third limit. The 21:37 intake run died holding `intake.lock` (no tagged suites
   left; the 02:37 intake clears it per OPS-07). Watchdog 02:24 resumed the executor + Command Center; the Command
   Center resumed Builder A (its Task 29 subagent stopped on the limit). Helpers kept going (BL-16 fix delivered 01:xx).
