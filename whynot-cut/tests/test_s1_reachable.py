@@ -7,14 +7,14 @@ docs/superpowers/specs/ui-coverage-map.md §2.1: a feature the editor cannot rea
 PENDING lists the verbs whose hook set has not landed yet, GAPS the registered verbs no skill names yet. Both are
 checked both ways: an entry still there must still be missing, so the test goes red the moment the verb lands and the
 entry has to go. At the Gate 4 tag both are empty (a gate check)."""
+import sys as _sys
+_sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
+import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
 import re
 import subprocess
 import sys
 import unittest
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import _isolation  # noqa: F401,E402
 
 SK = Path(__file__).resolve().parents[1]
 CLI = SK / "engine" / "reel" / "cli.py"
