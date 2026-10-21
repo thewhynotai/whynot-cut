@@ -12,6 +12,8 @@ are:
 - `caption-looks --pick … --yes`;
 - `rules --add`, `rules --remove`, `rules --record` and `rules --dismiss`;
 - `clean --apply` (the engine-home clean-up, which removes files);
+- `cut-proposals --accept` (the editor's chosen cuts go into the plan's cut list);
+- `takes --drop`, `takes --keep` and `takes --undo` (which takes stay);
 - `transcript-verify` as the editor.
 
 The table of these steps lives in `whynot-cut/engine/reel/lib/lead_steps.py` (`LEAD_STEPS`). `hooks/guard.py` keeps a

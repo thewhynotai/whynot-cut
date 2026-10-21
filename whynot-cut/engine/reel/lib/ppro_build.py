@@ -174,6 +174,7 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False, f
     for k in base["tracks"]["audio"][1:]:
         nm = k["name"].replace(" (L/R mono pair)", "")
         anames += [f"A{len(anames) + 1} {nm} L", f"A{len(anames) + 2} {nm} R"]
+    markers += _cut_proposal_markers(paths, spec, F)          # Task 25: none while its switch is off
     return {"project_path": str(paths.p(f"07_premiere/project/{paths.video_id}_{project_prefix()}_EDIT.prproj")),
             "overwrite_existing": overwrite, "xml_path": base["xml"], "sequence_name": base["sequence_name"],
             "settings": dict(SETTINGS, **dict(zip(("previewFrameWidth", "previewFrameHeight"), frame_size(paths)))),
@@ -185,6 +186,18 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False, f
             "_lanes": lanes, "_warnings": font_warns, "_stills_redrawn": fresh["redrawn"],
             "duration_s": spec["duration_frames"] * F, "_qc_frames": ease_qc_frames(spec),
             **ease_job_fields(spec, audio_tracks=fade_audio_tracks(base["tracks"]["audio"]), matte=matte)}
+
+
+def _cut_proposal_markers(paths: Paths, spec: dict, F: float) -> list:
+    """Task 25: one sequence marker per cut proposal (t, name, comment) on the sequence clock; none when there are none
+    and none while the switch task25_plan_proposals is off (the job of before). Only the contract's three marker keys:
+    the colour per kind waits for marker colours in the build contract (ADOBE-G4)."""
+    from .plan import task25_plan_proposals
+    if not task25_plan_proposals():
+        return []
+    from .cut_proposals import load, markers
+    return [{"t": m["t"], "name": m["name"], "comment": m["comment"]}
+            for m in markers(load(paths), round(1 / F, 3), (spec.get("time_map") or {}).get("keep_ms"))]
 
 
 FADE_JOB_KEYS = ("video_in", "video_out", "audio_in", "audio_out")

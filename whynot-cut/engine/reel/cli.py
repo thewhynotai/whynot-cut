@@ -608,6 +608,54 @@ def cmd_safezone_check(a):
         raise SystemExit(res["exit_code"])
 
 
+def cmd_cut_proposals(a):
+    """Task 25 (R-4.3): propose cuts (pauses, retakes, false starts, fillers, repeated words) into
+    01_analysis/cut-proposals.json; `--accept CP-001,CP-004` copies the chosen ones into edit-decisions.json
+    global.cut_words (then `reel plan` and a new approval: nothing is cut before that). --accept is a BL-15 lead step."""
+    from lib import cut_proposals
+    from lib.arglists import items
+    p = P(a)
+    if a.accept:
+        out(cut_proposals.accept(p, items(a.accept), by="editor"))
+        return
+    samples, sr = None, 0
+    wav = p.p("02_transcription/dialogue_16k_mono.wav")
+    if wav.exists():                                   # cut points snap to the quietest 10 ms nearby
+        from lib.transcribe import whisper_audio
+        samples, sr = whisper_audio(wav), 16000
+    doc = cut_proposals.propose(p, samples=samples, sr=sr)
+    out({"ok": True, "file": str(p.p(cut_proposals.FILE)), "proposals": len(doc["proposals"]),
+         "proposed": sum(1 for x in doc["proposals"] if x["default"] == "proposed"), "totals": doc["totals"],
+         "notes": doc["notes"], "next": doc["how"]})
+
+
+def cmd_takes(a):
+    """K-T7: the sentences numbered, with the ones said more than once grouped and the better take proposed;
+    `--drop 4,7 --keep 5` writes the choice into the plan's cut list, `--undo` goes back one step (then `reel plan`
+    and a new approval: nothing is cut before that). --drop, --keep and --undo are BL-15 lead steps."""
+    from lib.safety import takes
+    from lib.arglists import items
+    p = P(a)
+    if a.undo and (a.drop or a.keep):
+        from lib.errors import Guidance
+        raise Guidance("--undo لوحده، من غير --drop أو --keep / --undo goes alone, without --drop or --keep",
+                       "Run `reel takes --undo`, then choose again")
+    if a.undo:
+        out(takes.undo(p))
+        return
+    if a.drop or a.keep:
+        out(takes.apply(p, drop=items(a.drop), keep=items(a.keep), by="editor"))
+        return
+    samples, sr = None, 0
+    wav = p.p("02_transcription/dialogue_16k_mono.wav")
+    if wav.exists():                                   # audio level and clipping are measured, never guessed
+        from lib.transcribe import whisper_audio
+        samples, sr = whisper_audio(wav), 16000
+    rep = takes.report(p, samples=samples, sr=sr)
+    out({"ok": True, "groups": [{"takes": [t["n"] for t in g["takes"]], "best": g["best"], "line": g["line_ar"],
+                                 "line_en": g["line_en"]} for g in rep["groups"]], "next": rep["how"]})
+
+
 def cmd_approve_plan(a):
     from lib.plan import APPROVAL_FORMAT, plan_fingerprint
     from lib.motion_config import is_motion
@@ -1197,7 +1245,7 @@ OPTIONAL_ID = {"ref-analyze", "ref-style", "rules"}   # client-level without a v
 # scaffold creates a new folder: there is nothing to lock yet (it runs before the lock is taken).
 CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze", "preflight", "conform", "transcribe",
                "transcript-correct", "transcript-verify", "transcript-relisten", "transcript-compact", "audio-clean", "plan",
-               "review-flags", "removed-review", "approve-plan", "previews", "sfx", "preview-video", "ppro-build", "ppro-frames", "premiere", "verify",
+               "review-flags", "removed-review", "cut-proposals", "takes", "approve-plan", "previews", "sfx", "preview-video", "ppro-build", "ppro-frames", "premiere", "verify",
                "qc", "handoff", "mogrt-build", "ae-script", "ae-build", "ae-render", "ps-script", "ps-build",
                "episode-sheet", "client-brief"}
 # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
@@ -1790,6 +1838,13 @@ CORE_COMMANDS: dict[str, str] = {
                    "review must cover, from the trigger lexicons; read-only, the reviewer still reads every line",
     "safezone-check": "check the graphic and caption stills against the platform's UI zones; exit 0 clean, 1 an "
                       "element intrudes (ids printed), 2 could not check",
+    "cut-proposals": "propose cuts (pauses, retakes, false starts, fillers, repeated words) for the editor; "
+                     "--accept CP-001,CP-004 adds the chosen ones to the plan's cut list (nothing is cut before the "
+                     "plan is approved again)",
+    "takes": "number the sentences and group the ones said more than once, with the better take proposed (none when "
+             "the takes differ in meaning); "
+             "--drop 4,7 --keep 5 writes the choice into the plan's cut list, --undo goes back one step (nothing is cut "
+             "before the plan is approved again)",
     "approve-plan": "record the approval of the compiled plan (editor or delegated)",
     "auto-approve": "record the approval a standing `approval: auto` gives (by auto; refused unless this client's "
                     "merged preferences say auto); medical and religious lines are never covered",
@@ -1944,6 +1999,13 @@ def main(argv: list[str] | None = None):
             sp.add_argument("--platform", nargs="+", metavar="NAME",
                             help="platform profile(s) of config/defaults/safe-zones.json (default: the plan's, the "
                                  "client's, or the file's default; a 4:5 reel uses feed_4x5)")
+        if name == "cut-proposals":
+            sp.add_argument("--accept", nargs="+", metavar="CP-ID",
+                            help="proposal ids to add to edit-decisions.json global.cut_words (comma or space separated)")
+        if name == "takes":
+            sp.add_argument("--drop", nargs="+", metavar="N", help="sentence numbers to drop (comma or space separated)")
+            sp.add_argument("--keep", nargs="+", metavar="N", help="sentence numbers to keep (bring a dropped take back)")
+            sp.add_argument("--undo", action="store_true", help="go back one step")
         if name == "approve-plan":
             sp.add_argument("--by", required=True, choices=["editor", "delegated"])
             sp.add_argument("--note", "--notes", dest="note")

@@ -80,7 +80,8 @@ LEAD_STEPS = (
     ("lock", ("--release",)), ("settings", ("--init",)), ("handoff", ("--delivered",)),
     ("verify", ("--record",)), ("ae-probe", ("--record",)), ("ref-style", ("--adopt", "--yes")),
     ("caption-looks", ("--pick", "--yes")), ("rules", ("--add",)), ("rules", ("--remove",)),
-    ("rules", ("--record",)), ("rules", ("--dismiss",)), ("clean", ("--apply",)))
+    ("rules", ("--record",)), ("rules", ("--dismiss",)), ("clean", ("--apply",)),
+    ("cut-proposals", ("--accept",)), ("takes", ("--drop",)), ("takes", ("--keep",)), ("takes", ("--undo",)))
 TOKEN_DIR = ("run", "lead-tokens")                  # <engine home>/run/lead-tokens: the guard's approval tokens
 QC_FORBIDDEN = {"ppro-build", "approve-plan", "plan", "previews", "audio-clean", "transcribe",
                 "transcript-correct", "client-init", "client-db", "sfx", "premiere", "handoff",

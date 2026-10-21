@@ -96,6 +96,13 @@ def word_cut_ranges(words: list, cut_words: list, dur_ms: int, pad_ms: int = 30)
     for c in cut_words:
         ids = c.get("word_ids", []) if isinstance(c, dict) else [c]
         reason = c.get("reason", "") if isinstance(c, dict) else ""
+        # Task 25 (switch task25_plan_proposals, off until the executor turns it on): an accepted take is cut whole
+        span = _range_cut(c, ids, by_id, order, pos, dur_ms) if task25_plan_proposals() else None
+        if span:
+            ranges.append(span)
+            cut += [{"word_id": wid, "word": by_id[wid]["word"], "start_ms": by_id[wid]["start_ms"], "reason": reason}
+                    for wid in ids]
+            continue
         for wid in ids:
             w = by_id.get(wid)
             if not w:
@@ -109,6 +116,32 @@ def word_cut_ranges(words: list, cut_words: list, dur_ms: int, pad_ms: int = 30)
             ranges.append((a, max(a, b)))
             cut.append({"word_id": wid, "word": w["word"], "start_ms": w["start_ms"], "reason": reason})
     return ranges, cut, errors
+
+
+def task25_plan_proposals() -> bool:
+    """Task 25's switch (config/defaults/safety.json `switches.task25_plan_proposals`, client reel-profile on top): on
+    only when exactly JSON true. Off: the plan, edit-plan.md and the build are byte-identical to before Task 25."""
+    from .safety import switches
+    return switches.enabled(switches.TASK25_PLAN_PROPOSALS)
+
+
+def _range_cut(c, ids, by_id, order, pos, dur_ms):
+    """Task 25: a cut_words entry with "range_ms" (an accepted cut proposal: its padding, the breath after a take,
+    snapped edges) is one range, used only when it covers its words and stays clear of the words around them;
+    otherwise None and the words are cut one by one as before."""
+    r = c.get("range_ms") if isinstance(c, dict) else None
+    if not (isinstance(r, list) and len(r) == 2 and all(isinstance(x, (int, float)) and not isinstance(x, bool)
+                                                          for x in r) and r[0] < r[1]):
+        return None
+    if not ids or any(wid not in by_id for wid in ids):
+        return None
+    first, last = min(pos[w] for w in ids), max(pos[w] for w in ids)
+    lo = by_id[order[first - 1]]["end_ms"] if first > 0 else 0
+    hi = by_id[order[last + 1]]["start_ms"] if last + 1 < len(order) else dur_ms
+    a, b = r
+    if a < lo or b > hi or a > by_id[order[first]]["start_ms"] or b < by_id[order[last]]["end_ms"]:
+        return None
+    return (a, b)
 
 
 def window_rect(framing: str | None, y: int | None = None, seq_w: int = 1080, seq_h: int = 1920) -> dict | None:
@@ -1560,6 +1593,11 @@ def write_edit_plan(paths: Paths) -> Path:
         L += [f"- {s['id']} · {frame_to_tc(s['start_frame'])} – {frame_to_tc(s['end_frame'])} على التايملاين (المصدر "
               f"{fmt_ts(s['src_start_ms'], '.')} – {fmt_ts(s['src_end_ms'], '.')}) · {s['cue_ar']} · {mv.LINE_AR}"
               + (f" · {mv.GUESSED_AR}" if s.get("guessed_end") else "") for s in mvs]
+    if task25_plan_proposals():          # Task 25: the "Proposed cuts" table, only when proposals exist
+        from .cut_proposals import load as load_cut_proposals, plan_table
+        pt = plan_table(load_cut_proposals(paths))
+        if pt:
+            L += [""] + pt
     L += ["", "## Not included (and why)", ""]
     sem = read_json(paths.p("01_analysis/transcript-semantic-analysis.json"), {})
     L += [f"- {o.get('concept')}: {o.get('reason')}" for o in sem.get("broll_opportunities", [])

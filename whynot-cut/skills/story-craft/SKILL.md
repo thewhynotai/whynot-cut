@@ -38,6 +38,20 @@ Then run `reel plan` and fix **every** error it reports (evidence not verbatim, 
 - Fillers the editor or the client's plan asks to cut (a repeated «يعني», "um", a false start) go in
   `global.cut_words` (word ids + reason): picture, sound and captions lose them together; edit-plan.md lists them.
   Cut only fillers: a word that carries meaning («يعني» = "i.e." in an explanation) stays.
+- A sentence said more than once: `reel takes` numbers the sentences and groups the repeats with the better take
+  proposed («٤ و ٥ نفس الجملة: الأفضل ٥ — كاملة ومن غير تلعثم»). Show the editor those lines; the lead records the
+  editor's choice with `reel takes --drop 4 --keep 5` (`--undo` goes back one step), then `reel plan` and a new
+  approval. Nothing is cut before that, and the numbers are re-listed if the transcript changes. When the takes differ
+  in meaning (a number or dose, a negation, a timing) no take is proposed: the line names the difference and the
+  editor listens and chooses; never pick one for them.
+- `reel cut-proposals` lists what could go (pauses, retakes with the better take kept, false starts, fillers, a
+  doubled word) in `01_analysis/cut-proposals.json` with a plain reason, Arabic first, and the "Proposed cuts" table
+  in edit-plan.md. Show the editor the numbered list; only the ids the editor picks are added, by the lead, with
+  `reel cut-proposals --accept CP-003,CP-007`, then `reel plan` and a new approval. Nothing is cut before that. Bare
+  «اه» (yes), «إيه», «آية», «امم» (unstretched), laughter, the sign-off, quotes and drug names are never proposed; a
+  take holding a number or a dose, and two takes that differ in a negation, a number or a timing word («مش», «الصبح»
+  / «بالليل»), are left unticked with the differing words named: play both to the editor. The plan side (the table,
+  the markers, a take cut whole) waits for the `task25_plan_proposals` switch in safety.json.
 - Images come only from the client asset manifest (by `rel` path); stock VIDEO only from the licensed `data/Broll/` folder
   (`broll_video`). Never download or generate footage. No AI likeness, and no retouching of the client.
 - Decisions stay in **source time**. With `remove_pauses`, the compiler remaps everything.

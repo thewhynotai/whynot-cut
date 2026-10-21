@@ -30,8 +30,6 @@ S1_VERBS = {
     "brief": "Task 58 briefs", "client-brief": "Task 59 client brief", "transcript-compact": "Task 58 compact transcript",
 }
 PENDING = {          # verb -> the hook set that registers it
-    "cut-proposals": r"lane2\hooks\K-T7 (after Task 25 closes)",
-    "takes": r"lane2\hooks\K-T7 (after Task 25 closes)",
 }
 GAPS = {}            # registered, but no skill or agent names `reel <verb>` yet
 

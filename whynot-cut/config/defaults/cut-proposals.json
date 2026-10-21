@@ -1,0 +1,167 @@
+{
+  "note": "Cut proposals (Phase 4 Task 25, R-4.3). Every number is a starting value of ours (basis: starting) until a precision/recall run on our labelled fixtures replaces it with `measured: <fixture set>, <date>`. A client may override any value or filler list in reel-profile/cut-proposals.json.",
+  "thresholds": {
+    "retake_window_s": {
+      "value": 20,
+      "basis": "starting"
+    },
+    "retake_min_words": {
+      "value": 2,
+      "basis": "starting"
+    },
+    "retake_max_words": {
+      "value": 12,
+      "basis": "starting"
+    },
+    "retake_score": {
+      "value": 0.65,
+      "basis": "starting"
+    },
+    "retake_min_shared": {
+      "value": 2,
+      "basis": "starting"
+    },
+    "complete_pause_ms": {
+      "value": 350,
+      "basis": "starting"
+    },
+    "pad_ms": {
+      "value": 40,
+      "basis": "starting"
+    },
+    "false_start_restart_ms": {
+      "value": 400,
+      "basis": "starting"
+    },
+    "false_start_max_ms": {
+      "value": 250,
+      "basis": "starting"
+    },
+    "false_start_max_p": {
+      "value": 0.6,
+      "basis": "starting"
+    },
+    "stretch_factor": {
+      "value": 1.6,
+      "basis": "starting"
+    },
+    "stretch_min_ms": {
+      "value": 350,
+      "basis": "starting"
+    },
+    "context_pause_ms": {
+      "value": 250,
+      "basis": "starting"
+    },
+    "unsure_p": {
+      "value": 0.6,
+      "basis": "starting"
+    },
+    "min_kept_ms": {
+      "value": 300,
+      "basis": "starting"
+    },
+    "sign_off_search_s": {
+      "value": 20,
+      "basis": "starting"
+    },
+    "sign_off_fallback_s": {
+      "value": 8,
+      "basis": "starting"
+    },
+    "keep_below": {
+      "value": 0.6,
+      "basis": "starting"
+    },
+    "repeat_max_gap_ms": {
+      "value": 600,
+      "basis": "starting"
+    },
+    "snap_ms": {
+      "value": 50,
+      "basis": "starting"
+    },
+    "snap_frame_ms": {
+      "value": 10,
+      "basis": "starting"
+    },
+    "emphasis_max_content": {
+      "value": 3,
+      "basis": "starting"
+    },
+    "fragment_min_letters": {
+      "value": 3,
+      "basis": "starting"
+    },
+    "conf_always_filler": {
+      "value": 0.9,
+      "basis": "starting"
+    },
+    "conf_context_filler": {
+      "value": 0.7,
+      "basis": "starting"
+    },
+    "conf_unsure_bonus": {
+      "value": 0.1,
+      "basis": "starting"
+    },
+    "conf_false_start": {
+      "value": 0.75,
+      "basis": "starting"
+    },
+    "conf_repeat_word": {
+      "value": 0.85,
+      "basis": "starting"
+    },
+    "conf_retake_base": {
+      "value": 0.55,
+      "basis": "starting"
+    },
+    "conf_retake_per_similarity": {
+      "value": 0.4,
+      "basis": "starting"
+    },
+    "conf_pause": {
+      "value": 0.9,
+      "basis": "starting"
+    },
+    "conf_on_purpose": {
+      "value": 0.5,
+      "basis": "starting"
+    }
+  },
+  "fillers": {
+    "always": [
+      "م{3,}",
+      "ام{3,}",
+      "ا{2,}ه+",
+      "ه+م{2,}",
+      "um+",
+      "u+h+",
+      "erm+",
+      "hm+",
+      "m{3,}"
+    ],
+    "always_en": [
+      "e+r+"
+    ],
+    "stretched_only": [
+      "امم"
+    ],
+    "context": [
+      "ايه",
+      "اه",
+      "يعني",
+      "بص",
+      "طب",
+      "ف",
+      "like",
+      "so",
+      "you know"
+    ],
+    "soft": [
+      "اه"
+    ],
+    "note": "Egyptian first. always: pure hesitation sounds (regular expressions on the normalised word). stretched_only / context: proposed only when stretched (and, for context words, between pauses). soft: detected but left unticked (bare «اه» is a real 'yes'). Never listed: «اه» alone as always, «إيه», the 3-letter «امم», written laughter."
+  }
+}

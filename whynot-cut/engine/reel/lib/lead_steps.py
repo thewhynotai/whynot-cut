@@ -53,7 +53,9 @@ LEAD_STEPS = (
     ("caption-looks", ("--pick", "--yes")),                 # Task 28: the editor's caption-look swap is recorded
     ("rules", ("--add",)), ("rules", ("--remove",)),        # T4.3: a client rule is written or dropped
     ("rules", ("--record",)), ("rules", ("--dismiss",)),    # T4.3 ruling 2: a learned note is recorded or dismissed
-    ("clean", ("--apply",)))                                # T4.15: the engine-home clean-up removes files
+    ("clean", ("--apply",)),                                # T4.15: the engine-home clean-up removes files
+    ("cut-proposals", ("--accept",)),                       # Task 25: the editor's chosen cuts go into the plan
+    ("takes", ("--drop",)), ("takes", ("--keep",)), ("takes", ("--undo",)))   # K-T7: which takes stay
 # transcript-verify is lead-only unless --by names a subagent (agent, claude, or a WhyNot Cut agent; the guard pins a
 # subagent to its own name)
 TRANSCRIPT_VERIFY = "transcript-verify"
