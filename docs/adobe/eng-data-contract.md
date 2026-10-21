@@ -500,8 +500,13 @@ to the item or client folder, no links, cached by mtime and inode. "NEW file" me
 5. **Plan versions:** they live with `reel plan` / `reel motion-plan`. `plan.diff` is always against the last APPROVED plan.
 6. **Flags:** `reel review-flags` (Phase 4, T4.13) writes `<item>/review-flags.json` (item folder root, next to `poster.jpg`).
    - Shape: `{"schema": 1, "plan_kind": "timeline"|"motion", "plan_fingerprint", "domain": "medical"|"religious"|"general",
-     "written_at", "by", "checked", "lines_total", "items": [...], "ok": [{"event_id", "text"}]}`. `domain` is the client's
+     "coverage", "written_at", "by", "checked", "lines_total", "items": [...], "ok": [{"event_id", "text"}]}`. `domain` is the client's
      profile domain the review was done for.
+   - `coverage` is the rule the file was written under (3 since 9a4fdc7). From 2, a line whose words trigger `religious`
+     needs its own religious row; from 3, a line that triggers `medical` (a dose, a drug, a cure claim) needs its own
+     medical row too: on a religious client a religious row never clears a medical trigger, and a medical row never
+     clears a religious one. A file with an older `coverage` keeps its rows, but the lines its rule did not cover are
+     "not current" until they get their own row (the panel shows them as not reviewed, never as ok).
    - The file stores EVERY reviewed line. `items` are the flagged lines: `{"event_id", "flag", "verdict":
      "needs-doctor-approval"|"reword-to-match"|"remove", "text", "start_s", "end_s", "reason", "carried"?}`. `flag` is one the
      client's domain checks: `medical` for a medical or general client, `religious` or `medical` for a religious client (a
