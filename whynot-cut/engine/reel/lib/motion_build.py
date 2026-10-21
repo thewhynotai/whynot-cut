@@ -141,30 +141,30 @@ GATE_EDITOR = {
               "ar": "خطة الموشن اتغيّرت بعد ما وافقت عليها. بص عليها بصّة كمان ووافق عليها تاني."}}
 
 
-def plan_gate(paths) -> tuple[list[str], dict | None]:
+def plan_gate(paths) -> tuple[list[str], dict | None, dict | None]:
     """The compiled plan and its approval, checked the same way for every motion build route (the bridge build,
-    --script-only, --run-script): (problems, refusal). A problem is something to fix (exit 1); the refusal
+    --script-only, --run-script): (problems, refusal, plan). A problem is something to fix (exit 1); the refusal
     {blocked, how, editor_message EN/AR} is a missing, stale or 2.x approval (exit 2). A compiled plan edited by hand
-    (review 91b6b44 P2-1) is refused first, with no `blocked` (exit 1) and its own EN/AR line: it is compiled again
-    before anything else."""
-    from .motion_plan import PLAN_EDITED, fingerprint, plan_edited
+    or compiled by an older engine (review 91b6b44 P2-1, 1c98076 P3-2) is refused first, with no `blocked` (exit 1)
+    and its own EN/AR line: it is compiled again before anything else. `plan` is parsed from the very bytes that were
+    checked (review 1c98076 P3-5): the job is built from it, never from a second read of the file."""
+    from .motion_plan import compiled_plan, fingerprint
     probs, stale = [], False
     val = read_json(paths.p("01_analysis/motion-validation.json"), {}) or {}
     fp = fingerprint(paths)
-    if not paths.p("01_analysis/motion-plan.json").exists() or not val:
+    plan, edited = compiled_plan(paths)
+    if not plan or not val:
         probs.append("no compiled motion plan: run `reel motion-plan`")
     elif not val.get("ok"):
         probs.append("the motion plan has errors: fix them (01_analysis/motion-plan.md)")
     elif val.get("fingerprint") != fp:
         probs.append("the motion plan is stale (script, words, audio, music/licences, brand or the names shown changed): run `reel motion-plan` again")
         stale = True
-    else:
-        edited = plan_edited(paths)
-        if edited:
-            return probs + [edited], {"how": "Run `reel motion-plan` again: it writes the plan from the script, the "
-                                             "transcript and the episode sheet (a change made only in motion-plan.json "
-                                             "is not kept); then motion-build again",
-                                      "editor_message": dict(PLAN_EDITED)}
+    elif edited:
+        return probs + [edited["why"]], {"how": "Run `reel motion-plan` again: it writes the plan from the script, the "
+                                                "transcript and the episode sheet (a change made only in "
+                                                "motion-plan.json is not kept); then motion-build again",
+                                         "editor_message": edited["editor_message"]}, None
     appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
     from .plan import OLDER_APPROVAL, approved_before_3
     older = approved_before_3(appr) and appr.get("plan_fingerprint") != fp          # 3.0 F2: approved under 2.x
@@ -177,22 +177,22 @@ def plan_gate(paths) -> tuple[list[str], dict | None]:
                 "the plan approval is stale (the plan changed after approval): show the editor again")
         says = OLDER_APPROVAL if older else GATE_EDITOR["stale"]
     if not gate:
-        return probs, None
+        return probs, None, plan
     probs.append(gate)          # an approval gate is a refusal (exit 2), like ppro-build's (Gate 2 A2)
     how = ("Show the editor motion-plan.md and the animatic; only with their words run `reel approve-plan --by "
            "editor`, then motion-build again")
     if stale:                   # review 91b6b44 P3-3: the plan is compiled again first, then shown and approved
         how = "Run `reel motion-plan` again first (its inputs changed after it was compiled). Then " + how[0].lower() + how[1:]
-    return probs, {"blocked": gate, "how": how, "editor_message": dict(says)}
+    return probs, {"blocked": gate, "how": how, "editor_message": dict(says)}, plan
 
 
-def _route_refused(paths) -> dict | None:
+def _route_refused(paths) -> tuple[dict | None, dict | None]:
     """BL-21: --script-only / --run-script refused like the bridge build, before any script is written or After
-    Effects is asked anything."""
-    probs, refusal = plan_gate(paths)
+    Effects is asked anything: (refusal document, None), or (None, the checked plan the script is written from)."""
+    probs, refusal, plan = plan_gate(paths)
     if not probs:
-        return None
-    return dict({"status": "REFUSED", "ok": False, "reasons": probs, "aep": str(aep_path(paths))}, **(refusal or {}))
+        return None, plan
+    return dict({"status": "REFUSED", "ok": False, "reasons": probs, "aep": str(aep_path(paths))}, **(refusal or {})), None
 
 
 def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], dict]:
@@ -200,7 +200,7 @@ def preconditions(paths, allow_fallback_font: bool = False) -> tuple[list[str], 
     ctx = {"missing_fonts": []}
     if not plat.newest_app("after_effects"):
         return ["After Effects is not installed: deliver the script with `reel motion-build --script-only`"], ctx
-    probs, refusal = plan_gate(paths)
+    probs, refusal, ctx["plan"] = plan_gate(paths)
     if refusal:
         ctx["refusal"] = refusal
     st = ae_bridge.status()
@@ -369,7 +369,7 @@ def _build_locked(paths, replace_edited: bool, allow_fallback_font: bool, timeou
             return _record(paths, dict(base, status="FAILED", reasons=["re-fit with the fallback font: " + e
                                                                         for e in rc["errors"]], fallback_font=fb))
         fb_plan, brand = rc["plan_data"], ctx["missing_fonts"]
-    job_p = write_job(paths, fallback_font=fb, plan=fb_plan)
+    job_p = write_job(paths, fallback_font=fb, plan=fb_plan or ctx.get("plan"))   # review 1c98076 P3-5: the checked bytes
     job = json.loads(job_p.read_text(encoding="ascii"))
     t0 = time.time()
     r = ae_bridge.submit("build_motion", {"job": job}, timeout=timeout)
@@ -402,10 +402,10 @@ def _build_locked(paths, replace_edited: bool, allow_fallback_font: bool, timeou
 
 
 def script_only(paths) -> dict:
-    refused = _route_refused(paths)
+    refused, plan = _route_refused(paths)
     if refused:
         return refused
-    jsx = write_fallback_script(paths)
+    jsx = write_fallback_script(paths, plan=plan)       # review 1c98076 P3-5: the plan that was checked
     return {"status": "SCRIPT_ONLY", "jsx": str(jsx), "aep": str(aep_path(paths)),
             "next": "run it in After Effects (File > Scripts > Run Script File...); it is not verified: no read-back"}
 
@@ -444,14 +444,14 @@ def _refusal(project: str) -> str:
 def run_script(paths, timeout: int = 900) -> dict:
     import time
     from .adobe_run import run_after_effects
-    refused = _route_refused(paths)
+    refused, plan = _route_refused(paths)
     if refused:
         return refused
     aep = aep_path(paths)
     busy = unsaved_project(_ae_titles())       # the script would refuse inside AE: say so now, not after --timeout
     if busy:
         return {"status": "REFUSED", "aep": str(aep), "reasons": [_refusal(busy)]}
-    jsx = write_fallback_script(paths)
+    jsx = write_fallback_script(paths, plan=plan)       # review 1c98076 P3-5: the plan that was checked
     t0 = time.time()
     r = run_after_effects(jsx, timeout, done=lambda: aep.exists() and aep.stat().st_mtime >= t0 - 1)
     # Nothing ran in AE and the .aep on disk is unchanged: motion-build-result.json is kept as it was (no _record)

@@ -1519,11 +1519,12 @@ def approval_state(paths: Paths) -> dict:
         return {"state": "none", "by": None, "message": "NOT approved"}
     try:
         if appr.get("kind") == "motion":
-            from .motion_plan import PLAN_EDITED, fingerprint as motion_fp, plan_edited
+            from .motion_plan import fingerprint as motion_fp, plan_edited
             now = motion_fp(paths)
             edited = plan_edited(paths)                    # review 91b6b44 P2-1: the compiled file is bound too
             if edited:
-                return {"state": "stale", "by": by, "message": edited, "editor_message": dict(PLAN_EDITED)}
+                return {"state": "stale", "by": by, "message": edited["why"],
+                        "editor_message": edited["editor_message"]}
         else:
             now = plan_fingerprint(paths)
     except (OSError, ValueError) as e:

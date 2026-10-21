@@ -58,3 +58,4 @@ Motion videos (`<EP>_<ID>_MO`: animated, from an episode window's audio): the sc
 `${CLAUDE_SKILL_DIR}/references/motion-beats.md`, the After Effects bridge, probe, build, read-back, render and frames
 in `${CLAUDE_SKILL_DIR}/references/ae-motion.md`. Check a draft script's shape with
 `reel validate 01_analysis/motion-script.json --root "<CLIENT>" --video-id <EP>_<ID>_MO` before `reel motion-plan`.
+Never edit the compiled `01_analysis/motion-plan.json` by hand: a hand edit is refused (approval, build, render, frames, handoff) until `reel motion-plan` runs again. Change `01_analysis/motion-script.json` (or ask the lead to fix the episode sheet) and re-run `reel motion-plan`.

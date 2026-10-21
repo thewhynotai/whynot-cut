@@ -49,8 +49,8 @@ def render(paths, scenes: list[str] | None = None, timeout: int = 3600) -> dict:
     from .common import load_status, set_status
     from .motion_audio import mix
     from .motion_build import aep_path, render_path
-    from .stamps import read_compiled
-    plan = read_compiled(paths.p("01_analysis/motion-plan.json"))
+    from .motion_plan import checked_plan
+    plan = checked_plan(paths)          # review 1c98076 P3-4: never render from a plan edited by hand
     aep = aep_path(paths)
     if not plan or not aep.exists():
         raise SystemExit("build the After Effects project first (`reel motion-build`)")
@@ -181,8 +181,8 @@ def frame_points(plan: dict) -> list[dict]:
 def frames(paths) -> dict:
     from PIL import Image
     from . import ae_render
-    from .stamps import read_compiled
-    plan = read_compiled(paths.p("01_analysis/motion-plan.json"))
+    from .motion_plan import checked_plan
+    plan = checked_plan(paths)          # review 1c98076 P3-4: the frame checks expect the plan motion-plan wrote
     res = read_json(paths.p(RESULT), {}) or {}
     main = res.get("main")
     if not plan or not main or not Path(main).exists():

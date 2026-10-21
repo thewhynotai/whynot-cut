@@ -398,6 +398,22 @@ class TestCliGuidance(TempDir):
         self.assertEqual(code, 2, (doc, err))
         self.assertIn("not approved", doc["blocked"])
         self.assertFalse((self.root / "output/projects/C1/04_after_effects/scripts").exists())
+        # review 1c98076 M03: approved, but a reel whose episode file is gone: refused for the window, nothing written
+        from lib import plan as PL
+        p = Paths(self.root, "C1")
+        write_json(p.p("01_analysis/timeline-spec.json"), {"fps": 30, "duration_frames": 30, "events": [],
+                                                          "main_segments": []})
+        with common.use_context(common.Context(self.root)):
+            fp = PL.plan_fingerprint(p)
+        write_json(p.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor", "format": PL.APPROVAL_FORMAT,
+                                                            "plan_fingerprint": fp})
+        write_json(p.p("00_inputs/source.json"), {"kind": "episode_reel", "episode_id": "EP1", "reel_id": "R01",
+                                                  "fingerprint": "f" * 40, "footage": "data/Episodes/gone.mp4",
+                                                  "in_ms": 0, "out_ms": 1000})
+        code, doc, err = reel(self.root, "ae-script", "--extras", video_id="C1")
+        self.assertEqual(code, 2, (doc, err))
+        self.assertIn("gone", doc["blocked"])
+        self.assertFalse((self.root / "output/projects/C1/04_after_effects/scripts").exists())
 
     def test_refusals_stay_2_and_string_exits_stay_1(self):
         code, doc, err = reel(self.root, "ae-script", video_id="C1")          # an extra without --extras

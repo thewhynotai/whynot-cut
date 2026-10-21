@@ -128,6 +128,25 @@ class TestMotionPlanReseal(Base):
             self.assertIsNone(plan_edited(m1))
             self.assertIsNotNone(plan_edited(m2))
 
+    def test_a_linked_validation_is_never_resealed(self):
+        """Review 1c98076 M08: a motion-validation.json that is a link is never written through: the re-seal refuses
+        (the move lists it as an error) and the record stays as it was, so the rewritten plan reads as edited."""
+        from unittest import mock
+        from lib import linksafe
+        m = Paths(self.src, "M1")
+        plan = m.p("01_analysis/motion-plan.json")
+        write_json(plan, {"scenes": []})
+        vf = m.p("01_analysis/motion-validation.json")
+        write_json(vf, {"ok": True, "plan_sha1": sha(plan)})
+        before = vf.read_bytes()
+        real = linksafe.is_link
+        tail = os.path.normcase("M1/01_analysis/motion-validation.json")
+        with mock.patch.object(linksafe, "is_link", side_effect=lambda q: os.path.normcase(str(q)).endswith(tail)
+                               or real(q)):
+            with self.assertRaises(OSError):
+                CM._reseal_motion_plan(self.src, "output/projects/M1/01_analysis/motion-plan.json", sha(plan), "0" * 40)
+        self.assertEqual(vf.read_bytes(), before)
+
 
 class TestFixture(Approved):
     def test_every_approval_holds_before_the_move(self):

@@ -669,11 +669,12 @@ def cmd_approve_plan(a):
             raise SystemExit("the motion plan has errors (01_analysis/motion-plan.md): fix them before approval")
         if val.get("fingerprint") != fingerprint(p):
             raise SystemExit("the motion plan is stale (script, words, audio, brand or the names shown changed): run `motion-plan` again")
-        from lib.motion_plan import PLAN_EDITED, plan_edited
-        edited = plan_edited(p)               # review 91b6b44 P2-1: never approve a plan edited by hand
+        from lib.motion_plan import plan_edited
+        edited = plan_edited(p)               # review 91b6b44 P2-1: never approve a plan edited by hand (or old)
         if edited:
-            out({"ok": False, "error": edited, "how": "Run `reel motion-plan` again, show the editor the new plan, "
-                                                     "then approve it", "editor_message": dict(PLAN_EDITED)})
+            out({"ok": False, "error": edited["why"], "how": "Run `reel motion-plan` again, show the editor the new "
+                                                            "plan, then approve it",
+                 "editor_message": edited["editor_message"]})
             return
         rec = {"approved": True, "by": a.by, "note": a.note or "", "at": now_iso(), "plan_fingerprint": fingerprint(p),
                "kind": "motion", "format": APPROVAL_FORMAT}

@@ -122,7 +122,7 @@ def run(paths) -> dict:
     from .motion_plan import plan_edited
     edited = plan_edited(paths)                 # review 91b6b44 P2-1: the compiled plan is the one motion-plan wrote
     add("plan_valid", bool(val.get("ok")) and val.get("fingerprint") == fp and not edited,
-        edited or ("motion plan compiled without errors and current" if val.get("ok") else
+        (edited or {}).get("why") or ("motion plan compiled without errors and current" if val.get("ok") else
                    "motion plan missing, with errors or stale"))
     appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
     add("approval_current", bool(appr.get("approved")) and appr.get("plan_fingerprint") == fp,

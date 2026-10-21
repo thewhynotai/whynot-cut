@@ -520,8 +520,11 @@ def check(ep) -> dict:
         approvals += [f"{rid}: {a}" for a in r.get("approval_required") or []]
         if str(rid).endswith("_MO"):           # motion video (2.2): CC-BY art must be credited where it is posted
             from .common import Paths
-            from .stamps import read_compiled
-            mplan = read_compiled(Paths(ep.root, rid).p("01_analysis/motion-plan.json"), {}) or {}
+            from .motion_plan import compiled_plan
+            mplan, edited = compiled_plan(Paths(ep.root, rid))     # review 1c98076 P3-4: the plan motion-plan wrote
+            if edited:
+                errors.append(f"{rid}: {edited['why']} (the CC-BY attribution check reads that plan)")
+            mplan = mplan or {}
             posted = "\n".join([cap, tcap, str(sh.get("description") or "")])
             for a in mplan.get("assets") or []:
                 if a.get("license") == "CC-BY-4.0" and a.get("attribution") and a["attribution"] not in posted:

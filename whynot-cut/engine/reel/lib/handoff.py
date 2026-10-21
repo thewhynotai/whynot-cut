@@ -382,8 +382,8 @@ def motion_readme(paths: Paths) -> Path:
     """Handoff for a motion video (2.2): the After Effects project, how it is organised, what to edit, fonts, audio,
     renders, licenses and attributions, and what still needs the editor."""
     from .motion_build import aep_path, render_path
-    from .stamps import read_compiled
-    plan = read_compiled(paths.p("01_analysis/motion-plan.json"), {}) or {}
+    from .motion_plan import checked_plan
+    plan = checked_plan(paths) or {}    # review 1c98076 P3-4: the README describes the plan motion-plan wrote
     qc = read_json(paths.p("08_quality_control/qc-results.json"), {}) or {}
     rr = read_json(paths.p("04_after_effects/motion-render-result.json"), {}) or {}
     br = read_json(paths.p("04_after_effects/motion-build-result.json"), {}) or {}

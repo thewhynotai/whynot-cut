@@ -27,6 +27,7 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
   `context_card` (one editorial line in a brand pill at the top). Check both in the previews: Arabic joined and
   readable, the value large, the pill inside the top safe area and not over the face.
 - Return the failures you fixed, the ones still open, and the contact-sheet path.
+- Never edit the compiled `01_analysis/motion-plan.json` by hand: a hand edit is refused (approval, build, render, frames, handoff) until `reel motion-plan` runs again. Change `01_analysis/motion-script.json` (or ask the lead to fix the episode sheet) and re-run `reel motion-plan`.
 
 ## Fan-out rule
 Spawn all your sub-agents in one message and wait for every report before you write yours: they run in parallel (often in the background), so wait until each one has reported. Never write your report while a sub-agent is still running. A missing sub-agent result means your report is partial: say so, and say which rows are unchecked. A sub-report marked partial (for example one that stopped at its turn limit) counts as missing: continue that checker with SendMessage (or re-spawn it for the remaining items) and never merge a partial result as complete. A health or religious claim, frame or graphic without a full check blocks the gate.

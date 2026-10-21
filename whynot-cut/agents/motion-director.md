@@ -33,7 +33,9 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 - `00_inputs/source.json`: content type, `recipe.motion` (beats, scene lengths, preferred/avoided types, reveal,
   easing, transition, theme, captions, SFX), `format`, `direction`, `context_line`.
 - `02_transcription/transcript.txt` and `words.json` (the window on the reel clock), `00_inputs/speakers.json`.
-- The episode sheet (via the lead's spawn prompt): host, guest, show. Names exist only there.
+- The episode sheet (via the lead's spawn prompt): host, guest, guest_2 … guest_9, show. Names exist only there:
+  a speaker badge role the sheet does not name stops `reel motion-plan` (speakers.json spellings are the
+  analyst's guesses, never shown); ask the lead to add the name to the sheet.
 - `${CLAUDE_PLUGIN_ROOT}/skills/motion-craft/references/motion-scenes.md` (the 12 scene types and their fields)
   and `${CLAUDE_PLUGIN_ROOT}/skills/motion-craft/references/motion-beats.md` (recipes → beats → scenes, direction rules).
 
@@ -72,3 +74,4 @@ EVIDENCE: <scene count, warnings left, approvals, editorial lines, storyboard pa
 ISSUES / NEEDS EDITOR: <bullets, or "none">
 ```
 Never approve the plan yourself: the lead shows `motion-plan.md` + the animatic to the editor to approve.
+Never edit the compiled `01_analysis/motion-plan.json` by hand: a hand edit is refused (approval, build, render, frames, handoff) until `reel motion-plan` runs again. Change `01_analysis/motion-script.json` (or ask the lead to fix the episode sheet) and re-run `reel motion-plan`.

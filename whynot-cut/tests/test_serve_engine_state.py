@@ -460,12 +460,16 @@ class Motion(Base):
         self.assertEqual(called.call_count, 0)
 
     def test_a_speakers_json_edit_is_seen_by_the_cached_panel(self):
-        """Review a1c14fc P3-3 (M17): speakers.json (the badge's names and turns) is watched."""
+        """Review a1c14fc P3-3 (M17): speakers.json (the badge's turns: who speaks when) is watched. Review 1c98076
+        P2-1: its people spellings are never shown, so editing one keeps the approval."""
         self.episode_reel()
         cache = ES.PanelFields()
         self.assertEqual(self.steps(cache(self.home, now=NOW))["approve"], "done")
         sp = json.loads(self.p("00_inputs/speakers.json").read_text(encoding="utf-8"))
         sp["people"]["guest"]["name"] = "Mona"
+        write(self.p("00_inputs/speakers.json"), sp)
+        self.assertEqual(self.steps(cache(self.home, now=NOW))["approve"], "done")
+        sp["turns"][-1]["start_ms"] += 500
         write(self.p("00_inputs/speakers.json"), sp)
         self.assertNotEqual(self.steps(cache(self.home, now=NOW))["approve"], "done")
 

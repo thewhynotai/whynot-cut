@@ -87,3 +87,4 @@ EVIDENCE: <numbers, check results, image paths you viewed>
 ISSUES / NEEDS EDITOR: <bullets, or "none">
 ```
 Never report a stage as done because a command exited 0. Report what the outputs show.
+Never edit a compiled plan by hand (`timeline-spec.json`, `motion-plan.json`): change the decisions or the script and compile again (`reel plan`, `reel motion-plan`); a hand-edited motion plan is refused until it is compiled again.

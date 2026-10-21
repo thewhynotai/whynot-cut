@@ -65,7 +65,7 @@ class TestMotionRunScript(unittest.TestCase):
                   mock.patch.object(adobe_run, "stage_script", side_effect=OSError("disk full")),
                   mock.patch.object(motion_build, "_ae_titles", lambda: [], create=True),
                   mock.patch.object(motion_build, "write_fallback_script", lambda paths, **kw: self.jsx),
-                  mock.patch.object(motion_build, "_route_refused", lambda paths: None),   # BL-21: approved
+                  mock.patch.object(motion_build, "_route_refused", lambda paths: (None, None)),   # BL-21: approved
                   mock.patch.object(motion_build, "aep_path", lambda paths: self.aep),
                   mock.patch.object(motion_build, "_record", lambda paths, res: res)):
             p.start()
@@ -141,7 +141,7 @@ class TestMotionRealStage(unittest.TestCase):
                   mock.patch.dict(os.environ, env, clear=True),
                   mock.patch.object(motion_build, "_ae_titles", lambda: []),
                   mock.patch.object(motion_build, "write_fallback_script", lambda paths, **kw: self.jsx),
-                  mock.patch.object(motion_build, "_route_refused", lambda paths: None),   # BL-21: approved
+                  mock.patch.object(motion_build, "_route_refused", lambda paths: (None, None)),   # BL-21: approved
                   mock.patch.object(motion_build, "aep_path", lambda paths: self.aep)):
             p.start()
             self.addCleanup(p.stop)
