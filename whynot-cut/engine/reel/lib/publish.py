@@ -300,6 +300,11 @@ def render_thumbnails(ep) -> dict:
         if not 0 <= t_ms < info["duration_ms"]:
             errors.append(f"design {i}: frame_ms {t_ms} is outside the episode")
             continue
+        from .manual_verse import strip_recited
+        if strip_recited(text)[1]:             # manual verse (fix round 2, P3): never drawn
+            errors.append(f"design {i}: holds the basmala or isti'adha (recited text) — WhyNot Cut never writes Quran "
+                          "text: take it out of the design")
+            continue
         if len(text.split()) > lim.get("text_words_warn", 5):
             warnings.append(f"design {i}: {len(text.split())} words — thumbnail text reads best at 5 words or fewer")
         tmp = grab_frame_file(src, t_ms / 1000, out_dir / f"_frame_{i}.png")
@@ -419,8 +424,14 @@ def check(ep) -> dict:
     verse_ranges = [(s["src_start_ms"], s["src_end_ms"]) for s in verses] + mv.reel_spans(ep.root, ep.episode_id)
     verse_words += mv.span_words([{"src_start_ms": a, "src_end_ms": b} for a, b in verse_ranges[len(verses):]],
                                  ep_words)
+    # fix round 2 (P2-1): the caption run after a verse that ends on a pause stays out of the upload SRT (fail-closed:
+    # an episode has no release; the editor captions those seconds by hand if they are not the verse)
+    srt_ranges = verse_ranges + [(h["src_start_ms"], h["src_end_ms"]) for h in mv.holds(verses, ep_words)]
 
     def no_verse(where: str, text: str):
+        if mv.strip_recited(text or "")[1]:     # fix round 2 (P3): recited text whether or not the episode says it
+            errors.append(f"{where}: holds the basmala or isti'adha (recited text) — WhyNot Cut never writes Quran "
+                          "text: leave it out of the copy")
         if verse_words and mv.repeats(text or "", verse_words):
             errors.append(f"{where}: repeats the words of a recited verse in the episode — WhyNot Cut never writes Quran "
                           "text: leave the verse out of the copy (the editor adds verses by hand)")
@@ -523,8 +534,8 @@ def check(ep) -> dict:
     srt_src = ep.p("02_transcription/subtitles.srt")
     if srt_src.exists():
         dst = out / f"{ep.episode_id}.srt"
-        if verse_ranges:       # the upload SRT without a word of any recited verse (an empty gap, never a placeholder)
-            srtlib.write_srt(dst, mv.filter_cues(srtlib.read_srt(srt_src), verse_ranges, ep_words))
+        if srt_ranges:         # the upload SRT without a word of any recited verse (an empty gap, never a placeholder)
+            srtlib.write_srt(dst, mv.filter_cues(srtlib.read_srt(srt_src), srt_ranges, ep_words))
         else:
             shutil.copyfile(srt_src, dst)
         errs = srtlib.validate_cues(srtlib.read_srt(dst), total)

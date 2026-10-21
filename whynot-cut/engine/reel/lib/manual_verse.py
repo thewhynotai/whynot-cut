@@ -8,12 +8,15 @@ episode's reel plans; nothing else reads):
   config(profile)            which cues apply: the recitation cue class for every client; for a client whose review
                              domains include religious, also the religious lexicon's `verse-phrase` list
   detect(words, cfg)         recited-verse spans on the SOURCE clock from word times:
-                               * the citation class (fix round 1, P2-2): «قال / يقول / بيقول / قوله» (a joined و/ف)
-                                 then divine names and honorifics in any order («الله», «ربنا», «رب العزة», «الحق
-                                 سبحانه», «تعالى», «سبحانه», «عز وجل», «جل وعلا», «تبارك» …), optionally «في كتابه
-                                 الكريم». The span starts AFTER the cue (the speaker's own words stay captioned).
-                                 «قال والله» (an oath), «قال الحق», «قال رب البيت» and a name first («ربنا بيقول»,
-                                 everyday paraphrase far more often than a recitation) never fire;
+                               * the citation class (fix round 1, P2-2; fix round 2, P1-1): «قال / يقول / بيقول /
+                                 قوله» (a joined و/ف), then ONE divine name right after it («الله», «ربنا», «رب
+                                 العزة», «الحق سبحانه» …) and ONE honorific group after the name or the verb
+                                 («تعالى», «سبحانه وتعالى», «عز وجل», «جل وعلا», «تبارك وتعالى» …), optionally «في
+                                 كتابه الكريم». The span starts AFTER the cue (the speaker's own words stay
+                                 captioned); a second name or «تبارك» after that is the verse's first word, so the
+                                 span starts AT it. «قال والله» (an oath), «قال الحق», «قال رب البيت», a du'a after the
+                                 name («قال الله يرحمه», «قال ربنا يستر») and a name first («ربنا بيقول», everyday
+                                 paraphrase far more often than a recitation) never fire;
                                * the basmala and the full isti'adha open a span AT the cue (they are recited text);
                                * a verse phrase (religious clients) is a span over exactly the phrase.
                              A cue span runs from the first word after the cue (a pause right after the cue does not end
@@ -24,7 +27,11 @@ episode's reel plans; nothing else reads):
   resolve(detected, ed)      the story-editor's edit-decisions.json wins: `manual_verse: [{start_ms, end_ms, note?}]`
                              adds spans (a detected span it overlaps is replaced by it), `manual_verse_off:
                              [{start_ms, end_ms}]` removes the detected spans it overlaps. Ids MV01, MV02 … in time order
-  filter_cues / keep_piece / repeats / strip_recited / marker_comment / label   applying the spans
+  holds / held (fix round 2, P2-1: the plan session's fail-closed ruling)   after a detected span that ends on a
+                             pause the verse may go on (a reciter stops at a waqf), so the next caption run is HELD
+                             (to the next sentence end, a change of speaker or HOLD_MS) and masked like a span, until
+                             the editor releases it: `manual_verse_release: [{start_ms, end_ms}]` in edit-decisions.json
+  filter_cues / keep_piece / repeats / strip_recited / marker_comment / hold_comment / label   applying the spans
 A span's transcript words are never put into a marker, a NEEDS-YOU line, the edit-plan or a log: Whisper's text of a
 recited verse may be a misheard verse. Only ids, timecodes and the cue are shown; a basmala, isti'adha or
 verse-phrase cue is NAMED, never quoted.
@@ -52,12 +59,29 @@ _SENTENCE = re.compile(r"[.!?؟…]\W*$")      # a word that closes a sentence
 # the citation class (normalised forms: ى as ي, ة as ه, one alef)
 VERBS = {"قال", "يقول", "بيقول", "قوله"}
 DIVINE = {"الله", "ربنا", "المولي"}                  # a name as said (never with a joined و: «والله» is an oath)
-HONOR = {"تعالي", "سبحانه", "عز", "جل", "جلاله", "علا", "تبارك", "شانه", "ذكره"}   # a joined و allowed («وتعالى»)
+# fix round 2 (review 91cd197, P1-1): a verse may open with a divine name, «ربنا», «تبارك» or «سبحانه», so the cue
+# takes ONE name right after the verb and ONE honorific group after the name or the verb; any word after that (another
+# name, «تبارك» …) opens the span. A joined و is allowed on an honorific («وتعالى»).
+HEADS = {"سبحانه", "عز", "جل"}                        # a group's first word, then optionally one of TAILS
+TAILS = {"تعالي", "جل", "علا", "جلاله", "شانه", "ذكره"}   # «سبحانه وتعالى», «عز وجل», «جل وعلا», «جل جلاله» …
+HONOR = {"تعالي", "تبارك"} | HEADS | TAILS            # every honorific word (the cue vocabulary)
 WITH_HONOR = {"الحق"}                                 # a name only when an honorific follows («الحق سبحانه»)
 RABB_OF = {"العزه", "العالمين"}                       # «رب العزة», «رب العالمين»
+# «قال الله يرحمه», «قال ربنا يستر»: a du'a after the name (no honorific) is everyday speech, never a citation
+DUA = ("يرحم", "يستر", "يسامح", "يخلي", "يكرم", "يهدي", "يحفظ", "يشفي", "يعين", "يبارك", "يوفق", "يجازي", "يسهل",
+       "يفرج", "يصبر", "يعوض", "يسعد", "يجبر", "يحمي", "يتقبل", "يرضي", "ينور")
+DUA_ENDS = ("", "ه", "ها", "هم", "ك", "كي", "كم", "كو", "ني", "نا", "لك", "له", "لها", "لهم", "لنا", "لي")
+_SOFT = re.compile("[\u200c\u200d\ufeff]")  # ZWNJ, ZWJ, BOM (review P3): dropped inside a word, a gap between cue words
+# the hold (plan-session ruling 2026-10-20, P2-1): after a span that ends on a pause the verse may go on, so the next
+# caption run is held to the next sentence end, a change of speaker or HOLD_MS, until the editor releases it
+HOLD_MS = 10000
+HOLD_NAME = "تحقق: الآية ممكن تكون مكمّلة"                     # the hold marker's name ("check: verse may continue")
+AFTER_AR = "واسمع الكلام اللي بعدها على طول: لو الآية مكمّلة، ضيف الباقي بإيدك كمان"
+AFTER_EN = "listen to the words right after it: if the verse goes on, add the rest by hand too"
 BOOK = {"كتابه", "القران", "محكم"}                    # «في كتابه الكريم», «في محكم التنزيل»
 BOOK_TAIL = {"الكريم", "العزيز", "التنزيل"}
 RECITED = (("basmala", "بسم الله الرحمن الرحيم"), ("istiadha", "أعوذ بالله من الشيطان الرجيم"))
+_RECITED_WORDS = {"بسم", "الله", "الرحمن", "الرحيم", "اعوذ", "بالله", "الشيطان", "الرجيم"}   # normalised
 LABELS = {"basmala": ("من: البسملة", "from the basmala"),
           "istiadha": ("من: الاستعاذة", "from the isti'adha"),
           "verse_phrase": ("عبارة من آية معروفة", "a known verse phrase"),
@@ -67,9 +91,31 @@ LABELS = {"basmala": ("من: البسملة", "from the basmala"),
 # --------------------------------------------------------------------------- text
 def tokens(text) -> list[str]:
     """The matching words of a text: review_domains' normal form (no diacritics or tatweel, one alef, ى as ي, ة as ه),
-    then word characters only; a zero-width space or word joiner is a gap between words."""
+    then word characters only; a zero-width space or word joiner is a gap between words. A ZWNJ, ZWJ or BOM is
+    dropped inside a word, but splits a word whose pieces are cue words and whose joined form is not («قال» + ZWJ + «تعالى»)."""
     from .review_domains import normalize
-    return re.findall(r"\w+", normalize(_GAPS.sub(" ", str(text or ""))))
+    s = _GAPS.sub(" ", str(text or ""))
+    if _SOFT.search(s):
+        s = " ".join(_soft_split(w) for w in s.split())
+    return re.findall(r"\w+", normalize(s))
+
+
+def _cue_word(piece: str) -> bool:
+    from .review_domains import normalize
+    toks = re.findall(r"\w+", normalize(piece))
+    vocab = VERBS | DIVINE | HONOR | WITH_HONOR | RABB_OF | {"رب"} | _RECITED_WORDS
+    return len(toks) == 1 and bool(_cands(toks[0], PREFIXES) & vocab)
+
+
+def _soft_split(word: str) -> str:
+    """One word holding a ZWNJ / ZWJ / BOM: split there when a piece is a cue word and the joined word is not."""
+    if not _SOFT.search(word):
+        return word
+    pieces = [x for x in _SOFT.split(word) if x]
+    joined = "".join(pieces)
+    if len(pieces) > 1 and not _cue_word(joined) and any(_cue_word(x) for x in pieces):
+        return " ".join(pieces)
+    return joined
 
 
 def _cands(tok: str, prefixes=_JOINED) -> set:
@@ -152,37 +198,60 @@ def _match(stream: list, k: int, phrase: list, first_prefix=PREFIXES, every=Fals
     return True
 
 
-def _names(stream: list, j: int) -> tuple[int, bool]:
-    """From token j: how many tokens of divine names and honorifics follow (any order), and whether one is there."""
-    n, k, hit = len(stream), j, False
-    while k < n and k - j < 8:
-        tok = stream[k][0]
-        nxt = stream[k + 1][0] if k + 1 < n else ""
-        if tok in DIVINE or _cands(tok, PREFIXES) & HONOR:
-            k, hit = k + 1, True
-        elif tok in WITH_HONOR and _cands(nxt, PREFIXES) & HONOR:
-            k, hit = k + 1, True
-        elif tok == "رب" and nxt in RABB_OF:
-            k, hit = k + 2, True
-        else:
-            break
-    return k - j, hit
+def _tok(stream: list, j: int) -> str:
+    return stream[j][0] if j < len(stream) else ""
+
+
+def _honor_len(stream: list, j: int) -> int:
+    """The honorific group at token j: «تعالى»; «سبحانه / عز / جل» with an optional second word («وتعالى», «وجل»,
+    «وعلا», «جلاله», «شأنه»); «تبارك» only as «تبارك وتعالى». 0 = none."""
+    here, nxt = _cands(_tok(stream, j), PREFIXES), _cands(_tok(stream, j + 1), PREFIXES)
+    if "تعالي" in here:
+        return 1
+    if here & HEADS:
+        return 2 if nxt & TAILS else 1
+    if "تبارك" in here and "تعالي" in nxt:
+        return 2
+    return 0
+
+
+def _name_len(stream: list, j: int) -> int:
+    """The divine name at token j: «الله», «ربنا», «المولى»; «الحق» before an honorific; «رب العزة / العالمين»."""
+    tok = _tok(stream, j)
+    if tok in DIVINE:
+        return 1
+    if tok in WITH_HONOR and _honor_len(stream, j + 1):
+        return 1
+    if tok == "رب" and _tok(stream, j + 1) in RABB_OF:
+        return 2
+    return 0
+
+
+def _dua(tok: str) -> bool:
+    return any(tok.startswith(s) and tok[len(s):] in DUA_ENDS for s in DUA)
 
 
 def _say_cue(stream: list, k: int) -> int:
-    """How many tokens of a citation cue start at token k (0 = none)."""
+    """How many tokens of a citation cue start at token k (0 = none): a verb, ONE name right after it, ONE honorific
+    group after the name or the verb, optionally «في كتابه الكريم». Whatever follows opens the span, so a verse that
+    starts with a name or «تبارك» is never taken into the cue (fix round 2, P1-1). A verb followed directly by
+    «تبارك» (not «تبارك وتعالى») is a cue of the verb alone and the span starts AT «تبارك»."""
     n = len(stream)
-    if _cands(stream[k][0], PREFIXES) & VERBS:
-        used, hit = _names(stream, k + 1)
-        if not hit:
-            return 0
-        j = k + 1 + used
-        if j + 1 < n and stream[j][0] == "في" and stream[j + 1][0] in BOOK:
-            j += 2
-            while j < n and stream[j][0] in BOOK_TAIL:
-                j += 1
-        return j - k
-    return 0
+    if not _cands(stream[k][0], PREFIXES) & VERBS:
+        return 0
+    j = k + 1
+    name = _name_len(stream, j)
+    honor = _honor_len(stream, j + name)
+    if name and not honor and _dua(_tok(stream, j + name)):
+        return 0                                         # «قال الله يرحمه», «قال ربنا يستر»
+    if not (name or honor or "تبارك" in _cands(_tok(stream, j), PREFIXES)):
+        return 0
+    j += name + honor
+    if j + 1 < n and stream[j][0] == "في" and stream[j + 1][0] in BOOK:
+        j += 2
+        while j < n and stream[j][0] in BOOK_TAIL:
+            j += 1
+    return j - k
 
 
 def _phrase_end(words: list, j: int, start: float) -> tuple[float, str, bool]:
@@ -276,8 +345,8 @@ def strip_recited(text: str) -> tuple[str, bool]:
 
 def reel_spans(root, episode_id: str) -> list:
     """The verse ranges the episode's reels recorded in their plans (the story-editor's spans included), on the
-    episode's clock: every reel whose 00_inputs/source.json names this episode, its spec's manual_verse and verse_cut
-    ranges shifted by its source_in_ms. Unreadable plans are skipped. [] when none."""
+    episode's clock: every reel whose 00_inputs/source.json names this episode, its spec's manual_verse, verse_cut and
+    verse_hold ranges shifted by its source_in_ms. Unreadable plans are skipped. [] when none."""
     import json
     from pathlib import Path
     out = []
@@ -291,7 +360,8 @@ def reel_spans(root, episode_id: str) -> list:
                 continue
             spec = json.loads((d / "01_analysis/timeline-spec.json").read_text(encoding="utf-8-sig"))
             off = int(spec.get("source_in_ms") or src.get("in_ms") or 0)
-            for s in (spec.get("manual_verse") or []) + (spec.get("verse_cut") or []):
+            held_ = [h for h in spec.get("verse_hold") or [] if isinstance(h, dict) and not h.get("released")]
+            for s in (spec.get("manual_verse") or []) + (spec.get("verse_cut") or []) + held_:
                 out.append((int(s["src_start_ms"]) + off, int(s["src_end_ms"]) + off))
         except (OSError, ValueError, TypeError, KeyError, AttributeError):
             continue
@@ -351,6 +421,63 @@ def resolve(detected: list, ed: dict | None) -> tuple[list, list, list]:
     for i, s in enumerate(spans, 1):
         s["id"] = f"MV{i:02d}"
     return spans, errors, warnings
+
+
+# --------------------------------------------------------------------------- the hold after a span (P2-1)
+def holds(spans: list, words: list) -> list:
+    """The caption runs held after the detected spans that end on a pause (`pause`, `cap_pause`): a reciter stops at
+    a waqf, so the verse may go on. A run starts at the first word after the span and ends at the first word that
+    closes a sentence, before a change of speaker, at the speech end, or with the last word starting within HOLD_MS.
+    The editor's spans and verse phrases have a known end: no hold.
+    [{id, after (the span's id), src_start_ms, src_end_ms, end (why it ends), released: False}]."""
+    good = sorted((w for w in words or [] if _good(w)), key=lambda w: w["start_ms"])
+    out = []
+    for k, s in enumerate(spans or [], 1):
+        if s.get("source") != "detected" or s.get("end") not in ("pause", "cap_pause"):
+            continue
+        i = next((x for x, w in enumerate(good) if w["start_ms"] >= s["src_end_ms"]), None)
+        if i is None:
+            continue
+        start = good[i]["start_ms"]
+        while True:
+            w = good[i]
+            if _SENTENCE.search(str(w["word"])):
+                why = "sentence"
+            elif i + 1 >= len(good):
+                why = "speech_end"
+            elif good[i + 1].get("speaker") != w.get("speaker"):
+                why = "turn"
+            elif good[i + 1]["start_ms"] - start >= HOLD_MS:
+                why = "time"
+            else:
+                i += 1
+                continue
+            break
+        sid = s.get("id") or f"MV{k:02d}"
+        out.append({"id": f"{sid}H", "after": sid, "src_start_ms": int(start), "src_end_ms": int(round(w["end_ms"])),
+                    "end": why, "released": False})
+    return out
+
+
+def held(spans: list, words: list, ed: dict | None) -> tuple[list, list, list]:
+    """(holds, errors, warnings): `holds` with `released: True` on the runs the editor released
+    (`manual_verse_release: [{start_ms, end_ms}]` in edit-decisions.json: each entry releases the held runs it
+    overlaps; the plan runs again). A released run is listed, never blanked."""
+    errors, warnings = [], []
+    out = holds(spans, words)
+    for a, b, _e in _entries(ed if isinstance(ed, dict) else {}, "manual_verse_release", errors):
+        hit = [h for h in out if h["src_start_ms"] < b and a < h["src_end_ms"]]
+        if not hit:
+            warnings.append(f"manual_verse_release {_fmt(a)}–{_fmt(b)} matches no held caption run: nothing released")
+        for h in hit:
+            h["released"] = True
+    return out, errors, warnings
+
+
+def hold_comment(h: dict) -> str:
+    """The hold marker's comment: the run's SOURCE timecodes and the span it follows, never a word."""
+    return (f"المصدر {_fmt(h['src_start_ms'])}–{_fmt(h['src_end_ms'])} · بعد {h['after']}: الكابشن متوقف هنا. اسمع: لو "
+            f"الآية مكمّلة ضيفها بإيدك، ولو لأ رجّع الكابشن (manual_verse_release)")
 
 
 # --------------------------------------------------------------------------- applying the spans

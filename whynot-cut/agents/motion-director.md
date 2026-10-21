@@ -21,6 +21,11 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 - **motion-plan errors.** Fix the script until `reel motion-plan` compiles with no errors.
 - **Revision.** The lead passes the editor's comments on `motion-plan.md` or the animatic. Keep every scene's id stable: change a scene under its own id, and give a new scene the next unused id. Never renumber or reuse scene ids: the medical review is recorded against the scene id, and a flag that moved to another id has to be re-reviewed.
 
+## Recited verses
+- WhyNot Cut never writes Quran text: never put a verse, the transcript's words of one, the basmala or the
+  isti'adha in a scene (quotes, cards, list items, titles). `motion-plan` blanks the captions over a recited verse and
+  the words held after it, and errors on a scene that shows them. The editor adds verses by hand in After Effects.
+
 ## Inputs (read them; do not guess)
 - **`output/client_database/client-brief.md` first**: the client's people (gender and honorifics), brand colours,
   fonts and pairs, style, standing rules and review domains in at most 1,000 tokens, instead of the client

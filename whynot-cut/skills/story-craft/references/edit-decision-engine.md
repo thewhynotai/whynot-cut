@@ -104,8 +104,10 @@ shorten a punch-in to fake a smooth zoom: one shorter than 2 x the ease shares i
 - On-screen wording = the speaker's words (filler removed) or exact client-approved strings (name card).
 - `approval_required: true` for any medical diagram, claim card, dosage, lab values, before/after or likeness, and
   (religious domain) any hadith, ruling or line that echoes a verse. A verse itself never goes on screen: the editor
-  adds it by hand (`reel plan` leaves a recited verse's captions empty and marks it; `manual_verse` /
-  `manual_verse_off` at the top level of edit-decisions.json add or remove a span, see agents/story-editor.md).
+  adds it by hand (`reel plan` leaves a recited verse's captions empty and marks it, and holds the captions after a
+  verse that ends on a pause; `manual_verse` / `manual_verse_off` at the top level of edit-decisions.json add or
+  remove a span, `manual_verse_release` releases a held run once the editor has listened, see
+  agents/story-editor.md).
 - Client-approved strings (a hook written in the client's reels plan, the show's standing end card) may be used
   as on-screen text; say where they come from in `concept`.
 - Images only from the client asset manifest (`client_database/asset-manifest.json`, by `rel` path).

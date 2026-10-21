@@ -49,6 +49,9 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
   `approval_required`.
 - Tone follows the reel's recipe `copy` and the client's notes. Clickbait that the video doesn't deliver is wrong.
 - Arabic stays Arabic (the client's dialect from notes.md); English only where the client uses it.
+- WhyNot Cut never writes Quran text: no verse, no part of one, no basmala or isti'adha in a title, the description,
+  a chapter, a tag, a caption or a thumbnail. Name a recited verse by its place («آية في الدقيقة 12»), never by its words;
+  publish-check refuses copy that repeats one. The editor adds verses by hand from a trusted Mushaf.
 - Motion reels (`<EP>_<ID>_MO`) get `publish/reels/<EP>_<ID>_MO.json` like any reel. If `01_analysis/motion-plan.json`
   lists CC-BY assets, put each attribution text in the captions (publish-check requires it). The cover is
   `04_after_effects/render/<id>_cover.jpg`.

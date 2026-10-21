@@ -23,8 +23,8 @@ sys.path.insert(0, str(SK / "tests"))
 from lib import common  # noqa: E402
 from lib import schemas  # noqa: E402
 from lib.common import Paths, read_json, write_json  # noqa: E402
-from test_manual_verse import (SC, VERSE, Base, build_words, decision, has_verse, verse_project,  # noqa: E402
-                               verse_window, word_at)
+from test_manual_verse import (RELEASE, SC, VERSE, Base, build_words, decision, has_verse,  # noqa: E402
+                               verse_project, verse_window, word_at)
 
 LINE_AR = "أضف الآية يدويًا من مصحف موثوق ودقّق التشكيل"
 
@@ -42,7 +42,7 @@ class TestNeedsYouVerse(Base):
 
     def test_N1_one_line_per_span_and_the_twin_validates(self):
         w = build_words(SC["recited"])
-        root, p = self.planned(w, flags={"سحاب", "مفتاح"})
+        root, p = self.planned(w, flags={"سحاب", "مفتاح"}, extra=RELEASE)
         doc = NY().write(root)
         items = [i for i in doc["items"] if i["kind"] == "verse"]
         self.assertEqual(len(items), 1, doc["items"])

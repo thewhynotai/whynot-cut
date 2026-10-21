@@ -23,8 +23,8 @@ sys.path.insert(0, str(SK / "tests"))
 
 from lib import common  # noqa: E402
 from lib.common import Paths, read_json, write_json  # noqa: E402
-from test_manual_verse import (SC, VERSE, Base, build_words, cfg, decision, has_verse, verse_project,  # noqa: E402
-                               verse_window, word_at)
+from test_manual_verse import (RELEASE, SC, VERSE, Base, build_words, cfg, decision, has_verse,  # noqa: E402
+                               verse_project, verse_window, word_at)
 
 
 def MV():
@@ -42,7 +42,8 @@ def words_at(spec: list) -> list:
     return [{"id": i + 1, "word": t, "start_ms": a, "end_ms": b, "probability": 0.9} for i, (t, a, b) in enumerate(spec)]
 
 
-LONG = "اهلا بيكم قال تعالى " + " ".join(VERSE * 8) + " |900 وده كلام جميل"     # 16 s of recitation, no pause
+LONG = "اهلا بيكم قال تعالى " + " ".join(VERSE * 8) + " |900 تمام. وده كلام جميل"   # 16 s of recitation, no pause
+# (fix round 2: «تمام.» closes the held run after the verse, so the commentary after it is captioned)
 
 
 # --------------------------------------------------------------------------- P1-1 the cap
@@ -141,6 +142,7 @@ class TestCutAway(Base):
         w = build_words(SC["recited"])
         a, b = verse_window(w)
         dur = w[-1]["end_ms"] + 1000
+        kw.setdefault("extra", RELEASE)
         root, p = verse_project(self.tmp, w, flags={"سحاب", "مفتاح"},
                                 glob={"remove_pauses": True,                    # a cut word inside it: survivor E6
                                       "cut_words": [{"word_ids": [word_at(w, "نهر")["id"]], "reason": "x"}]},
@@ -187,7 +189,7 @@ class TestRiskOrder(Base):
             s, e = word_at(w, "وده")["start_ms"], w[-1]["end_ms"]
             decs = [decision("EDIT_001", "GFX_001", s, e, "وده معناه ان الصبر", "٥٠ مجم", template="stat_card",
                              value="٥٠ مجم")]
-        root, p = verse_project(self.tmp, w, flags={"مفتاح"}, decisions=decs)
+        root, p = verse_project(self.tmp, w, flags={"مفتاح"}, decisions=decs, extra=RELEASE)
         write_json(root / common.CLIENT_PROFILE_REL / "safety.json", {"switches": {"k_t1_plan_block": switch}})
         from lib.plan import compile_plan
         res = compile_plan(p)
@@ -215,7 +217,7 @@ class TestRiskOrder(Base):
                 w = build_words(self.SPEECH)
                 for x in w[-4:-2]:
                     x['probability'] = 0.6
-                root, p = verse_project(self.tmp, w, flags={'مفتاح'})
+                root, p = verse_project(self.tmp, w, flags={'مفتاح'}, extra=RELEASE)
                 write_json(root / common.CLIENT_PROFILE_REL / 'safety.json', {'switches': {'k_t1_plan_block': switch}})
                 from lib.plan import compile_plan
                 compile_plan(p)

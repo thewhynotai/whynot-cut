@@ -68,6 +68,11 @@ def has_verse(text: str) -> list:
     return [v for v in VERSE if v in str(text)]
 
 
+# fix round 2 (P2-1): the captions after a span that ends on a pause are held until the editor releases them; a test
+# about something else releases every hold (the hold itself: test_manual_verse_fix2.py)
+RELEASE = {"manual_verse_release": [{"start_ms": 0, "end_ms": 10 ** 7}]}
+
+
 def cfg(religious=True, phrases=()):
     return {"religious": religious, "phrases": [MV().tokens(p) for p in phrases], "warnings": []}
 
@@ -342,7 +347,7 @@ class TestPlan(Base):
         return decision("EDIT_001", "GFX_001", s, self.b + 1200, "هنتكلم عن الصبر", "الصبر")
 
     def test_P1_captions_bar_marker(self):
-        _root, p = verse_project(self.tmp, self.w, decisions=[self.bar_over_span()])
+        _root, p = verse_project(self.tmp, self.w, decisions=[self.bar_over_span()], extra=RELEASE)
         res, spec = self.compile(p)
         # captions: the -seq files, nothing inside the span, no verse word
         self.assertEqual(spec["caption_source"], "02_transcription/captions-short-seq.srt")
@@ -394,7 +399,7 @@ class TestPlan(Base):
         self.assertEqual([has_verse(x) for x in res["warnings"] if has_verse(x)], [])
 
     def test_P4_hand_written_cues_split_at_the_edge(self):
-        _root, p = verse_project(self.tmp, self.w)
+        _root, p = verse_project(self.tmp, self.w, extra=RELEASE)
         from lib import srt as srtlib
         q, n, j, m = (word_at(self.w, x) for x in ("قال", "نهر", "جبل", "معناه"))
         hand = [{"start_ms": q["start_ms"], "end_ms": n["end_ms"], "text": "قال تعالى شجرة نهر"},

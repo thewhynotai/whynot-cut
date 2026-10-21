@@ -69,6 +69,12 @@
       "items": {"type": "object", "required": ["start_ms", "end_ms"],
                 "properties": {"start_ms": {"$ref": "#/$defs/time"}, "end_ms": {"$ref": "#/$defs/time"}}}
     },
+    "manual_verse_release": {
+      "type": "array",
+      "description": "manual verse: releases each caption run held after a verse that ends on a pause (`verse_hold` in the timeline spec) this range overlaps, once the editor has listened and it is not the verse (source time)",
+      "items": {"type": "object", "required": ["start_ms", "end_ms"],
+                "properties": {"start_ms": {"$ref": "#/$defs/time"}, "end_ms": {"$ref": "#/$defs/time"}}}
+    },
     "music": {
       "type": "object",
       "properties": {

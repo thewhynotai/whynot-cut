@@ -20,12 +20,13 @@ sys.path.insert(0, str(SK / "tests"))
 
 from lib import common  # noqa: E402
 from lib.common import write_json  # noqa: E402
-from test_manual_verse import SC, build_words, has_verse  # noqa: E402
+from test_manual_verse import SC, build_words, has_verse, verse_window  # noqa: E402
 
 NAME = "آية: يضيفها المونتير يدويًا"
+HOLD = "تحقق: الآية ممكن تكون مكمّلة"
 
 
-def video_project(tmp: Path, scenario: str, domain="religious"):
+def video_project(tmp: Path, scenario: str, domain="religious", cut_verse=False):
     """test_pipeline.make_project's real 12 s clip with this scenario's words, preflighted and planned."""
     from lib.media import preflight
     from lib.plan import compile_plan
@@ -41,9 +42,13 @@ def video_project(tmp: Path, scenario: str, domain="religious"):
     finalize(p, {"source_video": str(root / "data/Raw/CLIP1.mov"), "backend": "test", "model": "none", "language": "ar",
                  "language_probability": 1.0, "duration_ms": 12000}, segs, [dict(x) for x in w])
     preflight(p, [root / "data/Raw/CLIP1.mov"])
-    write_json(p.p("01_analysis/edit-decisions.json"), {"video_id": "CLIP1",
-                                                        "global": {"main_footage": "data/Raw/CLIP1.mov"},
-                                                        "decisions": []})
+    glob = {"main_footage": "data/Raw/CLIP1.mov"}
+    if cut_verse:                       # fix round 2 (P1-2): pause removal takes the verse away whole
+        a, b = verse_window(w)
+        glob["remove_pauses"] = True
+        write_json(p.p("06_audio/dialogue/pauses.json"), {"keep_ms": [[0, a - 30], [b + 30, 12000]],
+                                                           "cuts_ms": [[a - 30, b + 30]]})
+    write_json(p.p("01_analysis/edit-decisions.json"), {"video_id": "CLIP1", "global": glob, "decisions": []})
     res = compile_plan(p)
     assert res["ok"], res["errors"]
     return root, p
@@ -55,8 +60,8 @@ class TestHandoff(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.addCleanup(common.set_context, None)
 
-    def readme(self, scenario, domain="religious"):
-        _root, p = video_project(self.tmp, scenario, domain)
+    def readme(self, scenario, domain="religious", cut_verse=False):
+        _root, p = video_project(self.tmp, scenario, domain, cut_verse)
         from lib.premiere_xml import build_xml
         from lib import handoff
         build_xml(p)
@@ -69,6 +74,18 @@ class TestHandoff(unittest.TestCase):
         self.assertNotIn("`02_transcription/subtitles.srt`", readme)
         self.assertIn(NAME, readme)
         self.assertIn("MV01", readme)
+        self.assertEqual(has_verse(readme), [])
+
+    def test_hold_line_in_the_readme(self):
+        readme = self.readme("recited")                  # fix round 2 (P2-1): the held run is named, never its words
+        self.assertIn(HOLD, readme)
+        self.assertIn("MV01H", readme)
+        self.assertNotIn("مفتاح", readme)
+
+    def test_cut_away_verse_keeps_the_seq_srt(self):
+        readme = self.readme("recited", cut_verse=True)  # fix round 2 (P1-2): no manual_verse left, verse_cut only
+        self.assertIn("subtitles-seq.srt", readme)
+        self.assertNotIn("`02_transcription/subtitles.srt`", readme)
         self.assertEqual(has_verse(readme), [])
 
     def test_plain_readme(self):

@@ -51,6 +51,15 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
   lexicon's common verse phrases. The captions are empty there (with no pause in 12 s, to the next pause), a graphic
   over the verse is shortened or dropped, and the timeline gets a marker «آية: يضيفها المونتير يدويًا». A hook
   title loses the basmala from its text. «آية», «سورة …» or «في الآية» alone never count.
+- The cue is the verb, one name right after it and one honorific group («قال الله تعالى», «قال تعالى»). A name or
+  «تبارك» after that is the verse's first word: the span starts AT it. «قال الله يرحمه», «قال ربنا يستر» never count.
+  Every graphic loses the basmala and the isti'adha from its text (dropped when nothing is left).
+- A reciter pauses at a waqf, so a span that ends on a pause may end too early. The captions after it are HELD
+  (to the next sentence end, a change of speaker or 10 s), with a marker «تحقق: الآية ممكن تكون مكمّلة» and a
+  NEEDS-YOU line; a graphic repeating those words is dropped. Only when the editor has listened and says it is not
+  the verse: `"manual_verse_release": [{"start_ms", "end_ms"}]` (top level, source ms) releases the held run it
+  overlaps; run `reel plan` again (the plan's approval then has to be given again). If it is the verse, extend the
+  span with `manual_verse` instead. Never release a hold on your own judgement.
 - Your decision wins. In `edit-decisions.json` (top level), `"manual_verse": [{"start_ms", "end_ms", "note"?}]` adds a
   recited span the plan missed. `"manual_verse_off": [{"start_ms", "end_ms"}]` removes a detected span that is not a
   recitation: a hadith after «قال الله تعالى», or a paraphrase. Times are source ms (or clocks). The note stays in the

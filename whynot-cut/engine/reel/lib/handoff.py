@@ -155,8 +155,10 @@ def build(paths: Paths) -> dict:
     from .stamps import read_compiled
     spec = read_compiled(paths.p("01_analysis/timeline-spec.json"), {}) or {}
     # manual verse: with a recited verse the CC track comes from the SRT the plan wrote without it (never the
-    # transcript's subtitles.srt, which holds Whisper's words of the verse)
-    srt = "subtitles-seq.srt" if spec.get("manual_verse") else "subtitles.srt"
+    # transcript's subtitles.srt, which holds Whisper's words of the verse); fix round 2: also a verse cut away whole
+    # (P1-2) or a caption run held after one (P2-1)
+    srt = ("subtitles-seq.srt" if any(spec.get(k) for k in ("manual_verse", "verse_cut", "verse_hold"))
+           else "subtitles.srt")
     ae = read_json(paths.p("04_after_effects/ae-build-result.json"), {})
     aer = read_json(paths.p("04_after_effects/ae-render-result.json"), {})
     ps = read_json(paths.p("05_photoshop/ps-build-result.json"), {})
@@ -228,6 +230,12 @@ def build(paths: Paths) -> dict:
         markers_line += (f" **{len(mvs)} recited verse(s)** have a marker «آية: يضيفها المونتير يدويًا» and empty captions: "
                          "add each verse by hand from a trusted Mushaf and check the diacritics (أضف الآية يدويًا من مصحف "
                          "موثوق ودقّق التشكيل): " + ", ".join(f"{s.get('id')} at {s.get('start_tc')}" for s in mvs) + ".")
+    holds = [h for h in spec.get("verse_hold") or [] if not (h.get("cut") or h.get("released"))]
+    if holds:            # fix round 2 (P2-1): the captions held after a verse that ends on a pause (never their words)
+        markers_line += (f" **{len(holds)} caption run(s)** after a verse that ends on a pause are held (marker «تحقق: "
+                         "الآية ممكن تكون مكمّلة»): listen; if the verse goes on, add it by hand, if not, caption those "
+                         "words by hand or release them (`manual_verse_release`) and plan again: "
+                         + ", ".join(f"{h.get('id')} at {h.get('start_tc')}" for h in holds) + ".")
     if native:
         all_checks = rec.get("checks") or {}
         ok_checks = [k for k, v in all_checks.items() if v]

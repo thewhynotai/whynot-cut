@@ -51,6 +51,8 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
   ("زي ما قلت", "the thing I mentioned"), mark `needs_context: true` and write a one-line `context_line` from the
   transcript (it becomes the context card).
 - Never invent what anyone said, a number, a name or a result. Keep hedges.
+- WhyNot Cut never writes Quran text: never a verse (or the transcript's words of one) in a hook, a title, a topic or
+  a `context_line`, and choose `evidence` / `end_evidence` words outside a recited verse. Name a verse by its time.
 - Topics in the sheet's `avoid` list: you may still list a strong moment, but say why in `risks`; the editor decides.
 - Medical, financial, legal or religious claims go in `risks` ("claim needs approval").
 - You never select reels. Picking the reels is the editor's; a hook blocks `reels-select` for agents.

@@ -410,14 +410,16 @@ def _verse_ranges(p: Paths, words: list, cfg: "_Config") -> list:
             spec = None
     if isinstance(spec, dict) and spec.get("events") is not None:
         out = [(s["src_start_ms"], s["src_end_ms"]) for s in (spec.get("manual_verse") or []) +
-               (spec.get("verse_cut") or []) if isinstance(s, dict)]
+               (spec.get("verse_cut") or []) + [h for h in spec.get("verse_hold") or [] if isinstance(h, dict)
+                                                 and not h.get("released")] if isinstance(s, dict)]
     else:
         try:
             ed = read_json(p.p("01_analysis/edit-decisions.json"), {}) or {}
         except Exception:  # noqa: BLE001 — a damaged file: detection alone
             ed = {}
         spans, _e, _w = manual_verse.resolve(manual_verse.detect(words, cfg.verse), ed)
-        out = [(s["src_start_ms"], s["src_end_ms"]) for s in spans]
+        held, _e, _w = manual_verse.held(spans, words, ed)      # the caption runs held after a span (P2-1)
+        out = [(s["src_start_ms"], s["src_end_ms"]) for s in spans + [h for h in held if not h["released"]]]
     if isinstance(p, EpisodePaths):
         out += manual_verse.reel_spans(p.root, p.episode_id)
     return out
@@ -426,6 +428,12 @@ def _verse_ranges(p: Paths, words: list, cfg: "_Config") -> list:
 VERSE_WHY = ("WhyNot Cut never writes Quran text: the captions stay empty there and a marker on the timeline shows the "
              "place.",
              "WhyNot Cut عمره ما بيكتب نص قرآن: الكابشن فاضي في المكان ده، وفي ماركر على التايملاين بيوضّح مكانه.")
+
+
+HOLD_WHY = ("A reciter pauses inside a verse, so the words after a verse's pause may still be the verse: WhyNot Cut "
+            "holds their captions until you have listened.",
+            "القارئ بيقف جوه الآية، فالكلام اللي بعد الوقفة ممكن يكون لسه من الآية: WhyNot Cut بيوقف الكابشن بتاعه لحد "
+            "ما تسمعه.")
 
 
 def _verses(c: _Collector, spec: dict, vid: str, src: str):
@@ -439,16 +447,29 @@ def _verses(c: _Collector, spec: dict, vid: str, src: str):
         cue_ar, cue_en = clean(s.get("cue_ar") or mv.label(s.get("cue"))), clean(s.get("cue_en") or
                                                                                    mv.label(s.get("cue"), "en"))
         guessed = s.get("guessed_end") is True
+        # fix round 2 (P2-1): a reciter's pause may end a span early, so every line asks to check the words after it
         ar = (f"{vid}: آية مقروءة عند {tc}–{tc2} على التايملاين ({cue_ar}، في المصدر {stc}–{stc2}): {mv.LINE_AR}"
               + ("؛ ونهاية الآية متخمّنة (مفيش وقفة في أول 12 ثانية، فالكابشن متشال لحد أول وقفة بعدها)، فحدّد "
-                 "نهايتها بالسمع" if guessed else ""))
+                 "نهايتها بالسمع" if guessed else "") + f"؛ {mv.AFTER_AR}")
         en = (f"{vid}: a recited verse at {tc}-{tc2} on the timeline ({cue_en}; source {stc}-{stc2}): {mv.LINE_EN}"
               + ("; the end of the verse is a guess (no pause in its first 12 s, so the captions stay off to the "
-                 "next pause): find the real end by ear" if guessed else ""))
+                 "next pause): find the real end by ear" if guessed else "") + f"; {mv.AFTER_EN}")
         span = {"start_ms": int(s.get("start_ms") or 0), "end_ms": int(s.get("end_ms") or 0),
                 "src_start_ms": int(s.get("src_start_ms") or 0), "src_end_ms": int(s.get("src_end_ms") or 0),
                 "cue_ar": cue_ar, "cue_en": cue_en, "guessed_end": guessed}
         c.add("verse", en, ar, *VERSE_WHY, s["id"], vid, src, span=span)
+    for h in spec.get("verse_hold") or []:     # fix round 2 (P2-1): a held caption run needs the editor's release
+        if not isinstance(h, dict) or not isinstance(h.get("id"), str) or h.get("cut") or h.get("released"):
+            continue
+        tc, tc2, stc, stc2 = (_tc(h.get(k)) for k in ("start_ms", "end_ms", "src_start_ms", "src_end_ms"))
+        of = clean(str(h.get("after") or ""))
+        c.add("religious",
+              f"{vid}: the captions at {tc}-{tc2} after the recited verse {of} are held (source {stc}-{stc2}): the "
+              f"verse may go on there. Listen: if it does, add it by hand and extend {of} (`manual_verse`); if not, "
+              "release the captions (`manual_verse_release` in edit-decisions.json) and plan again",
+              f"{vid}: الكابشن عند {tc}–{tc2} بعد الآية {of} متوقف (في المصدر {stc}–{stc2}): ممكن الآية تكون مكمّلة. "
+              f"اسمع: لو مكمّلة ضيفها بإيدك ووسّع {of} (manual_verse)، ولو لأ رجّع الكابشن (manual_verse_release) "
+              "وشغّل الخطة تاني", *HOLD_WHY, h["id"], vid, src)
 
 
 APPROVER = {"medical": ("the doctor's approval", "موافقة طبية"),
