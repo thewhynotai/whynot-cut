@@ -27,6 +27,13 @@ Head box from a face box: R-6.4's starting guess (+45 % top, +15 % below, +20 % 
 pass at 4 fps in the "shots" GPU slot, at the source's own aspect (no padding), display size (rotation applied).
 
 Writes only 01_analysis/emphasis.json and 01_analysis/face-samples.json; never edit-decisions.json or an approval.
+
+Recited verses (owner rule: the plugin never writes Quran text anywhere): the spans are the ones `reel plan` blanks,
+from the same source (manual_verse.resolve(manual_verse.detect(words, manual_verse.config(profile)), edit-decisions) on
+the words plan keeps). No word inside a span is written into emphasis.json: dropped entries and scored words keep ids
+and times only. When the spans cannot be known (detection failed, the religious lexicon unreadable, the editor's
+manual_verse entries unreadable, edit-decisions.json damaged) emphasis fails closed: no transcript word is written at
+all (candidates keep ids and times; the story-editor writes the evidence) and one note says why (review 2067800 P1-2).
 """
 from __future__ import annotations
 
@@ -48,7 +55,7 @@ DEFAULTS = {"w_loud": 0.6, "w_pause": 0.2, "boost_number": 0.3, "boost_client": 
             "pause_ms": 300, "neighbours": 8, "phrase_gap_ms": 250, "min_len_ms": 1200, "max_len_ms": 4000,
             "hook_ms": 1500, "tail_ms": 1500, "s_min": 1.05, "s_cap": 1.12, "margin": 0.06, "gap_calm_s": 6,
             "gap_energetic_s": 4, "gap_default_s": 6, "quota_window_s": 30, "sample_fps": 4, "near_ms": 125,
-            "presence": 0.5, "no_face_scale": 1.05}
+            "presence": 0.5, "no_face_scale": 1.05, "far_ms": 500}
 BASIS = "R-4.7 starting value, not measured"
 HEAD_DEFAULT = {"top": 0.45, "bottom": 0.15, "side": 0.20}
 HEAD_BASIS = "R-6.4 starting guess, not measured"
@@ -77,6 +84,14 @@ SIDE = {"cut": ("على قطع", "at a cut"), "start": ("في أول الريل"
 NO_FACE = ("مفيش وش متقاس هنا، راجعها بنفسك", "no face measured here: check it yourself")
 NO_SAMPLES = ("مفيش عينات للوش: شغّل reel emphasis --faces", "no face samples: run reel emphasis --faces")
 NOT_MEASURED = ("الوش ماتقاسش، راجعها بنفسك", "the face was not measured: check it yourself")
+FAR = ("مفيش عينة وش قريبة من الـ punch ده، راجعها بنفسك", "no face sample close to this punch: check it yourself")
+VERSE_UNKNOWN = ("مش عارفين نحدد الآيات في الكلام ده، فمفيش ولا كلمة من التفريغ مكتوبة هنا: اكتب الـ evidence بنفسك",
+                 "the recited-verse spans could not be known, so no transcript word is written here: write the "
+                 "evidence yourself")
+ZONE = {"hook": ("الهوك (أول ثانية ونص أو عنوان الهوك)", "the hook (the first 1.5 s or a hook title)"),
+        "ending": ("النهاية المحمية", "the ending"), "cutaway": ("لقطة معروضة كاملة", "a cutaway (a shot shown whole)"),
+        "full_screen": ("كارت full-screen", "a full-screen card"), "camera": ("حركة كاميرا تانية", "another camera move"),
+        "verse": ("آية", "a recited verse")}
 
 
 # --------------------------------------------------------------------------- settings
@@ -288,7 +303,7 @@ def phrase_words(words: list, phrase) -> set:
     return out
 
 
-def key_words(words: list, statements) -> tuple:
+def key_words(words: list, statements, quiet=None) -> tuple:
     """(indexes, notes): the statement analysis' `key_word` of each statement, found among the words inside that
     statement's time. No file or no key_word field anywhere -> nothing and one note; a key word that is not in its
     statement's text (or not said there) -> ignored with a note naming the statement."""
@@ -317,6 +332,9 @@ def key_words(words: list, statements) -> tuple:
                     break
         if hit:
             out.update(hit)
+        elif quiet is not None and quiet(a, b):           # inside a recited verse (or unknown): never quoted
+            notes.append(_note("bad_key_word", f"{sid}: الكلمة المهمة مش في نص الجملة دي، فاتجاهلت",
+                               f"{sid}: its key_word is not in that statement's words: ignored"))
         else:
             notes.append(_note("bad_key_word", f"{sid}: الكلمة المهمة «{s['key_word']}» مش في نص الجملة دي، فاتجاهلت",
                                f"{sid}: key_word '{s['key_word']}' is not in that statement's words: ignored"))
@@ -713,6 +731,17 @@ def build(inp: dict) -> dict:
     ratio = inp["head"]["value"]
     notes = []
     words, skipped = clean_words(inp.get("words"))
+    verse = [(float(a), float(b)) for a, b in inp.get("verse") or []]
+    known = inp.get("verse_known", True) is not False
+
+    def quiet(a, b):
+        """True when words in [a, b) may be a recited verse: never written (fail closed when the spans are unknown)."""
+        return not known or a is None or b is None or any(a < y and x < b for x, y in verse)
+
+    def sayable(w):
+        return not quiet(w["start_ms"], w["end_ms"])
+    if not known:
+        notes.append(_note("verse_unknown", VERSE_UNKNOWN[0], VERSE_UNKNOWN[1]))
     if skipped:
         notes.append(_note("bad_words", f"في {len(skipped)} كلمة في words.json ناقصة أو بايظة ومش هتتحسب",
                            f"{len(skipped)} word record(s) in words.json skipped (no id, word or valid times): "
@@ -731,7 +760,7 @@ def build(inp: dict) -> dict:
     kw, kw_note = endings.cta_keyword(cfg, inp.get("lang") or "ar")
     if kw_note:
         notes.append(_note("cta_keyword", kw_note["ar"], kw_note["en"]))
-    keys, key_notes = key_words(words, inp.get("statements"))
+    keys, key_notes = key_words(words, inp.get("statements"), quiet)
     notes += key_notes
     scores = score_words(words, levels, number_words(words), client_words(words, inp.get("terms") or []),
                          phrase_words(words, kw) if kw else set(), keys, v)
@@ -747,8 +776,8 @@ def build(inp: dict) -> dict:
                         "framing": (fr or {}).get("window", {}).get("mode") if (fr or {}).get("window") else "9:16",
                         "values": v, "basis": inp["settings"]["basis"]},
            "candidates": [], "dropped": [], "notes": notes,
-           "scored": [{"id": w["id"], "word": w["word"], "start_ms": w["start_ms"], "end_ms": w["end_ms"], "score": s}
-                      for w, s in zip(words, scores)],
+           "scored": [dict({"id": w["id"]}, **({"word": w["word"]} if sayable(w) else {}), start_ms=w["start_ms"],
+                           end_ms=w["end_ms"], score=s) for w, s in zip(words, scores)],
            "how": {"ar": "ده اقتراح بس: الستوري إديتور ينسخ «decision» بتاع اللي هيحتفظ بيه في edit-decisions.json، بعدين "
                          "reel plan وموافقة. ماينفعش تكبّر الزوم فوق s_max.",
                    "en": "suggestions only: the story-editor copies the `decision` of each one it keeps into "
@@ -792,9 +821,8 @@ def build(inp: dict) -> dict:
     if fr:
         zones += [(a, b, "cutaway") for a, b in fr.get("cutaways") or []]
         zones += [(c["at_ms"], c["until_ms"], "cutaway") for c in fr.get("layer") or [] if c["decision_id"] == "AUTO_CUTAWAY"]
-    span = endings.sign_off_span(inp.get("words") or [], cfg, inp.get("marker_ms"), dur)
-    cards = [e for e in events if endings.card_role(e)]
-    end_src = endings.ending_start(span, cards)
+    span = endings.sign_off_span(inp.get("words") or [], cfg, inp.get("marker", inp.get("marker_ms")), dur)
+    end_src = endings.ending_start(span, events, cfg, dur)     # only a part that is ON, an unmarked cta only at the end
     tail = end_src is None
     if tail:
         end_src = clock.src(max(0.0, clock.total - v["tail_ms"]))
@@ -803,9 +831,10 @@ def build(inp: dict) -> dict:
     cands = []
     drops = []
 
-    def drop(ids, a, b, code, word):
-        drops.append({"word_ids": ids, "word": word, "start_ms": a, "end_ms": b, "code": code, "why": WHY[code][0],
-                      "why_en": WHY[code][1]})
+    def drop(ids, a, b, code, w):
+        """One dropped candidate; its word only when it can be said (never inside a recited verse)."""
+        drops.append(dict({"word_ids": ids}, **({"word": w["word"]} if w is not None and sayable(w) else {}),
+                          start_ms=a, end_ms=b, code=code, why=WHY[code][0], why_en=WHY[code][1]))
     for i0, i1 in phrases(words, v["phrase_gap_ms"], (inp.get("speakers") or {}).get("turns")):
         top = min(range(i0, i1 + 1), key=lambda i: (-scores[i]["total"], words[i]["start_ms"], str(words[i]["id"])))
         w = words[top]
@@ -827,14 +856,14 @@ def build(inp: dict) -> dict:
             elif not any(a <= ws_ and we_ <= b for a, b in limits):
                 code = "removed"
         if code:
-            drop(ids, ws_, we_, code, w["word"])
+            drop(ids, ws_, we_, code, w)
             continue
         L = max([a for a, b in limits if a <= ws_ and we_ <= b] + [hook_src]
                 + [z[1] for z in zones if z[1] <= ws_] + [c["at_ms"] for c in shots if c["at_ms"] <= ws_ < c["until_ms"]])
         R = min([b for a, b in limits if a <= ws_ and we_ <= b] + [end_src]
                 + [z[0] for z in zones if z[0] >= we_] + [c["until_ms"] for c in shots if c["at_ms"] <= ws_ < c["until_ms"]])
         if R < we_ - 1e-9:
-            drop(ids, ws_, we_, "shot", w["word"])
+            drop(ids, ws_, we_, "shot", w)
             continue
         run = [j for j in range(i0, i1 + 1) if words[j]["start_ms"] >= L - 1e-9 and words[j]["end_ms"] <= R + 1e-9]
         # the contiguous run of the phrase's allowed words around the top word
@@ -858,11 +887,12 @@ def build(inp: dict) -> dict:
             j += 1
         if b - a < v["min_len_ms"]:
             cut_by_end = R == end_src and words[i1]["end_ms"] > R + 1e-9
-            drop(ids, a, b, "ending" if cut_by_end else "short", w["word"])
+            drop(ids, a, b, "ending" if cut_by_end else "short", w)
             continue
-        cands.append({"top": top, "word_ids": [words[j]["id"] for j in span_ix], "word": w["word"], "start_ms": a,
-                      "end_ms": b, "score": scores[top], "_ids": ids,
-                      "evidence": " ".join(words[j]["word"] for j in span_ix)})
+        say = all(sayable(words[j]) for j in span_ix)
+        cands.append({"top": top, "word_ids": [words[j]["id"] for j in span_ix], "word": w["word"] if say else None,
+                      "start_ms": a, "end_ms": b, "score": scores[top], "_ids": ids, "_w": w,
+                      "evidence": " ".join(words[j]["word"] for j in span_ix) if say else None})
     # face safety
     status = faces.get("status")
     review_all = None
@@ -896,6 +926,7 @@ def build(inp: dict) -> dict:
             measured.append(c)
             continue
         use = {s["t_ms"]: s for s in samples if a <= s["t_ms"] <= b}
+        far = not use
         for t in (a, (a + b) / 2, b):
             if not samples:
                 break
@@ -904,6 +935,11 @@ def build(inp: dict) -> dict:
             d = abs(nearest["t_ms"] - t)
             if d > v["near_ms"]:
                 c["extra"].append((f"أقرب عينة على بعد {int(round(d))} ms", f"nearest face sample {int(round(d))} ms away"))
+            far = far or d > v["far_ms"]
+        if far:                                     # measured on a face from elsewhere: the editor's eye (P3-1)
+            c.update(needs_review=True, s_max=None, faces_used=sorted(use), review=FAR)
+            measured.append(c)
+            continue
         heads = []
         for t in sorted(use):
             fs = [f for f in use[t].get("faces") or [] if isinstance(f, (list, tuple)) and len(f) >= 4]
@@ -917,7 +953,7 @@ def build(inp: dict) -> dict:
         r = s_max(fr, env, a, cap, v["margin"])
         if r["s_max"] is None or r["s_max"] < v["s_min"]:
             code = r["why"] if r["s_max"] is None else ("black_edge" if r["why"] == "black_edge" else "edge")
-            drop(c["_ids"], a, b, code, c["word"])
+            drop(c["_ids"], a, b, code, c["_w"])
             continue
         c.update(needs_review=False, s_max=r["s_max"], env=env)
         measured.append(c)
@@ -927,12 +963,12 @@ def build(inp: dict) -> dict:
     for c in rank_order(measured):
         sc = clock.seq(c["start_ms"])
         if any(abs(sc - clock.seq(p["start_ms"])) < gap - 1e-9 for p in placed):
-            drop(c["_ids"], c["start_ms"], c["end_ms"], "near", c["word"])
+            drop(c["_ids"], c["start_ms"], c["end_ms"], "near", c["_w"])
             continue
         if quota:
             starts = [clock.seq(p["start_ms"]) for p in placed] + [sc]
             if max(sum(1 for x in starts if s <= x < s + win) for s in starts) > quota:
-                drop(c["_ids"], c["start_ms"], c["end_ms"], "quota", c["word"])
+                drop(c["_ids"], c["start_ms"], c["end_ms"], "quota", c["_w"])
                 continue
         placed.append(c)
     # rank, scale, offsets, ease, words
@@ -941,7 +977,10 @@ def build(inp: dict) -> dict:
         from .common import load_config
         tpl = load_config("graphics-templates.json").get("templates", {})
     out = []
-    for (rank, r), c in zip(rank_ratios([c["score"]["total"] for c in placed]), placed):
+    sure = [c for c in placed if not c["needs_review"]]
+    ranks = {id(c): rr for rr, c in zip(rank_ratios([c["score"]["total"] for c in sure]), sure)}
+    for c in placed:
+        rank, r = ranks.get(id(c), (None, None))         # needs-review punches are not ranked (P3-6): fixed 1.05
         a, b = c["start_ms"], c["end_ms"]
         if c["needs_review"]:
             scale = v["no_face_scale"]
@@ -953,7 +992,7 @@ def build(inp: dict) -> dict:
                 scale = round(scale - 0.0001, 4)
                 ev = evaluate(fr, c["env"], a, scale, v["margin"])
             if not ev["ok"]:                       # never ship a punch that failed its own check
-                drop(c["_ids"], a, b, ev["why"] or "edge", c["word"])
+                drop(c["_ids"], a, b, ev["why"] or "edge", c["_w"])
                 continue
         c.update(rank=rank, r=r, scale=scale, offset_x=ev["offset_x"], offset_y=ev["offset_y"])
         c["ease"] = predict_ease(fr, a, b, keep, clock, inp.get("ease_ms") or 0, inp.get("fps") or 24, scale, moves)
@@ -1012,20 +1051,23 @@ def _record(n, c, inp, fmt_ts) -> dict:
     why_ar = "، ".join(p[0] for p in parts) or "أعلى كلمة في الجملة"
     why_en = ", ".join(p[1] for p in parts) or "the strongest word of its phrase"
     ea, ee = _ease_words(c["ease"])
-    ar = [f"punch على «{c['word']}» ({why_ar})", ea] + [x[0] for x in c["extra"]]
-    en = [f"punch on «{c['word']}» ({why_en})", ee] + [x[1] for x in c["extra"]]
+    said = f"«{c['word']}»" if c.get("word") else f"#{c['_ids'][0]}"
+    ar = [f"punch على {said} ({why_ar})", ea] + [x[0] for x in c["extra"]]
+    en = [f"punch on {said} ({why_en})", ee] + [x[1] for x in c["extra"]]
     if c["needs_review"]:
         ar.append(c["review"][0])
         en.append(c["review"][1])
     ease = {k: c["ease"][k] for k in ("in", "out")}
     did = f"EMPH_{n:02d}"
     cid = f"EMP_{n:02d}"
-    return {"id": cid, "word_ids": c["word_ids"], "word": c["word"], "start_ms": c["start_ms"], "end_ms": c["end_ms"],
+    return {"id": cid, "word_ids": c["word_ids"], **({"word": c["word"]} if c.get("word") else {}),
+            "start_ms": c["start_ms"], "end_ms": c["end_ms"],
             "score": dict(s), "rank": c["rank"], "r": c["r"], "s_max": c["s_max"], "scale": c["scale"],
             "offset_x": c["offset_x"], "offset_y": c["offset_y"], "faces_used": c["faces_used"], "ease": ease,
             "needs_review": c["needs_review"], "default_keep": not c["needs_review"], "reason": " · ".join(ar),
             "reason_en": " · ".join(en), "warnings": c["warnings"],
-            "decision": {"decision_id": did, "segment_id": "EMPHASIS", "evidence": c["evidence"],
+            "decision": {"decision_id": did, "segment_id": "EMPHASIS",
+                         **({"evidence": c["evidence"]} if c.get("evidence") else {}),
                          "start": fmt_ts(c["start_ms"], "."), "end": fmt_ts(c["end_ms"], "."),
                          "semantic_intent": "emphasis", "visual_treatment": "punch_in", "confidence": "medium",
                          "camera": {"type": "punch_in", "at": fmt_ts(c["start_ms"], "."), "until": fmt_ts(c["end_ms"], "."),
@@ -1094,6 +1136,7 @@ def plan_check(inp, cam: dict, fr: dict, tm: dict) -> tuple:
     S = (float(fr["bsp"]) / 100) if fr.get("bsp") else (geo["S"] if geo else 1.0)
     box, boy = float(cam.get("box") or 0.0), float(cam.get("boy") or 0.0)
     stale, kept, review, changed = False, 0, [], []
+    zones, verse_ok = _plan_zones(inp, fr, tm)
     for d in decs:
         c, did = d["camera"], d.get("decision_id")
         emph = c.get("emphasis") if isinstance(c.get("emphasis"), dict) else None
@@ -1141,6 +1184,18 @@ def plan_check(inp, cam: dict, fr: dict, tm: dict) -> tuple:
                                 f"candidate — «{did}» بقى فيه قطع في النص: شغّل reel emphasis تاني")
                 changed.append({"decision_id": did, "what": "cut", "en": "now crosses a cut: run reel emphasis again",
                                 "ar": "بقى فيه قطع في النص: شغّل reel emphasis تاني"})
+        if emph:
+            for zone, ref in _zone_hits(at, until, zones, tm, decs, did, v):
+                ar_z, en_z = ZONE[zone]
+                if zone == "verse":                # ruling Q9: never a punch over a recited verse
+                    errors.append(f"{did}: the punch-in is on a recited verse ({ref}): no punch there (the editor adds "
+                                  f"the verse by hand) — «{did}» على آية: مفيش زوم هناك")
+                else:
+                    warnings.append(f"{did}: the punch-in sits in {en_z}{' (' + ref + ')' if ref else ''}: an emphasis "
+                                    f"punch never goes there, move it out or drop it — «{did}» في {ar_z}: حرّكه أو شيله")
+            if not verse_ok:
+                warnings.append(f"{did}: the recited-verse spans could not be read, so this punch-in was not checked "
+                                f"against them: look at it — «{did}»: الآيات ماتقرتش، بص عليه")
         if not samples or geo is None:          # nothing to measure with: the punch needs the editor's eye
             if emph:
                 why = NO_SAMPLES if faces.get("status") == "missing" and geo is not None else NOT_MEASURED
@@ -1188,6 +1243,52 @@ def plan_check(inp, cam: dict, fr: dict, tm: dict) -> tuple:
                         "ending changed since): run `reel emphasis` again — الاقتراحات قديمة، شغّل reel emphasis تاني")
     info = {"kept": kept, "review": review, **({"changed": changed} if changed else {})}
     return errors, warnings, (info if kept else None)
+
+
+def _plan_zones(inp, fr: dict, tm: dict) -> tuple:
+    """([(a, b, zone, ref)] on the source clock, verse_ok) for the plan's re-check: the hook_title spans, full-screen
+    cards, story camera moves (with their decision ids), source cutaways, recited verses (the plan's own spans) and the
+    ending (the protected sign-off, the first ending card of a part that is on)."""
+    from . import endings, manual_verse as mv
+    from .qc import FULL_SCREEN
+    ed = getattr(inp, "ed", None) or {}
+    base = getattr(inp, "base", None) or {}
+    events = _ed_events(ed)
+    zones = [(e["start_ms"], e["end_ms"], "full_screen", e["event_id"] or "") for e in events if e["template"] in FULL_SCREEN]
+    zones += [(e["start_ms"], e["end_ms"], "hook", e["event_id"] or "") for e in events if e["template"] == "hook_title"]
+    zones += [(c["at_ms"], c["until_ms"], "camera", c["decision_id"] or "") for c in _ed_camera(ed) if not c["emphasis"]]
+    zones += [(c["at_ms"], c["until_ms"], "cutaway", "") for c in fr.get("camera") or []
+              if c.get("decision_id") == "AUTO_CUTAWAY"]
+    verse_ok = True
+    try:
+        spans, errs, _w = mv.resolve(mv.detect(getattr(inp, "words", None) or [], getattr(inp, "verse_cfg", None) or {}),
+                                     ed)
+        verse_ok = not errs and not (getattr(inp, "verse_cfg", None) or {}).get("warnings")
+        zones += [(s["src_start_ms"], s["src_end_ms"], "verse", s["id"]) for s in spans]
+    except Exception:  # noqa: BLE001  unknown spans: fail closed (a warning on every emphasis punch)
+        verse_ok = False
+    cfg = endings.config((getattr(inp, "profile", None) or {}).get("endings"), base.get("endings"))
+    marker = base.get("sign_off_at")
+    span = endings.sign_off_span(getattr(inp, "words", None) or [], cfg,
+                                 marker if endings.parse_marker(marker)[1] else None, getattr(inp, "dur_ms", None))
+    end_src = endings.ending_start(span, events, cfg, getattr(inp, "dur_ms", None))
+    if end_src is not None:
+        zones.append((end_src, float("inf"), "ending", ""))
+    return zones, verse_ok
+
+
+def _zone_hits(at, until, zones, tm, decs, did, v) -> list:
+    """[(zone, ref)] the punch [at, until) touches: any zone it overlaps (its own decision excluded), and the first
+    1.5 s on the sequence clock."""
+    tmap = tm.get("tmap")
+    seq_at = tmap.ms(at) if tmap else at
+    out = [("hook", "")] if seq_at < v["hook_ms"] - 1e-9 else []
+    for a, b, zone, ref in zones:
+        if zone == "camera" and ref == did:
+            continue
+        if at < b and a < until and (zone, ref) not in out:
+            out.append((zone, ref))
+    return out
 
 
 # --------------------------------------------------------------------------- face samples (the --faces pass)
@@ -1341,8 +1442,9 @@ def _statements(paths):
 def inputs_sha1(paths, ctx=None) -> str:
     """The hash of everything a candidate depends on except the story-editor's own decisions (so copying a candidate
     into edit-decisions.json does not make it stale): the transcript words, pauses, cut proposals, face samples,
-    preflight, speakers, statements, the reel's range; this video's cuts, pause removal, sign-off, endings, footage and
-    framing; the profile's endings and style framing/ease; the settings and head ratio."""
+    preflight, speakers, statements, the reel's range and recipe; this video's cuts, pause removal, sign-off, endings,
+    footage and framing, and the graphics and story camera moves that make zones; the profile's endings, style
+    framing/ease, sequence settings and podcast framing; the settings and head ratio."""
     from .common import load_config
     files = ["02_transcription/words.json", "06_audio/dialogue/pauses.json", "01_analysis/cut-proposals.json", FACES_FILE,
              "00_inputs/preflight.json", "00_inputs/speakers.json", "01_analysis/transcript-semantic-analysis.json",
@@ -1358,23 +1460,41 @@ def inputs_sha1(paths, ctx=None) -> str:
                                 "framing_window_y", "base_scale_percent", "base_offset_x", "base_offset_y")}
     style = load_config("style.json", ctx)
     style = style if isinstance(style, dict) else {}
+    zones = [(e["template"], e["start_ms"], e["end_ms"], (e.get("params") or {}).get("ending")) for e in _ed_events(ed)]
+    zones += [(c["type"], c["at_ms"], c["until_ms"]) for c in _ed_camera(ed) if not c["emphasis"]]
     key = json.dumps([hashes, gk, ed.get("manual_verse"), ed.get("manual_verse_off"),
                       (load_config("profile.json", ctx) or {}).get("endings"),
-                      {k: style.get(k) for k in ("framing", "camera")}, settings(ctx), head_ratio(ctx), SCHEMA],
+                      {k: style.get(k) for k in ("framing", "camera")}, settings(ctx), head_ratio(ctx), SCHEMA,
+                      load_config("sequence-settings.json", ctx), load_config("podcast.json", ctx), zones],
                      ensure_ascii=False, sort_keys=True, default=str)
     return hashlib.sha1(key.encode("utf-8")).hexdigest()
 
 
+def verse_spans(words: list, profile: dict, ed: dict, ed_bad: bool = False) -> tuple:
+    """([(src_start_ms, src_end_ms)], known): the recited-verse spans `reel plan` blanks, from the SAME source
+    (plan.apply_manual_verse: manual_verse.resolve(manual_verse.detect(words, manual_verse.config(profile)), ed) on the
+    words plan._word_ok keeps). known False (fail closed) when they cannot be trusted: detection raised, the religious
+    lexicon could not be read, the editor's manual_verse entries are unreadable, or edit-decisions.json is damaged."""
+    from . import manual_verse as mv
+    from .plan import _word_ok
+    try:
+        cfg = mv.config(profile)
+        spans, errs, _w = mv.resolve(mv.detect([w for w in words or [] if _word_ok(w)], cfg), ed)
+    except Exception:  # noqa: BLE001
+        return [], False
+    return [(s["src_start_ms"], s["src_end_ms"]) for s in spans], not (ed_bad or errs or cfg.get("warnings"))
+
+
 def gather(paths, ctx=None, audio: bool = True) -> dict:
     """Every read build() needs, done once."""
-    from . import endings, manual_verse as mv
+    from . import endings
     from .camera_ease import ease_settings
     from .common import current_context, frame_size, load_config, seq_fps, source_range
-    from .plan import _try_ms
     from .recipes import for_paths
     ctx = ctx or current_context()
     wj = _words_doc(paths)
-    _, ed = _read(paths.p("01_analysis/edit-decisions.json"))
+    ed_data, ed = _read(paths.p("01_analysis/edit-decisions.json"))
+    ed_bad = ed_data is not None and not isinstance(ed, dict)          # the editor's manual_verse entries unknown
     ed = ed if isinstance(ed, dict) else {}
     g = ed.get("global") if isinstance(ed.get("global"), dict) else {}
     rng = source_range(paths)
@@ -1394,7 +1514,7 @@ def gather(paths, ctx=None, audio: bool = True) -> dict:
     _, cp = _read(paths.p("01_analysis/cut-proposals.json"))
     props = cp.get("proposals") if isinstance(cp, dict) and isinstance(cp.get("proposals"), list) else None
     good, _ = clean_words(words)
-    spans, _e, _w = mv.resolve(mv.detect([w for w in good if isinstance(w["id"], int)], mv.config(profile)), ed)
+    spans, known = verse_spans(words, profile, ed, ed_bad)
     levels, source = None, None
     if audio and good:
         got = read_wav(paths.p("06_audio/dialogue/dialogue_clean.wav"))
@@ -1410,10 +1530,10 @@ def gather(paths, ctx=None, audio: bool = True) -> dict:
             "levels": levels, "audio_source": source,
             "remove_pauses": bool(g.get("remove_pauses")) if ed else pz is not None, "pauses": pz, "ed": ed,
             "proposals": props, "endings": endings.config(profile.get("endings"), g.get("endings")),
-            "marker_ms": _try_ms(g.get("sign_off_at")) if g.get("sign_off_at") not in (None, "") else None,
+            "marker": g.get("sign_off_at"),
             "recipe": for_paths(paths), "terms": _terms(ctx, profile), "statements": _statements(paths),
             "speakers": speakers, "frame": fr, "faces": load_samples(paths, main_file, rng, fr),
-            "verse": [(s["src_start_ms"], s["src_end_ms"]) for s in spans], "ease_ms": ease_settings(style)[0],
+            "verse": spans, "verse_known": known, "ease_ms": ease_settings(style)[0],
             "fps": seq_fps(ctx), "settings": settings(ctx), "head": head_ratio(ctx),
             "templates": (load_config("graphics-templates.json", ctx) or {}).get("templates", {}),
             "inputs_sha1": inputs_sha1(paths, ctx), "main_file": main_file, "range": rng}
@@ -1449,7 +1569,8 @@ def run(paths, ctx=None, faces: bool = False, faces_fn=None, decode=None, audio:
             int(_num((wj.get("meta") or {}).get("duration_ms")) or 0)
         from .gpu_lock import site_slot
         with site_slot("shots", log_to=paths) as lane:
-            sd = sample_faces(f, in_ms, dur, fr["dw"], fr["dh"], DEFAULTS["sample_fps"], faces_fn, decode, lane)
+            sd = sample_faces(f, in_ms, dur, fr["dw"], fr["dh"], settings(ctx)["values"]["sample_fps"], faces_fn, decode,
+                              lane)
         sd = dict({"schema": 1, "video_id": paths.video_id, "footage": main_file,
                    "range": {"in_ms": in_ms, "out_ms": in_ms + dur}}, **sd)
         write_json(paths.p(FACES_FILE), sd)

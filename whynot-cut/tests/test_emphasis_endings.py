@@ -64,9 +64,12 @@ class TestSignOff(unittest.TestCase):
         self.assertIsNone(N().sign_off_span(WORDS, N().config({}, {}), None, 22000))
 
     def test_g64_parity_with_cut_proposals(self):
-        """Until the cut_proposals patch calls endings.sign_off_span, both detectors must protect the same span."""
+        """Until the cut_proposals patch calls endings.sign_off_span, both detectors must protect the same span. Both
+        sides get the RAW config (the marker as written: a clock string, an integer of ms); a float marker (seconds)
+        is read the plan's way only once patch 04 lands: its own test (test_emphasis_signoff_parity.py)."""
         from lib import cut_proposals as cp
-        cases = [(END_ALL, None), (END_ALL, "00:00:19.000"), (fx("profile_endings_signoff_unsaid.json")["endings"], None),
+        cases = [(END_ALL, None), (END_ALL, "00:00:19.000"), (END_ALL, 19000),
+                 (fx("profile_endings_signoff_unsaid.json")["endings"], None),
                  ({"sign_off": {"on": False}}, None), ({"sign_off": {"on": True, "phrase": ""}}, None),
                  ({"sign_off": {"on": True, "phrase": "يَلّا   سلام"}}, None)]
         for prof, marker in cases:
@@ -87,8 +90,7 @@ class TestSignOff(unittest.TestCase):
                     wj = fx("words_ar.json")
                     ws = cp.clean_words(wj["words"])
                     prot, _ = cp._protections(p, ws, [cp.norm_word(w["word"]) for w in ws], "ar", ctx, 22000)
-                    ms = cp._ms(marker) if marker else None
-                    got = N().sign_off_span(wj["words"], N().config(prof, {}), ms, 22000)
+                    got = N().sign_off_span(wj["words"], N().config(prof, {}), marker, 22000)   # the raw value
                 self.assertEqual(prot["after_ms"], got["start_ms"] if got else None, (prof, marker))
             finally:
                 shutil.rmtree(tmp, ignore_errors=True)
@@ -247,14 +249,84 @@ class TestOrder(unittest.TestCase):
 class TestEndingStart(unittest.TestCase):
     def test_the_ending_is_the_earliest_card_or_the_span(self):
         span = {"start_ms": 20320, "end_ms": 22000}
-        self.assertEqual(N().ending_start(span, [ev("GFX_C", 15840, 17000, role="cta")]), 15840)
-        self.assertEqual(N().ending_start(span, [ev("GFX_X", 1000, 2000, template="name_card")]), 20320)
+        on = N().config(END_ALL, {})
+        self.assertEqual(N().ending_start(span, [ev("GFX_C", 15840, 17000, role="cta")], on), 15840)
+        self.assertEqual(N().ending_start(span, [ev("GFX_C", 15840, 17000, role="cta")], N().config({}, {})), 20320)
+        self.assertEqual(N().ending_start(span, [ev("GFX_X", 1000, 2000, template="name_card")], on), 20320)
         self.assertIsNone(N().ending_start(None, []))
 
     def test_roles(self):
-        self.assertEqual(N().card_role(ev("A", 0, 1, template="cta")), "cta")
+        on = N().config(END_ALL, {})
+        tail = N().tail_start({"start_ms": 20320}, None)
+        self.assertEqual(tail, 10320)
+        self.assertEqual(N().card_role(ev("A", 12000, 13000, template="cta"), on, tail), "cta")
+        self.assertIsNone(N().card_role(ev("A", 12000, 13000, template="cta")))        # no config: never implicit
         self.assertEqual(N().card_role(ev("A", 0, 1, template="cta", role="follow")), "follow")
-        self.assertIsNone(N().card_role(ev("A", 0, 1, template="logo_outro")))
+        self.assertIsNone(N().card_role(ev("A", 0, 1, template="logo_outro"), on, tail))
+
+
+# ============================================================================== fix round 1 (review 2067800)
+class TestFixRound1(unittest.TestCase):
+    def test_p1_1_the_follow_card_is_drawn_at_the_fitted_size_or_refused(self):
+        fit = {"ok": True, "size_px": 56, "width_px": 890.0, "floor_px": 32, "text": "@dr.mohamed.elsayed.clinic.eg"}
+        cards = [ev("GFX_C", 15000, 17000, role="cta"), ev("GFX_F", 17000, 19000, role="follow")]
+        e, _ = errs(cards, handle_fit=fit, card_px={"GFX_C": 60, "GFX_F": 60})
+        self.assertTrue(any('GFX_F' in x and '"size": 56' in x for x in e), e)   # the template's 60 px would clip it
+        e, _ = errs(cards, handle_fit=fit, card_px={"GFX_C": 60, "GFX_F": 56})
+        self.assertEqual(e, [])
+        e, _ = errs(cards, handle_fit=fit, card_px={"GFX_C": 60, "GFX_F": 48})
+        self.assertEqual(e, [])
+
+    def test_p1_3_a_mid_reel_cta_template_is_no_ending_part(self):
+        off = N().config({}, {})
+        on = N().config(END_ALL, {})
+        mid = ev("GFX_1", 5000, 6000, template="cta")
+        tail = N().tail_start({"start_ms": 20320}, None)                  # the last 10 s before the sign-off
+        self.assertIsNone(N().card_role(mid, off, tail))
+        self.assertIsNone(N().card_role(mid, on, tail))                   # far from the end: a spoken CTA, not the card
+        self.assertEqual(N().card_role(ev("GFX_9", 15840, 18000, template="cta"), on, tail), "cta")
+        self.assertEqual(N().card_role(ev("GFX_2", 5000, 6000, role="cta"), off, tail), "cta")   # marked: always
+        e, w = errs([mid], cfg=off)
+        self.assertEqual((e, w), ([], []))                               # no "switched off" warning for it
+        cta_off = N().config(fx("profile_endings_cta_off.json")["endings"], {})
+        self.assertIsNone(N().card_role(ev("GFX_9", 15840, 18000, template="cta"), cta_off, tail))
+
+    def test_p2_2_a_logo_after_the_spoken_sign_off_is_allowed(self):
+        words = [{"id": 1, "word": "كلام", "start_ms": 20000, "end_ms": 25000},
+                 {"id": 2, "word": "يلا", "start_ms": 26000, "end_ms": 26400},
+                 {"id": 3, "word": "سلام", "start_ms": 26500, "end_ms": 27000}]
+        cfg = N().config({"sign_off": {"on": True, "phrase": "يلا سلام"}}, {})
+        span = N().sign_off_span(words, cfg, None, 30000)
+        self.assertEqual((span["start_ms"], span["spoken_end_ms"], span["end_ms"]), (26000, 27000, 30000))
+        e, _ = N().check([ev("GFX_9", 28000, 30000, template="logo_outro")], span, cfg)
+        self.assertEqual(e, [])
+        e, _ = N().check([ev("GFX_9", 26800, 30000, template="logo_outro")], span, cfg)
+        self.assertTrue(e)                                               # over the spoken words: refused
+
+    def test_p2_2_the_fallback_span_warns_and_names_both_fixes(self):
+        cfg = N().config(fx("profile_endings_signoff_unsaid.json")["endings"], {})
+        span = N().sign_off_span(WORDS, cfg, None, 22000)
+        self.assertEqual(span["source"], "fallback")
+        e, w = N().check([ev("GFX_5", 15000, 16000, template="statement_highlight")], span, cfg)
+        self.assertEqual(e, [])
+        txt = " ".join(w)
+        self.assertIn("sign-off not found", txt)
+        self.assertIn("global.sign_off_at", txt)
+        self.assertIn("global.endings.sign_off.on: false", txt)
+
+    def test_p2_4_one_marker_parser(self):
+        cfg = N().config(END_ALL, {})
+        for raw in (27.4, 27400, "00:00:27.400", "27.4"):
+            self.assertEqual(N().sign_off_span(WORDS, cfg, raw, 30000)["start_ms"], 27400, raw)
+        bad = N().sign_off_span(WORDS, cfg, "soon", 30000)
+        self.assertEqual(bad["source"], "phrase")                        # an unreadable marker is not used
+        self.assertIn("sign_off_at", bad["note"]["en"])
+
+    def test_p3_3_on_takes_the_values_people_write(self):
+        for v in (True, 1, "true", "yes", "on"):
+            self.assertTrue(N().config({"sign_off": {"on": v}}, {})["sign_off"]["on"], v)
+        for v in (False, 0, "false", "no", "off", "", None):
+            self.assertFalse(N().config({"sign_off": {"on": v}}, {})["sign_off"]["on"], v)
 
 
 if __name__ == "__main__":

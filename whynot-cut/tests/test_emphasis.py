@@ -1072,5 +1072,228 @@ class TestOutput(unittest.TestCase):
         self.assertNotIn("no_audio", [n["code"] for n in doc["notes"]])
 
 
+# ============================================================================== fix round 1 (review 2067800)
+VERSE_WORDS = ("نزلت", "خمسمية", "جرام", "الأسبوع")      # the words of P3 (4.96-7.76 s), unique in words_ar.json
+FAKE_VERSE = ("فلانيه", "علانيه", "ترتانيه", "زنتانيه")  # invented tokens: no Quran text in the fixtures
+
+
+def no_verse_text(tc, text, words=VERSE_WORDS):
+    for w in words:
+        tc.assertNotIn(w, text)
+
+
+def no_transcript_text(tc, doc, words):
+    """Fail closed: no `word` or `evidence` anywhere, and no transcript word of 5+ letters in the text (a shorter one
+    such as «عن» may be part of our own fixed wording)."""
+    def keys(x):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                yield k
+                yield from keys(v)
+        elif isinstance(x, list):
+            for v in x:
+                yield from keys(v)
+    found = set(keys(doc))
+    tc.assertNotIn("word", found)
+    tc.assertNotIn("evidence", found)
+    text = json.dumps(doc, ensure_ascii=False)
+    for w in words:
+        if len(w["word"]) >= 5:
+            tc.assertNotIn(w["word"], text)
+
+
+def verse_words_doc():
+    """words_ar.json with a cited verse in P6: «قال تعالى» then invented tokens, then a pause (no real verse text)."""
+    wj = copy.deepcopy(fx("words_ar.json"))
+    by_id = {w["id"]: w for w in wj["words"]}
+    for i, t in zip((25, 26, 27, 28, 29), ("قال", "تعالى", "فلانيه", "علانيه", "ترتانيه")):
+        by_id[i]["word"] = t
+    by_id[30]["word"] = "زنتانيه"
+    return wj
+
+
+class TestFixRound1(unittest.TestCase):
+    def test_p1_2_no_verse_word_in_emphasis_json(self):
+        doc = build(verse=[(4900, 7800)])
+        no_verse_text(self, json.dumps(doc, ensure_ascii=False))
+        d = next(x for x in doc["dropped"] if x["code"] == "verse")
+        self.assertNotIn("word", d)
+        self.assertEqual(d["word_ids"], [12])
+        sc = {s["id"]: s for s in doc["scored"]}
+        self.assertNotIn("word", sc[12])
+
+    def test_p1_2_fail_closed_when_the_verse_status_is_unknown(self):
+        doc = build(verse=[], verse_known=False)
+        no_transcript_text(self, doc, fx("words_ar.json")["words"])    # no transcript word at all
+        self.assertTrue(doc["candidates"])                              # ids and times still proposed
+        self.assertIn("verse_unknown", [n["code"] for n in doc["notes"]])
+        self.assertNotIn("evidence", doc["candidates"][0]["decision"])
+
+    def test_p1_2_a_key_word_note_inside_a_verse_is_not_quoted(self):
+        st = [{"statement_id": "ST_001", "start": "00:00:04.960", "end": "00:00:07.760", "text": "كلام تاني",
+               "key_word": "خمسمية"}]
+        doc = build(verse=[(4900, 7800)], statements=st)
+        no_verse_text(self, json.dumps(doc, ensure_ascii=False))
+
+    def test_p1_3_a_mid_reel_cta_is_not_the_ending(self):
+        ed = {"decisions": [{"decision_id": "EDIT_001", "start": "00:00:05.000", "end": "00:00:06.000",
+                             "graphics": [{"id": "GFX_1", "template": "cta", "text": "x", "start": "00:00:05.000",
+                                           "end": "00:00:06.000"}]}]}
+        self.assertEqual(kept(build(ed=ed)), kept(build()))             # endings off: nothing is the ending
+        on = N().config(fx("profile_endings_all.json")["endings"], {})
+        self.assertEqual(kept(build(ed=ed, endings=on)), kept(build(endings=on)))   # on, but mid-reel
+        late = {"decisions": [{"decision_id": "EDIT_009", "start": "00:00:15.840", "end": "00:00:18.000",
+                               "graphics": [{"id": "GFX_9", "template": "cta", "text": "x", "start": "00:00:15.840",
+                                             "end": "00:00:18.000"}]}]}
+        for c in build(ed=late, endings=on)["candidates"]:
+            self.assertLessEqual(c["end_ms"], 15840)                    # in the last beats: the CTA card
+        explicit = {"decisions": [{"decision_id": "EDIT_001", "start": "00:00:09.000", "end": "00:00:10.400",
+                                   "graphics": [{"id": "GFX_1", "template": "cta", "text": "x", "ending": "cta",
+                                                 "start": "00:00:09.000", "end": "00:00:10.400"}]}]}
+        for c in build(ed=explicit, endings=on)["candidates"]:
+            self.assertLessEqual(c["end_ms"], 9000)                     # marked by the story-editor: wherever it is
+
+    def test_p2_5_spacing_is_on_the_sequence_clock(self):
+        w = ws(["٣ كيلو في الأسبوع"], t0=2000) + ws(["كيلو ٥ في الشهر"], t0=8000, id0=10)
+        free = build(words=w, media_end_ms=20000, faces={"status": "missing", "doc": None})
+        self.assertEqual([c["start_ms"] for c in free["candidates"]], [2000, 8000])   # 6 s apart
+        cut = build(words=w, media_end_ms=20000, remove_pauses=True, faces={"status": "missing", "doc": None},
+                    pauses={"keep_ms": [[0, 4000], [5000, 20000]], "cuts_ms": [[4000, 5000]]})
+        self.assertEqual([c["start_ms"] for c in cut["candidates"]], [2000])          # 5 s on screen
+        self.assertEqual(drop_codes(cut)[(11,)], "near")
+
+    def test_p2_5_the_final_self_check_drops_a_punch_that_fails_it(self):
+        real = E().evaluate
+
+        def failing(fr, env, t, s, margin):
+            r = real(fr, env, t, s, margin)
+            return dict(r, ok=False, why="edge") if env is not None else r
+        with mock.patch.object(E(), "s_max", return_value={"s_max": 1.08, "why": None}), \
+                mock.patch.object(E(), "evaluate", side_effect=failing):
+            doc = build()
+        self.assertEqual(doc["candidates"], [])
+        self.assertEqual(drop_codes(doc)[(12,)], "edge")
+
+    def test_p3_1_no_sample_inside_the_punch_needs_review(self):
+        early = samples_doc(lambda t: [[0.5, 0.42, 0.2, 0.23]], t1=2000)          # samples stop at 2 s
+        doc = build(faces={"status": "ok", "doc": early})
+        self.assertTrue(doc["candidates"])
+        for c in doc["candidates"]:
+            self.assertTrue(c["needs_review"], c)
+            self.assertFalse(c["default_keep"])
+
+    def test_p3_1_a_named_moment_far_from_every_sample_needs_review(self):
+        middle = samples_doc(lambda t: [[0.5, 0.42, 0.2, 0.23]] if 6000 <= t <= 6500 else [], t1=22000)
+        middle["samples"] = [s for s in middle["samples"] if s["faces"]]          # samples only mid-punch (P3)
+        doc = build(faces={"status": "ok", "doc": middle})
+        c = next(c for c in doc["candidates"] if c["start_ms"] == 4960)
+        self.assertTrue(c["needs_review"])                              # start and end > 500 ms from any sample
+
+    def test_p3_1_no_sample_inside_needs_review_whatever_far_ms_says(self):
+        early = samples_doc(lambda t: [[0.5, 0.42, 0.2, 0.23]], t1=2000)
+        st = E().settings()
+        st["values"]["far_ms"] = 60000                                  # the distance rule switched off
+        doc = build(faces={"status": "ok", "doc": early}, settings=st)
+        self.assertTrue(doc["candidates"] and all(c["needs_review"] for c in doc["candidates"]))
+
+    def test_p2_4_the_marker_as_written_reaches_build(self):
+        cfg = N().config(fx("profile_endings_all.json")["endings"], {})
+        for raw in ("00:00:19.500", 19.5, 19500):
+            for c in build(endings=cfg, marker=raw)["candidates"]:
+                self.assertLessEqual(c["end_ms"], 19500, raw)
+            self.assertEqual(drop_codes(build(endings=cfg, marker=raw))[(35,)], "ending")
+
+    def test_p3_6_r_is_ranked_among_the_measured_punches_only(self):
+        late = samples_doc(lambda t: [[0.5, 0.42, 0.2, 0.23]] if t >= 12000 else [], t1=22000)
+        doc = build(faces={"status": "ok", "doc": late})
+        a, b = doc["candidates"]
+        self.assertTrue(a["needs_review"])                              # P3, the stronger one, no face there
+        self.assertFalse(b["needs_review"])
+        self.assertEqual((b["r"], b["scale"]), (1.0, b["s_max"]))       # the only measured punch: r = 1
+
+    def test_p3_2_inputs_sha1_follows_the_zones_and_the_sequence(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        root, p = project(tmp)
+        ctx = common.set_context(root)
+        self.addCleanup(common.set_context, None)
+        a = E().inputs_sha1(p, ctx)
+        ed = read_json(p.p("01_analysis/edit-decisions.json"))
+        ed["decisions"] = [{"decision_id": "EMPH_01", "camera": {"type": "punch_in", "emphasis": {"candidate": "EMP_01"}}}]
+        write_json(p.p("01_analysis/edit-decisions.json"), ed)
+        self.assertEqual(a, E().inputs_sha1(p, ctx))                    # a copied candidate: not an input
+        ed["decisions"].append({"decision_id": "EDIT_002", "start": "00:00:05.000", "end": "00:00:08.000",
+                                "graphics": [{"id": "GFX_1", "template": "hook_title", "text": "x"}]})
+        write_json(p.p("01_analysis/edit-decisions.json"), ed)
+        b = E().inputs_sha1(p, ctx)
+        self.assertNotEqual(a, b)                                        # a graphic that makes a zone: an input
+        ed["decisions"].append({"decision_id": "EDIT_003", "start": "00:00:09.000", "end": "00:00:10.000",
+                                "camera": {"type": "slow_push", "at": "00:00:09.000", "until": "00:00:10.000"}})
+        write_json(p.p("01_analysis/edit-decisions.json"), ed)
+        b2 = E().inputs_sha1(p, ctx)
+        self.assertNotEqual(b, b2)                                       # a story camera move: an input
+        b = b2
+        prof = root / common.CLIENT_PROFILE_REL / "sequence-settings.json"
+        prof.parent.mkdir(parents=True, exist_ok=True)
+        write_json(prof, {"general": {"timebase": 30}})
+        self.assertNotEqual(b, E().inputs_sha1(p, ctx))                 # the sequence rate: an input
+
+    def test_p3_5_the_sample_rate_comes_from_the_settings(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        root, p = project(tmp, faces=False)
+        ctx = common.set_context(root)
+        self.addCleanup(common.set_context, None)
+        seen = []
+
+        def decode(argv):
+            seen.append(argv[argv.index("-vf") + 1])
+            return [], ""
+        st = E().settings()
+        st["values"]["sample_fps"] = 2
+        with mock.patch.object(E(), "settings", return_value=st):
+            E().run(p, ctx, faces=True, faces_fn=lambda im: [], decode=decode, audio=False)
+        self.assertIn("fps=2,", seen[0])
+
+
+class TestVerseSource(unittest.TestCase):
+    """The verse spans emphasis uses are the ones `reel plan` blanks (manual_verse.resolve(detect(...)) on the words
+    plan keeps); when they cannot be known, emphasis fails closed (no transcript word written at all)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.addCleanup(common.set_context, None)
+        self.verse = verse_words_doc()
+        self.root, self.p = project(self.tmp, words_doc=self.verse)
+        self.ctx = common.set_context(self.root)
+
+    def test_gather_uses_the_plans_verse_spans(self):
+        from lib import manual_verse as mv
+        from lib.plan import _word_ok
+        inp = E().gather(self.p, self.ctx, audio=False)
+        words = [w for w in self.verse["words"] if _word_ok(w)]
+        spans, _e, _w = mv.resolve(mv.detect(words, mv.config({})),
+                                   read_json(self.p.p("01_analysis/edit-decisions.json")))
+        self.assertTrue(spans)
+        self.assertEqual(inp["verse"], [(s["src_start_ms"], s["src_end_ms"]) for s in spans])
+        self.assertTrue(inp["verse_known"])
+        doc = E().run(self.p, self.ctx, audio=False)
+        no_verse_text(self, json.dumps(doc, ensure_ascii=False), FAKE_VERSE)
+        no_verse_text(self, self.p.p(E().FACES_FILE).read_text(encoding="utf-8"), FAKE_VERSE)
+
+    def test_fail_closed_when_detection_fails_or_the_decisions_are_unreadable(self):
+        with mock.patch("lib.manual_verse.detect", side_effect=RuntimeError("boom")):
+            self.assertFalse(E().gather(self.p, self.ctx, audio=False)["verse_known"])
+        with mock.patch("lib.manual_verse.config", return_value={"religious": True, "phrases": [],
+                                                                  "warnings": ["lexicon unreadable"]}):
+            self.assertFalse(E().gather(self.p, self.ctx, audio=False)["verse_known"])
+        self.p.p("01_analysis/edit-decisions.json").write_text("{broken", encoding="utf-8")
+        self.assertFalse(E().gather(self.p, self.ctx, audio=False)["verse_known"])
+        doc = E().run(self.p, self.ctx, audio=False)
+        no_transcript_text(self, doc, self.verse["words"])
+        no_verse_text(self, json.dumps(doc, ensure_ascii=False), FAKE_VERSE)
+
+
 if __name__ == "__main__":
     unittest.main()

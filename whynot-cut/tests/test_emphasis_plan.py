@@ -348,5 +348,155 @@ class TestPodcastParity(unittest.TestCase):
         self.assertAlmostEqual(960 + spec["base_offset_y"] + seg["offset_y"], cy, places=1)
 
 
+# ============================================================================== fix round 1 (review 2067800)
+class TestPlanCheckRound1(Base):
+    """P2-1 (a moved emphasis punch is held to the same zones as a candidate), P2-5 (the plan's margin and protected
+    faces), on HEAD's own plan steps."""
+
+    check = TestPlanCheck.check
+    candidate = TestPlanCheck.candidate
+
+    def write_ed(self, g, decisions, **top):
+        write_json(self.p.p("01_analysis/edit-decisions.json"),
+                   dict({"video_id": "CLIP1", "global": dict({"main_footage": "data/Raw/CLIP1.mov"}, **g),
+                         "decisions": list(decisions)}, **top))
+
+    def check_top(self, g, decisions, **top):
+        from lib import plan
+        self.write_ed(g, decisions, **top)
+        ctx = common.Context(root=self.root)
+        with common.use_context(ctx):
+            inp = plan.read_inputs(self.p, ctx)
+            inp.emphasis = E().plan_inputs(self.p, ctx, inp.main_file, inp.rng, inp.pre_all)
+            vd, _e, _ = plan.validate_decisions(inp)
+            cam, _, _ = plan.build_camera(inp, vd["camera"], vd["events"])
+            fr, _, _ = plan.apply_framing(inp, cam)
+            tm, _, _ = plan.apply_timemap(inp, fr["camera"], fr["merged"], vd["events"], vd["broll"], vd["cues"],
+                                          cam["box"])
+            return E().plan_check(inp, cam, fr, tm)
+
+    def moved(self, a, b):
+        d = self.candidate()
+        d["camera"]["at"], d["camera"]["until"], d["start"], d["end"] = a, b, a, b
+        return d
+
+    def test_p2_1_a_punch_moved_into_the_hook_warns(self):
+        e, w, _ = self.check_top({}, [self.moved("00:00:00.200", "00:00:01.400")])
+        self.assertEqual(e, [])
+        self.assertTrue(any("hook" in x and "EMPH_01" in x for x in w), w)
+
+    def test_p2_1_a_punch_moved_onto_a_recited_verse_is_refused(self):
+        d = self.candidate()
+        e, w, _ = self.check_top({}, [d], manual_verse=[{"start_ms": 8000, "end_ms": 9000}])
+        self.assertTrue(any("EMPH_01" in x and "verse" in x for x in e), e)
+
+    def test_p2_1_a_punch_moved_onto_the_sign_off_warns(self):
+        prof = self.root / common.CLIENT_PROFILE_REL / "profile.json"
+        prof.parent.mkdir(parents=True, exist_ok=True)
+        write_json(prof, {"endings": {"sign_off": {"on": True, "phrase": "Isotretinoin مهم"}}})
+        self.addCleanup(prof.unlink)
+        e, w, _ = self.check_top({}, [self.moved("00:00:09.300", "00:00:10.900")])
+        self.assertTrue(any("EMPH_01" in x and "ending" in x for x in w), w)
+
+    def test_p2_5_the_plan_margin_boundary(self):
+        write_json(self.p.p(E().FACES_FILE), dict(samples_doc(lambda t: [[0.5, 0.30, 0.2, 0.23]], t1=12000, w=216,
+                                                              h=384), footage="data/Raw/CLIP1.mov"))
+        d = self.candidate()
+        s = d["camera"]["scale_factor"]
+        self.assertLess(s, 1.12)                                         # the geometry binds, not the cap
+        e, _w, _ = self.check({}, [d])
+        self.assertEqual(e, [])
+        d["camera"]["scale_factor"] = round(s + 0.01, 4)
+        e, _w, _ = self.check({}, [d])
+        self.assertTrue(any("crops the head" in x for x in e), e)
+
+    def test_p2_5_the_plan_protects_the_same_faces(self):
+        d = self.candidate()
+        half_out = [-0.01, 0.30, 0.1, 0.1]                               # 40 % visible at the left edge
+        write_json(self.p.p(E().FACES_FILE), dict(samples_doc(lambda t: [FACE, half_out], t1=12000, w=216, h=384),
+                                                  footage="data/Raw/CLIP1.mov"))
+        e, _w, _ = self.check({}, [d])
+        self.assertEqual(e, [])                                          # not protected: no veto
+        near_top = [0.15, 0.06, 0.1, 0.1]                                # fully visible, head out at the top
+        write_json(self.p.p(E().FACES_FILE), dict(samples_doc(lambda t: [FACE, near_top], t1=12000, w=216, h=384),
+                                                  footage="data/Raw/CLIP1.mov"))
+        e, _w, _ = self.check({}, [d])
+        self.assertTrue(any("crops the head" in x for x in e), e)
+
+
+class TestEndingsPlanCheckRound1(Base):
+    check = TestEndingsPlanCheck.check
+    PROF = {"endings": {"sign_off": {"on": True, "phrase": "Isotretinoin مهم"}}}
+
+    def test_p2_3_a_cut_word_inside_the_sign_off_is_refused(self):
+        e, _w, info = self.check(self.PROF, {"cut_words": [16]}, [])
+        self.assertTrue(any("sign-off" in x and "cut" in x for x in e), e)
+
+    def test_p2_3_a_removed_pause_inside_the_sign_off_warns(self):
+        write_json(self.p.p("06_audio/dialogue/pauses.json"), {"keep_ms": [[0, 10670], [10690, 12000]],
+                                                              "cuts_ms": [[10670, 10690]]})
+        self.addCleanup(self.p.p("06_audio/dialogue/pauses.json").unlink)
+        e, w, _ = self.check(self.PROF, {"remove_pauses": True}, [])
+        self.assertEqual(e, [])
+        self.assertTrue(any("sign-off" in x and "pause" in x for x in w), w)
+
+
+class TestVerseNeverWritten(unittest.TestCase):
+    """Addendum (plan session): a cited verse through the emphasis run and the real compile_plan: no verse token in
+    emphasis.json, face-samples.json, nor in what the plan records for Task 29 (the spec's emphasis / ending blocks,
+    the edit-plan lines; present once patch 02 lands)."""
+
+    def setUp(self):
+        from lib.transcribe import finalize
+        from test_emphasis import FAKE_VERSE, ws
+        self.fake = FAKE_VERSE
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.addCleanup(common.set_context, None)
+        self.root, self.p, _w = tp.make_project(self.tmp)
+        words = ws(["كلام عادي جدا عن الصحة", "قال تعالى فلانيه علانيه ترتانيه زنتانيه"], t0=200)
+        t = words[-1]["end_ms"] + 900
+        words += ws(["٣ كيلو في الأسبوع ده", "وبعدين كلام مهم جدا"], t0=t, id0=len(words) + 1)
+        self.words = words
+        finalize(self.p, {"source_video": "x", "backend": "test", "model": "none", "language": "ar",
+                          "language_probability": 1.0, "duration_ms": 12000},
+                 [{"id": 1, "start_ms": 200, "end_ms": words[-1]["end_ms"], "text": " ".join(w["word"] for w in words),
+                   "avg_logprob": -0.2, "no_speech_prob": 0.0, "compression_ratio": 1.1,
+                   "words": [w["id"] for w in words]}], words)
+        from lib.discover import run_discovery
+        from lib.client_db import build
+        from lib.media import preflight
+        self.ctx = common.Context(root=self.root)
+        with common.use_context(self.ctx):
+            build(self.p, run_discovery(self.p)["inventory"])
+            preflight(self.p, [self.root / "data/Raw/CLIP1.mov"])
+        write_json(self.p.p(E().FACES_FILE), dict(samples_doc(lambda t: [FACE], t1=12000, w=216, h=384),
+                                                  footage="data/Raw/CLIP1.mov"))
+        write_json(self.p.p("01_analysis/edit-decisions.json"),
+                   {"video_id": "CLIP1", "global": {"main_footage": "data/Raw/CLIP1.mov"}, "decisions": []})
+
+    def test_no_verse_token_in_any_task29_output(self):
+        from lib.plan import compile_plan
+        with common.use_context(self.ctx):
+            doc = E().run(self.p, self.ctx, audio=False)
+        self.assertTrue(doc["candidates"], doc["dropped"])
+        write_json(self.p.p("01_analysis/edit-decisions.json"),
+                   {"video_id": "CLIP1", "global": {"main_footage": "data/Raw/CLIP1.mov"},
+                    "decisions": [c["decision"] for c in doc["candidates"]]})
+        with common.use_context(self.ctx):
+            r = compile_plan(self.p)
+        self.assertTrue(r["ok"], r["errors"])
+        spec = read_json(self.p.p("01_analysis/timeline-spec.json"))
+        self.assertTrue(spec.get("manual_verse") or spec.get("verse_cut"))       # the plan found the same verse
+        texts = [self.p.p(E().FILE).read_text(encoding="utf-8"),
+                 self.p.p(E().FACES_FILE).read_text(encoding="utf-8"),
+                 json.dumps({k: spec.get(k) for k in ("emphasis", "ending")}, ensure_ascii=False),
+                 "\n".join(ln for ln in self.p.p("01_analysis/edit-plan.md").read_text(encoding="utf-8").splitlines()
+                           if ln.startswith(("Emphasis", "- EMPH", "Ending")))]
+        for t in texts:
+            for tok in self.fake:
+                self.assertNotIn(tok, t)
+
+
 if __name__ == "__main__":
     unittest.main()
