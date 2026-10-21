@@ -1,12 +1,17 @@
 """BL-03 (Task 22 R-T11): the GPL-compliance request and the trademark notice, each in Arabic and English
 (docs/legal/notices/). Templates only. Checks:
   * all four files exist, and each starts with the "not legal advice; have a lawyer review it" banner in its language
+    ("in both languages" is read as one banner per language file: the English file holds no Arabic letters)
+  * each template has a "Before sending" checklist (BL-02's LICENSE and SPDX headers in the cited release, every
+    field filled, a lawyer has read it), and the GPL letter does not claim that *each* source file carries headers
   * the only `{{placeholders}}` are the allow-listed ones, and the Arabic and English twins use the same set
   * no e-mail, phone number, URL, personal name, DMCA / cease-and-desist wording, or law article number
   * each template tells the sender what to attach (commit history, release hashes, tag names)
-  * the identity scan (Source-R naming rule: no audited project name) finds nothing; it is skipped without the key
-Run:  ~/.whynot-cut/venv/Scripts/python.exe -B -m unittest discover -s whynot-cut/tests -p test_legal_notices.py -v
+  * the identity scan (Source-R naming rule: no audited project name) finds nothing; without the owner's key the test
+    is SKIPPED (the repo-wide check is test_identity_scan.TestRealTree.test_real_tree_passes_with_the_owners_key)
+Run:  tools/test.sh -p test_legal_notices.py -v
 """
+import json
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
@@ -30,7 +35,11 @@ ALLOWED_PLACEHOLDERS = {
 }
 BANNER = {
     "en": (r"not legal advice", r"lawyer"),
-    "ar": (r"ليس[تة]? (?:هذا )?استشارة قانونية|ليست استشارة قانونية", r"محامٍ|محامي"),
+    "ar": (r"ليس[تة]? (?:هذا )?استشارة قانونية", r"محامٍ|محامي"),
+}
+CHECKLIST = {  # heading, then what the section itself must say
+    "en": (r"^## Before sending\b.*$", (r"LICENSE", r"SPDX", r"BL-02", r"double-brace field", r"lawyer")),
+    "ar": (r"^## قبل الإرسال.*$", (r"LICENSE", r"SPDX", r"BL-02", r"أقواس مزدوجة", r"محامٍ|محامي")),
 }
 ATTACH = {
     "en": (r"commit history", r"release hash", r"tag name"),
@@ -69,6 +78,26 @@ class TestLegalNotices(unittest.TestCase):
             for pat in BANNER[lang]:
                 with self.subTest(file=path.name, pattern=pat):
                     self.assertRegex(head, re.compile(pat, re.I))
+
+    def test_before_sending_checklist(self):
+        for (kind, lang), path in FILES.items():
+            heading, musts = CHECKLIST[lang]
+            text = path.read_text(encoding="utf-8")
+            m = re.search(heading, text, re.M)
+            with self.subTest(file=path.name):
+                self.assertIsNotNone(m, "no checklist heading")
+            if m is None:
+                continue
+            section = text[m.end():].split("\n\n")[0]  # the list right under the heading, not the letter body
+            for pat in musts:
+                with self.subTest(file=path.name, pattern=pat):
+                    self.assertRegex(section, pat)
+
+    def test_gpl_letter_does_not_claim_every_file_has_headers(self):
+        # not true today, and BL-02 deliberately skips third-party, fixture, generated and pinned files
+        for lang in LANGS:
+            with self.subTest(lang=lang):
+                self.assertNotRegex(read("gpl-compliance-request", lang), re.compile(r"\beach source file|كل ملف مصدر", re.I))
 
     def test_only_allow_listed_placeholders_and_twins_match(self):
         for kind in KINDS:
@@ -125,9 +154,14 @@ class TestLegalNotices(unittest.TestCase):
                 self.assertRegex(read("trademark-notice", lang), tm)
 
     def test_identity_scan_is_clean(self):
-        run = subprocess.run([sys.executable, "-B", "-I", str(SCAN), "scan", "--root", str(NOTICES)],
+        run = subprocess.run([sys.executable, "-B", "-I", str(SCAN), "scan", "--root", str(NOTICES), "--json"],
                              capture_output=True, text=True, timeout=120)
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        doc = json.loads(run.stdout)
+        if "skipped" in doc:
+            self.skipTest("the owner's identity key is not on this machine: nothing was scanned")
+        self.assertEqual(doc["hits"], [])
+        self.assertGreater(doc["files"], 0)
 
 
 if __name__ == "__main__":

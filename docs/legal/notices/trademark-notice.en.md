@@ -3,6 +3,12 @@
 > **Not legal advice. Have a lawyer review this text before you send it.** This is a fill-in template: replace every
 > double-brace field and delete what does not apply.
 
+## Before sending (delete this section from the letter)
+- [ ] The release you cite contains our `LICENSE` file and the SPDX licence and copyright headers (task BL-02 is
+      merged and released). Do not send this letter before that.
+- [ ] Every double-brace field is filled, and what does not apply is deleted.
+- [ ] A lawyer has read the final text.
+
 {{date}}
 
 To: {{recipient}}

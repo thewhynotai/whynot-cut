@@ -3,6 +3,12 @@
 > **Not legal advice. Have a lawyer review this text before you send it.** This is a fill-in template: replace every
 > double-brace field and delete what does not apply.
 
+## Before sending (delete this section from the letter)
+- [ ] The release you cite contains our `LICENSE` file and the SPDX licence and copyright headers (task BL-02 is
+      merged and released). Do not send this letter before that.
+- [ ] Every double-brace field is filled, and what does not apply is deleted.
+- [ ] A lawyer has read the final text.
+
 {{date}}
 
 To: {{recipient}}
@@ -13,7 +19,7 @@ From: {{sender_org}} ({{contact}})
 Dear {{recipient}},
 
 {{sender_org}} publishes WhyNot Cut at {{our_repo}} under the GNU General Public License, version 3 or (at your
-option) any later version. Each source file carries an SPDX licence line and a copyright line.
+option) any later version. Our source files carry SPDX licence and copyright notices.
 
 We believe that {{their_product}}, distributed at {{their_location}}, contains or is derived from our code. The
 evidence we hold is listed under "Attachments" below.
@@ -26,8 +32,9 @@ recipient also gets:
 - a clear statement of what you changed and when.
 
 We ask you to do one of the following within {{deadline_days}} days of the date of this letter:
-1. publish the complete corresponding source code of {{their_product}} under the same licence, with the notices
-   restored, and tell us where; or
+1. make the complete corresponding source code of {{their_product}} available to every recipient, as the licence
+   requires (for example by publishing it), under the same licence and with the notices restored, and tell us how;
+   or
 2. stop distributing {{their_product}} and tell us in writing that you have stopped.
 
 If you think we are mistaken, please send us your reasoning and the origin of the code in question. We would be glad
