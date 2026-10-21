@@ -1736,7 +1736,7 @@ class TestR4CopyReplaced(_R3):
     restore or a sync of that one file) is never imported, and `--wait` makes it again (the sidecar keeps them too)."""
 
     def test_a_copy_replaced_under_its_name_is_never_imported(self):
-        for i, case in enumerate(("another video", "the same bytes, an older time")):
+        for i, case in enumerate(("another video", "the same size, other bytes, an older time")):
             with self.subTest(case):
                 p, f = self.ready(vid=f"C{i}", fname=f"copy case {i}.mp4")
                 copy = self.root / self.rec(p)["path"]
@@ -1747,7 +1747,9 @@ class TestR4CopyReplaced(_R3):
                     shutil.copyfile(FX / "cfr30.mp4", copy)
                     planted = copy.read_bytes()
                 else:
-                    copy.write_bytes(copy.read_bytes())
+                    data = bytearray(copy.read_bytes())
+                    data[len(data) // 2] ^= 0xFF                                # r5: the same bytes are reused
+                    copy.write_bytes(bytes(data))
                     old = time.time() - 86400
                     os.utime(copy, (old, old))
                 planted_ns = copy.stat().st_mtime_ns
@@ -1895,6 +1897,221 @@ class TestR4FolderCannotBeWritten(_R3):
             res = self.imp(p, f)
             self.assertEqual(res["use"], "original")
             self.assertNoWrite(res["lines"])
+
+
+# --------------------------------------------------------------------------- fix round 5 (review e4ff6cc)
+class TestR5ReadyItemJobCannotStart(_R3):
+    """P3-1: a job that can't start (its claim can't be created: a read-only archive or a view-only share) on an item
+    whose copies are all ready never says "failed … the original is used": nothing was waiting, the state stays as
+    the records say, one neutral line, and the build imports the copy."""
+
+    def test_a_ready_item_whose_claim_is_refused(self):
+        from lib import writer_lock as WL
+        p, f = self.ready()
+        with mock.patch.object(WL, "_create", side_effect=PermissionError(13, "Access is denied")), \
+                mock.patch.object(media, "CLAIM_CREATE_S", 0.3):
+            res = self.job(p, wait_s=5)
+        self.assertEqual((res["job"], res["state"]), ("failed", "ready"))
+        self.assertEqual(res["lines"], _lines_of(media._NOT_STARTED))
+        self.assertNotIn("original", " ".join(res["lines"]["en"]))
+        self.assertTrue(ARABIC.search(res["lines"]["ar"][0]))
+        self.assertEqual(self.rec(p)["state"], "ready")
+        self.assertEqual(self.imp(p, f)["use"], "copy")
+
+    def test_a_ready_but_stale_item_whose_claim_is_refused_says_the_original_is_used(self):
+        from lib import writer_lock as WL
+        for case in ("the source changed", "the check itself breaks"):
+            with self.subTest(case):
+                p, f = self.ready(vid=f"R{len(case)}", fname=f"{case}.mp4")
+                if case == "the source changed":
+                    t = f.stat().st_mtime + 60
+                    os.utime(f, (t, t))
+                    broken = mock.patch.object(media, "MTIME_SLACK_S", media.MTIME_SLACK_S)
+                else:
+                    broken = mock.patch.object(media, "conform_current", side_effect=RuntimeError("no answer"))
+                with mock.patch.object(WL, "_create", side_effect=PermissionError(13, "Access is denied")),                         mock.patch.object(media, "CLAIM_CREATE_S", 0.3), broken:
+                    res = self.job(p, wait_s=5)
+                self.assertEqual((res["job"], res["state"]), ("failed", "failed"))
+                self.assertEqual(res["lines"], _lines_of(media._NO_CLAIM))
+
+    def test_a_pending_item_whose_claim_is_refused_still_says_so(self):          # the control
+        from lib import writer_lock as WL
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        with mock.patch.object(WL, "_create", side_effect=PermissionError(13, "Access is denied")), \
+                mock.patch.object(media, "CLAIM_CREATE_S", 0.3):
+            res = self.job(p, wait_s=5)
+        self.assertEqual((res["job"], res["state"]), ("failed", "failed"))
+        self.assertEqual(res["lines"], _lines_of(media._NO_CLAIM))
+
+
+def _lines_of(pair):
+    return {"en": [pair[0]], "ar": [pair[1]]}
+
+
+class TestR5CopyTimeOnly(_R3):
+    """P3-3: a time-only change of the source AND its copy (a cloud or NAS re-sync, a copy tool that does not keep
+    times, a FAT time shift of the whole folder) costs no encode: `--wait` re-hashes the source against the sidecar
+    and the copy against its own sha256 (out_sha256), reuses the copy and records the new times."""
+
+    def test_the_whole_folder_shifted_in_time(self):
+        from lib import accel
+        for i, shift in enumerate((3600, -86400)):
+            with self.subTest(shift=shift):
+                p, f = self.ready(vid=f"S{i}", fname=f"shifted {i}.mp4")
+                copy = self.root / self.rec(p)["path"]
+                bytes_before = copy.read_bytes()
+                for x in (f, copy):
+                    t = x.stat().st_mtime + shift
+                    os.utime(x, (t, t))
+                self.assertEqual(self.imp(p, f)["use"], "original")             # until it is checked again
+                real, calls = accel.run_ff, []
+
+                def counting(*a, **k):
+                    calls.append(1)
+                    return real(*a, **k)
+                with mock.patch.object(accel, "run_ff", counting):
+                    self.assertEqual(self.wait(p)["state"], "ready")
+                self.assertEqual(calls, [])                                     # no encode
+                self.assertEqual(copy.read_bytes(), bytes_before)
+                self.assertEqual(self.imp(p, f)["use"], "copy")
+
+    def test_the_same_bytes_with_an_older_time_are_reused(self):
+        p, f = self.ready()
+        copy = self.root / self.rec(p)["path"]
+        old = time.time() - 86400
+        os.utime(copy, (old, old))
+        self.assertOriginal(self.imp(p, f), "ready")
+        self.assertEqual(self.wait(p)["state"], "ready")
+        self.assertEqual(copy.stat().st_mtime, old)                             # reused, not made again
+        self.assertEqual(self.imp(p, f)["use"], "copy")
+
+
+class TestR5ReadOnlyRecord(_R3):
+    """Review e4ff6cc note: a read-only preflight.json (the job can't record anything) gives the plain EN + AR line,
+    never an English-only error or exit 1."""
+
+    def test_a_read_only_preflight_json(self):
+        import stat as st_
+        p, f = self.ready()
+        t = f.stat().st_mtime + 60
+        os.utime(f, (t, t))                                                     # stale: the job has to record
+        pf = p.p("00_inputs/preflight.json")
+        os.chmod(pf, st_.S_IREAD)
+        self.addCleanup(os.chmod, pf, st_.S_IREAD | st_.S_IWRITE)
+        res = self.wait(p)
+        self.assertEqual((res["job"], res["state"]), ("failed", "failed"))
+        self.assertEqual(res["lines"], _lines_of(media._NO_WRITE))
+        self.assertEqual(self.imp(p, f)["use"], "original")
+
+    def test_a_busy_preflight_json_is_still_a_busy_refusal(self):
+        from lib.file_lock import LockTimeout
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        busy = LockTimeout(p.p("00_inputs/preflight.json"), 120)
+        with mock.patch.object(media, "_refresh", side_effect=busy), self.assertRaises(LockTimeout):
+            self.job(p, wait_s=5)                                               # exit 2, "try again": not "can't
+        self.assertFalse(p.p(CLAIM).exists())                                   # be written"; the claim is gone
+
+
+class TestR5Gaps(_R3):
+    """P3-4: the review's surviving mutants K03, K05, K06, K08, K09, K17, and the torn-claim note."""
+
+    def test_the_beat_is_well_inside_the_stale_bound(self):                      # K06
+        self.assertLessEqual(media.HEARTBEAT_S * 5, media.CLAIM_STALE_S)
+        self.assertLessEqual(media.CLAIM_STALE_S, 3600)
+
+    def test_a_failure_that_is_not_a_permission_keeps_the_general_line(self):   # K17
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        self.age(p, 600)
+        with mock.patch.object(media, "_reap_dead_job", side_effect=RuntimeError("disk on fire")):
+            res = self.imp(p, f)
+        self.assertEqual((res["use"], res["state"]), ("original", "failed"))
+        self.assertEqual(res["lines"], _lines_of(media._FAILED))
+
+    def test_malformed_copy_files_are_never_trusted(self):                       # K03, K05
+        p, f = self.ready()
+        good = self.rec(p)
+        entry = good["copy_files"][0]
+        for name, files in (("no entry for the path", [dict(entry, path="output/elsewhere.mp4")]),
+                            ("a null time", [dict(entry, mtime=None)]),
+                            ("a string size", [dict(entry, size=str(entry["size"]))]),
+                            ("not a dict", ["output/x.mp4"]),
+                            ("no time", [{k: v for k, v in entry.items() if k != "mtime"}])):
+            with self.subTest(name):
+                why = media.conform_current(p, f, dict(good, copy_files=files))
+                self.assertEqual(getattr(why, "code", None), "copy_changed", why)
+        self.assertIsNone(media.conform_current(p, f, good))                    # the control
+
+    def beat(self, cp, me, wrap):
+        """Run the heartbeat on `cp` with json.loads / json.dumps wrapped by `wrap`; returns after ~10 beats."""
+        stop = threading.Event()
+        with mock.patch.object(media, "HEARTBEAT_S", 0.05), wrap:
+            t = threading.Thread(target=media._heartbeat, args=(cp, me, stop))
+            t.start()
+            time.sleep(0.6)
+            stop.set()
+            t.join(10)
+        return json.loads(cp.read_text(encoding="utf-8"))
+
+    def claim(self):
+        cp = self.tmp / "conform-job.claim"
+        me = {"pid": os.getpid(), "started_at": "now"}
+        cp.write_text(json.dumps(me), encoding="utf-8")
+        return cp, me
+
+    def test_a_beat_that_fails_once_recovers(self):                              # K08, K09
+        for err in (ValueError("a torn read"), PermissionError(13, "held by a scanner")):
+            with self.subTest(type(err).__name__):
+                cp, me = self.claim()
+                real, n = json.loads, []
+
+                def once(s, *a, **k):
+                    n.append(1)
+                    if len(n) == 1:
+                        raise err
+                    return real(s, *a, **k)
+                got = self.beat(cp, me, mock.patch("json.loads", once))
+                self.assertIn("beat_at", got)                                   # it kept beating
+                self.assertEqual(got, me)
+
+    def test_its_own_torn_write_is_repaired(self):
+        cp, me = self.claim()
+        real, n = json.dumps, []
+
+        def torn(obj, *a, **k):
+            n.append(1)
+            if len(n) == 1:                                                     # the write breaks half-way
+                with open(cp, "r+", encoding="utf-8") as g:
+                    g.write('{"pid": ')
+                    g.truncate()
+                raise OSError(28, "No space left on device")
+            return real(obj, *a, **k)
+        got = self.beat(cp, me, mock.patch("json.dumps", torn))
+        self.assertIn("beat_at", got)
+        self.assertEqual(got, me)
+
+    def test_a_torn_claim_that_is_not_ours_is_left_alone(self):
+        cp, me = self.claim()
+        stop = threading.Event()
+        with mock.patch.object(media, "HEARTBEAT_S", 0.05):
+            t = threading.Thread(target=media._heartbeat, args=(cp, me, stop))
+            t.start()
+            time.sleep(0.3)                                                     # a few good beats first
+            self.assertIn("beat_at", json.loads(cp.read_text(encoding="utf-8")))
+            tmp = cp.with_name("other.tmp")
+            tmp.write_text('{"pid": ', encoding="utf-8")                        # another job's claim, being written
+            for _ in range(100):
+                try:
+                    os.replace(tmp, cp)
+                    break
+                except PermissionError:
+                    time.sleep(0.01)
+            time.sleep(0.4)
+            stop.set()
+            t.join(10)
+        self.assertEqual(cp.read_text(encoding="utf-8"), '{"pid": ')
 
 
 if __name__ == "__main__":

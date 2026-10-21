@@ -624,14 +624,24 @@ def _plain_file(p: Path) -> bool:
 
 
 def _same_copy(rec: dict, out: Path) -> bool:
-    """The sidecar `rec` still describes the copy file `out`: the size and time it had when the record was written
-    (Task 26 r4, review 17729fc P3-3: a copy replaced under its name, by a restore or a sync of that one file, is made
-    again, never reused). A record without them (written before) never matches, so that copy is made again once."""
+    """The sidecar `rec` still describes the copy file `out` (Task 26 r4, review 17729fc P3-3: a copy replaced under its
+    name, by a restore or a sync of that one file, is made again, never reused): the same size, and the same time
+    (within COPY_MTIME_SLACK_S) or, when only the time changed (a re-sync, a copy tool that does not keep times, a FAT
+    time shift), the same full sha256 (`out_sha256`; r5, review e4ff6cc P3-3: no encode for a time-only change). A
+    record without these values (written before) never matches, so that copy is made again once. Limit: a copy
+    swapped for other bytes with the same size and time is reused; nothing cheap tells them apart."""
     try:
         st = os.lstat(out)
     except OSError:
         return False
-    return rec.get("out_size") == st.st_size and isinstance(rec.get("out_mtime"), (int, float))         and abs(st.st_mtime - rec["out_mtime"]) <= COPY_MTIME_SLACK_S
+    if rec.get("out_size") != st.st_size or not isinstance(rec.get("out_mtime"), (int, float)):
+        return False
+    if abs(st.st_mtime - rec["out_mtime"]) <= COPY_MTIME_SLACK_S:
+        return True
+    try:
+        return bool(rec.get("out_sha256")) and _sha256(out) == rec["out_sha256"]
+    except OSError:
+        return False
 
 
 def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=None, runner=None,
@@ -827,7 +837,7 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
                     ost = os.lstat(out)                        # the copy this record describes (_same_copy)
                     linksafe.replace_atomic(side, anchor, json.dumps(dict(
                         want, reason=decision.get("actions"), encoder="libx264", lane=used, out_size=ost.st_size,
-                        out_mtime=ost.st_mtime), indent=1).encode("utf-8"), within)
+                        out_mtime=ost.st_mtime, out_sha256=_sha256(out)), indent=1).encode("utf-8"), within)
                 except (Guidance, OSError) as e:               # locked folder, a virus scan, a full disk: the copy
                     if client_output(given, client_root) != out_dir:   # is right; without a record never reused.
                         # Unless the folder was swapped for a link in the gap before the rename: the copy went

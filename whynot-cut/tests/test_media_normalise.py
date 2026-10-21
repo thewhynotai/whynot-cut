@@ -1684,13 +1684,17 @@ class TestT26R4CopyFile(_Out):
         m, r = self.conform("tag60_real30")
         side, out = json.loads(Path(r["sidecar"]).read_text(encoding="utf-8")), Path(r["path"])
         self.assertEqual((side["out_size"], side["out_mtime"]), (out.stat().st_size, out.stat().st_mtime))
+        self.assertEqual(side["out_sha256"], sha(out))                                # r5: the copy's own hash
 
     def test_a_replaced_copy_is_made_again(self):
-        for case in ("an older time", "another file"):
+        for case in ("other bytes of the same size, an older time", "another file"):
             with self.subTest(case):
                 m, r1 = self.conform("tag60_real30")
                 out = Path(r1["path"])
-                if case == "an older time":
+                if case != "another file":
+                    data = bytearray(out.read_bytes())
+                    data[len(data) // 2] ^= 0xFF
+                    out.write_bytes(bytes(data))
                     old = time.time() - 86400
                     os.utime(out, (old, old))
                 else:
@@ -1711,6 +1715,35 @@ class TestT26R4CopyFile(_Out):
                         encoding="utf-8")
         m, r2 = self.conform("tag60_real30")
         self.assertFalse(r2["reused"])
+
+
+class TestT26R5CopyTimeOnly(_Out):
+    """Task 26 r5 (review e4ff6cc P3-3): a copy whose time changed but not its bytes (a re-sync, a copy tool that does
+    not keep times, a FAT time shift) is checked against the sidecar's full sha256 and reused, never encoded again."""
+
+    def test_the_same_bytes_with_a_new_time_are_reused(self):
+        for shift in (3600, -86400):
+            with self.subTest(shift=shift):
+                m, r1 = self.conform("tag60_real30")
+                out = Path(r1["path"])
+                t = out.stat().st_mtime + shift
+                os.utime(out, (t, t))
+                before = sha(out)
+                m, r2 = self.conform("tag60_real30")
+                self.assertTrue(r2["reused"], r2)
+                self.assertEqual(sha(out), before)
+
+    def test_a_sidecar_without_the_copy_hash_needs_the_time(self):
+        m, r1 = self.conform("tag60_real30")
+        side, out = Path(r1["sidecar"]), Path(r1["path"])
+        rec = json.loads(side.read_text(encoding="utf-8"))
+        side.write_text(json.dumps({k: v for k, v in rec.items() if k != "out_sha256"}), encoding="utf-8")
+        m, r2 = self.conform("tag60_real30")
+        self.assertTrue(r2["reused"])                                                 # round 4's sidecar, same time
+        t = out.stat().st_mtime + 3600
+        os.utime(out, (t, t))
+        m, r3 = self.conform("tag60_real30")
+        self.assertFalse(r3["reused"])                                                # no hash to check a new time
 
 
 if __name__ == "__main__":

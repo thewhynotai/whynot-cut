@@ -436,8 +436,9 @@ def snap_range_points(path: Path, in_ms: int, out_ms: int, search_ms: int = 2500
 # file under output/ with no link on the way, PyAV opens it, it is still the file the job verified (copy_files: its size
 # and time), and the source still has the size, tag, modified time and content check (source_fp: its first and last
 # FP_BYTES) it had when the copy was made; anything else turns it back to `pending` and the job makes it again (reused
-# when the sidecar's full sha256 and its copy's size and time still match, with the new time). Stated limit: a
-# same-size edit in the middle of the source with its time put back is never caught (_fingerprint).
+# when the sidecar's full sha256 matches the source and the copy still has its size, and its time or its own sha256,
+# with the new times). Stated limits: a same-size edit in the middle of the source with its time put back is never
+# caught (_fingerprint); a copy swapped for other bytes of the same size and time IS imported (copy_files).
 # The job: `reel conform --wait` (also what preflight starts in the background), one per item (the OS lock on
 # 00_inputs/conform-job.lock, plus the claim 00_inputs/conform-job.claim, kept fresh by a heartbeat, for volumes
 # without OS locks and for other computers sharing a synced folder), the GPU lane
@@ -493,12 +494,16 @@ _NO_CLAIM = ("The background job could not create its marker file conform-job.cl
              "الشغل اللي في الخلفية ماقدرش يعمل ملف العلامة بتاعه conform-job.claim في فولدر 00_inputs بتاع الفيديو ده: "
              "هنستخدم الأصلي. اتأكد إن فولدر العميل ينفع يتكتب فيه (مش read-only ومش واقف في نص sync)، وبعدين شغّل "
              "reel conform --wait.")
-_NO_WRITE = ("This clip's 00_inputs folder can't be written (permission denied), so the evenly timed / SDR copy can't "
-             "be made or recorded: the original is used. Give this user write access to the client folder (or stop the "
-             "tool that holds it), then run `reel conform --wait`.",
-             "فولدر 00_inputs بتاع الفيديو ده مش مسموح الكتابة فيه، فالنسخة المظبوطة مش هتتعمل ولا هتتسجل: هنستخدم "
-             "الأصلي. ادّي اليوزر ده صلاحية الكتابة على فولدر العميل (أو اقفل البرنامج اللي ماسكه)، وبعدين شغّل "
-             "reel conform --wait.")
+_NO_WRITE = ("This clip's 00_inputs folder (or its preflight.json) can't be written (permission denied), so the evenly "
+             "timed / SDR copy can't be made or recorded: the original is used. Give this user write access to the "
+             "client folder (or stop the tool that holds it), then run `reel conform --wait`.",
+             "فولدر 00_inputs بتاع الفيديو ده (أو ملف preflight.json اللي فيه) مش مسموح الكتابة فيه، فالنسخة المظبوطة "
+             "مش هتتعمل ولا هتتسجل: هنستخدم الأصلي. ادّي اليوزر ده صلاحية الكتابة على فولدر العميل (أو اقفل البرنامج "
+             "اللي ماسكه)، وبعدين شغّل reel conform --wait.")
+_NOT_STARTED = ("The background job could not start, but nothing was waiting for it: every evenly timed / SDR copy of "
+                "this clip is ready and still matches its source.",
+                "الشغل اللي في الخلفية ماقدرش يبدأ، بس مكانش فيه حاجة مستنياه: كل النسخ المظبوطة للفيديو ده جاهزة "
+                "ولسه مطابقة للأصل.")
 # Why a `ready` copy can't be used (conform_current, _copy_problem): code -> (English, Arabic). The English text is the
 # record's / result's `reason`; the Arabic one goes into the Arabic build line (review 17729fc P3-4).
 _WHY = {
@@ -933,7 +938,12 @@ def _claim_live(cp: Path, rec=None) -> bool:
     its file time is younger than CLAIM_STALE_S. A running job rewrites its claim every HEARTBEAT_S (_heartbeat), so
     a live job's claim stays fresh on every computer, also in a cloud-synced folder where each computer's OS lock
     covers only its own copy (review 17729fc P3-1); a crashed or sleeping computer's claim is gone after the bound.
-    Unreadable: younger than CLAIM_WRITING_S."""
+    Unreadable: younger than CLAIM_WRITING_S. Stated limits (review e4ff6cc P3-2):
+      * two computers that start the same item within the sync delay both create their claim (each on its own
+        replica) and both encode: double GPU time and sync-conflict files, never a wrong import (copy_files);
+      * the age is this computer's clock minus the file's time as whatever stamped it set it: on a NAS share that is
+        the NAS clock, so a NAS clock CLAIM_STALE_S or more off makes a live claim from another computer look gone
+        (both encode), or a dead one live for that long."""
     import os
     import time
     from . import writer_lock as WL
@@ -955,21 +965,28 @@ def _heartbeat(cp: Path, me: dict, stop) -> None:
     """The running job's beat (a thread): every HEARTBEAT_S the claim is rewritten in place (the same file, so a
     takeover's move-aside compare still sees it) with a new `beat_at`. Its file time stays fresh, and a cloud folder
     syncs the change. Only while the claim is still ours: another job's claim is never written over, and the beat
-    stops once the claim is gone. `me` follows each write, so the end-of-job check still knows the claim as ours."""
+    stops once the claim is gone. `me` follows each write, so the end-of-job check still knows the claim as ours. A
+    beat that fails (a held file, a torn read) is tried again at the next one; when this beat's own write broke
+    half-way, the next beat writes the claim whole again (review e4ff6cc note), never a torn claim it did not write."""
     import json
+    torn = False                                            # this beat's own write broke after it began
     while not stop.wait(HEARTBEAT_S):
         try:
             with open(cp, "r+", encoding="utf-8") as f:
                 try:
                     cur = json.loads(f.read())
                 except ValueError:
-                    continue                                # being written: the next beat looks again
+                    if not torn:
+                        continue                            # someone else's, being written: the next beat looks again
+                    cur = me                                # our own broken write: written whole below
                 if cur != me:
                     return                                  # not ours any more
                 new = dict(me, beat_at=now_iso())
                 f.seek(0)
+                torn = True
                 f.write(json.dumps(new, ensure_ascii=False))
                 f.truncate()
+                torn = False
             me.clear()
             me.update(new)
         except FileNotFoundError:
@@ -1055,6 +1072,21 @@ def _job_running(paths: Paths) -> bool:
     return _claim_live(paths.p(CLAIM_REL))
 
 
+def _waiting(paths: Paths) -> bool:
+    """Is anything of this item still to be made: a pending record, or a `ready` one that is no longer current?
+    True when it can't be told (the safe answer: the caller then says the original is used)."""
+    try:
+        for fr in _measured(_read_doc(paths.p("00_inputs/preflight.json"))):
+            rec = fr["normalise"].get("conform")
+            state = rec.get("state") if isinstance(rec, dict) else None
+            if state == "pending" or (state == "ready" and conform_current(
+                    paths, fr["path"], rec, fr["normalise"]["decision"], conform_windows(paths, fr["path"])) is not None):
+                return True
+    except Exception:  # noqa: BLE001
+        return True
+    return False
+
+
 def run_conform_job(paths: Paths, wait_s: float = 0.0) -> dict:
     """The conform job of one item (in this process): every pending file is made, verified and recorded; stale
     copies found on the way are made again (STALE_PASSES). One job per item (the OS lock, plus the claim for volumes
@@ -1062,7 +1094,9 @@ def run_conform_job(paths: Paths, wait_s: float = 0.0) -> dict:
     "running"` when it is still running; a dead job's claim is taken over). Returns conform_summary() with job "done".
     When its lock or claim can't be made it never raises: job and state "failed", with the reason and ONE line at the
     top level (_NO_WRITE when the folder can't be written, so not even the records could be saved; else _NO_CLAIM or
-    _FAILED, which the pending records then carry too); the original is used."""
+    _FAILED, which the pending records then carry too); the original is used. But when nothing was waiting (every
+    copy ready and current: _waiting), the state stays as the records say, with the neutral _NOT_STARTED line (review
+    e4ff6cc P3-1). A preflight.json that can't be written inside the job (read-only) gives _NO_WRITE the same way."""
     import contextlib
     import time
     from .file_lock import LockTimeout
@@ -1094,13 +1128,21 @@ def run_conform_job(paths: Paths, wait_s: float = 0.0) -> dict:
         stack.close()
         why = (f"the job could not start ({type(e).__name__}: {str(e)[:200]}): run `reel conform --wait` once the "
                "folder can be written")
+        if not _waiting(paths):                             # e4ff6cc P3-1: every copy ready and current: the records
+            return dict(conform_summary(paths), job="failed", reason=why, lines=_lines(_NOT_STARTED))   # stay
         lines = _lines(_NO_CLAIM if isinstance(e, _ClaimUnavailable) else _FAILED)
         if _denied(fail_pending(why, lines)):                # 17729fc P3-6: not even the records could be saved
             lines = _lines(_NO_WRITE)
         return dict(conform_summary(paths), state="failed", job="failed", reason=why, lines=lines)
     with stack:
         for _ in range(STALE_PASSES + 1):
-            todo = _refresh(paths, retry_failed=False)
+            try:
+                todo = _refresh(paths, retry_failed=False)
+            except Exception as e:  # noqa: BLE001  e4ff6cc note: preflight.json can't be written (read-only)
+                if not _denied(e):
+                    raise
+                return dict(conform_summary(paths), state="failed", job="failed", lines=_lines(_NO_WRITE),
+                            reason=f"preflight.json could not be written ({type(e).__name__}: {str(e)[:200]})")
             if not todo:
                 break
             try:
