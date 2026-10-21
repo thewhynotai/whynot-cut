@@ -46,7 +46,10 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
 
 ## 3. Checks (copy-paste)
 
-- Helpers live view: desktop shortcut **WhyNot - Helpers LIVE**, or `python -X utf8 D:\ClaudeData\accounts\helper_peek.py h1`.
+- Live view of the whole agency (2026-10-21): desktop shortcut **WhyNot - Agency LIVE** = `00-HQ\tools\agency_live.py`
+  (read-only: each session and helper with model, level, status and what it does; the main-account limit; routines;
+  tasks; what needs Yunus). One helper's raw steps: `python -X utf8 D:\ClaudeData\accounts\helper_peek.py h1`. The old
+  helpers-only `helpers_live.py` is kept; the old shortcut's backup is in `D:\ClaudeData\backups\shortcuts`.
 - Routines: in the Claude app, sidebar **Routines** (or ask the Command Center "routines status").
 - Status now: `python -X utf8 "D:\0 Work\0 Pegasus IMC Agency\00 TWN\0 TWN AI\Editing Plugin\00-HQ\tools\hq_status.py"`.
 - Heavy queue: `bash C:/Users/LOQ/AppData/Roaming/Claude/side-session-notes/local_263cabbf-75e3-42a1-b384-1753a7bd4dad/heavy.sh status`.
@@ -67,7 +70,7 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
 2. Open the Claude app (the routines live there).
 3. Check the routines are **enabled** (they were found disabled after restarts on 10-14 and 10-20; a person must switch
    them back on — the Command Center does it in an attended session).
-4. Open **Helpers LIVE** and check both show `AUTO ON  loop running`.
+4. Open **Agency LIVE** and check neither helper shows `LOOP NOT RUNNING`.
 
 ## 5b. After a usage-limit cut (OPS-07)
 - The intake recovers by itself (MASTER-INTAKE step 0.1): a lock whose run is dead (`get_session` isRunning false)
@@ -78,6 +81,7 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
   hand after checking its CPU on the CHILD python (the venv `python.exe` launcher always shows 0 CPU).
 
 ## 6. Incidents
+- 2026-10-21 23:10: Yunus found the old helpers-only live window unclear. New `tools/agency_live.py` (desktop shortcut renamed **WhyNot - Agency LIVE**): all sessions + helpers with model, level, status (WORKING / QUIET / RUNNING TESTS / IN TEST QUEUE / STOPPED by limit), what each does, routines, tasks, latest decisions, needs-you. 16 tests; review r1 PASS-WITH-MINORS (10 fixed) → r2 PASS. Known limits: an unreadable limit reset shows LIMITED up to 5 h; the WHO list and GOAL are constants in the file. Also found: the watchdog cannot run `run_scheduled_task` unattended → WATCHDOG 1b now asks the Command Center to re-run a lost report.
 - 2026-10-21 ~21:08 → 22:20: seventh limit. Found at 22:30: BL-02's intake review queued the full suite 6 times today (each ~1 h + 1-2 h queue wait) and every run was cut by a limit before its verdict; the results lived only in the dead session. Fix: MASTER-INTAKE 1B keeps the suite log in `reviews/suites/review-<ID>-<sha8>.log` and the next run reuses a finished log for the same sha. (Helper/review worktrees fail ~40-80 env tests on the base too; the rule stays "no worse than the baseline".) Review PASS-WITH-MINORS, all minors applied (Bash only, full POSIX path, reuse check command, 24 h age, known limit: a suite ended by OPS-07 mid-run leaves only `.part`).
 - 2026-10-21 ~14:10 → 17:20: sixth limit. The 17:00 report was lost → re-run by the Command Center 17:30. Found while checking: at 08:38 and 13:38 an intake took over the lock of a LIVE intake (b3a342d2 ran to 08:46, 06764fdd to 17:10) because a run waiting on its review reads `isRunning: false`; two intakes ran at once. Fix: MASTER-INTAKE 0.1 now also reads the run's status in `list_task_runs` (`stale_suites.run_alive`, tests RunAlive); a run listed `running` is alive. Not listed → `until` only. Review: r1 FAIL (P1: not-listed was judged dead) → r2 PASS. 17:43 found live: an intake's turn ends `succeeded` while its tagged suites still wait, so `succeeded` + 1+ tagged suites = alive (scan-tag is the third signal); end-tag only on `failed`; a woken run re-reads the lock and stops if taken over. Review r3 PASS-WITH-MINORS. Verified live 18:37: run 2dbec8c7 saw 432e75c7 `succeeded` + 6 tagged suites → "intake already running", lock and suites untouched. Known limit: an intake waiting on untagged background work (not via heavy.sh with WNC_RUN) can still be judged dead → a second intake runs beside it (nothing is killed). Known limit: an app crash that leaves a run stuck at `running` holds the lock until it drops out of the last 10 runs (~10 h).
 - 2026-10-21 ~08:38 → 12:20: fifth limit. The 08:37 intake died holding the lock (to 14:40); the 09:37-11:37 intakes and the 09:00 report failed fast (13:00 report covers it; past step 1b's 180 min). 12:28 Command Center: H2's untagged `review-BL-02` suite frozen since 08:26 (wrapper gone, child python 0 CPU over 60 s) → ended by hand per §5b; heavy.sh marked the slot STALE and frees it on the next ask.

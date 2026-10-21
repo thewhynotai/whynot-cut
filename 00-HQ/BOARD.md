@@ -25,8 +25,8 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 | BL-19 | Root-normalised fingerprints, so a client move keeps its approvals (Stage 2) | H1 | READY | `tasks/BL-19.md` | — |
 | S1-R51 | Installer r5_1: the engine-home drift test says which list to edit (Gate 4 exit prep, LIGHT) | H1 | READY · fallback executor 28 Oct | `tasks/S1-R51.md` | new card 2026-10-21 (intake top-up) |
 | SETUP-H2 | First login (marketing@) + full suite baseline | H2 (marketing@) | ACCEPTED — closed, no code (nothing to merge) | `tasks/SETUP-H2.md` | r1 2026-10-20 11:40: 8753 run, 77 env/timing (ENV-01 classes); npm ci + 296 panel tests + 1 render OK |
-| BL-03 | GPL-compliance + trademark notice templates (AR + EN) (Gate 4) | H2 | FIX (round 1, 2026-10-20 21:40) | `tasks/BL-03.md` | peer h1 FAIL: P2-1 identity-scan false green, P2-2 send checklist + soften "each source file" |
-| BL-04 | run-state.json + resume, preflight-first in `reel next` (Gate 4) | H2 | READY · fallback executor 25 Oct | `tasks/BL-04.md` | BLOCKED answered 2026-10-20 09:40: queue via wnc-locks/wait; next_doc ruling + fixture patch accepted; full suite with 3 patches, then DONE |
+| BL-03 | GPL-compliance + trademark notice templates (AR + EN) (Gate 4) | H2 | ACCEPTED (2026-10-21 22:40) | `tasks/BL-03.md` | peer h1 PASS (none) on ca8c783 → MERGE-QUEUE |
+| BL-04 | run-state.json + resume, preflight-first in `reel next` (Gate 4) | H2 | IN PROGRESS · fallback executor 25 Oct | `tasks/BL-04.md` | PARTIAL 2026-10-21 19:02: 1 real failure (test_t45_guard) → 4th patch; confirm run + full suite with 4 patches pending (queue) |
 | BL-20 | Gate check: no temporary dated skips in the suite (`tools/skip_audit.py`) (Gate 4 exit, LIGHT, S) | H2 | READY · fallback executor 25 Oct | `tasks/BL-20.md` | — |
 | BL-22 | AE build warnings reach NEEDS-YOU: a missing logo or image becomes a checklist line (Stage 2, LIGHT) | H2 | READY · fallback executor 28 Oct | `tasks/BL-22.md` | — |
 | BL-18 | Two wrong fix lines in installer/onboarding (Gate 4) | EXECUTOR (done) | MERGED (f2ca516 on release/3.0, 2026-10-20) | `tasks/BL-18.md` | H2 does NOT take it |

@@ -23,6 +23,9 @@ without an offset counts as "nudged just now" until rewritten.
    and its error contains "limit", and `stale_suites.py age <its started_at>` is 180 or less → `run_scheduled_task`
    `whynot-cut-primary-report-2` once (load it in the same ToolSearch). Older than 180 or "unknown" → leave it for
    the next scheduled slot.
+   If `run_scheduled_task` is refused (unattended runs cannot approve it; seen 2026-10-21 22:24), do not retry:
+   `send_message` the Command Center (`local_a36b6974-0281-4d5f-b70f-d0bd7c51b4ef`) "Watchdog: the <HH:MM> report was lost to a
+   limit and I cannot re-run it; re-run `whynot-cut-primary-report-2` now." This counts as its nudge (step 4).
 2. **Targets, in this order** (skip any with `isRunning: true` or archived; `get_session` each):
    - executor `local_22b44953-13e2-409d-93c1-3b201b119548` (work track)
    - Command Center `local_a36b6974-0281-4d5f-b70f-d0bd7c51b4ef` (work track)
