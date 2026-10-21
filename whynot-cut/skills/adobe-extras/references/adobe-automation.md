@@ -1,7 +1,8 @@
 # After Effects & Photoshop Automation
 
 ## After Effects (configured integration)
-- `reel ae-script` → `04_after_effects/scripts/build_<ID>_graphics.jsx` (self-contained: data + `templates/after_effects/nh_ae_lib.jsx`).
+- `reel ae-script` → `04_after_effects/scripts/build_<ID>_graphics.jsx` (self-contained: data + `templates/after_effects/nh_ae_lib.jsx`);
+  like `ae-build`, it needs the editor's approval of the current plan.
   Arabic is embedded as `\uXXXX` escapes (immune to ExtendScript encoding guesses).
 - `reel ae-build` → runs it in the installed AE (macOS `osascript … DoScriptFile`; Windows `AfterFX.exe -r <jsx>`), saves `04_after_effects/project/<ID>_NH_GFX.aep`.
   AE launches if closed; first launch may show dialogs — dismiss and re-run.

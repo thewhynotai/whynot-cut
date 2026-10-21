@@ -689,7 +689,13 @@ class TestAutoApprove(Base):
         self.assertIn("refused", AP().approve(m))                         # no validation yet
         write_json(m.p("01_analysis/motion-validation.json"), {"ok": False, "fingerprint": motion_plan.fingerprint(m)})
         self.assertIn("refused", AP().approve(m))
-        write_json(m.p("01_analysis/motion-validation.json"), {"ok": True, "fingerprint": motion_plan.fingerprint(m)})
+        write_json(m.p("01_analysis/motion-validation.json"), {"ok": True, "fingerprint": motion_plan.fingerprint(m),
+                                                               "plan_sha1": motion_plan.plan_sha1(m)})
+        pf = m.p("01_analysis/motion-plan.json")              # review 91b6b44 P2-1: never approve a hand edit
+        keep = pf.read_bytes()
+        pf.write_bytes(keep + b" ")
+        self.assertIn("refused", AP().approve(m))
+        pf.write_bytes(keep)
         rec = AP().approve(m)
         self.assertEqual((rec["by"], rec["kind"], rec["plan_fingerprint"]), ("auto", "motion", motion_plan.fingerprint(m)))
 

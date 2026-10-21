@@ -596,20 +596,23 @@ class _Item:
         handle (lib/motion_audio.py _read_small), and hashes a track by size and head/tail only. An oversized or
         hard-linked licence is then just an invalid licence, never a reason to drop the approval card. BL-20: also the
         reel's 00_inputs/speakers.json and its episode's episode.json (the names shown, motion_plan.episode_sheet);
-        BL-21: 02_transcription/captions-short.srt (the caption words shown, motion_plan.shown_cues)."""
+        BL-21: 02_transcription/captions-short.srt (the caption words shown, motion_plan.shown_cues); review 91b6b44
+        P2-1: the compiled motion-plan.json and motion-validation.json (motion_plan.plan_edited hashes the plan)."""
         cfg = self._config_files("motion.json")
         if cfg is None:
             return None
         ep = self._episode_json()
         return [(self.p(rel), self.base, True) for rel in (
             "00_inputs/source.json", "01_analysis/motion-script.json", "02_transcription/words.json",
-            "06_audio/dialogue/pauses.json", "00_inputs/speakers.json", "02_transcription/captions-short.srt")] + [
+            "06_audio/dialogue/pauses.json", "00_inputs/speakers.json", "02_transcription/captions-short.srt",
+            "01_analysis/motion-plan.json", "01_analysis/motion-validation.json")] + [
             (self.paths.client_db / "branding/brand-tokens.json", self.root, True)] + \
             ([(ep, self.root, True)] if ep else []) + cfg
 
     def _episode_json(self) -> Path | None:
         """BL-20: output/episodes/<EP>/00_inputs/episode.json of the item's source.json episode_id, whose sheet names
-        the motion fingerprint reads; None without one or for an id the engine refuses (it then reads no episode)."""
+        the motion fingerprint reads; None without one or for an id the engine refuses (it then reads no episode:
+        an id that is not text, motion_plan.episode_sheet, or not one plain name, check_project_id)."""
         eid = (self.json("00_inputs/source.json") or {}).get("episode_id")
         if not isinstance(eid, str):
             return None
@@ -698,7 +701,9 @@ def _plan_fingerprint(it: _Item, motion: bool) -> str | None:
                 return None
             if not it.inputs_ok(it._motion_inputs()):
                 return None
-            from lib.motion_plan import fingerprint
+            from lib.motion_plan import fingerprint, plan_edited
+            if plan_edited(it.paths):             # review 91b6b44 P2-1: a plan edited by hand gets no approval card
+                return None
             return val["fingerprint"] if fingerprint(it.paths) == val["fingerprint"] else None
         if not isinstance(_check(it.p("01_analysis/timeline-spec.json"), it.base, EVIDENCE_MAX), Path):
             return None

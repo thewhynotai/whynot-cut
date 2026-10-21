@@ -1463,12 +1463,20 @@ def approval_state(paths: Paths) -> dict:
         return {"state": "none", "by": None, "message": "NOT approved"}
     try:
         if appr.get("kind") == "motion":
-            from .motion_plan import fingerprint as motion_fp
+            from .motion_plan import PLAN_EDITED, fingerprint as motion_fp, plan_edited
             now = motion_fp(paths)
+            edited = plan_edited(paths)                    # review 91b6b44 P2-1: the compiled file is bound too
+            if edited:
+                return {"state": "stale", "by": by, "message": edited, "editor_message": dict(PLAN_EDITED)}
         else:
             now = plan_fingerprint(paths)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
         now = None                                         # no compiled plan: nothing the approval still matches
+        from .errors import FileFormatError
+        if isinstance(e, FileFormatError):                 # review a1c14fc P3-4: a broken input, not "plan changed"
+            from .errors import describe
+            return {"state": "stale", "by": by, "message": f"the approval cannot be checked: {describe(e)['error']} "
+                                                            f"({e.path}): fix that file, then check again"}
     if not appr.get("stale") and now and appr.get("plan_fingerprint") == now:
         return {"state": "current", "by": by, "message": f"approved by {by}"}
     if approved_before_3(appr):

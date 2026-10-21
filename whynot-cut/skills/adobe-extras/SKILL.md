@@ -16,7 +16,7 @@ commands (`ae-status`, `ae-probe`, `motion-*`) need no `--extras`.
 
 | Request | Commands | Output |
 |---|---|---|
-| Editable AE graphics project | `reel ae-script --extras`, then `reel ae-build --extras` (needs the approved plan), then `reel ae-render --extras` | `04_after_effects/project/<ID>_<PREFIX>_GFX.aep` plus ProRes 4444 alpha renders |
+| Editable AE graphics project | `reel ae-script --extras`, then `reel ae-build --extras` (both need the approved plan), then `reel ae-render --extras` | `04_after_effects/project/<ID>_<PREFIX>_GFX.aep` plus ProRes 4444 alpha renders |
 | MOGRT templates for Premiere | `reel mogrt-build --extras` | `.mogrt` files (validated zips) |
 | Cover / thumbnail PSD | `global.photoshop_jobs` in decisions, then `reel ps-build --extras` | layered PSD + preview PNG |
 

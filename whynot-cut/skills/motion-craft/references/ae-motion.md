@@ -42,7 +42,8 @@ no boxes or clipping, emphasis on the right word, icon fits the idea, mirrored a
 the platform UI zones, readable contrast, brand colours.
 
 ## Without the bridge
-`reel motion-build --script-only` writes a self-contained JSX (File › Scripts › Run Script File…);
+`reel motion-build --script-only` writes a self-contained JSX (File › Scripts › Run Script File…) once the editor
+approved the current plan (it refuses without that approval, like the build, and so does `--run-script`);
 `--run-script` hands it to AE with `AfterFX -r`. Both are unverified (no read-back): QC cannot pass, so `--run-script`
 exits 1 even when the .aep was saved (status BUILT_UNVERIFIED: built, not verified; not a crash). Like the bridge,
 the script refuses (an alert in AE) while the open project has unsaved changes: the editor saves or closes it first.

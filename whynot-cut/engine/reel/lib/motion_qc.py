@@ -119,8 +119,11 @@ def run(paths) -> dict:
     from .stamps import read_compiled
     plan = read_compiled(paths.p("01_analysis/motion-plan.json"), {}) or {}
     val = read_json(paths.p("01_analysis/motion-validation.json"), {}) or {}
-    add("plan_valid", bool(val.get("ok")) and val.get("fingerprint") == fp,
-        "motion plan compiled without errors and current" if val.get("ok") else "motion plan missing, with errors or stale")
+    from .motion_plan import plan_edited
+    edited = plan_edited(paths)                 # review 91b6b44 P2-1: the compiled plan is the one motion-plan wrote
+    add("plan_valid", bool(val.get("ok")) and val.get("fingerprint") == fp and not edited,
+        edited or ("motion plan compiled without errors and current" if val.get("ok") else
+                   "motion plan missing, with errors or stale"))
     appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
     add("approval_current", bool(appr.get("approved")) and appr.get("plan_fingerprint") == fp,
         f"plan approved by {appr.get('by')}" if appr.get("plan_fingerprint") == fp else "plan approval missing or older than the plan")
@@ -221,7 +224,12 @@ def motion_next(paths) -> dict:
     def newer(a, *ups):
         return tm.get(a) is not None and any(tm.get(u) is not None and tm[u] > tm[a] + 1 for u in ups)
     stale = []
-    if newer("plan", "script", "pauses"):
+    from .motion_plan import plan_edited
+    if val and fp and val.get("fingerprint") != fp:    # review 91b6b44 P3-3: compile again first, then approve
+        stale.append("motion-plan (its inputs changed after it was compiled)")
+    elif plan_edited(paths):                            # review 91b6b44 P2-1
+        stale.append("motion-plan (01_analysis/motion-plan.json was edited by hand: compile it again)")
+    elif newer("plan", "script", "pauses"):
         stale.append("motion-plan (older than motion-script.json or pauses.json)")
     if newer("anim", "plan"):
         stale.append("motion-animatic (older than the plan)")

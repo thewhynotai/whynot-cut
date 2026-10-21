@@ -81,6 +81,8 @@ REBASE_JSON = {INVENTORY, "01_analysis/edit-decisions.json", "00_inputs/input-ma
                # opened later by the absolute path they store (review 7fcbc1d P3-2): `reel verify --record` stats the
                # sheet, motion-render / motion-qc probe `main`; no fingerprint, check or sign-off hashes their bytes
                "08_quality_control/verify/verify-build.json", "04_after_effects/motion-render-result.json",
+               # (motion-plan.json: motion-validation.json's plan_sha1 hashes it, and a move re-seals it,
+               # _reseal_motion_plan, review 91b6b44 P2-1)
                "01_analysis/motion-plan.json",
                # Claude's map of SFX kinds to the client's sound files (review 087e8e3 P3-1): `reel sfx` opens the
                # paths; the plan reads only its keys, and no fingerprint or sign-off hashes it
@@ -683,6 +685,13 @@ def rebase(root, olds, new=None, dry_run: bool = False, before: dict | None = No
                     key = tuple(rel.split("/")[1:3]) + ("transcript",)
                     if before.get(key) is not False:         # never confirmed: nothing to list (r2 N-P3-2)
                         forced.append(key)
+            if rel.endswith("/01_analysis/motion-plan.json") and rel.count("/") == 4:
+                try:                                  # review 91b6b44 P2-1: the move's rewrite is not a hand edit
+                    _reseal_motion_plan(root, rel, hashlib.sha1(raw).hexdigest(),
+                                        hashlib.sha1(data.encode("utf-8")).hexdigest())
+                except (Guidance, OSError) as e:      # left as it was: the plan reads as edited (compile it again)
+                    rep["errors"].append({"file": rel[:-len("motion-plan.json")] + "motion-validation.json",
+                                          "why": str(e)})
         rep["rewritten"].append({"file": rel, "values": n})
     from .safety.takes import ED, HISTORY
     for r in list(rep["rewritten"]):
@@ -841,6 +850,29 @@ def _pin_transcript_check(root: Path, words_rel: str, old_sha: str):
     if not isinstance(doc, dict) or not doc.get("verified") or doc.get("words_sha1") is not None:
         return
     doc["words_sha1"] = old_sha
+    st = os.stat(_x(vf))
+    linksafe.replace_atomic(vf, root, (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+                            within="output")
+    os.utime(_x(vf), ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
+def _reseal_motion_plan(root: Path, plan_rel: str, old_sha: str, new_sha: str):
+    """Review 91b6b44 P2-1: motion-validation.json records the sha1 of the motion-plan.json `reel motion-plan` wrote
+    (motion_plan.plan_edited). A move rewrites the plan's paths: when the record matched the plan as it was
+    (`old_sha`), it is moved on to the rewritten plan (`new_sha`), so the move never reads as a hand edit; a record that
+    did not match (an edit made before the move, or an older engine's record) is left as it is. Never through a link."""
+    vf = str(root.joinpath(*plan_rel.split("/")[:-1], "motion-validation.json"))
+    if not os.path.lexists(_x(vf)):
+        return
+    if linksafe.is_link(vf):
+        raise OSError(0, f"{vf} is a link: never written through")
+    try:
+        doc = json.loads(Path(_x(vf)).read_bytes().decode("utf-8-sig"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return
+    if not isinstance(doc, dict) or doc.get("plan_sha1") != old_sha:
+        return
+    doc["plan_sha1"] = new_sha
     st = os.stat(_x(vf))
     linksafe.replace_atomic(vf, root, (json.dumps(doc, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
                             within="output")

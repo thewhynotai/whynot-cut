@@ -71,6 +71,11 @@ def approve(paths: Paths, note: str | None = None) -> dict:
             if val.get("fingerprint") != fp:
                 return {"refused": "the motion plan is stale (script, words, audio, brand or the names shown changed)",
                         "how": "Run `reel motion-plan` again; then `reel auto-approve`."}
+            from .motion_plan import PLAN_EDITED, plan_edited
+            edited = plan_edited(paths)             # review 91b6b44 P2-1: never approve a plan edited by hand
+            if edited:
+                return {"refused": edited, "how": "Run `reel motion-plan` again; then `reel auto-approve`.",
+                        "editor_message": dict(PLAN_EDITED)}
             events, kind = None, "motion"
         else:
             from .plan import plan_fingerprint

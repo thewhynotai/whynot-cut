@@ -144,9 +144,11 @@ GATE_EDITOR = {
 def plan_gate(paths) -> tuple[list[str], dict | None]:
     """The compiled plan and its approval, checked the same way for every motion build route (the bridge build,
     --script-only, --run-script): (problems, refusal). A problem is something to fix (exit 1); the refusal
-    {blocked, how, editor_message EN/AR} is a missing, stale or 2.x approval (exit 2)."""
-    from .motion_plan import fingerprint
-    probs = []
+    {blocked, how, editor_message EN/AR} is a missing, stale or 2.x approval (exit 2). A compiled plan edited by hand
+    (review 91b6b44 P2-1) is refused first, with no `blocked` (exit 1) and its own EN/AR line: it is compiled again
+    before anything else."""
+    from .motion_plan import PLAN_EDITED, fingerprint, plan_edited
+    probs, stale = [], False
     val = read_json(paths.p("01_analysis/motion-validation.json"), {}) or {}
     fp = fingerprint(paths)
     if not paths.p("01_analysis/motion-plan.json").exists() or not val:
@@ -155,6 +157,14 @@ def plan_gate(paths) -> tuple[list[str], dict | None]:
         probs.append("the motion plan has errors: fix them (01_analysis/motion-plan.md)")
     elif val.get("fingerprint") != fp:
         probs.append("the motion plan is stale (script, words, audio, music/licences, brand or the names shown changed): run `reel motion-plan` again")
+        stale = True
+    else:
+        edited = plan_edited(paths)
+        if edited:
+            return probs + [edited], {"how": "Run `reel motion-plan` again: it writes the plan from the script, the "
+                                             "transcript and the episode sheet (a change made only in motion-plan.json "
+                                             "is not kept); then motion-build again",
+                                      "editor_message": dict(PLAN_EDITED)}
     appr = read_json(paths.p("01_analysis/plan-approval.json"), {}) or {}
     from .plan import OLDER_APPROVAL, approved_before_3
     older = approved_before_3(appr) and appr.get("plan_fingerprint") != fp          # 3.0 F2: approved under 2.x
@@ -169,9 +179,11 @@ def plan_gate(paths) -> tuple[list[str], dict | None]:
     if not gate:
         return probs, None
     probs.append(gate)          # an approval gate is a refusal (exit 2), like ppro-build's (Gate 2 A2)
-    return probs, {"blocked": gate, "how": "Show the editor motion-plan.md and the animatic; only with their words "
-                                           "run `reel approve-plan --by editor`, then motion-build again",
-                   "editor_message": dict(says)}
+    how = ("Show the editor motion-plan.md and the animatic; only with their words run `reel approve-plan --by "
+           "editor`, then motion-build again")
+    if stale:                   # review 91b6b44 P3-3: the plan is compiled again first, then shown and approved
+        how = "Run `reel motion-plan` again first (its inputs changed after it was compiled). Then " + how[0].lower() + how[1:]
+    return probs, {"blocked": gate, "how": how, "editor_message": dict(says)}
 
 
 def _route_refused(paths) -> dict | None:

@@ -1453,6 +1453,89 @@ class TestEpisodeSheetBinding(unittest.TestCase):
         self.assertNotIn("Traceback", err)
         self.assertIn("episode id", json.dumps(doc) + err)
 
+    # BL-20 round 2 (review a1c14fc P1-1): a second guest (guest_2 … guest_9, episode_sheet.SHEET_PEOPLE)
+    def three_speakers(self, people: dict):
+        write_json(self.reel.p("00_inputs/speakers.json"), {"method": "inferred", "people": people, "turns": [
+            {"start_ms": 0, "end_ms": 3000, "speaker": "host"}, {"start_ms": 3000, "end_ms": 6000, "speaker": "guest"},
+            {"start_ms": 6000, "end_ms": 12000, "speaker": "guest_2"}]})
+
+    def badge(self):
+        return read_json(self.reel.p("01_analysis/motion-plan.json"))["persistent"]["speaker_badge"]
+
+    def test_second_guest_badge_shows_the_sheet_name_and_is_bound(self):
+        """The sheet is the only source of names: the badge shows the sheet's guest_2 (not the analyst's spelling in
+        speakers.json), and renaming guest_2 in the sheet (episode-prep, motion-plan) makes the approval stale."""
+        self.edit_sheet('guest: "Sara — CEO"\n', 'guest: "Sara — CEO"\nguest_2: Karim Sheet — Engineer\n')
+        self.three_speakers({"host": {"name": "Ahmed"}, "guest": {"name": "Sara"}, "guest_2": {"name": "Kareem Analyst"}})
+        self.prep()
+        self.motion_plan()
+        self.assertEqual([s["name"] for s in self.badge()["segments"]], ["Ahmed", "Sara", "Karim Sheet"])
+        self.approve()
+        self.assertEqual(self.state(), "current")
+        self.edit_sheet("guest_2: Karim Sheet — Engineer", "guest_2: Karim Sami — Engineer")
+        self.prep()
+        self.motion_plan()
+        self.assertEqual([s["name"] for s in self.badge()["segments"]], ["Ahmed", "Sara", "Karim Sami"])
+        self.assertEqual(self.state(), "stale")
+
+    def test_a_speaker_with_no_name_never_reaches_the_screen(self):
+        """A badge speaker named neither in the sheet nor in speakers.json fails closed: the plan does not compile, a
+        plain line names the speaker and the sheet, and no raw key such as "guest_2" is in the plan."""
+        self.three_speakers({"host": {"name": "Ahmed"}, "guest": {"name": "Sara"}})
+        code, doc, err = self.reel_cli("motion-plan", "--video-id", "EP12_R01_MO")
+        self.assertEqual(code, 1, (doc, err))
+        self.assertFalse(doc["ok"])
+        line = next((e for e in doc["errors"] if "guest_2" in e), "")
+        self.assertIn("episode sheet", line, doc["errors"])
+        self.assertIsNone(self.badge())
+        self.assertNotIn('"guest_2"', json.dumps(read_json(self.reel.p("01_analysis/motion-plan.json"))["persistent"]))
+
+    def test_only_the_sheet_people_name_speakers(self):
+        """The compiler reads exactly what the fingerprint binds: a sheet key outside the sheet's people list
+        (guest_10) never names a badge speaker; that speaker has no name, so the plan fails closed."""
+        from lib.motion_plan import compile_motion
+        info_p = self.ep.p("00_inputs/episode.json")
+        info = read_json(info_p)
+        write_json(info_p, dict(info, sheet=dict(info["sheet"], guest_10="Ten Sheet")))
+        write_json(self.reel.p("00_inputs/speakers.json"), {"people": {"host": {"name": "Ahmed"}}, "turns": [
+            {"start_ms": 0, "end_ms": 6000, "speaker": "host"}, {"start_ms": 6000, "end_ms": 12000, "speaker": "guest_10"}]})
+        common.set_context(self.root)
+        r = compile_motion(self.reel)
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("guest_10" in e for e in r["errors"]), r["errors"])
+        self.assertNotIn("Ten Sheet", self.plan_text())
+
+    def test_a_broken_episode_json_is_named_by_the_approval_state(self):
+        """Review a1c14fc P3-4: a broken episode.json says which file is broken, not "plan changed since approval"."""
+        from lib.plan import approval_state
+        self.motion_plan()
+        self.approve()
+        self.ep.p("00_inputs/episode.json").write_text("{ broken", encoding="utf-8")
+        common.set_context(self.root)
+        st = approval_state(self.reel)
+        self.assertNotEqual(st["state"], "current")
+        self.assertIn("episode.json", st["message"])
+        self.assertNotIn("plan changed", st["message"])
+
+    def test_speakers_json_is_bound_only_while_the_badge_shows(self):
+        """Review a1c14fc P3-1: speakers.json is written for every reel; it is bound only while the speaker badge
+        shows (recipe speaker_badge on, two speakers or more), so a reel without a badge keeps its hash."""
+        from lib.motion_plan import fingerprint
+        common.set_context(self.root)
+        info_p = self.ep.p("00_inputs/episode.json")
+        info_p.unlink()                                       # no sheet names: only speakers.json is in question
+        sp_f = self.reel.p("00_inputs/speakers.json")
+        sp = read_json(sp_f)
+        self.assertNotEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))   # badge shows: bound
+        src_f = self.reel.p("00_inputs/source.json")
+        src = read_json(src_f)
+        rec = dict(src["recipe"], motion=dict(src["recipe"].get("motion") or {}, speaker_badge=False))
+        write_json(src_f, dict(src, recipe=rec))
+        self.assertEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))      # badge off
+        write_json(src_f, src)
+        write_json(sp_f, dict(sp, turns=[t for t in sp["turns"] if t["speaker"] == "guest"]))
+        self.assertEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))      # one speaker: no badge
+
 
 # --------------------------------------------------------------------------- BL-21: the caption words shown
 def captions_script(mode="subtitles"):
@@ -1587,6 +1670,93 @@ class TestCaptionBinding(unittest.TestCase):
         srtlib.write_srt(self.srt, cues)
         self.motion_plan()
         self.assertEqual(self.state(), "current")
+
+
+class TestCompiledPlanBinding(unittest.TestCase):
+    """Review 91b6b44 round 2. P2-1: the compiled motion-plan.json is bound to the approval too (motion-validation.json
+    plan_sha1): a caption (or any scene text) edited straight in it is refused by every route until `reel motion-plan`
+    writes it again. P3-2: a broken caption line names the file and the cue. P3-3: after a hand-edited caption, the
+    first step named is motion-plan, not approve-plan. M05: a recipe with no captions setting shows none."""
+    B = TestEpisodeSheetBinding
+    tearDown, reel_cli, plan_text, motion_plan, approve, state, build = (
+        B.tearDown, B.reel_cli, B.plan_text, B.motion_plan, B.approve, B.state, B.build)
+    shown_cue, edit_cue, script_only = TestCaptionBinding.shown_cue, TestCaptionBinding.edit_cue,         TestCaptionBinding.script_only
+
+    def setUp(self):
+        TestCaptionBinding.setUp(self)
+
+    def test_a_compiled_plan_edited_by_hand_is_refused_by_every_route(self):
+        from lib.plan import approval_state
+        self.motion_plan()
+        self.approve()
+        pf = self.reel.p("01_analysis/motion-plan.json")
+        plan = read_json(pf)
+        plan["persistent"]["captions"]["cues"][0]["text"] = "HANDEDITED"
+        write_json(pf, plan)
+        jsx = self.reel.p(f"04_after_effects/scripts/build_{self.reel.video_id}_motion.jsx")
+        jsx.unlink(missing_ok=True)
+        code, doc, err = self.script_only()
+        self.assertEqual((code, doc.get("status")), (1, "REFUSED"), (doc, err))
+        self.assertFalse(jsx.exists())
+        from lib.motion_plan import PLAN_EDITED
+        self.assertEqual(doc["editor_message"], PLAN_EDITED)
+        self.assertIn("reel motion-plan", doc["how"])
+        code, doc = self.build()
+        self.assertEqual((code, doc["status"]), (1, "REFUSED"), doc)
+        self.assertEqual(doc["editor_message"], PLAN_EDITED)
+        common.set_context(self.root)
+        st = approval_state(self.reel)
+        self.assertEqual(st["state"], "stale")
+        self.assertIn("motion-plan.json", st["message"])
+        code, doc, err = self.reel_cli("next", "--video-id", "EP12_R01_MO")
+        self.assertTrue(doc["stale"][0].startswith("motion-plan"), (doc, err))
+        code, doc, err = self.reel_cli("approve-plan", "--video-id", "EP12_R01_MO", "--by", "editor")
+        self.assertEqual(code, 1, (doc, err))
+        self.assertEqual(doc["editor_message"], PLAN_EDITED)
+        self.motion_plan()                      # written again from the same inputs: the approval holds again
+        self.assertNotIn("HANDEDITED", self.plan_text())
+        self.assertEqual(self.state(), "current")
+        code, doc, err = self.script_only()
+        self.assertEqual((code, doc.get("status")), (0, "SCRIPT_ONLY"), (doc, err))
+
+    def test_a_broken_caption_line_names_the_file_and_the_cue(self):
+        self.motion_plan()
+        lines = self.srt.read_text(encoding="utf-8").splitlines()
+        k = [i for i, ln in enumerate(lines) if "-->" in ln][1]
+        lines[k] = lines[k].split("-->")[0] + "-->"
+        self.srt.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        code, doc, err = self.reel_cli("next", "--video-id", "EP12_R01_MO")
+        said = json.dumps(doc, ensure_ascii=False) + err
+        self.assertIn("captions-short.srt", said)
+        self.assertIn("cue 2", said)
+        self.assertNotIn("list index", said)
+        self.assertNotIn("Traceback", err)
+
+    def test_a_hand_edited_caption_names_motion_plan_first(self):
+        self.motion_plan()
+        self.approve()
+        self.edit_cue(self.shown_cue(), "كلمةمعدلة")
+        code, doc, err = self.reel_cli("next", "--video-id", "EP12_R01_MO")
+        self.assertTrue(doc["stale"][0].startswith("motion-plan"), (doc, err))
+        code, doc, err = self.script_only()
+        self.assertEqual(code, 2, (doc, err))
+        self.assertTrue(doc["how"].startswith("Run `reel motion-plan` again first"), doc)
+
+    def test_a_recipe_without_a_captions_setting_shows_none(self):
+        """Review 91b6b44 M05: no `captions` in the recipe's motion values and none in the script: the compiler's
+        default is off, so the srt is not read and the hash is the old one (here the pre-BL-20 one: no names)."""
+        from lib.motion_plan import fingerprint
+        common.set_context(self.root)
+        self.reel.p("00_inputs/speakers.json").unlink()
+        self.ep.p("00_inputs/episode.json").unlink()
+        write_json(self.reel.p("01_analysis/motion-script.json"), good_script())
+        src_f = self.reel.p("00_inputs/source.json")
+        src = read_json(src_f)
+        motion = {k: v for k, v in (src["recipe"].get("motion") or {}).items() if k != "captions"}
+        write_json(src_f, dict(src, recipe=dict(src["recipe"], motion=motion)))
+        self.assertEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))
+        write_json(src_f, dict(src, recipe=dict(src["recipe"], motion=dict(motion, captions="subtitles"))))
+        self.assertNotEqual(fingerprint(self.reel), legacy_motion_fingerprint(self.reel))
 
 
 # --------------------------------------------------------------------------- animatic
@@ -2220,6 +2390,10 @@ class TestMotionBuild(CompiledMotion):
                 self.assertIn(says, doc["blocked"], (route, name))
                 self.assertEqual(set(doc["editor_message"]), {"en", "ar"}, (route, name))
                 self.assertTrue(doc["editor_message"]["ar"].strip(), (route, name))
+                from lib.plan import OLDER_APPROVAL       # review 91b6b44 M18: the line that goes with each case
+                self.assertEqual(doc["editor_message"], {"missing": self.mb.GATE_EDITOR["none"],
+                                                         "stale": self.mb.GATE_EDITOR["stale"],
+                                                         "2.x": OLDER_APPROVAL}[name], (route, name))
                 self.assertFalse(jsx.exists(), (route, name))
         val_f = self.reel.p("01_analysis/motion-validation.json")
         val = read_json(val_f)
@@ -2518,6 +2692,19 @@ class TestMotionQC(CompiledMotion):
                   "visual_verified", "licenses"):
             self.assertEqual(c[k], "PASS", k)
         self.assertTrue(self.reel.p("08_quality_control/qc-results.json").exists())
+
+    def test_a_compiled_plan_edited_by_hand_fails_plan_valid(self):
+        """Review 91b6b44 P2-1: QC agrees with the build routes: motion-plan.json changed after `reel motion-plan`
+        wrote it fails plan_valid, naming the file."""
+        pf = self.reel.p("01_analysis/motion-plan.json")
+        keep = pf.read_bytes()
+        try:
+            pf.write_bytes(keep.replace(b'"scenes"', b'"scenes" ', 1))
+            r, c = self.checks()
+            self.assertEqual(c["plan_valid"], "FAIL")
+            self.assertIn("motion-plan.json", next(x["detail"] for x in r["checks"] if x["check"] == "plan_valid"))
+        finally:
+            pf.write_bytes(keep)
 
     def test_piece_render_after_rebuild_fails_render(self):
         """Review: a `--scenes` piece render after a rebuild must not let QC pass on the old MAIN render / MP4."""

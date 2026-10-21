@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 from .common import fmt_ts, ms_to_frame, now_iso, read_json, seq_fps, set_status, write_json, write_text
+from .episode_sheet import SHEET_PEOPLE
 from .motion_config import direction_for, format_spec, motion_cfg, source as msource
 from .motion_layout import contrast, fit, pick_text_color, place, role_of, theme_colors
 from .motion_script import (REPLAYS_SPEECH, SCENE_TYPES, check_editorial, check_fields, check_number, digit_runs,
@@ -43,19 +44,39 @@ def _system_font() -> dict | None:
     return {"file": face["file"], "index": int(face.get("index") or 0)} if face else None
 
 
-SHEET_SHOWN = ("host", "guest", "show")       # the episode sheet values a motion plan puts on screen (BL-20)
+# the episode sheet values a motion plan puts on screen (BL-20): the sheet's people (host, guest, guest_2 … guest_9:
+# the badge names every speaker turn by its role) and the show
+SHEET_SHOWN = SHEET_PEOPLE + ("show",)
 
 
 def episode_sheet(paths, src: dict) -> dict:
     """The episode sheet values (SHEET_SHOWN) of the reel's episode, from output/episodes/<EP>/00_inputs/episode.json:
-    names, the guest's role, the show. {} without an episode_id or before `reel episode-prep`. The compiler reads the
-    sheet only through this, so fingerprint() binds every sheet value that can reach the screen."""
+    the people's names (and roles), the show. {} without an episode_id or before `reel episode-prep`. The compiler
+    reads the sheet only through this, so fingerprint() binds every sheet value that can reach the screen."""
     from .episode import EpisodePaths, load_episode
+    eid = src.get("episode_id")
+    if "episode_id" in src and not isinstance(eid, str):     # review a1c14fc P3-2: a plain line, never a TypeError
+        from .errors import Guidance
+        raise Guidance(f"invalid episode id {eid!r} in 00_inputs/source.json: it must be text, e.g. \"EP12\"",
+                       "Put back the episode id `reel episodes` lists (in quotes), or pick the reel again with "
+                       "`reel reels-select`")
     try:
         sheet = load_episode(EpisodePaths(paths.root, src["episode_id"])).get("sheet") or {}
     except (SystemExit, KeyError):
         return {}
     return {k: sheet[k] for k in SHEET_SHOWN if k in sheet}
+
+
+def badge_turns(rm: dict, sp: dict) -> list | None:
+    """The speaker turns the speaker badge shows from 00_inputs/speakers.json `sp` (each named by its `speaker` role);
+    None when the recipe's `speaker_badge` (`rm`, the recipe's motion values) is off or fewer than two speakers talk:
+    then no badge, and speakers.json is not bound (review a1c14fc P3-1: every reel has one)."""
+    if not rm.get("speaker_badge", True):
+        return None
+    turns = sp.get("turns") or []
+    if len({t.get("speaker") for t in turns}) < 2:
+        return None
+    return turns
 
 
 def fingerprint(paths) -> str:
@@ -81,12 +102,12 @@ def fingerprint(paths) -> str:
     ms = music_state(paths.root, sm, [rmood] if isinstance(rmood, str) else list(rmood))
     if ms:                      # no tracks: the fingerprint stays as before T4.6 (approved plans do not go stale)
         h.update(json.dumps(ms, sort_keys=True, ensure_ascii=True).encode())
-    # BL-20: no names shown (no sheet values, no speakers.json): the fingerprint stays as before BL-20
+    # BL-20: the names shown. No sheet value shown and no speaker badge: the fingerprint stays as before BL-20
     shown = episode_sheet(paths, src)
     if shown:
         h.update(b"sheet" + json.dumps(shown, sort_keys=True, ensure_ascii=True).encode())
     sp = paths.p("00_inputs/speakers.json")
-    if sp.exists():
+    if badge_turns((src.get("recipe") or {}).get("motion") or {}, read_json(sp, {}) or {}):
         h.update(b"speakers" + sp.read_bytes())
     cues = shown_cues(paths, script, src)       # BL-21: no captions shown (or no file): as before BL-21
     if cues is not None:
@@ -618,11 +639,17 @@ class _Compiler:
         if not self.rm.get("speaker_badge", True):
             return None
         sp = read_json(self.paths.p("00_inputs/speakers.json"), {}) or {}
-        turns = sp.get("turns") or []
-        if len({t.get("speaker") for t in turns}) < 2:
+        turns = badge_turns(self.rm, sp)
+        if not turns:
             return None
-        names = {r: person_name(self.sheet.get(r)) or ((sp.get("people") or {}).get(r) or {}).get("name") or r
+        names = {r: person_name(self.sheet.get(r)) or ((sp.get("people") or {}).get(r) or {}).get("name")
                  for r in {t.get("speaker") for t in turns}}
+        unnamed = sorted(str(r) for r, n in names.items() if not n)
+        if unnamed:             # never a raw role id such as "guest_2" on screen (review a1c14fc P1-1): fail closed
+            self.err(f"speaker badge: {', '.join(unnamed)} has no name in the episode sheet or in "
+                     f"00_inputs/speakers.json people: add `{unnamed[0]}: <name>` to the episode sheet "
+                     "(data/Episodes/<episode>.md), then run `reel episode-prep` and `reel motion-plan` again")
+            return None
         segs = []
         for t in turns:
             a, b = self.frame(t["start_ms"]), self.frame(t["end_ms"])
@@ -813,7 +840,8 @@ def _finish(paths, C: _Compiler, script: dict, scenes: list[dict] | None, early:
     if plan is not None:
         write_json(paths.p("01_analysis/motion-plan.json"), plan)
     val = {"ok": ok, "errors": C.errors, "warnings": C.warnings, "approvals": C.approvals,
-           "editorial_lines": C.editorial, "recipe_notes": C.notes, "fingerprint": fp, "generated": now_iso()}
+           "editorial_lines": C.editorial, "recipe_notes": C.notes, "fingerprint": fp,
+           "plan_sha1": plan_sha1(paths) if plan is not None else None, "generated": now_iso()}
     write_json(paths.p("01_analysis/motion-validation.json"), val)
     md = write_motion_md(paths, plan, val, C)
     if ok:
@@ -828,6 +856,32 @@ def _music_line(plan: dict) -> str:
                 f"{len(m.get('keyframes') or [])} level keys ({(m.get('license') or {}).get('license', '?')})")
     need = next((n for n in plan.get("needs_you") or [] if n.get("kind") == "music"), None)
     return f"none — {need['text']}" if need else "none (off in the motion script)"
+
+
+# review 91b6b44 P2-1: what the editor reads when the compiled plan is not the one `reel motion-plan` wrote
+PLAN_EDITED = {"en": "The motion plan file was changed by hand after it was made. It has to be made again before anything "
+                     "is built.",
+               "ar": "ملف خطة الموشن اتعدّل بإيد بعد ما اتعمل. لازم يتعمل تاني قبل ما أي حاجة تتبني."}
+PLAN_EDITED_WHY = ("01_analysis/motion-plan.json is not the plan `reel motion-plan` wrote (edited by hand, or compiled "
+                   "by an older WhyNot Cut): run `reel motion-plan` again")
+
+
+def plan_sha1(paths) -> str:
+    """The sha1 of 01_analysis/motion-plan.json as it is on disk."""
+    return hashlib.sha1(paths.p("01_analysis/motion-plan.json").read_bytes()).hexdigest()
+
+
+def plan_edited(paths) -> str | None:
+    """Review 91b6b44 P2-1: PLAN_EDITED_WHY when the compiled plan on disk is not the file `reel motion-plan` wrote
+    (motion-validation.json `plan_sha1`, recorded when it was written; a record without one is from an older engine);
+    None when it is, or when there is no compiled plan or validation to compare (the callers refuse those already).
+    The approval binds the plan's inputs (fingerprint), and this binds the compiled file to them: a caption, name or
+    any scene text edited straight in motion-plan.json never reaches a build with a current approval."""
+    f = paths.p("01_analysis/motion-plan.json")
+    val = read_json(paths.p("01_analysis/motion-validation.json"), {}) or {}
+    if not f.exists() or not val:
+        return None
+    return None if val.get("plan_sha1") == plan_sha1(paths) else PLAN_EDITED_WHY
 
 
 def _caption_mode(v: str | None) -> str | None:

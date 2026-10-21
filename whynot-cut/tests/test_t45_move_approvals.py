@@ -102,6 +102,33 @@ class Approved(Base):
         return {k: root.joinpath(*CM._entry(*k)["file"].split("/")).read_bytes() for k in self.ALL}
 
 
+class TestMotionPlanReseal(Base):
+    """Review 91b6b44 P2-1: motion-validation.json binds the compiled motion-plan.json (plan_sha1). A move rewrites
+    the plan's paths and moves the record on, so the plan never reads as edited by hand; a plan already edited before
+    the move still reads as edited."""
+    def test_a_move_reseals_an_unedited_plan_only(self):
+        from lib.motion_plan import plan_edited
+        a = lambda r: str(self.src.joinpath(*r.split("/")))
+        for vid, edited in (("M1", False), ("M2", True)):
+            m = Paths(self.src, vid)
+            write_json(m.p("00_inputs/source.json"), {"kind": "motion_reel", "format": "9x16"})
+            write_json(m.p("01_analysis/motion-plan.json"), {"scenes": [], "audio": {"dialogue": a("data/Raw/clip 1.mp4")}})
+            write_json(m.p("01_analysis/motion-validation.json"), {"ok": True,
+                                                                   "plan_sha1": sha(m.p("01_analysis/motion-plan.json"))})
+            if edited:
+                write_json(m.p("01_analysis/motion-plan.json"), {"scenes": [{"text": "HANDEDITED"}],
+                                                                 "audio": {"dialogue": a("data/Raw/clip 1.mp4")}})
+        self.hold()
+        doc = CM.move(self.src, self.dest, apply=True)
+        self.assertTrue(doc.get("applied"), doc)
+        m1, m2 = Paths(self.dest, "M1"), Paths(self.dest, "M2")
+        self.assertEqual(read_json(m1.p("01_analysis/motion-plan.json"))["audio"]["dialogue"],
+                         str(self.dest / "data/Raw/clip 1.mp4"))
+        with use_context(Context(self.dest)):
+            self.assertIsNone(plan_edited(m1))
+            self.assertIsNotNone(plan_edited(m2))
+
+
 class TestFixture(Approved):
     def test_every_approval_holds_before_the_move(self):
         self.assertEqual(sorted(self.held), self.ALL)

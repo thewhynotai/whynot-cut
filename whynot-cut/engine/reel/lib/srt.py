@@ -22,9 +22,16 @@ def read_srt(path: Path) -> list[dict]:
         i = 1 if "-->" not in lines[0] else 0
         if "-->" not in lines[i]:
             continue
-        a, b = _ARROW.split(lines[i].strip())[:2]
-        b = b.split()[0]
-        cues.append({"index": len(cues) + 1, "start_ms": parse_ts(a), "end_ms": parse_ts(b),
+        try:
+            a, b = _ARROW.split(lines[i].strip())[:2]
+            start, end = parse_ts(a), parse_ts(b.split()[0])
+        except (IndexError, ValueError):       # review 91b6b44 P3-2: name the file and the cue, never "list index"
+            from .errors import FileFormatError
+            line = next((k for k, t in enumerate(text.split("\n"), 1) if t.strip() == lines[i].strip()), 1)
+            raise FileFormatError(path, line, 1,
+                                  f"cue {len(cues) + 1}: the time line {lines[i].strip()!r} is not like "
+                                  "'00:00:01,000 --> 00:00:02,500'") from None
+        cues.append({"index": len(cues) + 1, "start_ms": start, "end_ms": end,
                      "text": "\n".join(lines[i + 1:]).strip()})
     return cues
 

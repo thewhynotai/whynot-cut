@@ -378,7 +378,8 @@ class Motion(Base):
         write(self.p("01_analysis/motion-plan.json"), {"fps": 25, "scenes": []})
         write(self.p("01_analysis/motion-plan.md"), "# Motion plan — EP02_R03_MO\n")
         fp = self.motion_fp()
-        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": fp})
+        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": fp,
+                                                              "plan_sha1": self.plan_sha1()})
         write(self.p("08_quality_control/animatic/EP02_R03_MO_animatic.mp4"), b"\x00")
         f = self.fields()
         s = self.steps(f)
@@ -413,18 +414,25 @@ class Motion(Base):
         self.assertIsNone(f["approval"])
         self.assertEqual(self.steps(f)["approve"], "pending")
 
-    def episode_reel(self, guest="Sara — CEO"):
-        """BL-20: a motion reel of episode EP02 whose sheet names the guest, compiled and approved."""
-        write(self.p("00_inputs/source.json"), {"kind": "motion_reel", "episode_id": "EP02"})
-        self.episode = self.root / "output/episodes/EP02/00_inputs/episode.json"
-        write(self.episode, {"episode_id": "EP02", "sheet": {"guest": guest, "avoid": []}})
-        write(self.p("00_inputs/speakers.json"), {"people": {"guest": {"name": "Sara"}}, "turns": []})
+    def episode_reel(self, guest="Sara — CEO", eid="EP02", episode_dir=None):
+        """BL-20: a motion reel of episode `eid` whose sheet names the guest, with a two-speaker badge, compiled and
+        approved. `episode_dir`: the episode's folder already exists there (e.g. a link to elsewhere)."""
+        write(self.p("00_inputs/source.json"), {"kind": "motion_reel", "episode_id": eid})
+        self.episode = (episode_dir or self.root / f"output/episodes/{eid}") / "00_inputs/episode.json"
+        write(self.episode, {"episode_id": str(eid), "sheet": {"guest": guest, "avoid": []}})
+        write(self.p("00_inputs/speakers.json"), {"people": {"host": {"name": "Ahmed"}, "guest": {"name": "Sara"}},
+                                                  "turns": [{"start_ms": 0, "end_ms": 1000, "speaker": "host"},
+                                                            {"start_ms": 1000, "end_ms": 2000, "speaker": "guest"}]})
         write(self.p("01_analysis/motion-script.json"), {"scenes": []})
         write(self.p("01_analysis/motion-plan.json"), {"fps": 25, "scenes": []})
         fp = self.motion_fp()
-        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": fp})
+        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": fp,
+                                                              "plan_sha1": self.plan_sha1()})
         write(self.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor", "at": iso(NOW),
                                                           "plan_fingerprint": fp, "kind": "motion", "format": APPROVAL_FORMAT})
+
+    def plan_sha1(self):
+        return hashlib.sha1(self.p("01_analysis/motion-plan.json").read_bytes()).hexdigest()
 
     def test_a_renamed_guest_in_the_episode_sheet_is_seen_by_the_cached_panel(self):
         """BL-20: the episode.json the motion fingerprint reads is watched: a guest renamed by `reel episode-prep`
@@ -435,6 +443,77 @@ class Motion(Base):
         write(self.episode, {"episode_id": "EP02", "sheet": {"guest": "Mona — CEO", "avoid": []}})
         self.assertNotEqual(self.steps(cache(self.home, now=NOW))["approve"], "done")
 
+    def test_a_compiled_plan_edited_by_hand_has_no_approval(self):
+        """Review 91b6b44 P2-1: the panel agrees with the CLI: a motion-plan.json changed after `reel motion-plan`
+        wrote it (motion-validation.json plan_sha1) shows no approval card and the approval is not done; an oversized
+        plan is never handed to the helpers."""
+        self.episode_reel()
+        cache = ES.PanelFields()
+        self.assertEqual(self.steps(cache(self.home, now=NOW))["approve"], "done")
+        write(self.p("01_analysis/motion-plan.json"), {"fps": 25, "scenes": [{"text": "HANDEDITED"}]})
+        f = cache(self.home, now=NOW)
+        self.assertNotEqual(self.steps(f)["approve"], "done")
+        self.assertIsNone(f["approval"])
+        write(self.p("01_analysis/motion-plan.json"), b" " * (ES.EVIDENCE_MAX + 1))
+        with mock.patch("lib.motion_plan.plan_edited", side_effect=AssertionError("called")) as called:
+            self.assertNotEqual(self.steps(self.fields())["approve"], "done")
+        self.assertEqual(called.call_count, 0)
+
+    def test_a_speakers_json_edit_is_seen_by_the_cached_panel(self):
+        """Review a1c14fc P3-3 (M17): speakers.json (the badge's names and turns) is watched."""
+        self.episode_reel()
+        cache = ES.PanelFields()
+        self.assertEqual(self.steps(cache(self.home, now=NOW))["approve"], "done")
+        sp = json.loads(self.p("00_inputs/speakers.json").read_text(encoding="utf-8"))
+        sp["people"]["guest"]["name"] = "Mona"
+        write(self.p("00_inputs/speakers.json"), sp)
+        self.assertNotEqual(self.steps(cache(self.home, now=NOW))["approve"], "done")
+
+    def test_a_numeric_episode_id_is_refused_by_engine_and_panel_alike(self):
+        """Review a1c14fc P3-2: "episode_id": 12 (not text) is refused by the engine with a plain line (it reads no
+        episode.json), and the panel agrees: no approval holds, whatever the record says."""
+        from lib.errors import Guidance
+        self.episode_reel()                                   # a current approval for EP02 ...
+        rec = json.loads(self.p("01_analysis/plan-approval.json").read_text(encoding="utf-8"))
+        write(self.p("00_inputs/source.json"), {"kind": "motion_reel", "episode_id": 12})        # ... then a number
+        write(self.root / "output/episodes/12/00_inputs/episode.json", {"episode_id": "12", "sheet": {"guest": "X"}})
+        with self.assertRaises(Guidance) as cm:
+            self.motion_fp()
+        self.assertIn("episode id", cm.exception.error)
+        write(self.p("00_inputs/source.json"), {"kind": "motion_reel", "episode_id": None})
+        with self.assertRaises(Guidance):
+            self.motion_fp()
+        write(self.p("00_inputs/source.json"), {"kind": "motion_reel", "episode_id": 12})
+        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": rec["plan_fingerprint"]})
+        f = self.fields()
+        self.assertNotEqual(self.steps(f)["approve"], "done")
+        self.assertIsNone(f["approval"])
+
+    def test_an_episode_json_through_a_link_outside_the_client_root_skips_the_fingerprint(self):
+        """Review a1c14fc P3-3 (M16): output/episodes/EP02 is a junction (Windows) or symlink to a folder outside the
+        client: the panel never hands it to the fingerprint. The link is removed as a link only."""
+        outside = self.tmp / "outside" / "EP02"
+        outside.mkdir(parents=True)
+        link = self.root / "output/episodes/EP02"
+        link.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if os.name == "nt":
+                import _winapi
+                _winapi.CreateJunction(str(outside), str(link))
+            else:
+                os.symlink(outside, link, target_is_directory=True)
+        except (OSError, AttributeError) as e:
+            self.skipTest(f"no directory link here: {e}")
+        try:
+            self.episode_reel(episode_dir=link)
+            self.assertTrue((outside / "00_inputs/episode.json").is_file())
+            with mock.patch("lib.motion_plan.fingerprint", side_effect=AssertionError("called")) as fp:
+                self.assertNotEqual(self.steps(self.fields())["approve"], "done")
+            self.assertEqual(fp.call_count, 0)
+        finally:
+            (os.rmdir if os.name == "nt" else os.unlink)(link)        # the link only, never what it points to
+        self.assertTrue((outside / "00_inputs/episode.json").is_file())
+
     def test_caption_words_are_watched_and_checked(self):
         """BL-21: captions-short.srt (read by the motion fingerprint when the plan shows captions) is watched, so a
         caption word fixed by hand turns the cached approval back to waiting, and checked first: an oversized one is
@@ -443,7 +522,8 @@ class Motion(Base):
         self.episode_reel()
         write(self.p("01_analysis/motion-script.json"), {"captions": "subtitles", "scenes": [{"id": "S01"}]})
         fp = self.motion_fp()
-        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": fp})
+        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": fp,
+                                                              "plan_sha1": self.plan_sha1()})
         write(self.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor", "at": iso(NOW),
                                                           "plan_fingerprint": fp, "kind": "motion", "format": APPROVAL_FORMAT})
         cache = ES.PanelFields()
@@ -580,7 +660,8 @@ class EngineSummary(Base):
         from lib.motion_plan import fingerprint
         with common.use_context(common.Context(root=self.root, home=self.home)):
             fp = fingerprint(common.Paths(self.root, self.item))
-        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": fp})
+        write(self.p("01_analysis/motion-validation.json"), {"ok": True, "errors": [], "fingerprint": fp,
+                                                              "plan_sha1": hashlib.sha1(self.p("01_analysis/motion-plan.json").read_bytes()).hexdigest()})
         f = self.fields()
         summary = f["approval"]["summary"]
         self.assertTrue(summary.startswith("Motion plan — EP02_R03_MO"), summary)

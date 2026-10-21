@@ -16,7 +16,9 @@ Run engine-side Python with `reel py` (`reel py <script.py> [args]`, `-m <module
 ## When to invoke
 - **Build.** The editor approved the motion plan: build, read back, render.
 - **Rebuild.** After a revision (`--replace-edited` only when the lead says the editor agreed to replace their AE edits).
-- **No After Effects / no bridge.** Deliver `reel motion-build --script-only` and say what is not verified.
+- **No After Effects / no bridge.** Once the editor approved the current motion plan, deliver `reel motion-build
+  --script-only` and say what is not verified (`--script-only` and `--run-script` refuse without that approval, like
+  the build).
 
 ## How you work
 1. `reel ae-status`. Not alive → stop and report what the editor must do (start/restart After Effects; PlayerDebugMode

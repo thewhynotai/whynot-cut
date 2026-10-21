@@ -391,6 +391,14 @@ class TestCliGuidance(TempDir):
         doc = self.assert_guidance(code, json.loads(out), err)
         self.assertEqual(Path(doc["log"]), common.engine_home() / "logs" / "pipeline.log")
 
+    def test_ae_script_needs_the_approved_plan(self):
+        """Review 91b6b44 P3-4b: the edit-mode `ae-script` writes a build script to run by hand: like `ae-build` it is
+        refused (exit 2, `blocked`) without the editor's approval of the current plan, before anything is written."""
+        code, doc, err = reel(self.root, "ae-script", "--extras", video_id="C1")
+        self.assertEqual(code, 2, (doc, err))
+        self.assertIn("not approved", doc["blocked"])
+        self.assertFalse((self.root / "output/projects/C1/04_after_effects/scripts").exists())
+
     def test_refusals_stay_2_and_string_exits_stay_1(self):
         code, doc, err = reel(self.root, "ae-script", video_id="C1")          # an extra without --extras
         self.assertEqual(code, 2, err)
