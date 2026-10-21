@@ -5,7 +5,8 @@ stands, whether the main account is stopped by a usage limit). Refreshes every 5
   python -X utf8 agency_live.py --once   # print one screen and exit
 
 Sources (read only): the Claude app's session files (model, effort, last activity, error, one-line summary), the
-session transcripts (their write time = working now), helper status.json + run logs, 00-HQ BOARD / intake / inbox,
+session transcripts (their write time = working now) and their sub-agents (`<session>/subagents/agent-*.jsonl` + `.meta.json`),
+the app's plan-usage-history.json (main-account usage %), helper status.json + run logs, 00-HQ BOARD / intake / inbox,
 `heavy.sh status` and git. This screen writes nothing; `heavy.sh status` itself does the queue's own designed cleanup
 (dead tickets, day-old .peak files). English on purpose: the Windows console cannot shape Arabic.
 """
@@ -17,6 +18,8 @@ import hq_status as hq  # noqa: E402  (parse_board, helper_state, open_requests,
 
 APP_SESSIONS = Path(os.environ.get("APPDATA", ""), "Claude", "claude-code-sessions")
 TRANSCRIPTS = Path.home() / ".claude" / "projects"
+USAGE = Path(os.environ.get("APPDATA", ""), "Claude", "plan-usage-history.json")
+AGENT_WINDOW_SEC = 6 * 3600  # sub-agents started or active in the last 6 h are listed (finished ones are not)
 HEAVY = "C:/Users/LOQ/AppData/Roaming/Claude/side-session-notes/local_263cabbf-75e3-42a1-b384-1753a7bd4dad/heavy.sh"
 WORKING_SEC = 180   # a transcript or run log written this recently = working now
 GOAL_TAG, GOAL = "v3.0.0-p4", "finish Gate 4 -> release v3.0.0-p4"  # update both at each release
@@ -91,6 +94,40 @@ def account_state(errors, now):
     if reset is None:
         return ("LIMITED", None) if now - at < dt.timedelta(hours=5) else ("OK", None)
     return ("LIMITED", reset) if now < reset else ("OK", (at, reset))
+
+
+def usage_line(samples, now):
+    """plan-usage-history samples -> 'used 37% of the 5-hour limit (at 22:20) · weekly 17%' for the account whose
+    sample is newest ('fh' = 5-hour window %, shown when under 5 h old; 'sd' = 7-day %, when under 24 h old), or ''."""
+    if not samples:
+        return ""
+    newest = max(samples, key=lambda x: x.get("t", 0))
+    mine = [x for x in samples if x.get("org") == newest.get("org")]
+    fh = max((x for x in mine if "fh" in (x.get("u") or {})), key=lambda x: x["t"], default=None)
+    sd = max((x for x in mine if "sd" in (x.get("u") or {})), key=lambda x: x["t"], default=None)
+    parts = []
+    if fh and now - dt.datetime.fromtimestamp(fh["t"] / 1000) < dt.timedelta(hours=5):
+        at = dt.datetime.fromtimestamp(fh["t"] / 1000)
+        parts.append(f"used {fh['u']['fh']}% of the 5-hour limit (at {at:%H:%M})")
+    if sd and now - dt.datetime.fromtimestamp(sd["t"] / 1000) < dt.timedelta(hours=24):
+        parts.append(f"weekly {sd['u']['sd']}%")
+    return " · ".join(parts)
+
+
+def subagent_state(meta, last, age_sec, parent_limited=False):
+    """meta: agent-*.meta.json; last: its transcript's last line (dict); age_sec: since the transcript was written;
+    parent_limited: its session hit a usage limit after the agent's last write. -> None when it finished, else
+    (word, colour)."""
+    msg = (last or {}).get("message") or {}
+    if meta.get("finished") or (last or {}).get("type") == "assistant" and msg.get("stop_reason") == "end_turn":
+        return None
+    if age_sec is not None and age_sec <= WORKING_SEC:
+        return "WORKING now", "green"
+    if parent_limited:
+        return "STOPPED: usage limit", "red"
+    if (age_sec or 0) > 1800:
+        return f"STOPPED? quiet {ago((age_sec or 0) / 60)}", "gray"
+    return f"QUIET {ago((age_sec or 0) / 60)}", "yellow"
 
 
 def next_run(minutes, hours, now):
@@ -295,7 +332,8 @@ def _session(path):
     except (OSError, ValueError):
         data = {}
     return {k: data.get(k) for k in ("sessionId", "cliSessionId", "model", "effort", "lastActivityAt", "createdAt",
-                                     "scheduledTaskId", "error", "errorAt", "postTurnSummary", "lastTurnReport")}
+                                     "scheduledTaskId", "error", "errorAt", "postTurnSummary", "lastTurnReport",
+                                     "title", "cwd")}
 
 
 def _lines(path):
@@ -332,7 +370,55 @@ def _run(cmd, timeout=20):
         return "", None
 
 
-_slow = {"t": 0, "queue": "", "git": ("?", "?"), "alive": {}}
+_slow = {"t": 0, "queue": "", "git": ("?", "?"), "alive": {}, "agents": [], "top": []}
+
+
+def _tail(path, size=262144):
+    """Read only a transcript's end -> (last JSON line, model and effort of the last line that names them)."""
+    last, model, effort = {}, "", ""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - size))
+            raws = f.read().splitlines()
+    except OSError:
+        return last, model, effort
+    for raw in reversed(raws):
+        try:
+            e = json.loads(raw)
+        except ValueError:
+            continue
+        last = last or e
+        model = model or (e.get("message") or {}).get("model") or ""
+        effort = effort or e.get("effort") or ""
+        if model and effort:
+            break
+    return last, model, effort
+
+
+def scan_agents(now_ts):
+    """Unfinished sub-agents of the main account's sessions and of both helpers' runs, active in the last 6 h.
+    -> [(parent cli id or helper, meta, last line, model, effort, age seconds)]."""
+    roots = [(str(TRANSCRIPTS / "*" / "*" / "subagents" / "agent-*.jsonl"), None)]
+    roots += [(str(hq.ACCOUNTS / h / "projects" / "*" / "*" / "subagents" / "agent-*.jsonl"), h) for h, _, _ in HELPERS]
+    out = []
+    for pattern, helper in roots:
+        for path in glob.glob(pattern):
+            try:
+                age = now_ts - os.path.getmtime(path)
+            except OSError:
+                continue
+            if age > AGENT_WINDOW_SEC:
+                continue
+            try:
+                meta = json.loads(Path(path[:-6] + ".meta.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                meta = {}
+            if meta.get("finished"):
+                continue
+            parent = helper or Path(path).parent.parent.name
+            out.append((parent, meta) + _tail(path) + (age,))
+    return out
 
 
 def refresh_slow():
@@ -345,8 +431,46 @@ def refresh_slow():
     alive = {}
     for h, _, _ in HELPERS:
         _, rc = _run([sys.executable, "-X", "utf8", str(hq.ACCOUNTS / "helper_loop.py"), h, "--alive"])
-        alive[h] = None if rc is None else rc == 0
-    _slow.update(queue=queue, git=(tag, ahead), alive=alive, t=time.time())
+        alive[h] = _slow["alive"].get(h) if rc is None else rc == 0  # a timed-out check keeps the last answer
+    agents = scan_agents(time.time())
+    ram = hq.ram_percent() or 0
+    try:
+        top = top_memory() if ram >= 85 else []
+    except Exception:
+        top = []
+    _slow.update(queue=queue, git=(tag, ahead), alive=alive, agents=agents, top=top, t=time.time())
+
+
+def top_memory(n=3):
+    """[(process name, MB)] of the n biggest processes by working set (Win32 API: fast even when the PC thrashes)."""
+    import ctypes
+    from ctypes import wintypes
+    psapi, k32 = ctypes.WinDLL("psapi"), ctypes.WinDLL("kernel32")
+    k32.OpenProcess.restype, k32.OpenProcess.argtypes = wintypes.HANDLE, [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+    class PMC(ctypes.Structure):
+        _fields_ = [("cb", wintypes.DWORD), ("PageFaultCount", wintypes.DWORD)] + \
+                   [(f, ctypes.c_size_t) for f in ("Peak", "WorkingSet", "QPP", "QP", "QPNP", "QNP", "Page", "PeakPage")]
+    pids = (wintypes.DWORD * 4096)()
+    got = wintypes.DWORD()
+    if not psapi.EnumProcesses(pids, ctypes.sizeof(pids), ctypes.byref(got)):
+        return []
+    sizes = {}
+    for pid in pids[: got.value // ctypes.sizeof(wintypes.DWORD)]:
+        h = k32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION: also opens protected processes
+        if not h:
+            continue
+        try:
+            pmc, name, size = PMC(), ctypes.create_unicode_buffer(260), wintypes.DWORD(260)
+            pmc.cb = ctypes.sizeof(PMC)
+            if psapi.GetProcessMemoryInfo(h, ctypes.byref(pmc), pmc.cb) and \
+                    k32.QueryFullProcessImageNameW(h, 0, name, ctypes.byref(size)):
+                exe = os.path.basename(name.value).rsplit(".", 1)[0]
+                sizes[exe] = sizes.get(exe, 0) + pmc.WorkingSet
+        finally:
+            k32.CloseHandle(h)
+    return [(k, v // 2 ** 20) for k, v in sorted(sizes.items(), key=lambda kv: -kv[1])[:n]]
 
 
 def card_mtime_fn(hq_dir):
@@ -384,6 +508,12 @@ def build(now=None):
     else:
         last = f" (last usage limit ended {info[1]:%a %H:%M})" if info else ""
         add(f"Main account (info@): OK{last}", "green")
+    try:
+        usage = usage_line(json.loads(USAGE.read_text(encoding="utf-8")).get("samples") or [], now)
+    except (OSError, ValueError):
+        usage = ""
+    if usage:
+        lines.append(("\0   ·   " + usage, ""))
     tag, ahead = slow["git"]
     if not slow["t"]:
         add(f"Goal: {GOAL}.  (checking git…)")
@@ -397,6 +527,9 @@ def build(now=None):
     else:
         old = (now_ts - slow["t"]) / 60
         add("PC: " + queue_summary(q) + (f"   (queue info {ago(old)} old)" if old > 1 else ""))
+        if slow.get("top"):
+            add("  RAM is high: biggest users " + ", ".join(f"{n} {mb / 1024:.1f} GB" for n, mb in slow["top"]) +
+                ". New test jobs wait until RAM is under 85%.", "red")
     add()
 
     # who
@@ -434,14 +567,45 @@ def build(now=None):
         tail = _lines(str(Path(hq.ACCOUNTS, h, "auto", "auto.log")))[-3:]
         card = helper_card(h, log_lines, tail, board_ids) if running else ""
         tests = helper_tests(h, card, q) if running and slow["t"] else None
-        word, colour = helper_status(st["state"], slow["alive"].get(h), log_age, st["reason"], raw.get("until"),
-                                     waiting, tests)
+        alive = slow["alive"].get(h)
+        word, colour = helper_status(st["state"], alive, log_age, st["reason"], raw.get("until"), waiting, tests)
         doing = (f"{card}: " if card else "") + said
         add(f"{name:<30}{account:<12}{model_name(raw.get('model')):<10}{(raw.get('effort') or '?'):<8}")
         lines.append(("\0" + word.ljust(40), colour))
         lines.append(("\0" + (doing or "-"), ""))
     for old in [k for k in _cache if k.endswith(".jsonl") and k not in logs_now]:  # finished runs' logs (MBs)
         del _cache[old]
+    add()
+
+    # agents: the sub-agents those sessions started (reviewers, builders) that have not finished
+    names = {s.get("cliSessionId"): n for sid, n, _ in PEOPLE for s in [by_id.get(sid) or {}]}
+    names.update({s.get("cliSessionId"): rname for s in sessions for tid, rname, _, _ in ROUTINES
+                  if s.get("scheduledTaskId") == tid})
+    names.update({h: n.split(" (")[0] for h, n, _ in HELPERS})
+    for s in sessions:  # any other chat on the main account: its English title, else its folder
+        if s.get("cliSessionId") and s["cliSessionId"] not in names:
+            names[s["cliSessionId"]] = latin(s.get("title"), 26) or f"Chat in {Path(s.get('cwd') or '?').name}"
+    by_cli = {s.get("cliSessionId"): s for s in sessions if s.get("cliSessionId")}
+    agents = []
+    for parent, meta, last, model, effort, age in slow["agents"]:
+        ps = by_cli.get(parent) or {}
+        err_at = _ms(ps.get("errorAt"))
+        limited = bool(ps.get("error") and "limit" in ps["error"].lower() and err_at and
+                       err_at.timestamp() >= now_ts - age)
+        state = subagent_state(meta, last, age, limited)
+        if state:
+            agents.append((names.get(parent, "Other chat"), meta, model, effort, age, state))
+    add(f"AGENTS working inside those sessions ({len(agents) if slow['t'] else '…'})", "bold")
+    if not slow["t"]:
+        add("  checking…", "gray")
+    elif not agents:
+        add("  none right now", "gray")
+    for parent, meta, model, effort, age, (word, colour) in sorted(agents, key=lambda a: a[4])[:12]:
+        add(f"  {parent[:28]:<28}{model_name(model or meta.get('model')):<10}{(effort or '?'):<8}")
+        lines.append(("\0" + word.ljust(16), colour))
+        lines.append(("\0" + (latin(meta.get("description"), 90) or meta.get("agentType") or "-"), ""))
+    if len(agents) > 12:
+        add(f"  … and {len(agents) - 12} more", "gray")
     add()
 
     # routines

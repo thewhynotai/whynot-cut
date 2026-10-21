@@ -186,6 +186,33 @@ class Decisions(unittest.TestCase):
         self.assertEqual(al.recent_decisions(state, NOW.date())[-1], "10-20 08:24 BL-16 FIX r1")  # older day: date shown
 
 
+class Usage(unittest.TestCase):
+    def test_newest_account_and_stale_weekly(self):
+        ms = lambda d: int(d.timestamp() * 1000)  # noqa: E731
+        samples = [
+            {"t": ms(dt.datetime(2026, 10, 20, 16, 16)), "org": "old", "u": {"fh": 46, "sd": 17}},
+            {"t": ms(dt.datetime(2026, 10, 21, 21, 52)), "org": "main", "u": {"fh": 100}},
+            {"t": ms(dt.datetime(2026, 10, 21, 22, 20)), "org": "main", "u": {"fh": 0}},
+        ]
+        self.assertEqual(al.usage_line(samples, NOW), "used 0% of the 5-hour limit (at 22:20)")
+        samples.append({"t": ms(dt.datetime(2026, 10, 21, 22, 30)), "org": "main", "u": {"fh": 12, "sd": 40}})
+        self.assertEqual(al.usage_line(samples, NOW), "used 12% of the 5-hour limit (at 22:30) · weekly 40%")
+        self.assertEqual(al.usage_line([], NOW), "")
+        self.assertEqual(al.usage_line(samples, NOW + dt.timedelta(hours=6)), "weekly 40%")  # 5-hour % too old
+
+
+class SubAgents(unittest.TestCase):
+    def test_state(self):
+        done = {"type": "assistant", "message": {"stop_reason": "end_turn", "content": [{"type": "text"}]}}
+        tool = {"type": "user", "message": {"content": [{"type": "tool_result"}]}}
+        self.assertIsNone(al.subagent_state({"finished": True}, tool, 10))
+        self.assertIsNone(al.subagent_state({}, done, 10))
+        self.assertEqual(al.subagent_state({}, tool, 30), ("WORKING now", "green"))
+        self.assertEqual(al.subagent_state({}, tool, 600), ("QUIET 10 min", "yellow"))
+        self.assertEqual(al.subagent_state({}, tool, 600, parent_limited=True), ("STOPPED: usage limit", "red"))
+        self.assertEqual(al.subagent_state({}, tool, 3600), ("STOPPED? quiet 1 h 00 min", "gray"))
+
+
 class Render(unittest.TestCase):
     def test_continuation_parts_and_width(self):
         out = al.render([("Name      ", ""), ("\0WORKING", "green"), ("\0 doing a long thing", "")], 20, colour=False)
