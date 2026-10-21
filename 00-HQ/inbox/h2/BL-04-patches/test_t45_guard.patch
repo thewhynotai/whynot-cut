@@ -1,0 +1,12 @@
+diff --git a/whynot-cut/tests/test_t45_guard.py b/whynot-cut/tests/test_t45_guard.py
+index df9ca03..ec59a54 100644
+--- a/whynot-cut/tests/test_t45_guard.py
++++ b/whynot-cut/tests/test_t45_guard.py
+@@ -64,6 +64,7 @@ ALLOW_NAMED = {
+     ("lib/needs_you.py", "typography.json"),          # reads the file names of missing fonts (any form) for the editor
+     ("lib/needs_you.py", "asset-manifest.json"),      # reads each asset's category only
+     ("lib/plan.py", "typography.json"),               # a list of the plan's input files (fingerprint), not a read
++    ("lib/run_state.py", "reference-measurements.json"),   # a video's own 01_analysis copy: parses + hashes it, no path
+ }
+
+
