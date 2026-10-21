@@ -11,10 +11,10 @@
     is SKIPPED (the repo-wide check is test_identity_scan.TestRealTree.test_real_tree_passes_with_the_owners_key)
 Run:  tools/test.sh -p test_legal_notices.py -v
 """
-import json
 import sys as _sys
 _sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
 import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
+import json
 import re
 import subprocess
 import sys
