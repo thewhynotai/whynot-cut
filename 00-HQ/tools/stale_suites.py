@@ -8,7 +8,7 @@ launcher stub at 0 CPU while its child works, so CPU heuristics would kill live 
   python -X utf8 stale_suites.py scan-tag <session id>   list the env.exe launchers carrying WNC_RUN=<session id>
   python -X utf8 stale_suites.py end-tag  <session id>   end those process trees (re-checked just before the kill)
   python -X utf8 stale_suites.py age <ISO time>         minutes since a zoned timestamp (e.g. list_task_runs started_at)
-Lock helpers (the tested rules behind MASTER-INTAKE step 0.1): lock_line / parse_lock / lock_stale.
+Lock helpers (the tested rules behind MASTER-INTAKE step 0.1): lock_line / parse_lock / run_alive / lock_stale.
 """
 import datetime as dt, json, re, subprocess, sys
 
@@ -48,6 +48,17 @@ def parse_lock(text):
     if not m:
         return None, None
     return dt.datetime.strptime(m.group(1), FMT), m.group(2)
+
+
+def run_alive(is_running, run_status):
+    """Is the lock's intake run alive? is_running: get_session isRunning (None if unknown); run_status: that session's
+    status in list_task_runs of whynot-cut-hq-intake (None if not listed). A live run waiting on its review can read
+    isRunning false (2026-10-21 08:38 + 13:38: two intakes ran at once), so "running" in the run list wins."""
+    if is_running or run_status == "running":
+        return True
+    if run_status in ("failed", "succeeded"):
+        return False
+    return is_running
 
 
 def lock_stale(until, session_id, session_running, now):

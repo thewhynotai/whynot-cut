@@ -52,6 +52,30 @@ class Lock(unittest.TestCase):
         self.assertFalse(ss.lock_stale(later, DEAD, None, NOW))          # session state unknown: respect it
 
 
+class RunAlive(unittest.TestCase):
+    """2026-10-21 08:38 + 13:38 incidents: a live intake waiting on its review read `isRunning: false`, the next intake
+    took its lock, and two intakes ran at once. The routine's own run status is the second, authoritative signal."""
+
+    def test_either_signal_alive_means_alive(self):
+        self.assertTrue(ss.run_alive(True, None))
+        self.assertTrue(ss.run_alive(False, "running"))   # the incident: idle-looking session, run still running
+        self.assertTrue(ss.run_alive(None, "running"))
+
+    def test_finished_run_is_dead(self):
+        self.assertFalse(ss.run_alive(False, "failed"))   # cut by a usage limit
+        self.assertFalse(ss.run_alive(False, "succeeded"))
+        self.assertFalse(ss.run_alive(None, "failed"))
+
+    def test_not_in_the_run_list_keeps_the_session_answer(self):
+        self.assertFalse(ss.run_alive(False, None))
+        self.assertIsNone(ss.run_alive(None, None))
+
+    def test_feeds_lock_stale(self):
+        later = NOW + dt.timedelta(hours=3)
+        self.assertFalse(ss.lock_stale(later, DEAD, ss.run_alive(False, "running"), NOW))
+        self.assertTrue(ss.lock_stale(later, DEAD, ss.run_alive(False, "failed"), NOW))
+
+
 class Age(unittest.TestCase):
     """2026-10-20 11:40 incident: the watchdog read UTC run times against a Cairo clock and stopped 3-minute-old runs."""
 

@@ -17,14 +17,19 @@ reading and testing.
 ## 0. Lock, then a quick exit when there is nothing to do
 1. **The lock.** `HQ\intake\intake.lock` holds one line: `until <YYYY-MM-DD HH:MM> session <this run's session id>`
    (get the id with `mcp__ccd_session_mgmt__get_session` "self"). Old locks may lack the `session` part.
-   - If the lock exists and names a session, call `mcp__ccd_session_mgmt__get_session` on that id. The tested rule
-     is `00-HQ/tools/stale_suites.py` `lock_stale` / `parse_lock`:
-     - `isRunning: true` → NOT stale, even if `until` has passed (a long review may outlast it): stop at once
-       ("intake already running").
-     - `isRunning: false` → stale (a run cut by a usage limit).
-     - the session cannot be looked up, or the lock has no `session` (old format) → judged by `until` only.
+   - If the lock exists and names a session, read TWO signals (load both tools in one ToolSearch:
+     `select:mcp__ccd_session_mgmt__get_session,mcp__scheduled-tasks__list_task_runs`):
+     `get_session` on that id (`isRunning`), and `list_task_runs` `whynot-cut-hq-intake` limit 10 (that session's
+     `status`, or "not listed"). Combine them with `stale_suites.py` `run_alive`, then the tested rule `lock_stale` /
+     `parse_lock`. A live run that waits on its review can read `isRunning: false` (2026-10-21 08:38 and 13:38: two
+     intakes ran at once), so a run listed as `running` is ALIVE whatever `isRunning` says:
+     - alive (`isRunning: true`, or listed `running`) → NOT stale, even if `until` has passed (a long review may
+       outlast it): stop at once ("intake already running").
+     - dead (`isRunning: false` and listed `failed`/`succeeded` or not listed) → stale (a run cut by a usage limit).
+     - neither signal is known (session not found and not listed), or the lock has no `session` (old format) →
+       judged by `until` only.
      - the line cannot be read → stale.
-   - Stale → rename it to `intake.lock.stale-<HHMM>`. Only when `get_session` said `isRunning: false`, run
+   - Stale → rename it to `intake.lock.stale-<HHMM>`. Only when the run was judged dead by both signals, run
      `python -X utf8 "<HQ>\tools\stale_suites.py" end-tag <that session id>`: it ends ONLY processes whose command
      carries `WNC_RUN=<that session id>` (that dead run's own review suites, running or still queued in heavy.sh).
      Never run `end-tag` on a lock judged by time alone.
