@@ -18,7 +18,7 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 | ID | Title | Assigned | Status | Card | Next |
 |---|---|---|---|---|---|
 | SETUP-H1 | First login (mayar@) + full suite baseline | H1 (Mayar) | ACCEPTED — closed, no code (nothing to merge) | `tasks/SETUP-H1.md` | r3 2026-10-20 08:26: 8226 run, 51 env/timing; ENV-01 gaps routed |
-| BL-16 | Safe ASCII engine home for a non-ASCII Windows user (Gate 4, high) | H1 | ACCEPTED (2026-10-21 03:39, peer h2 PwM, LIGHT) | `tasks/BL-16.md` | MERGE-QUEUE: executor merges 37cc841 + 2 patches |
+| BL-16 | Safe ASCII engine home for a non-ASCII Windows user (Gate 4, high) | H1 | MERGED (890b144 + patch 1 7db98a5, 2026-10-21 12:25; patch 2 at ADOBE-G4) | `tasks/BL-16.md` | merged by executor |
 | BL-02 | Licence files, notices generator, SPDX tool (tool only) (Gate 4, high) | H1 | READY | `tasks/BL-02.md` | — |
 | S6b | Gate 4 eval cases for the Phase 4 skills (LIGHT) | H1 | READY (22:20; executor froze rules, episode sheet, autopilot, music + review-scan) | `tasks/S6b.md` | after BL-16 FIX |
 | BL-17 | Second install must not overwrite the first install's pointer files (Gate 5) | H1 | READY | `tasks/BL-17.md` | — |
@@ -36,8 +36,8 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 | OPS-01 | Status generator, Arabic reports, ops/hq GitHub mirror (pilot task) | MASTER | DONE_ARCHIVED (02:00, 25/25 tests, 2 reviews) | `tasks/archive/OPS-01/OPS-01.md` | OPS-02 |
 | OPS-02 | Schedule the 4 daily PRIMARY reports + delivery receipt test | MASTER | DONE_ARCHIVED (17:10; runs 13:03 + 17:03 SENT unattended; ACK → Q-006) | `tasks/archive/OPS-02/OPS-02.md` | — |
 | OPS-03 | Fold the release-preview refresh check into the report run; retire lane-watch | MASTER | DONE_ARCHIVED (02:20, 28/28, review r1) | `tasks/archive/OPS-03/OPS-03.md` | — |
-| OPS-04 | After the tag: move 00-HQ into the repo; fix 3 repo references to archived docs | EXECUTOR | NOT READY (after the v3.0.0-p4 tag) | `tasks/OPS-04.md` | — |
-| OPS-05 | First observed cross-account cycle: H1 DONE → H2 peer review → intake verdict | MASTER (observe) | IN PROGRESS (steps 1-4 seen on BL-16; merge pending) | `tasks/OPS-05.md` | — |
+| OPS-04 | After the tag: move 00-HQ into the repo; fix 3 repo references to archived docs; confirm BL-16 merge 890b144 is on remote release/3.0 (OPS-05) | EXECUTOR | NOT READY (after the v3.0.0-p4 tag) | `tasks/OPS-04.md` | — |
+| OPS-05 | First observed cross-account cycle: H1 DONE → H2 peer review → intake verdict | MASTER (observe) | DONE_ARCHIVED (13:05; BL-16 merged 890b144 + 7db98a5; remote SHA → OPS-04) | `tasks/archive/OPS-05/OPS-05.md` | — |
 | OPS-06 | Effort per tier in helper runs (HIGH → high, LIGHT/setup → medium); owner rule 10-19 21:00 | MASTER | DONE_ARCHIVED (02:12, 30/30, review r1) | `tasks/archive/OPS-06/OPS-06.md` | — |
 | OPS-07 | A usage-limit cut must not freeze the intake lock or the heavy queue (incident 10-20 03:54) | MASTER | DONE_ARCHIVED (06:15, 6/6 + sim, reviews r1/r2) | `tasks/archive/OPS-07/OPS-07.md` | — |
 | API-500 | The single paid API job (Stage 3 mechanical part) | LANE | PLANNED_NOT_AUTHORIZED (waits for «نفذ خطة الـ API») | `BUDGET-API.md` | — |

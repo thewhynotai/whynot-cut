@@ -53,7 +53,7 @@
   (OPS-00/01/02/03/06/07 + ENV-01). الـ API مقفول لحد أمرك. التقارير بتوصلك لوحدها 4 مرات في اليوم.
 - **مشكلة المساعدين اتحلت:** الـ tests عندهم كانت بتفشل (563) بسبب البيئة. دلوقتي suite كاملة من حساب H2 = 8,899
   test، صفر فشل (ENV-01).
-- **أهم حاجة مفتوحة:** أول دورة كاملة بين الحسابين لحد الـ merge (OPS-05)، و Gate 4 عند الـ executor.
+- **أهم حاجة مفتوحة:** Gate 4 عند الـ executor لحد الـ tag `v3.0.0-p4`. (أول دورة كاملة بين الحسابين اتقفلت: OPS-05.)
 
 ## 2. الـ Product Roadmap بالكامل
 
@@ -68,7 +68,7 @@
   - [x] OPS-03 — فحص نسخة التجربة جوه التقرير — DONE_ARCHIVED — `00-HQ/tasks/archive/OPS-03/`
   - [x] OPS-06 — مستوى الـ effort حسب الـ tier في شغل المساعدين — DONE_ARCHIVED — `00-HQ/tasks/archive/OPS-06/`
   - [x] OPS-07 — الـ limit مايجمّدش الاستلام ولا طابور الـ tests — DONE_ARCHIVED (اتجرّب لوحده 12:37) — `00-HQ/tasks/archive/OPS-07/`
-  - [ ] OPS-05 — أول دورة handoff حقيقية بين H1 و H2 لحد الـ merge — IN_PROGRESS — خطوات 1–5 اتشافت على BL-16 (اتقبل 03:39)، مستني merge الـ executor
+  - [x] OPS-05 — أول دورة handoff حقيقية بين H1 و H2 لحد الـ merge — DONE_ARCHIVED (10-21 13:05) — BL-16 اتعمله merge (890b144 + 7db98a5)؛ الـ SHA على GitHub بيتأكد في OPS-04 بعد الـ tag
 - [ ] **M1 — Gate 4 → `v3.0.0-p4` (أول build متجرّب جوه Premiere لـ 3.0)** — الـ executor — IN_PROGRESS
   - النتيجة اللي هتشوفها: build حي لـ PODCAST-TEST جوه Premiere + frames، والنسخة في `Releases`.
   - شروط الإغلاق: review مستقل 0 Critical / 0 Important، الـ suite كاملة 0 failures، `validate --strict` مرتين،
@@ -96,7 +96,7 @@
 ## 3. قائمة التنفيذ بالترتيب
 
 - [x] آخر تاسكات مكتملة: OPS-00، OPS-01، OPS-03، OPS-06، OPS-07، ENV-01، OPS-02 (كلهم في `00-HQ/tasks/archive/`)، و T4.14 (التفريغ اتصحح بكلامك).
-- [ ] **التاسك الحالية:** OPS-05 — BL-16 اتقبل (03:39) واتحط في الـ MERGE-QUEUE؛ فاضل merge الـ executor ← SHA على GitHub.
+- [x] **التاسك الحالية:** مفيش تاسك MASTER جاهزة دلوقتي. شغلي: متابعة الحسابات والطابور والاستلام لحد الـ tag `v3.0.0-p4`.
   المسؤول: Command Center (متابعة). وفي نفس الوقت: H1 و H2 بيعملوا peer review لـ BL-02 و BL-03، والـ executor بيكمّل Gate 4.
 - [ ] **اللي بعدها:** OPS-04 بعد الـ tag `v3.0.0-p4` (نقل 00-HQ جوه الـ repo).
 - [ ] **المحجوب:** API-500 (مستني أمرك)، H14 (موافقة Anthropic، مهم بس برّه الوكالة).
@@ -115,7 +115,7 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
 
 - التسليم بين الحسابات عن طريق الملفات بس: الكارت في `00-HQ/tasks/`، والتقرير في `00-HQ/inbox/<h>/`،
   والـ review في `00-HQ/reviews/`، والـ branch `<h>/<ID>`. محدش بيكلّم حد في الشات.
-- **اتشاف فعليًا:** H1 سلّم BL-16 ← H2 راجعه من حسابه ← الاستلام إدّى FIX ← H1 صلّح ← H2 راجع تاني ← ACCEPTED 03:39. فاضل الـ merge (OPS-05).
+- **اتشاف فعليًا:** H1 سلّم BL-16 ← H2 راجعه من حسابه ← الاستلام إدّى FIX ← H1 صلّح ← H2 راجع تاني ← ACCEPTED 03:39. ← merge الـ executor 12:25 (890b144). OPS-05 اتقفلت.
 
 ## 5. نسخ البرنامج والإصدارات
 
@@ -150,7 +150,7 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
   - [x] مزامنة GitHub للـ HQ (`ops/hq`) — OPS-01، local = remote متأكد في كل تشغيل
   - [x] Queue و lease و handoff و archive موجودين (00-HQ) — الـ TASK_QUEUE.yaml المولّد في OPS-01
   - [x] هويات الحسابات الثلاثة اتأكدت (D-002)
-  - [ ] تجربة read/write و handoff لكل حساب — OPS-05
+  - [x] تجربة read/write و handoff لكل حساب — OPS-05
   - [x] scheduler + runner (helper AUTO loop + keepalive) موجودين ومتجرّبين 21/21 بـ fake Claude
   - [ ] resume بعد restart للجهاز — اتشاف فعليًا النهارده لـ H1 (keepalive 00:46)، لسه لـ H2
   - [x] تقرير الصبح والليل + 4 تقارير PRIMARY مجدولة ومتجرّبة — OPS-02 (13:03 و 17:03 وصلوا لوحدهم)
