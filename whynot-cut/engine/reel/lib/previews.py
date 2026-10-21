@@ -628,6 +628,23 @@ def _no_timestamps(doc):
         if isinstance(doc, dict) else doc
 
 
+def _client_logo(paths: Paths, man: dict) -> str | None:
+    """The logo the stills draw and hash: the manifest's first logo, only when it is the client's own file
+    (client_db.inside_file: an existing file whose final real path is in the client, review c84f652 P2)."""
+    from . import client_db
+    v = next((a.get("display_derivative") for a in (man or {}).get("assets", [])
+              if isinstance(a, dict) and a.get("category") == "logo"), None)
+    return client_db.inside_file(paths.root, v)
+
+
+def _image_file(paths: Paths, assets: dict, img: str) -> str | None:
+    """An event's image: the manifest entry's display copy, else the plan's own path under the client; either only
+    when it is the client's own file (review c84f652 P2). None draws the placeholder."""
+    from . import client_db
+    a = assets.get(img)
+    return client_db.inside_file(paths.root, a.get("display_derivative") if a else str(paths.root / img))
+
+
 def _shared_inputs(paths: Paths, spec: dict, asset_manifest: dict) -> dict:
     """What every still of the reel is drawn from: the drawing code, the frame, the brand (colours, fonts, logo) and the
     footage the readability check looks at."""
@@ -638,8 +655,7 @@ def _shared_inputs(paths: Paths, spec: dict, asset_manifest: dict) -> dict:
     keep = lambda v: client_db.to_stored(paths.root, v)      # hashed as stored (root-relative): a move redraws nothing
     fonts = sorted({str(w.get("file")) for fam in (typ.get("families") or {}).values() if isinstance(fam, dict)
                     for w in fam.get("weights", []) if isinstance(w, dict) and w.get("file")})
-    logo = next((a.get("display_derivative") for a in asset_manifest.get("assets", [])
-                 if isinstance(a, dict) and a.get("category") == "logo"), None)
+    logo = _client_logo(paths, asset_manifest)
     brand_cfg = load_config("brand.json") or {}
     main = spec.get("main_footage")
     foot = (Path(main) if Path(main).is_absolute() else paths.root / main) if main else None
@@ -660,8 +676,7 @@ def _event_inputs(paths: Paths, ev: dict, tpls: dict, shared: dict, assets: dict
     img = (ev.get("params") or {}).get("image")
     img_sha = None
     if img:
-        a = assets.get(img)
-        img_sha = _file_sha(a["display_derivative"] if a else paths.root / img)
+        img_sha = _file_sha(_image_file(paths, assets, img))
     body = {"shared": shared, "event": ev, "template": tpls.get(ev["template"]), "image": img_sha}
     return _sha256(_canon(body).encode("utf-8"))
 
@@ -775,7 +790,7 @@ def render_all(paths: Paths, composite_preview: bool = True, only: set | None = 
     W, H = size
     tpls, assets, man, shared = _drawing_context(paths, spec)
     b = Brand(paths.client_db)
-    logo = next((a["display_derivative"] for a in man["assets"] if a["category"] == "logo"), None)
+    logo = _client_logo(paths, man)
     outs, comps, warns, records = [], [], [], {}
     for ev in spec["events"]:
         if only is not None and ev["event_id"] not in only:
@@ -783,8 +798,7 @@ def render_all(paths: Paths, composite_preview: bool = True, only: set | None = 
         inputs = _event_inputs(paths, copy.deepcopy(ev), tpls, shared, assets)     # before the paths are added below
         p = ev["params"]
         if p.get("image"):
-            a = assets.get(p["image"])
-            p["image_path"] = a["display_derivative"] if a else str(paths.root / p["image"])
+            p["image_path"] = _image_file(paths, assets, p["image"])
         if p.get("video"):
             p["video_path"] = str(paths.root / p["video"])
         cat = still_category(ev["template"])

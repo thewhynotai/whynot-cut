@@ -158,13 +158,17 @@ def generate(paths: Paths) -> dict:
     manifest = client_db.load(paths, "asset-manifest.json", {"assets": []})
     by_rel = {a["rel"]: a for a in manifest["assets"]}
     logo = next((a for a in manifest["assets"] if a["category"] == "logo"), None)
-    events = []
+    events, images = [], []
     for e in spec["events"]:
         e = json.loads(json.dumps(e))
         p = e["params"]
         if p.get("image"):
             a = by_rel.get(p["image"])
-            p["image_path"] = (a.get("display_derivative") if a else str(paths.root / p["image"]))
+            v = a.get("display_derivative") if a else str(paths.root / p["image"])
+            images.append((v, a.get("rel") if a else p["image"]))
+            # review c84f652 P2: only a path inside the client (final real path) is handed on; a missing one inside
+            # is (the JSX logs and skips it), with the warning below
+            p["image_path"] = v if client_db.inside(paths.root, v) else None
         for key, mx in (("text", 26 if e["template"] in ("glass_card",) else 22), ("headline", 24)):
             if p.get(key) and e["template"] != "highlight_caption":
                 p[key] = wrap_lines(p[key], p.get("max_chars", mx))
@@ -176,24 +180,27 @@ def generate(paths: Paths) -> dict:
     if spec.get("fps") and abs(float(spec["fps"]) - fps) > 0.01:
         warnings.append(f"the plan was compiled at {float(spec['fps']):.5g} fps but the profile is {fps:.5g} fps: the "
                         "comps use the profile rate, so run plan again before building")
-    # review 0d84730 P3-5: a missing asset file is a warning here (the JSX only logs it and leaves the layer out)
-    used = [("logo", logo.get("display_derivative"))] if logo else []
-    used += [("image", e["params"]["image_path"]) for e in events if e["params"].get("image_path")]
+    # review 0d84730 P3-5: a missing asset file is a warning here (the JSX only logs it and leaves the layer out);
+    # review c84f652 P2: so is one outside the client folder (never handed on); one load refused names its manifest entry
+    logo_v = logo.get("display_derivative") if logo else None
+    used = [("logo", logo_v, logo.get("rel"))] if logo else []
+    used += [("image", v, name) for v, name in images]
     shown = set()
-    for role, v in used:
-        if not v or (role, v) in shown or (Path(v).is_absolute() and Path(v).is_file()):
+    for role, v, name in used:
+        if client_db.inside_file(paths.root, v) or (role, v, name) in shown:
             continue
-        shown.add((role, v))
-        rel = client_db.rel_under(v, str(paths.root)) or Path(v).name   # never an absolute path from outside
+        shown.add((role, v, name))
+        rel = (client_db.rel_under(v, str(paths.root)) or Path(v).name) if v else name   # never an absolute path
         en, ar = {"logo": ("logo", "اللوجو"), "image": ("image", "الصورة")}[role]
-        warnings.append(f"the {en} file is missing, so After Effects leaves it out of the comps: {rel} (put the file "
-                        "back at that path, then build again)")
-        warnings.append(f"ملف {ar} مش موجود، فالأفتر إفكتس هيسيبه برّه الكومبس: {rel} (رجّع الملف في المكان ده، "
-                        "وبعدين اعمل build تاني)")
+        warnings.append(f"the {en} file is missing or outside the client folder, so After Effects leaves it out of the "
+                        f"comps: {rel} (put the file itself in the client folder, not a link, run `reel client-db`, "
+                        "then build again)")
+        warnings.append(f"ملف {ar} مش موجود أو برّه فولدر العميل، فالأفتر إفكتس هيسيبه برّه الكومبس: {rel} (حط الملف "
+                        "نفسه جوّه فولدر العميل، مش لينك، وشغّل reel client-db، وبعدين اعمل build تاني)")
     w, h = frame_size(paths)          # Gate 2 A1: comps at the profile's frame size (4:5 -> 1080x1350), not fixed 9:16
     data = {"fps": fps, "w": w, "h": h, "brand": brand_controls(paths.client_db), "fonts": fonts_map(paths.client_db),
             "templates": tpls, "events": events, "captions": caption_data(paths, spec, ed),
-            "logo": logo.get("display_derivative") if logo else None,
+            "logo": logo_v if client_db.inside(paths.root, logo_v) else None,
             "render_dir": str(render_dir), "aep_path": str(aep), "render_template": RENDER_TEMPLATE,
             "new_project": True, "generated": now_iso()}
     lib = (TEMPLATES_DIR / "after_effects/wnc_ae_lib.jsx").read_text(encoding="utf-8")

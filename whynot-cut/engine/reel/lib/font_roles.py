@@ -68,12 +68,17 @@ def _file_key(path) -> str:
 
 
 def _by_name(fs: list[dict], name) -> dict | None:
-    """A face named exactly: PostScript name, font file (the whole path, or a bare file name)."""
+    """A face named exactly: PostScript name or the whole font file path; else a bare file name, when it names one
+    file only (the same name in two folders names no face: which one is meant is not known, review c84f652 P3-5)."""
     n = _lc(name)
     if not n:
         return None
     key = _file_key(name)
-    return next((f for f in fs if n in (_lc(f["ps"]), _stem(f["file"])) or key == _file_key(f["file"])), None)
+    hit = next((f for f in fs if n == _lc(f["ps"]) or key == _file_key(f["file"])), None)
+    if hit:
+        return hit
+    same = [f for f in fs if n == _stem(f["file"])]
+    return same[0] if len({_file_key(f["file"]) for f in same}) == 1 else None
 
 
 def _target(fs: list[dict], spec) -> tuple[dict | None, int | None, str | None]:

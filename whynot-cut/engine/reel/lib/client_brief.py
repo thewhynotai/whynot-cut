@@ -521,6 +521,10 @@ def _notes(paths) -> list:
                    "roles apply")
     typ, _ = _db(paths, TYPOGRAPHY_REL)
     tr, _ = _db(paths, "branding/typography-roles.json")
+    if isinstance(typ, dict) and isinstance(tr, dict):        # roles compared as stored (review c84f652 P3-1): load
+        import copy                                           # resolves a role file, typography-roles.json is not
+        typ, tr = ({**d, "roles": client_db.stored(paths.root, TYPOGRAPHY_REL, {"roles": copy.deepcopy(
+            d.get("roles"))}).get("roles")} for d in (typ, tr))
     if isinstance(typ, dict) and isinstance(tr, dict) and any(
             (tr.get(k) or ({} if k == "roles" else [])) != (typ.get(k) or ({} if k == "roles" else []))
             for k in ("roles", "notes")):

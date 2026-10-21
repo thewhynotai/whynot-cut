@@ -162,9 +162,146 @@ class TestAeBuilderAssets(unittest.TestCase):
         self.addCleanup(os.rmdir, link)                                # the link only, before the tree goes
         self.manifest(logo="assets/junc/logo.png")
         self.put(PHOTO_D)
-        res, _ = self.build()
-        self.assert_one_pair(res, "logo", "اللوجو", "assets/junc/logo.png")
+        res, data = self.build()
+        self.assert_one_pair(res, "logo", "اللوجو", "assets/Logo.png")    # refused by load: its manifest entry
+        self.assertIsNone(data["logo"])
         self.assertTrue(target.is_dir())
+
+    # ------------------------------------------------------------------ review c84f652 P2: only the client's own files
+    def other_client(self, name: str) -> Path:
+        f = self.tmp / "Other Client" / "derivatives" / name
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"OTHER CLIENT")
+        return f
+
+    def test_another_clients_logo_is_never_handed_on(self):
+        logo = self.other_client("logo.png")
+        self.manifest(logo=str(logo))
+        self.put(PHOTO_D)
+        res, data = self.build()
+        self.assertIsNone(data["logo"])
+        self.assert_one_pair(res, "logo", "اللوجو", "logo.png")
+        self.assertIn("outside the client folder", " ".join(res["warnings"]))
+        self.assertIn("برّه فولدر العميل", " ".join(res["warnings"]))
+        self.assertNotIn("Other Client", json.dumps(data))
+
+    def test_another_clients_image_is_never_handed_on(self):
+        photo = self.other_client("photo.png")
+        self.manifest(photo=str(photo))
+        self.put(LOGO_D)
+        res, data = self.build()
+        self.assertIsNone(data["events"][0]["params"]["image_path"])
+        self.assert_one_pair(res, "image", "الصورة", "photo.png")
+        self.assertNotIn("Other Client", json.dumps(data))
+
+    def test_a_plan_image_outside_the_client_is_never_handed_on(self):
+        self.other_client("pic.png")
+        self.manifest()
+        self.put(LOGO_D, PHOTO_D)
+        self.events[0]["params"]["image"] = "../Other Client/derivatives/pic.png"
+        res, data = self.build()
+        self.assertIsNone(data["events"][0]["params"]["image_path"])       # the plan's own words stay as written
+        self.assert_one_pair(res, "image", "الصورة", "pic.png")
+
+
+class TestPsBuilderAssets(unittest.TestCase):
+    """ps_builder (review c84f652 P2): a Photoshop job's image and the logo are the client's own files or nothing."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="psassets_"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.root = self.tmp / "Client عميل"
+        for d in ("assets", "data"):
+            (self.root / d).mkdir(parents=True)
+        self.p = Paths(self.root, "V1")
+        self.p.ensure_project()
+        self.root = self.p.root
+
+    def generate(self, logo_file: str, image_file: str):
+        from lib import ps_builder
+        write_json(self.p.client_db / "asset-manifest.json", {"assets": [
+            {"rel": "assets/Logo.png", "category": "logo", "file": logo_file, "display_derivative": None},
+            {"rel": "assets/photo.jpg", "category": "photo", "file": image_file, "display_derivative": None}]})
+        write_json(self.p.p("01_analysis/edit-decisions.json"), {"global": {"photoshop_jobs": [
+            {"id": "PS1", "image": "assets/photo.jpg", "headline": "عنوان"}]}})
+        with common.use_context(common.Context(self.p.root)):
+            res = ps_builder.generate(self.p)
+        text = Path(res["jsx"]).read_text(encoding="utf-8")
+        start = text.index("var WNC_PS = ") + len("var WNC_PS = ")
+        return res, json.JSONDecoder().raw_decode(text[start:])[0]
+
+    def test_the_clients_own_files_are_handed_on(self):
+        for rel in ("assets/Logo.png", "assets/photo.jpg"):
+            (self.root / rel).write_bytes(b"own")
+        res, data = self.generate("assets/Logo.png", "assets/photo.jpg")
+        self.assertEqual(res["errors"], [])
+        self.assertEqual(Path(data["logo"]), self.root / "assets/Logo.png")
+        self.assertEqual(Path(data["jobs"][0]["image"]), self.root / "assets/photo.jpg")
+
+    def test_another_clients_files_are_never_handed_on(self):
+        other = self.tmp / "Other Client"
+        other.mkdir()
+        for n in ("logo.png", "photo.jpg"):
+            (other / n).write_bytes(b"OTHER CLIENT")
+        res, data = self.generate(str(other / "logo.png"), str(other / "photo.jpg"))
+        self.assertIsNone(data["logo"])
+        self.assertEqual(len(res["errors"]), 1, res["errors"])
+        self.assertIn("PS1", res["errors"][0])
+        self.assertIn("outside the client folder", res["errors"][0])
+        self.assertNotIn("Other Client", json.dumps(data))
+
+
+class TestPreviewsAndPublishAssets(unittest.TestCase):
+    """previews (stills) and publish (thumbnails) (review c84f652 P2): the logo and a manifest image are the client's
+    own files or nothing, for drawing and for the stills' hash alike."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="pvassets_"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.root = self.tmp / "Client عميل"
+        for d in ("assets", "data"):
+            (self.root / d).mkdir(parents=True)
+        self.p = Paths(self.root, "V1")
+        self.p.ensure_project()
+        self.root = self.p.root
+        self.other = self.tmp / "Other Client" / "logo.png"
+        self.other.parent.mkdir(parents=True)
+        self.other.write_bytes(b"OTHER CLIENT")
+        (self.root / "assets" / "Logo.png").write_bytes(b"own")
+
+    def test_the_logo_and_images_drawn_and_hashed_are_the_clients_own(self):
+        from lib import client_db, previews
+        own = {"rel": "assets/Logo.png", "category": "logo", "file": "assets/Logo.png",
+               "display_derivative": "assets/Logo.png"}
+        bad = {"rel": "assets/Other.png", "category": "logo", "file": str(self.other),
+               "display_derivative": str(self.other)}
+        for first, want in ((own, self.root / "assets" / "Logo.png"), (bad, None)):
+            with self.subTest(logo=first["display_derivative"]):
+                man = client_db.resolved(self.root, "asset-manifest.json", {"assets": [json.loads(json.dumps(first))]})
+                got = previews._client_logo(self.p, man)
+                self.assertEqual(Path(got) if got else None, want)
+                with common.use_context(common.Context(self.p.root)):
+                    shared = previews._shared_inputs(self.p, {}, man)
+                self.assertEqual(shared["logo"][1] is None, want is None)
+                self.assertNotIn("Other Client", json.dumps(shared))
+                assets = {a["rel"]: a for a in man["assets"]}
+                img = previews._image_file(self.p, assets, first["rel"])
+                self.assertEqual(Path(img) if img else None, want)
+        self.assertIsNone(previews._image_file(self.p, {}, "../Other Client/logo.png"))     # a plan path outside
+
+    def test_the_stills_draw_through_the_same_helpers(self):
+        """render_all draws the logo and images it hashes (the helpers above): never a raw manifest value."""
+        import inspect
+        from lib import previews
+        src = inspect.getsource(previews.render_all)
+        self.assertIn("logo = _client_logo(paths, man)", src)
+        self.assertIn('p["image_path"] = _image_file(paths, assets, p["image"])', src)
+        self.assertNotIn('a["display_derivative"]', src)
+
+    def test_publish_takes_the_logo_through_the_same_check(self):
+        src = (SK / "engine" / "reel" / "lib" / "publish.py").read_text(encoding="utf-8")
+        self.assertIn("client_db.inside_file(", src)
+        self.assertNotRegex(src, r'logo = next\(\(a\.get\("display_derivative"\) for a')
 
 
 if __name__ == "__main__":

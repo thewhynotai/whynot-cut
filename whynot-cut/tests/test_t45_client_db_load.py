@@ -200,6 +200,11 @@ class TestDarwinPrivateVar(unittest.TestCase):
                                             fold=True, sep="/"))
 
 
+def json_copy(doc):
+    import json
+    return json.loads(json.dumps(doc))
+
+
 class TestResolveConfinement(Base):
     """Review 0d84730 (After Effects loads what `resolve` gives): a value that names a place in the client never lands
     outside it, by `..` or through a link (P2-1, P3-2); a value that names no place we can place counts as missing
@@ -227,15 +232,15 @@ class TestResolveConfinement(Base):
         self.assertTrue((self.root / "assets" / ".." / ".." / "outside" / "x.ttf").is_file())
         for v in (r"Z:\g\assets\..\..\outside\x.ttf", "/g/assets/../../outside/x.ttf"):
             got = CDB.resolve(self.root, v)
-            if os.name == "nt" and v.startswith("/"):
-                self.assertIsNone(got, v)                     # review d224a9a P3-3: Windows opens it on this drive
+            if os.name == "nt":                               # review c84f652: its real path is not what it spells
+                self.assertIsNone(got, v)
                 continue
             self.assertEqual(got, v, v)                                   # never re-anchored: kept, names nothing here
             self.assertNotEqual(os.path.realpath(got), os.path.realpath(out / "x.ttf"), v)
         self.assertEqual(Path(CDB.resolve(self.root, r"Z:\Old\C\assets\Brand\logo.png")),   # a tail without `..`:
                          self.root / "assets/Brand/logo.png")                                 # re-anchored as before
         v = r"Z:\g\assets\x\..\Brand\logo.png"                         # a tail with `..` is never re-anchored, even
-        self.assertEqual(CDB.resolve(self.root, v), v)                  # one that would stay inside
+        self.assertEqual(CDB.resolve(self.root, v), None if os.name == "nt" else v)   # one that would stay inside
         self.assertEqual(Path(CDB.resolve(self.root, r"Z:\g\assets\..\x\assets\Brand\logo.png")),   # review d224a9a
                          self.root / "assets/Brand/logo.png")          # P3-4: a later clean tail still re-anchors
 
@@ -243,30 +248,94 @@ class TestResolveConfinement(Base):
         for v in (".", "./", "./.", ".\\"):
             self.assertIsNone(CDB.resolve(self.root, v), v)
 
-    @unittest.skipUnless(os.name == "nt", "device paths, admin shares and a junction are Windows")
-    def test_device_and_admin_share_forms_land_inside_or_count_as_missing(self):   # review d224a9a P3-3
+    def subst(self, target: Path) -> str:
+        """A free drive letter mapped to `target` with `subst`, removed again (`subst X: /d`) at cleanup."""
+        import subprocess
+        letter = next((c for c in "QRSTUVWXYP" if not os.path.exists(f"{c}:\\")), None)
+        if letter is None:
+            self.skipTest("no free drive letter for subst")
+        r = subprocess.run(["subst", f"{letter}:", str(target)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.addCleanup(lambda: subprocess.run(["subst", f"{letter}:", "/d"], capture_output=True))
+        return f"{letter}:"
+
+    @unittest.skipUnless(os.name == "nt", "device paths, admin shares, subst and a junction are Windows")
+    def test_every_alias_of_a_path_follows_one_rule(self):                  # review c84f652 P2, P3-3
+        """Inside or not is decided on the final real path (links, subst drives, this computer's shares, device
+        prefixes and `..` followed), never on a list of spellings: an alias of a client file opens that file, one that
+        really lands outside is missing, and nothing outside the client is ever a client file (inside_file)."""
+        import socket
         out = self.outside()
         junc = self.root / "assets" / "junc"
         self.junction(junc, out)
         try:
-            drive, rest = os.path.splitdrive(str(self.root))
+            drive = os.path.splitdrive(str(self.root))[0]
+            q = self.subst(self.root)
             inside = self.root / "assets" / "Brand" / "Brand-Bold.ttf"
-            forms = [lambda q: "\\\\?\\" + str(q), lambda q: "\\\\.\\" + str(q),
-                     lambda q: f"\\\\localhost\\{drive[0]}$" + str(q)[len(drive):],
-                     lambda q: f"\\\\LOCALHOST\\{drive[0].lower()}$" + str(q)[len(drive):]]
-            for form in forms:
-                with self.subTest(form=form(inside)):
-                    self.assertEqual(Path(CDB.resolve(self.root, form(inside))), inside)         # inside: the file
-                    self.assertIsNone(CDB.resolve(self.root, form(junc / "x.ttf")))              # through the link
-                    self.assertIsNone(CDB.resolve(self.root, form(self.root / "assets" / ".." / ".." / "outside" /
-                                                                  "x.ttf")))                      # by `..`
-                    self.assertIsNone(CDB.resolve(self.root, form(out / "x.ttf")))               # plainly outside
-            self.assertIsNone(CDB.resolve(self.root, "/outside/x.ttf"))       # POSIX-rooted: this drive's \outside
+            share = lambda host: (lambda x: f"\\\\{host}\\{drive[0]}$" + str(x)[len(drive):])
+            forms = {"device ?": lambda x: "\\\\?\\" + str(x), "device .": lambda x: "\\\\.\\" + str(x),
+                     "slashes //?/": lambda x: "//?/" + str(x).replace("\\", "/"),
+                     "UNC device": lambda x: "\\\\?\\UNC\\localhost\\" + f"{drive[0]}$" + str(x)[len(drive):],
+                     "localhost": share("localhost"), "LOCALHOST d$": lambda x: share("LOCALHOST")(x).replace(
+                         f"{drive[0]}$", f"{drive[0].lower()}$"), "127.0.0.1": share("127.0.0.1"),
+                     "this PC's name": share(socket.gethostname()),
+                     "subst": lambda x: q + str(x)[len(str(self.root)):] if str(x).startswith(str(self.root)) else None}
+            if not os.path.exists(share("localhost")(inside)):
+                self.skipTest("this computer's admin share is not reachable here")
+            for name, form in forms.items():
+                with self.subTest(form=name):
+                    got = CDB.resolve(self.root, form(inside))
+                    self.assertEqual(Path(got), inside)                                   # the client's own file
+                    self.assertEqual(Path(CDB.inside_file(self.root, got)), inside)
+                    for bad in (junc / "x.ttf", self.root / "assets" / ".." / ".." / "outside" / "x.ttf"):
+                        v = form(bad)
+                        if v is None or name == "subst" and ".." in v:       # `..` can't climb above a drive root
+                            continue
+                        if bad == junc / "x.ttf":
+                            self.assertTrue(os.path.exists(v), v)                # it really opens the outside file
+                        self.assertIsNone(CDB.resolve(self.root, v), v)           # through a link or `..`: missing
+                    v = form(out / "x.ttf")
+                    if v is not None:                                       # plainly elsewhere: never a client file
+                        self.assertIsNone(CDB.inside_file(self.root, CDB.resolve(self.root, v)), v)
+                    if v is not None and name.startswith(("device", "slashes")):
+                        self.assertEqual(CDB.resolve(self.root, v), v)    # a device prefix is no alias: kept as is
+            self.assertIsNone(CDB.resolve(self.root, "/outside/x.ttf"))       # POSIX-rooted: this drive's \\outside
             self.assertEqual(Path(CDB.resolve(self.root, "/Volumes/Old/C/assets/Brand/logo.png")),
                              self.root / "assets/Brand/logo.png")                # ...unless it re-anchors here
-            self.assertEqual(CDB.resolve(self.root, r"\\oldpc\share\x.ttf"), r"\\oldpc\share\x.ttf")   # a server:
-        finally:                                                                               # kept as before
+            self.assertEqual(CDB.resolve(self.root, r"C:\Windows\Fonts\arial.ttf"), r"C:\Windows\Fonts\arial.ttf")
+            self.assertIsNone(CDB.inside_file(self.root, r"C:\Windows\Fonts\arial.ttf"))   # kept, but no client file
+        finally:
             self._unlink()
+
+    def test_an_unreachable_share_counts_as_missing(self):                     # review c84f652 P3-5
+        from lib import client_move_paths as CMP
+        real = CMP.real
+
+        def offline(p):
+            if str(p).replace("/", "\\").startswith("\\\\127.0.0.2"):
+                raise OSError(1231, "The network location cannot be reached")
+            return real(p)
+        v = "\\\\127.0.0.2\\D$\\Clients\\C\\x.png"
+        with mock.patch.object(CMP, "real", side_effect=offline):
+            self.assertIsNone(CDB.resolve(self.root, v))
+            self.assertIsNone(CDB.inside_file(self.root, v))
+            self.assertFalse(CDB.inside(self.root, v))
+
+    def test_inside_file_is_an_existing_file_really_in_the_client(self):       # review c84f652 P2
+        own = self.root / "assets" / "Brand" / "logo.png"
+        self.assertEqual(CDB.inside_file(self.root, str(own)), str(own))
+        self.assertIsNone(CDB.inside_file(self.root, str(self.root / "assets" / "Brand")))     # a folder
+        self.assertIsNone(CDB.inside_file(self.root, str(self.root / "assets" / "gone.png")))  # missing
+        out = self.outside()
+        self.assertIsNone(CDB.inside_file(self.root, str(out / "x.ttf")))                      # another folder
+        twin = Path(str(self.root) + " 2") / "assets" / "logo.png"                              # a name that only
+        twin.parent.mkdir(parents=True)                                                         # starts like it
+        twin.write_bytes(b"png")
+        self.assertIsNone(CDB.inside_file(self.root, str(twin)))
+        self.assertTrue(CDB.inside(self.root, str(self.root / "assets" / "gone.png")))         # inside, not there
+        self.assertFalse(CDB.inside(self.root, str(out / "x.ttf")))
+        for v in (None, "", 3):
+            self.assertIsNone(CDB.inside_file(self.root, v))
 
     def test_dotdot_and_drive_relative_values_count_as_missing(self):        # P3-3
         for v in ("../../x.ttf", "..\\..\\outside\\x.ttf", "assets/../../outside/x.ttf", "C:x.ttf", "\\x.ttf"):
@@ -325,6 +394,64 @@ class TestResolveConfinement(Base):
         face = self.typography(rel, "assets/Other/B-Bold.ttf")             # another folder's file of that name: no
         self.assertEqual(face["ps"], "B-Regular")
         self.assertEqual(face["source"], "default")
+
+    def test_a_role_is_a_file_only_with_a_folder_and_a_font_extension(self):  # review c84f652 P3-2
+        rel = lambda n: f"assets/Fonts/{n}.ttf"
+        face = self.typography(rel, "Bold/Italic", as_string=True)          # a style with a slash: still a style
+        self.assertEqual(face["ps"], "B-Bold")
+        shutil.rmtree(self.root / "assets" / "Fonts")
+        t = CDB.load(self.paths, "branding/typography.json")
+        self.assertEqual(t["roles"]["body"], "Bold/Italic")
+        for role in ("assets/Fonts", "assets/Fonts/B-Bold"):                  # no font extension: left as written
+            write_json(self.db / "branding/typography.json", {"families": {}, "roles": {"body": {"file": role}}})
+            self.assertEqual(CDB.load(self.paths, "branding/typography.json")["roles"]["body"]["file"], role)
+        write_json(self.db / "branding/typography.json", {"families": {}, "roles": {"body": {"file": "B-Bold.TTF"}}})
+        self.assertEqual(CDB.load(self.paths, "branding/typography.json")["roles"]["body"]["file"], "B-Bold.TTF")
+        write_json(self.db / "branding/typography.json", {"families": {}, "roles": {"body": "assets\\Fonts\\B.OTF"}})
+        self.assertEqual(Path(CDB.load(self.paths, "branding/typography.json")["roles"]["body"]),
+                         self.root / "assets" / "Fonts" / "B.OTF")
+
+    def test_a_bare_font_name_in_two_folders_names_no_face(self):              # review c84f652 P3-5
+        rel = lambda n: f"assets/Fonts/{n}.ttf"
+        (self.root / "assets" / "Old").mkdir(parents=True)
+        (self.root / "assets" / "Old" / "B-Bold.ttf").write_bytes(b"ttf")
+        old = {"Old": {"weights": [{"style": "Black", "file": "assets/Old/B-Bold.ttf", "postscript_name": "Old-Black"}]}}
+        face = self.typography(rel, "B-Bold.ttf", first=old)                 # which B-Bold.ttf? ambiguous: none
+        self.assertEqual((face["ps"], face["source"]), ("B-Regular", "default"))
+        shutil.rmtree(self.root / "assets" / "Fonts")
+        same = {"Copy": {"weights": [{"style": "Bold", "file": "assets/Fonts/B-Bold.ttf", "postscript_name": "B-Bold"}]}}
+        face = self.typography(rel, "B-Bold.ttf", first=same)                # one file listed twice: that file
+        self.assertEqual((face["ps"], face["source"]), ("B-Bold", "typography.json roles"))
+        shutil.rmtree(self.root / "assets" / "Fonts")
+        face = self.typography(rel, "assets/Old/B-Bold.ttf", first=old)      # a path is exact
+        self.assertEqual(face["ps"], "Old-Black")
+
+    def test_migrate_rewrites_a_role_file_like_saving_does(self):             # review c84f652 P3-4
+        fonts = self.root / "assets" / "Fonts"
+        fonts.mkdir()
+        (fonts / "B-Bold.ttf").write_bytes(b"ttf")
+        old = r"Z:\Old\C"
+        write_json(self.db / "branding/typography.json", {"families": {"B": {"weights": [
+            {"style": "Bold", "file": "assets/Fonts/B-Bold.ttf", "postscript_name": "B-Bold"}]}},
+            "roles": {"body": {"file": old + r"\assets\Fonts\B-Bold.ttf"}, "small": "Regular"}})
+        rep = CDB.migrate(self.paths, old_roots=[old], dry_run=True)
+        self.assertEqual(rep["changed"], [{"file": "branding/typography.json", "values": 1}], rep)
+        self.assertEqual(rep["kept_absolute"], [])
+        stored = CDB.stored(self.root, "branding/typography.json", CDB.load(self.paths, "branding/typography.json"))
+        self.assertEqual(stored["roles"], {"body": {"file": "assets/Fonts/B-Bold.ttf"}, "small": "Regular"})
+
+    def test_the_brief_says_nothing_about_roles_written_as_files(self):        # review c84f652 P3-1
+        from lib import client_brief
+        roles = {"body": {"file": "assets/Fonts/B-Bold.ttf"}, "headline": "Black", "caption": "assets/Fonts/B.otf"}
+        write_json(self.db / "branding/typography-roles.json", {"roles": roles})
+        write_json(self.db / "branding/typography.json", {"families": {}, "roles": CDB.stored(
+            self.root, "branding/typography.json", {"roles": json_copy(roles)})["roles"]})   # as `reel client-db` does
+        self.assertFalse([n for n in client_brief._notes(self.paths) if "typography-roles.json" in n])
+        write_json(self.db / "branding/typography-roles.json",
+                   {"roles": dict(roles, body={"file": str(self.root / "assets" / "Fonts" / "B-Bold.ttf")})})
+        self.assertFalse([n for n in client_brief._notes(self.paths) if "typography-roles.json" in n])   # same file
+        write_json(self.db / "branding/typography-roles.json", {"roles": dict(roles, body={"file": "assets/x.ttf"})})
+        self.assertTrue([n for n in client_brief._notes(self.paths) if "typography-roles.json" in n])  # really new
 
     def test_a_role_file_names_exactly_one_face(self):                        # review d224a9a P3-1
         rel = lambda n: f"assets/Fonts/{n}.ttf"

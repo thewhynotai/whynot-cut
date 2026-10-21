@@ -529,10 +529,11 @@ class _Compiler:
 
     def _client_file(self, a: dict) -> str | None:
         """The file of an asset manifest entry for the comp: its display copy, else its own file, both through
-        client_db (never a raw `root / rel`, review d224a9a P2-1); None when it is missing or outside the client."""
+        client_db (never a raw `root / rel`, review d224a9a P2-1); None when it is missing or its final real path is
+        outside the client (client_db.inside_file, review c84f652 P2)."""
         from . import client_db
         p = a.get("display_derivative") or client_db.resolve(self.paths.root, a.get("rel"))
-        return p if isinstance(p, str) and Path(p).is_file() else None
+        return client_db.inside_file(self.paths.root, p)
 
     def _person(self, sid, sc, theme, els):
         who = sc.get("who")

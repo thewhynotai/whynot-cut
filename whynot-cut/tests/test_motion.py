@@ -1205,11 +1205,12 @@ class TestMotionAssetsStayInTheClient(unittest.TestCase):
     def manifest(self, *assets):
         write_json(self.reel.client_db / "asset-manifest.json", {"assets": list(assets), "count": len(assets)})
 
-    def compile(self, photo=None):
+    def compile(self, photo=None, **outro):
         from lib.motion_plan import compile_motion
         script = names_script()
         if photo:
             script["scenes"][2]["photo"] = photo
+        script["scenes"][3].update(outro)
         write_json(self.reel.p("01_analysis/motion-script.json"), script)
         r = compile_motion(self.reel)
         plan = read_json(self.reel.p("01_analysis/motion-plan.json"))
@@ -1267,6 +1268,70 @@ class TestMotionAssetsStayInTheClient(unittest.TestCase):
         self.assertTrue(any("logo" in x and "outside the client folder" in x for x in r["warnings"]), r["warnings"])
         self.assertEqual((images["S03"], images["S04"]), ([], []))
         self.assertNotIn("junc", json.dumps([e.get("path") for sc in plan["scenes"] for e in sc["elements"]]))
+
+    def logo_warnings(self, r):
+        return [x for x in r["warnings"] if "logo" in x]
+
+    def test_an_absolute_display_copy_outside_the_client_is_left_out(self):       # review c84f652 P2
+        self.manifest({"rel": "assets/Brand/logo.png", "file": "assets/Brand/logo.png",
+                       "display_derivative": str(self.out / "logo.png"), "category": "logo"})
+        r, plan, images = self.compile()
+        self.assertTrue(r["ok"], r["errors"])
+        self.assertEqual(images["S04"], [])
+        w = self.logo_warnings(r)
+        self.assertEqual(len(w), 1, r["warnings"])
+        self.assertIn("outside the client folder", w[0])
+        self.assertIn("برة فولدر العميل", w[0])
+        self.assert_nothing_outside(plan)
+
+    def test_a_photo_from_another_client_is_a_compile_error(self):                # review c84f652 P2
+        other = self.root.parent / "OtherClient" / "assets"
+        other.mkdir(parents=True)
+        (other / "p.png").write_bytes(b"OTHER CLIENT PHOTO")
+        self.manifest({"rel": str(other / "p.png"), "file": str(other / "p.png"), "display_derivative": None,
+                       "category": "person"})
+        r, plan, images = self.compile(photo=str(other / "p.png"))
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("photo" in x and "outside the client folder" in x for x in r["errors"]), r["errors"])
+        self.assertEqual(images["S03"], [])
+        self.assertNotIn("OtherClient", json.dumps([e.get("path") for sc in plan["scenes"] for e in sc["elements"]]))
+
+    @unittest.skipUnless(sys.platform == "win32", "a junction, subst and this computer's admin share are Windows")
+    def test_an_alias_of_this_computer_through_a_junction_is_left_out(self):      # review c84f652 P2
+        import os
+        import socket
+        self.junc = self.root / "assets" / "junc"
+        r = subprocess.run(["cmd", "/c", "mklink", "/J", str(self.junc), str(self.out)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        drive = os.path.splitdrive(str(self.root))[0]
+        letter = next((c for c in "QRSTUVWXYP" if not os.path.exists(f"{c}:\\")), None)
+        self.assertIsNotNone(letter)
+        r = subprocess.run(["subst", f"{letter}:", str(self.root)], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.addCleanup(lambda: subprocess.run(["subst", f"{letter}:", "/d"], capture_output=True))
+        logo = self.junc / "logo.png"
+        host = f"\\\\{socket.gethostname()}\\{drive[0]}$" + str(logo)[len(drive):]
+        if not os.path.exists(host):
+            self.skipTest("this computer's admin share is not reachable here")
+        for alias in (host, f"{letter}:" + str(logo)[len(str(self.root)):]):
+            with self.subTest(alias=alias):
+                self.assertTrue(os.path.exists(alias))                           # it really opens the outside file
+                self.manifest({"rel": "assets/junc/logo.png", "file": "assets/junc/logo.png",
+                               "display_derivative": alias, "category": "logo"})
+                r, plan, images = self.compile()
+                self.assertEqual(images["S04"], [])
+                self.assertTrue(self.logo_warnings(r), r["warnings"])
+                self.assert_nothing_outside(plan)
+
+    def test_show_logo_false_places_no_logo_and_says_nothing(self):               # review c84f652 P3-5
+        self.manifest({"rel": "assets/Brand/logo.png", "file": "assets/Brand/logo.png", "display_derivative": None,
+                       "category": "logo"})
+        r, plan, images = self.compile(show_logo=False)
+        self.assertEqual(images["S04"], [])
+        self.assertEqual(self.logo_warnings(r), [])
+        self.manifest({"rel": "../outside/logo.png", "file": None, "display_derivative": None, "category": "logo"})
+        r, plan, images = self.compile(show_logo=False)                       # a logo it would refuse: not asked for
+        self.assertEqual((images["S04"], self.logo_warnings(r)), ([], []))
 
     def test_a_display_copy_that_is_gone_counts_as_missing(self):
         self.manifest({"rel": "assets/Brand/logo.png", "file": "assets/Brand/logo.png",

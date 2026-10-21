@@ -356,14 +356,14 @@ def _norm(v: str, sep: str, fold: bool) -> str:
     return s.casefold() if fold else s
 
 
-def inside_root(v: str, root: str, fold: bool | None = None, sep: str | None = None) -> bool:
+def inside_root(v: str, root: str, fold: bool | None = None, sep: str | None = None, real: bool = True) -> bool:
     """Is absolute `v` the client root or under it? Case folded where the file system folds it; when the strings
     differ (a junction, macOS /var vs /private/var) the real paths are compared too, on this computer's own form."""
     import os
     from . import client_move_paths as cmp
     fold = cmp.FOLD_CASE if fold is None else fold
     sep = os.sep if sep is None else sep
-    for a, b in ((v, root), (cmp.real(v), cmp.real(root))) if native_abs(v) else ((v, root),):
+    for a, b in ((v, root), (cmp.real(v), cmp.real(root))) if real and native_abs(v) else ((v, root),):
         a, b = _norm(a, sep, fold), _norm(b, sep, fold)
         if a == b or a.startswith(b + sep):
             return True
@@ -377,34 +377,74 @@ def anchor_tails(p) -> list[str]:
     return ["/".join(parts[i:]) for i, s in enumerate(parts) if s.lower() in ANCHORS and i < len(parts) - 1]
 
 
-def _really_inside(p: str, root) -> bool:
-    """Is `p` under the client root once `..` and every link are followed (realpath)? (review 0d84730 P2-1, P3-2)"""
+def _final(p) -> str | None:
+    """The final real path of `p`: every link, `..`, subst drive and device prefix followed (realpath, which asks
+    Windows for the final path of an existing file), the \\\\?\\ / \\\\.\\ prefix dropped. None when it can't be
+    looked up (an unreachable share): such a value counts as missing, it never raises (review c84f652 P3-5)."""
     from . import client_move_paths as cmp
-    return inside_root(cmp.real(p), cmp.real(str(root)))
+    try:
+        return _plain(cmp.real(str(p)))
+    except (OSError, ValueError):
+        return None
 
 
-_ADMIN_SHARE = re.compile(r"^\\\\(?:localhost|127\.0\.0\.1)\\([A-Za-z])\$(\\.*)?$", re.I)
+def _key(p: str) -> str:
+    """`p` for comparing: this OS's separators and case (case folded where the file system folds it), no device prefix."""
+    import os
+    from . import client_move_paths as cmp
+    s = _plain(os.path.normcase(str(p))).rstrip("\\/")
+    return s.casefold() if cmp.FOLD_CASE else s
 
 
-def _alias(v: str) -> str | None:
-    r"""The plain path behind a Windows device path (\\?\X:\..., \\.\X:\..., \\?\UNC\srv\...) or this computer's
-    admin share (\\localhost\X$\...), either slash; None for any other value (review d224a9a P3-3)."""
-    w = v.replace("/", "\\")
-    if w.startswith(("\\\\?\\", "\\\\.\\")):
-        s = w[4:]
-        return "\\\\" + s[4:] if s[:4].upper() == "UNC\\" else s
-    m = _ADMIN_SHARE.match(w)
-    return f"{m.group(1)}:{m.group(2) or chr(92)}" if m else None
+def _prefixed(p: str) -> bool:
+    r"""Is `p` spelled with a Windows device prefix (\\?\, \\.\, //?/ ...)?"""
+    import os
+    s = os.path.normcase(str(p))
+    return _plain(s) != s
+
+
+def _under(p: str, root: str) -> bool:
+    import os
+    a, b = _key(p), _key(root)
+    return a == b or a.startswith(b + os.sep)
+
+
+def _really_inside(p: str, root) -> bool:
+    """Is `p` under the client root by their FINAL real paths (_final)? The one rule for "inside" (reviews 0d84730
+    P2-1, P3-2; c84f652): a link, `..`, a subst drive, a device prefix or a share of this computer is followed, never
+    listed; a share path stays a share path, so it is inside only when the root itself is reached that way."""
+    f, r = _final(p), _final(root)
+    return f is not None and r is not None and _under(f, r)
+
+
+def inside(root, p) -> bool:
+    """Public form of _really_inside for the renderers: is `p` (a path load() gave) really inside the client root?"""
+    return isinstance(p, str) and bool(p) and _really_inside(p, root)
+
+
+def inside_file(root, p) -> str | None:
+    """`p` when it is an existing file whose final real path is inside the client root, else None: the check every
+    renderer makes before a client file goes on screen (motion, stills, After Effects, Photoshop, thumbnails;
+    review c84f652 P2). load()/resolve() alone keep an absolute value from elsewhere as it is (an OS font)."""
+    from pathlib import Path
+    return p if inside(root, p) and Path(p).is_file() else None
 
 
 def resolve(root, v):
-    """A stored value -> a path this computer can open: relative -> under the root; absolute inside the root -> kept;
-    absolute elsewhere -> the same file under this root when its tail from an anchor folder exists here (a client
-    copied or moved by hand), else kept as it is (never invented). None (missing) for: a value that names a place in
-    the client but really lands outside it (a link, `..`); one that names no place we can place (`../x`, `C:x`, `\\x`,
-    the root itself `.`); on Windows a device path or admin share of this computer (`\\\\?\\`, `\\\\.\\`,
-    `\\\\localhost\\X$\\`) unless it is really inside the root, and a POSIX-rooted `/x` unless its anchor tail is
-    here (Windows would open it on the current drive) (reviews 0d84730 P2-1, P3-2, P3-3; d224a9a P3-3, P3-4)."""
+    """A stored value -> a path this computer can open. "Inside" is always decided on FINAL real paths (_final:
+    links, `..`, subst drives, device prefixes and this computer's shares followed), never on a list of spellings:
+      * relative -> under the root, if its final real path is inside the root (else None); `.` (the root) is None;
+      * absolute, final real path inside the root -> kept (an alias of a client file -> that file's real path);
+      * absolute, spelled under the root but really outside (a link, `..`) -> None;
+      * absolute elsewhere -> the same file under this root when its tail from an anchor folder exists there and is
+        really inside (a client copied or moved by hand);
+      * else kept as it is (an OS font, an old folder, never invented) when the value IS its final real path; on
+        Windows a value whose final real path differs from its spelling (a link, `..`, a subst drive, a share of this
+        computer, a POSIX-rooted `/x` that Windows opens on the current drive) is None, and so is one that can't be
+        looked up (an unreachable share);
+      * no place we can place (`../x`, `C:x`, `\\x`) -> None.
+    A kept value from elsewhere is NOT a client file: a renderer takes a file only through inside_file() (reviews
+    0d84730 P2-1, P3-2, P3-3; d224a9a P3-3, P3-4; c84f652 P2, P3-3, P3-5)."""
     import os
     from pathlib import Path, PurePosixPath, PureWindowsPath
     if not isinstance(v, str) or not v:
@@ -414,21 +454,24 @@ def resolve(root, v):
         parts = PurePosixPath(v.replace("\\", "/")).parts
         cand = str(root.joinpath(*parts))
         return cand if parts and _really_inside(cand, root) else None
-    plain = _alias(v)
-    if plain is not None:
-        return plain if os.name == "nt" and _really_inside(plain, root) else None
     win = bool(PureWindowsPath(v).drive) or "\\" in v
     if not (PureWindowsPath(v) if win else PurePosixPath(v)).is_absolute():
         return None                                # "../x", "C:x", "\x": relative to whatever folder runs it
-    if inside_root(v, str(root)):
-        return v if not native_abs(v) or _really_inside(v, root) else None
+    nat = native_abs(v)
+    if nat and _really_inside(v, root):                # spelled under the root as it is, or an alias of a client file
+        return v if not _prefixed(v) and _under(v, str(root)) else _final(v)
+    if inside_root(v, str(root), real=False):
+        return None if nat else v                  # names a place in the client, really lands outside it
     for tail in anchor_tails(PureWindowsPath(v) if win else PurePosixPath(v)):
         if ".." in tail.split("/"):
             continue
         cand = root.joinpath(*tail.split("/"))
         if cand.exists() and _really_inside(str(cand), root):
             return str(cand)
-    return None if os.name == "nt" and not win else v
+    if os.name == "nt" and nat:
+        f = _final(v)
+        return v if f is not None and _key(f) == _key(v) else None
+    return v
 
 
 def _walk(node, spec: tuple, fn):
@@ -447,6 +490,14 @@ def _walk(node, spec: tuple, fn):
     return node
 
 
+def client_root(paths) -> Path:
+    """The client root of a Paths (or anything with `client_db`), or of the client_database folder itself: its `root`,
+    else two levels above client_database (what load() resolves against)."""
+    db = Path(paths) if isinstance(paths, (str, Path)) else Path(paths.client_db)
+    root = getattr(paths, "root", None) if not isinstance(paths, (str, Path)) else None
+    return Path(root) if root else db.parent.parent
+
+
 def load(paths, rel: str, default=None):
     """A client-database file (`rel` under output/client_database/) with every path field resolved for this computer
     (`resolve`). `paths` is a Paths (or EpisodePaths, or anything with `client_db`), or the client_database folder
@@ -454,8 +505,7 @@ def load(paths, rel: str, default=None):
     damaged -> errors.FileFormatError like read_json. Never writes."""
     import copy
     db = Path(paths) if isinstance(paths, (str, Path)) else Path(paths.client_db)
-    root = getattr(paths, "root", None) if not isinstance(paths, (str, Path)) else None
-    root = Path(root) if root else db.parent.parent
+    root = client_root(paths)
     doc = read_json(db / rel)
     if doc is None:
         return copy.deepcopy(default)
@@ -470,14 +520,22 @@ def resolved(root, rel: str, doc):
     return doc
 
 
+def font_file_value(v) -> bool:
+    """Is a typography role value a font FILE path: a folder and a font extension (`assets/Fonts/B.ttf`)? A style
+    ("Bold", "Bold/Italic"), a PostScript name or a bare file name (`B-Bold.ttf`, matched by name) is not
+    (review c84f652 P3-2)."""
+    import os
+    return isinstance(v, str) and ("/" in v or "\\" in v) and os.path.splitext(v)[1].lower() in FONT_EXT
+
+
 def _role_files(rel: str, doc, fn) -> None:
-    """typography.json roles given as a font FILE (`"body": {"file": ...}` or a path string), read and stored like the
-    families' files, so a role names exactly that file (review d224a9a P3-1). A value without a folder (a style, a
-    PostScript name, a bare file name) is left as it is: it matches by name."""
+    """typography.json roles given as a font FILE (`"body": {"file": ...}` or a path string, font_file_value), read,
+    stored and migrated like the families' files, so a role names exactly that file (reviews d224a9a P3-1, c84f652
+    P3-2, P3-4). Any other value is left as it is."""
     if str(rel).replace("\\", "/") != "branding/typography.json" or not isinstance(doc, dict) or \
             not isinstance(doc.get("roles"), dict):
         return
-    named = lambda v: isinstance(v, str) and ("/" in v or "\\" in v)
+    named = font_file_value
     for k, spec in doc["roles"].items():
         if named(spec):
             doc["roles"][k] = fn(spec)
@@ -487,10 +545,11 @@ def _role_files(rel: str, doc, fn) -> None:
 
 # --------------------------------------------------------------------------- writing portable paths (T4.5 part B)
 def _plain(s: str) -> str:
-    r"""Without the Windows extended-length prefix (\\?\C:\x, \\?\UNC\srv\share): realpath may hand it back."""
-    if s.startswith("\\\\?\\UNC\\"):
+    r"""Without the Windows extended-length or device prefix (\\?\C:\x, \\.\C:\x, \\?\UNC\srv\share, either case):
+    realpath may hand it back."""
+    if s[:8].upper() in ("\\\\?\\UNC\\", "\\\\.\\UNC\\"):
         return "\\\\" + s[8:]
-    return s[4:] if s.startswith("\\\\?\\") else s
+    return s[4:] if s.startswith(("\\\\?\\", "\\\\.\\")) else s
 
 
 def native_abs(v: str) -> bool:
@@ -623,6 +682,7 @@ def migrate(paths, old_roots=(), dry_run: bool = False) -> dict:
             return s
         for spec in path_fields(rel):
             _walk(new, spec, fn)
+        _role_files(rel, new, fn)                       # review c84f652 P3-4: like saving (stored)
         if rel == "reference_analysis/cache.json" and isinstance(new, dict):
             new = _rekey_cache(root, new, old_roots)
         if new == doc:

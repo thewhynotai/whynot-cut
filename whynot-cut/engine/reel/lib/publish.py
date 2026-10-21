@@ -288,7 +288,8 @@ def render_thumbnails(ep) -> dict:
     b = Brand(ep.client_db)
     from . import client_db
     man = client_db.load(ep, "asset-manifest.json", {"assets": []}) or {"assets": []}
-    logo = next((a.get("display_derivative") for a in man.get("assets", []) if a.get("category") == "logo"), None)
+    logo = client_db.inside_file(client_db.client_root(ep), next((a.get("display_derivative") for a in man.get("assets", [])
+                                                if a.get("category") == "logo"), None))   # review c84f652 P2
     out_dir = ep.p("publish/thumbnail")
     files, warnings, errors, highlights = [], [], [], []
     if len(given) > dmax:
