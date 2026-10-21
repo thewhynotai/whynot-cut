@@ -55,3 +55,4 @@ channel state is `NOT_CONFIGURED`, and messages stay `FILED`.
 | R-2026-10-21-1228 | 2026-10-21 12:28 | hq_status | PRIMARY | FILED | تقرير حالة: 0 تغيير | `reports/2026-10-21-1228.md` |
 | R-2026-10-21-1302 | 2026-10-21 13:03 | hq_status | PRIMARY | FILED | تقرير الضهر: 2 تغيير | `reports/2026-10-21-1302.md` |
 | R-2026-10-21-1303 | 2026-10-21 13:03 | hq_status | PRIMARY | SENT (session local_2a3f8216-2828-4ad1-bb30-018a97b839f0) | تقرير الضهر: 0 تغيير | `reports/2026-10-21-1303.md` |
+| R-2026-10-21-1728 | 2026-10-21 17:28 | hq_status | PRIMARY | FILED | تقرير العصر: 0 تغيير | `reports/2026-10-21-1728.md` |
