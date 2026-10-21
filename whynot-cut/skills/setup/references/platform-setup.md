@@ -28,7 +28,7 @@ Claude Code); on macOS export it in your shell profile (`~/.zshrc`).
 
 | Variable | What it does | Default when unset |
 |---|---|---|
-| `WHYNOT_HOME` | The engine home: runtime, models, queue, logs. Same as the plugin option `engine_home`. Use an ASCII-only folder (e.g. `C:\whynot`) when your user name is not ASCII | `~/.whynot-cut` |
+| `WHYNOT_HOME` | The engine home: runtime, models, queue, logs. Same as the plugin option `engine_home`. Use an ASCII-only folder when your user name is not ASCII: for example `D:\WhyNotCut` (the root of a fixed local NTFS drive, a non-system one when there is one; never a network drive, a removable drive (a USB stick or card) or a FAT/exFAT drive; it holds the engine only, never client folders). `reel doctor` names one for this PC; `reel setup` creates it and locks it to your account, and `reel doctor` warns when other accounts may change files in the engine home | `~/.whynot-cut` |
 | `WHYNOT_CLIENTS_ROOT` | The folder that holds your client folders, so `--root` can be a bare client name. Same as the plugin option `clients_root` (the option wins over the preferences file) | `clients_root` from your preferences file; none if not set |
 | `WHYNOT_OPTIONS_FILE` | Where the plugin options record is read from (the SessionStart hook writes it; the wrappers read it because PowerShell does not receive path variables) | `~/.whynot-cut/plugin-options.json` |
 | `WHYNOT_PREMIERE_APP` | Premiere Pro to use: the `.app` / `.exe` or its folder. A wrong value is reported by `reel doctor` with this name | Newest release install found (registry / Spotlight / standard folders) |
