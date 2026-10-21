@@ -1,8 +1,8 @@
 diff --git a/whynot-cut/tests/test_plan_approval.py b/whynot-cut/tests/test_plan_approval.py
-index be21d74..b6dfcc9 100644
+index ec6b751..b7ce925 100644
 --- a/whynot-cut/tests/test_plan_approval.py
 +++ b/whynot-cut/tests/test_plan_approval.py
-@@ -157,6 +157,8 @@ class TestApprovalStaleness(ApprovalFixture):
+@@ -159,6 +159,8 @@ class TestApprovalStaleness(ApprovalFixture):
          self.assertNotEqual(plan_fingerprint(self.p), fp)
 
      def test_e2_next_and_handoff_flag_a_stale_approval(self):

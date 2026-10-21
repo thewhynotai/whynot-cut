@@ -13,7 +13,7 @@ index 4917744..38c9fe3 100644
    editor; never delete them.
  - If a reel command answers `blocked` because another session holds the client, stop and tell the editor; never
 diff --git a/whynot-cut/skills/edit/SKILL.md b/whynot-cut/skills/edit/SKILL.md
-index 49112d0..68dc065 100644
+index f753b8d..4abd0f2 100644
 --- a/whynot-cut/skills/edit/SKILL.md
 +++ b/whynot-cut/skills/edit/SKILL.md
 @@ -24,6 +24,7 @@ editor what is happening ("transcribing", "building in Premiere"), not "stage 5"
@@ -21,11 +21,11 @@ index 49112d0..68dc065 100644
  ```bash
  reel next --root "<CLIENT_FOLDER>" --video-id <ID>      # status, active client profile, next step (the pipeline resumes)
 +reel run-state --root "<CLIENT_FOLDER>" --video-id <ID> # a new session or after a usage limit: the same + any stage a cut left half done
+ reel brief --root "<CLIENT_FOLDER>" --video-id <ID>     # state, numbers, open items, next step in <= 1,500 tokens
+ reel client-brief --root "<CLIENT_FOLDER>"              # the client in <= 1,000 tokens (rebuilt only on a change)
  reel profile --root "<CLIENT_FOLDER>"                   # which profile applies and where its values come from
- reel settings --root "<CLIENT_FOLDER>"                  # preferences in effect for THIS client (_file = which file)
- ```
 diff --git a/whynot-cut/skills/motion/SKILL.md b/whynot-cut/skills/motion/SKILL.md
-index 5102607..d7f299b 100644
+index 183ddef..923e5b8 100644
 --- a/whynot-cut/skills/motion/SKILL.md
 +++ b/whynot-cut/skills/motion/SKILL.md
 @@ -21,6 +21,7 @@ approve the plan.
@@ -33,11 +33,11 @@ index 5102607..d7f299b 100644
  reel episode-next --root "<CLIENT>" --episode <EP>      # episode state, picked reels (motion ones end in _MO)
  reel next --root "<CLIENT>" --video-id <EP>_<ID>_MO     # the motion project's next step (resumable), stale steps
 +reel run-state --root "<CLIENT>" --video-id <EP>_<ID>_MO # a new session or after a usage limit: the same + any stage a cut left half done
+ reel brief --root "<CLIENT>" --video-id <EP>_<ID>_MO    # state, numbers, open items, next step in <= 1,500 tokens
+ reel client-brief --root "<CLIENT>"                     # the client in <= 1,000 tokens (rebuilt only on a change)
  reel ae-status                                          # is the WhyNot Cut Bridge alive in After Effects?
- ```
- Audio-only episodes (`.mp3 .wav .m4a .aac .flac` in `data/Episodes/`) can only become motion videos.
 diff --git a/whynot-cut/skills/podcast/SKILL.md b/whynot-cut/skills/podcast/SKILL.md
-index 6c6ee50..efc5fce 100644
+index 53b2358..6bc9e84 100644
 --- a/whynot-cut/skills/podcast/SKILL.md
 +++ b/whynot-cut/skills/podcast/SKILL.md
 @@ -17,6 +17,7 @@ messages to the editor): Gate 0 = pick the reels, Gate 1 = approve the plan, Gat
@@ -47,4 +47,4 @@ index 6c6ee50..efc5fce 100644
 +reel run-state --root "<CLIENT>" --episode <EP>         # a new session or after a usage limit: the same + any stage a cut left half done
  reel settings --root "<CLIENT>"                         # language, approval, whisper_model
  reel profile --root "<CLIENT>"                          # client profile (NONE -> /whynot-cut:new-client first)
- ```
+ reel client-brief --root "<CLIENT>"                     # the client in <= 1,000 tokens (rebuilt only on a change)

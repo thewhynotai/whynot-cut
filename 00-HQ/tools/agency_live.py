@@ -602,7 +602,7 @@ def build(now=None):
         add("  none right now", "gray")
     for parent, meta, model, effort, age, (word, colour) in sorted(agents, key=lambda a: a[4])[:12]:
         add(f"  {parent[:28]:<28}{model_name(model or meta.get('model')):<10}{(effort or '?'):<8}")
-        lines.append(("\0" + word.ljust(16), colour))
+        lines.append(("\0" + word.ljust(28), colour))
         lines.append(("\0" + (latin(meta.get("description"), 90) or meta.get("agentType") or "-"), ""))
     if len(agents) > 12:
         add(f"  … and {len(agents) - 12} more", "gray")
