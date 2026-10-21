@@ -787,8 +787,11 @@ class TestAsciiAeStage(_Tmp):
             with self.assertRaises(ae_render.StageError) as cm:
                 ae_render.stage_ascii(aep)
         msg = str(cm.exception)
-        self.assertIn("setx WHYNOT_HOME", msg)
-        self.assertIn("TEMP", msg)
+        self.assertIn(self.ARABIC_TEMP, msg)
+        # BL-16: the suggested ASCII engine home, never a folder at the root of C:\ (whynot or Temp)
+        self.assertRegex(msg, r"setx WHYNOT_HOME [A-Z]:\\WhyNotCut")
+        self.assertNotRegex(msg, r"(?i)c:\\(whynot(?!cut)|temp)")
+        self.assertIn("reel setup", msg)
 
 
 class TestRunDecodesLeniently(unittest.TestCase):

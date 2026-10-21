@@ -219,10 +219,11 @@ def stage_ascii(aep: Path, out: Path | None = None) -> tuple[Path | None, Path, 
         except OSError:
             continue
     if stage is None:
+        from .portability import suggested_home
         raise StageError(f"aerender needs ASCII paths, and no ASCII folder could hold its stage (the temp folder "
                          f"{tempfile.gettempdir()} is not ASCII; tried: {', '.join(tried) or 'none'}): run "
-                         "`setx WHYNOT_HOME C:\\whynot` (or `setx TEMP C:\\Temp` after creating that folder) in a "
-                         "terminal, open a new Claude Code session, then render again")
+                         f"`setx WHYNOT_HOME {suggested_home()}` in a terminal, open a new Claude Code session, run "
+                         "`reel setup` (it creates that folder and locks it to your account), then render again")
     try:
         r_aep = stage / "project.aep"
         shutil.copy2(aep, r_aep)
