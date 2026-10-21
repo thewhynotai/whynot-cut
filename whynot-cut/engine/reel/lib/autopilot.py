@@ -20,25 +20,25 @@ APPROVAL_REL = "01_analysis/plan-approval.json"
 
 
 def _pending(paths: Paths, events: list | None) -> list[dict]:
-    """The lines an automatic approval never covers: for a medical or religious client whose review of THIS plan is
-    missing, stale or damaged, the whole review (`event_id` None); the current review's rows that are not `ok`; then
-    the graphics with approval_required (religious for a religious client)."""
+    """The lines an automatic approval never covers: for a client review_flags.held() holds (a medical or religious
+    client, or any client whose review key has religious) whose review of THIS plan is missing, stale or damaged, the
+    whole review (`event_id` None); the current review's rows that are not `ok`; then the graphics with
+    approval_required (religious when held as religious)."""
     from . import review_flags
-    from .common import content_domain
     out, seen = [], set()
     try:
         doc = review_flags.load(paths)
     except Exception:  # noqa: BLE001 — an unusable review covers nothing
         doc = None
-    domain = content_domain()
-    if doc is None and domain in ("medical", "religious"):
-        out.append({"event_id": None, "kind": domain, "review": "missing or not current"})
+    hold, _checks = review_flags.held()
+    if doc is None and hold:
+        out.append({"event_id": None, "kind": hold, "review": "missing or not current"})
     for it in (doc or {}).get("items", []):
         if it.get("verdict") != "ok" and (it["event_id"], it["flag"]) not in seen:
             seen.add((it["event_id"], it["flag"]))
             out.append({"event_id": it["event_id"], "kind": it["flag"]})
     flagged = {e for e, _ in seen}
-    kind = "religious" if domain == "religious" else "medical"
+    kind = "religious" if hold == "religious" else "medical"
     for e in events or []:
         if isinstance(e, dict) and e.get("approval_required") and e.get("event_id") not in flagged:
             out.append({"event_id": str(e["event_id"]), "kind": kind})

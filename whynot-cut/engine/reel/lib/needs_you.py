@@ -312,6 +312,7 @@ class _Config:
     def __init__(self, c: _Collector):
         from .common import content_domain, load_config
         self.threshold, self.no_music, self.domain = 0.5, False, "general"
+        self.hold, self.hold_checks = None, ("medical",)          # as the general default above, until read
         self.verse = {"religious": False, "phrases": [], "warnings": []}
         with c.source("output/client_database/reel-profile", None):
             t = load_config("transcription.json").get("low_confidence_threshold", 0.5)
@@ -319,12 +320,14 @@ class _Config:
             m = load_config("style.json").get("music")
             self.no_music = isinstance(m, str) and m.strip().lower().startswith("none")
             self.domain = content_domain()
+            from . import review_flags
+            self.hold, self.hold_checks = review_flags.held()    # the review key's checks, as review_flags uses them
             from . import manual_verse
             self.verse = manual_verse.config(load_config("profile.json"))
 
     @property
     def approval_kind(self) -> str:
-        return "religious" if self.domain == "religious" else "medical"
+        return "religious" if self.hold == "religious" else "medical"
 
 
 def _words(c: _Collector, cfg: _Config, p: Paths, item: str, label: tuple[str, str]) -> bool:
@@ -487,14 +490,16 @@ def _review_rows(p: Paths) -> list[dict] | None:
     return None if doc is None else [it for it in doc.get("items", []) if it.get("verdict") != "ok"]
 
 
-NOT_CURRENT = {"medical": ("the medical review of the words on screen is missing or not current: Claude reviews them "
-                           "again before you approve anything",
-                           "مراجعة الكلام الطبي اللي على الشاشة مش موجودة أو مش محدّثة: Claude يراجعه تاني قبل ما "
-                           "توافق على أي حاجة"),
-               "religious": ("the religious review of the words on screen is missing or not current: Claude reviews "
-                             "them again before you approve anything",
-                             "مراجعة المحتوى الديني اللي على الشاشة مش موجودة أو مش محدّثة: Claude يراجعه تاني قبل "
-                             "ما توافق على أي حاجة")}
+# keyed by the review key's checks (review_flags.held): a religious key's review can be not current for its medical
+# check alone (a dose line without its own medical row), so its line names both checks
+NOT_CURRENT = {("medical",): ("the medical review of the words on screen is missing or not current: Claude reviews "
+                              "them again before you approve anything",
+                              "مراجعة الكلام الطبي اللي على الشاشة مش موجودة أو مش محدّثة: Claude يراجعه تاني قبل ما "
+                              "توافق على أي حاجة"),
+               ("medical", "religious"): ("the medical and religious review of the words on screen is missing or not "
+                                          "current: Claude reviews them again before you approve anything",
+                                          "مراجعة الكلام الطبي والديني اللي على الشاشة مش موجودة أو مش محدّثة: Claude "
+                                          "يراجعه تاني قبل ما توافق على أي حاجة")}
 
 
 def _approvals(c: _Collector, cfg: _Config, p: Paths, item: str, spec: dict | None, plan_src: str | None = None,
@@ -531,9 +536,9 @@ def _approvals(c: _Collector, cfg: _Config, p: Paths, item: str, spec: dict | No
                     why_ar += f" المراجعة استخدمت نوع مراجعة WhyNot Cut ما يعرفوش ({f})، فمحتاج أشد موافقة."
                 c.add(kind, en, ar, why_en + (f" Review note: {reason}" if reason else ""),
                       why_ar + (f" ملاحظة المراجعة: {reason}" if reason else ""), gid, item, src)
-    if cfg.domain in ("medical", "religious") and has_words and plan_src and not current:
-        en, ar = NOT_CURRENT[cfg.domain]
-        c.add(cfg.domain, f"{item}: {en}", f"{item}: {ar}", *NEVER_AUTO[cfg.domain], c.rel(rf), item, plan_src)
+    if cfg.hold and has_words and plan_src and not current:
+        en, ar = NOT_CURRENT[cfg.hold_checks]
+        c.add(cfg.hold, f"{item}: {en}", f"{item}: {ar}", *NEVER_AUTO[cfg.hold], c.rel(rf), item, plan_src)
     if spec is not None:
         src = c.rel(p.p("01_analysis/timeline-spec.json"))
         kind = cfg.approval_kind

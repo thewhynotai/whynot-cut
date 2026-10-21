@@ -573,6 +573,22 @@ class TestSources(Base):
             self.assertIn(rf_ref, [u["source"] for u in doc["unread"]])
             put_spec(self.p)
 
+    def test_K9_the_not_current_line_names_every_check_that_may_be_missing(self):
+        """Review 9a4fdc7 P3-1: a religious client's review can be not current for its medical check alone (a dose
+        line without its own medical row), so the line names both checks; a medical client's names medical."""
+        put_spec(self.p)
+        rf_ref = f"output/projects/{VID}/review-flags.json"
+        for doc, en, ar in (({"domain": "medical"}, "the medical review of the words", "مراجعة الكلام الطبي اللي"),
+                            ({"domain": "religious"}, "the medical and religious review of the words", "الطبي والديني"),
+                            ({"review_domains": ["religious"]}, "the medical and religious review of the words",
+                             "الطبي والديني")):
+            with self.subTest(doc):
+                profile(self.root, "profile.json", doc)
+                got = [i for i in self.collect()["items"] if i["ref"] == rf_ref]
+                self.assertEqual(len(got), 1)
+                self.assertIn(en, got[0]["text"])
+                self.assertIn(ar, got[0]["text_ar"])
+
     def test_K8_pick_the_reels(self):
         from lib.episode import EpisodePaths
         ep = EpisodePaths(self.root, "EP01")
@@ -647,6 +663,50 @@ class TestAutoApprove(Base):
         rec = AP().approve(self.p)
         self.assertEqual(rec["not_covered"], [{"event_id": "G2", "kind": "religious"}])
         self.assertEqual([i["ref"] for i in by_kind(self.collect(), "religious")], ["G2"])
+        rf = self.p.p("review-flags.json")                     # religious rows alone on the dose line: held
+        doc = read_json(rf)                                     # (review 9a4fdc7 P3-6)
+        write_json(rf, dict(doc, ok=[dict(o, flags=["religious"]) for o in doc["ok"]]))
+        self.assertIn({"event_id": None, "kind": "religious", "review": "missing or not current"},
+                      AP().approve(self.p)["not_covered"])
+
+    def test_A11_a_religious_review_set_is_held_like_a_religious_client(self):
+        """Review 9a4fdc7 P2-2: NEEDS-YOU and autopilot decide from the review key, so a client whose religious check
+        comes from `review_domains` (no legacy `domain`) is held when its review is missing or not current, and its
+        approval_required graphics go to the content owner."""
+        prefs(self.root, approval="auto")
+        rf_ref = f"output/projects/{VID}/review-flags.json"
+        profile(self.root, "profile.json", {"review_domains": ["religious"]})
+        rec = AP().approve(self.p)
+        self.assertIn({"event_id": None, "kind": "religious", "review": "missing or not current"}, rec["not_covered"])
+        self.assertIn({"event_id": "G2", "kind": "religious"}, rec["not_covered"])
+        self.assertEqual(len([i for i in by_kind(self.collect(), "religious") if i["ref"] == rf_ref]), 1)
+        self.assertIn("G2", [i["ref"] for i in by_kind(self.collect(), "religious")])   # approval_required: religious
+        full_review(self.p)
+        self.assertNotIn(None, [n["event_id"] for n in AP().approve(self.p)["not_covered"]])
+        self.assertEqual([i for i in self.collect()["items"] if i["ref"] == rf_ref], [])
+        profile(self.root, "profile.json", {"review_domains": ["business"]})   # no medical or religious subject area
+        self.p.p("review-flags.json").unlink()
+        self.assertNotIn(None, [n["event_id"] for n in AP().approve(self.p)["not_covered"]])
+        profile(self.root, "profile.json", {"review_domains": ["no-such-check"]})   # unreadable review set: held
+        self.assertIn(None, [n["event_id"] for n in AP().approve(self.p)["not_covered"]])
+
+    def test_A12_a_citation_on_screen_goes_to_the_content_owner(self):
+        """Review 9a4fdc7 P2-1: a detected citation is never `ok`; its needs-approval row is in NEEDS-YOU and in
+        autopilot's not_covered. The plan is the Task 53 eval's planted hadith plan, read from its fixture."""
+        plant = SK / "evals" / "review-religious-hadith-attribution" / "plant" / "timeline-spec.json"
+        write_json(self.p.p("01_analysis/timeline-spec.json"), json.loads(plant.read_text(encoding="utf-8")))
+        prefs(self.root, approval="auto")
+        profile(self.root, "profile.json", {"domain": "religious"})
+        rows = [("G01", "medical", "ok"), ("G02", "religious", "ok"), ("G03", "medical", "ok")]
+        with self.assertRaises(Guidance):
+            RF.write(self.p, {"items": [{"event_id": i, "flag": f, "verdict": v, "reason": ""} for i, f, v in rows]})
+        rows[1] = ("G02", "religious", "needs-approval")
+        RF.write(self.p, {"items": [{"event_id": i, "flag": f, "verdict": v, "reason": "x"} for i, f, v in rows]})
+        rec = AP().approve(self.p)
+        self.assertEqual(rec["not_covered"], [{"event_id": "G02", "kind": "religious"}])
+        got = [i for i in by_kind(self.collect(), "religious") if i["ref"] == "G02"]
+        self.assertEqual(len(got), 1)
+        self.assertIn("موافقة صاحب المحتوى", got[0]["text_ar"])
 
     def test_A9_failed_replan_is_refused(self):
         prefs(self.root, approval="auto")
