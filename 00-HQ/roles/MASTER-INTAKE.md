@@ -112,18 +112,21 @@ never review yourself. Give it the card, the spec, the report, the sha, the patc
 - **Clean setup.** Run `git -C D:\WNC-work\review checkout --force --detach <sha>`, then
   `git -C D:\WNC-work\review clean -fdx`. `git status` must be clean before you start and again after you finish.
   Revert every mutant you make.
-- **Tests.** Run the focused tests, then the **FULL suite** through the queue. The full-suite output is kept in
-  `HQ\reviews\suites\review-<ID>-<sha8>.log` (`<sha8>` = first 8 characters of the reviewed sha), so a run
-  cut by a usage limit does not lose a finished suite (2026-10-21: BL-02's suite ran 6 times, each result lost).
-  - **Reuse first.** If that `.log` exists and its last lines hold the unittest result (`Ran N tests` and then `OK…`
-    or `FAILED (…)`), use it: do not queue the suite again; write "suite reused from <file>" in the review.
-    A `.log.part` file is an unfinished run: ignore it.
+- **Tests.** Run the focused tests, then the **FULL suite** through the queue, both from `D:\WNC-work\review`, with
+  the **Bash** tool (never PowerShell: it strips the inner quotes of the command below). The full-suite output is
+  kept in `L="/d/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/00-HQ/reviews/suites/review-<ID>-<sha8>.log"`
+  (`<sha8>` = first 8 characters of the reviewed sha), so a run cut by a usage limit does not lose a finished suite
+  (2026-10-21: BL-02's suite ran 6 times, each result lost).
+  - **Reuse first.** Reuse `$L` only if it is under 24 h old (same engine runtime) and
+    `grep -qE '^Ran [0-9]+ tests' "$L" && tail -n 10 "$L" | grep -qE '^(OK|FAILED)'` succeeds: then do not queue
+    the suite again; write "suite reused from <file>" in the review. A `.log.part` is an unfinished run: ignore it.
   - **Otherwise run** (the same command as SETUP-H1 step 3, with the log kept):
-    `bash HEAVY suite review-<ID> -- env WNC_RUN=<this intake run's session id> PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 bash -c 'set -o pipefail; L="<HQ>/reviews/suites/review-<ID>-<sha8>.log"; bash tools/test.sh 2>&1 | tee "$L.part"; rc=$?; mv -f "$L.part" "$L"; exit $rc'`
+    `bash HEAVY suite review-<ID> -- env WNC_RUN=<this intake run's session id> PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 bash -c 'set -o pipefail; L="/d/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/00-HQ/reviews/suites/review-<ID>-<sha8>.log"; bash tools/test.sh 2>&1 | tee "$L.part"; rc=$?; mv -f "$L.part" "$L"; exit $rc'`
   (the `WNC_RUN` tag lets the next intake end this suite if this run is cut by a usage limit, OPS-07; give the
-  reviewer subagent the id and the log path). Spawn the reviewer in the FOREGROUND (`run_in_background: false`) and wait for it in
-  this turn, so this run stays `isRunning: true` while its review lives.
-  run from `D:\WNC-work\review`.
+  reviewer subagent the id and the log path). Known limit: a suite still running when the next intake ends it
+  (OPS-07) leaves only its `.part`; the reuse helps when the suite finished first. Spawn the reviewer in the
+  FOREGROUND (`run_in_background: false`) and wait for it in this turn, so this run stays `isRunning: true` while
+  its review lives.
 - **Mutants.** HIGH tier only: kill at least 3 mutants of the new logic. LIGHT tier: no mutation run.
 - **Coverage.** Verify every acceptance line of the card and every done criterion and pre-mortem line of the spec.
 - **Output.** Return:
