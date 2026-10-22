@@ -177,6 +177,14 @@ the others.
 - **One mission per chat.** A chat starts from a task card and ends when it is delivered. A new task = a new chat
   that reads the card, not an old chat with 9,000 messages. Big contexts are what burn the limit.
 - **Subagents for reading,** main chat for deciding. Ask subagents for short reports (≤ 500 words).
+- **Sub-agents stay small (measured 2026-10-22, OPS-08).** In the 24 h to 10-22 04:00, about 75% of the main
+  account's limit went to five fix-round sub-agents of the executor and Builder A, kept alive 1-2 days at
+  0.4-0.95M tokens of context; 65-76% of their cost was rewriting that context after each pause over 5 minutes
+  (a queued suite, a limit). The routines (intake, watchdog, report) were 7% together. Rules:
+  - one fresh sub-agent per fix round or review; its brief is the card + the diff + the last review, not the old agent;
+  - never continue (SendMessage) a sub-agent whose context is over 250k tokens: ask it for a handoff of at most
+    300 words (what is done, what is left, commit, log paths) written to the card, then start a fresh one from it;
+  - a sub-agent that queues a suite ends its turn with the log path; the next round reads the log (suite-log reuse).
 - **Machine work is not AI work.** Suites, renders, downloads and CI watches go to the job queue (Windows:
   `wnc-queue`; Mac: a plain background shell job). Never poll in a loop; read the result when it is done.
 - **No cross-pinging.** Sessions talk through files in git (cards, inbox), not by messaging each other. Only the
