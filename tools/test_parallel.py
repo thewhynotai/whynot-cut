@@ -312,9 +312,10 @@ def atomic_write(path: Path, text: str):
 def dirty_key(repo: Path):
     """sha + hash of the dirty tree, or None when git can't tell (then: no cache). The hash covers `git status` of the
     whole repo (modified, staged, deleted, untracked non-ignored) plus the RAW working-tree bytes of every path it
-    lists, so a line-ending-only change counts too (review r1 P2-1, P3-7). No `git diff HEAD`: those bytes add nothing
-    the listed paths' raw bytes don't hold, and diff refreshes .git/index even with --no-optional-locks (git 2.56:
-    a file with a new mtime and the same bytes; OPS-09 equivalence run 3)."""
+    lists, so a line-ending-only change counts too (review r1 P2-1, P3-7). No `git diff HEAD`: it refreshes .git/index
+    even with --no-optional-locks (git 2.56: a file with a new mtime and the same bytes; OPS-09 equivalence run 3).
+    Known limit (review r5): a submodule's commit, a mode-only bit and a retargeted directory symlink are not in the
+    key (the repo has none of them; Windows runs with core.filemode=false)."""
     def g(*args):
         return git_out(repo, *args)
     try:

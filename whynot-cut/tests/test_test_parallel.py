@@ -436,11 +436,10 @@ class Cache(Case):
         old = x.stat()
         os.utime(x, ns=(old.st_atime_ns, old.st_mtime_ns + 2_000_000_000))   # always stale (no racy-git luck)
         index = self.repo / ".git" / "index"
-        st = index.stat()
+        before = index.read_bytes()                                       # bytes: a refresh rewrites the stored stat data
         self.assertEqual(self.run_tool()[0], 0)
-        st2 = index.stat()
-        self.assertEqual((st.st_mtime_ns, st.st_size), (st2.st_mtime_ns, st2.st_size),
-                         "the tool rewrote .git/index (git status without --no-optional-locks)")
+        self.assertEqual(index.read_bytes(), before,
+                         "the tool rewrote .git/index (a git call that refreshes the index)")
         src = TOOL.read_text(encoding="utf-8")
         self.assertIn('["git", "--no-optional-locks", *args]', src)
         self.assertEqual(src.count('["git"'), 1, "every git call goes through g()")
