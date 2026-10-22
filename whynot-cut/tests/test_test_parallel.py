@@ -370,7 +370,7 @@ class Cache(Case):
         self.use("pass_a")
         self.assertEqual(self.run_tool()[0], 0)
         f = self.tests / "test_pass_a.py"
-        f.write_bytes(f.read_bytes() + b"\n# edited\n")                   # tracked change: git diff HEAD
+        f.write_bytes(f.read_bytes() + b"\n# edited\n")                   # tracked change: listed by git status, bytes hashed
         code, out = self.run_tool()
         self.assertEqual(code, 0, out)
         self.assertFalse(out.startswith("reused: "), out)
@@ -432,8 +432,9 @@ class Cache(Case):
     def test_git_takes_no_optional_index_lock(self):                     # review r2 P3-1
         self.use("pass_a")
         x = self.repo / "tools" / "x.txt"
-        time.sleep(0.05)
         x.write_bytes(x.read_bytes())                                     # same bytes, new mtime: a stale index entry
+        old = x.stat()
+        os.utime(x, ns=(old.st_atime_ns, old.st_mtime_ns + 2_000_000_000))   # always stale (no racy-git luck)
         index = self.repo / ".git" / "index"
         st = index.stat()
         self.assertEqual(self.run_tool()[0], 0)

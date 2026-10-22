@@ -312,14 +312,15 @@ def atomic_write(path: Path, text: str):
 def dirty_key(repo: Path):
     """sha + hash of the dirty tree, or None when git can't tell (then: no cache). The hash covers `git status` of the
     whole repo (modified, staged, deleted, untracked non-ignored) plus the RAW working-tree bytes of every path it
-    lists, so a line-ending-only change counts too (review r1 P2-1, P3-7), and the binary diff without external
-    diff/textconv drivers."""
+    lists, so a line-ending-only change counts too (review r1 P2-1, P3-7). No `git diff HEAD`: those bytes add nothing
+    the listed paths' raw bytes don't hold, and diff refreshes .git/index even with --no-optional-locks (git 2.56:
+    a file with a new mtime and the same bytes; OPS-09 equivalence run 3)."""
     def g(*args):
         return git_out(repo, *args)
     try:
         sha = g("rev-parse", "HEAD").decode().strip()
         status = g("status", "--porcelain=v1", "-z", "--untracked-files=all")
-        h = hashlib.sha256(status + b"\0" + g("diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv"))
+        h = hashlib.sha256(status + b"\0")
         paths, toks, i = set(), status.split(b"\0"), 0
         while i < len(toks):
             t = toks[i]
