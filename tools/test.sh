@@ -47,6 +47,11 @@ if [ -n "$TT" ]; then
   if command -v cygpath >/dev/null 2>&1; then TTW="$(cygpath -w "$TT")"; else TTW="$TT"; fi
   export TEMP="$TTW" TMP="$TTW" TMPDIR="$TT"
 fi
+# --parallel N [--fresh]: one fresh process per test module, N at a time, same flags (OPS-09, tools/test_parallel.py)
+if [ "${1:-}" = "--parallel" ]; then
+  shift
+  PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 exec "$PY" $FLAG -B tools/test_parallel.py --workers "$@"
+fi
 # -W error::ResourceWarning: an unclosed file / pipe / process anywhere fails the run (T2.17, MI-9;
 # collected by tests/test_release_hygiene.py)
 PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 exec "$PY" $FLAG -B -W error::ResourceWarning -m unittest discover -s whynot-cut/tests "$@"

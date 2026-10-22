@@ -1,0 +1,329 @@
+"""OPS-09: tools/test_parallel.py, the parallel full suite behind `tools/test.sh --parallel N`.
+
+Every run here points the tool at a small temp git repo whose tests folder is made of fixtures
+(tests/fixtures/test_parallel/case_*.py, copied in as test_*.py), a temp cache folder (WHYNOT_SUITE_CACHE) and,
+where it matters, a simulated RAM reading (WHYNOT_PARALLEL_FAKE_RAM_FILE). The real suite is never run.
+Run:  bash tools/test.sh -p test_test_parallel.py
+"""
+import sys as _sys
+_sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
+import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
+import importlib.util
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+SK = Path(__file__).resolve().parents[1]
+REPO = SK.parent
+TOOL = REPO / "tools" / "test_parallel.py"
+FIX = Path(__file__).resolve().parent / "fixtures" / "test_parallel"
+STATE_ENV = "WNC_PARALLEL_FIXTURE_STATE"
+
+
+def load_tool():
+    spec = importlib.util.spec_from_file_location("_wnc_test_parallel", TOOL)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def git(repo, *args):
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "core.autocrlf=false",
+                    *args], cwd=str(repo), check=True, capture_output=True)
+
+
+class Case(unittest.TestCase):
+    """A temp repo <tmp>/repo (git, one commit) with whynot-cut/tests/ holding the chosen fixtures."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="wnc-par-"))
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.repo = self.tmp / "repo"
+        self.tests = self.repo / "whynot-cut" / "tests"
+        self.tests.mkdir(parents=True)
+        (self.repo / "tools").mkdir()
+        (self.repo / "tools" / "x.txt").write_bytes(b"x\n")
+        self.cache = self.tmp / "cache"
+        self.state = self.tmp / "state"
+        self.state.mkdir()
+
+    def use(self, *cases, commit=True):
+        for c in cases:
+            shutil.copyfile(FIX / f"case_{c}.py", self.tests / f"test_{c}.py")
+        if commit:
+            git(self.repo, "init", "-q")
+            git(self.repo, "add", "-A")
+            git(self.repo, "commit", "-q", "-m", "fixture")
+
+    def env(self, **extra):
+        e = dict(os.environ, WHYNOT_SUITE_CACHE=str(self.cache), PYTHONUTF8="1", WHYNOT_PARALLEL_POLL="0.2")
+        e[STATE_ENV] = str(self.state)
+        e.pop("WHYNOT_PARALLEL_FAKE_RAM_FILE", None)
+        e.update(extra)
+        return e
+
+    def argv(self, *extra, workers="2", lane=""):
+        return [sys.executable, "-B", str(TOOL), "--workers", workers, "--repo", str(self.repo),
+                "--tests-dir", str(self.tests), "--serial-lane", lane, *extra]
+
+    def run_tool(self, *extra, lane="", env=None, workers="2"):
+        r = subprocess.run(self.argv(*extra, workers=workers, lane=lane), capture_output=True,
+                           env=env or self.env(), timeout=300)
+        out = (r.stdout.decode("utf-8") + r.stderr.decode("utf-8")).replace("\r\n", "\n")   # Windows text mode
+        return r.returncode, out
+
+    def events(self):
+        f = self.state / "events.txt"
+        return f.read_text(encoding="utf-8").split() if f.exists() else []
+
+
+class Discovery(Case):
+    def test_module_discovery_equals_unittest_discover(self):
+        self.use("pass_a", "pass_b", "fail", "arabic", commit=False)
+        (self.tests / "helper.py").write_bytes(b"X = 1\n")              # not test*.py: discover skips it
+        (self.tests / "test-dash.py").write_bytes(b"import unittest\n")  # not an importable name: discover skips it
+        (self.tests / "data").mkdir()
+        shutil.copyfile(FIX / "case_pass_a.py", self.tests / "data" / "test_inner.py")   # no __init__: not a package
+        tool = load_tool()
+        got = tool.discover_modules(self.tests)
+        suite = unittest.TestLoader().discover(str(self.tests))
+        want = set()
+
+        def walk(s):
+            for t in s:
+                if isinstance(t, unittest.TestSuite):
+                    walk(t)
+                else:
+                    want.add(t.id().split(".")[0])
+        try:
+            walk(suite)
+        finally:
+            for m in list(sys.modules):
+                if m in ("test_pass_a", "test_pass_b", "test_fail", "test_arabic"):
+                    del sys.modules[m]
+            while str(self.tests) in sys.path:
+                sys.path.remove(str(self.tests))
+        self.assertEqual(sorted(got), sorted(want))
+        self.assertEqual(sorted(got), ["test_arabic", "test_fail", "test_pass_a", "test_pass_b"])
+
+    def test_a_test_package_is_refused_with_exit_2(self):
+        self.use("pass_a", commit=False)
+        pkg = self.tests / "subpkg"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_bytes(b"")
+        shutil.copyfile(FIX / "case_pass_b.py", pkg / "test_inside.py")
+        git(self.repo, "init", "-q")
+        code, out = self.run_tool()
+        self.assertEqual(code, 2, out)
+        self.assertIn("subpkg", out)
+        self.assertNotIn("\nOK", out)
+
+
+class Ordering(unittest.TestCase):
+    def test_lpt_order_from_recorded_durations(self):
+        tool = load_tool()
+        mods = ["a", "b", "c", "d"]
+        order = tool.order_modules(mods, {"a": 5.0, "b": 50.0, "c": 1.0, "d": 20.0}, {m: 100 for m in mods})
+        self.assertEqual(order, ["b", "d", "a", "c"])
+
+    def test_lpt_order_from_file_sizes_when_no_durations(self):
+        tool = load_tool()
+        order = tool.order_modules(["a", "b", "c"], {}, {"a": 10, "b": 3000, "c": 200})
+        self.assertEqual(order, ["b", "c", "a"])
+
+    def test_missing_duration_is_estimated_from_size(self):
+        tool = load_tool()
+        # a and b known (1 s per 100 bytes); c has no duration but 5000 bytes -> ~50 s: first
+        order = tool.order_modules(["a", "b", "c"], {"a": 10.0, "b": 2.0}, {"a": 1000, "b": 200, "c": 5000})
+        self.assertEqual(order, ["c", "a", "b"])
+
+
+class Results(Case):
+    def test_green_run_prints_ran_and_ok_and_exits_0(self):
+        self.use("pass_a", "pass_b")
+        code, out = self.run_tool()
+        self.assertEqual(code, 0, out)
+        self.assertIn("Ran 4 tests in ", out)
+        self.assertIn("\nOK (skipped=1)\n", out)
+        self.assertIn("parallel: workers=2", out)
+
+    def test_failing_fixture_counts_as_failure_exit_1(self):
+        self.use("pass_a", "fail")
+        code, out = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAIL: test_always_fails (test_fail.Fails", out)
+        self.assertIn("AssertionError", out)
+        self.assertIn("ERROR: test_raises (test_fail.Fails", out)
+        self.assertIn("Ran 5 tests in ", out)
+        self.assertIn("FAILED (failures=1, errors=1, skipped=1)", out)
+        self.assertIn("test_fail.Fails.test_always_fails: fails alone too", out)
+        self.assertIn("test_fail.Fails.test_raises: fails alone too", out)
+
+    def test_load_sensitive_failure_is_labelled_and_still_fails(self):
+        self.use("pass_a", "flaky")
+        code, out = self.run_tool()
+        self.assertEqual(code, 1, out)                                   # the strict rule: the label changes nothing
+        self.assertIn("FAILED (failures=1, skipped=1)", out)
+        self.assertIn("test_flaky.Flaky.test_fails_first_time: load-sensitive (passed alone)", out)
+        self.assertEqual(self.events().count("flaky"), 2)                # first run + the labelling re-run
+
+    def test_arabic_test_names_and_messages_print_as_utf8(self):
+        self.use("arabic")
+        code, out = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("test_عربي", out)
+        self.assertIn("الجملة غلط: ٣ مش ٤", out)
+        self.assertIn("رسالة الخطأ", out)
+
+
+class Incomplete(Case):
+    def assert_nothing_stored(self):
+        stored = sorted(p.name for p in self.cache.glob("*")) if self.cache.exists() else []
+        self.assertEqual(stored, [], "an incomplete run must store no cache entry and no durations")
+
+    def test_killed_worker_exits_2_no_cache_no_durations(self):
+        self.use("pass_a", "killed")
+        code, out = self.run_tool()
+        self.assertEqual(code, 2, out)
+        self.assertIn("INCOMPLETE", out)
+        self.assertIn("test_killed", out)
+        self.assertNotIn("\nOK", out)
+        self.assert_nothing_stored()
+
+    def test_missing_record_exits_2_even_with_rc_0(self):
+        self.use("pass_a", "norecord")
+        code, out = self.run_tool()
+        self.assertEqual(code, 2, out)
+        self.assertIn("test_norecord", out)
+        self.assertIn("no result record", out)
+        self.assertNotIn("\nOK", out)
+        self.assert_nothing_stored()
+
+    def test_bad_worker_count_exits_2(self):
+        self.use("pass_a")
+        code, out = self.run_tool(workers="1")
+        self.assertEqual(code, 2, out)
+
+
+class Cache(Case):
+    def test_cache_hit_reuses_the_report_and_says_so(self):
+        self.use("pass_a", "fail")
+        code1, out1 = self.run_tool()
+        self.assertEqual(code1, 1, out1)
+        self.assertTrue((self.cache / "durations.json").is_file())
+        ran = len(self.events())
+        code2, out2 = self.run_tool()
+        self.assertEqual(code2, 1, out2)                                  # the stored exit code
+        self.assertTrue(out2.startswith("reused: "), out2)
+        self.assertIn(" from ", out2.splitlines()[0])
+        self.assertIn("FAILED (failures=1, errors=1, skipped=1)", out2)
+        self.assertEqual(len(self.events()), ran, "a cache hit runs nothing")
+
+    def test_a_dirty_tree_change_misses_the_cache(self):
+        self.use("pass_a")
+        self.assertEqual(self.run_tool()[0], 0)
+        f = self.tests / "test_pass_a.py"
+        f.write_bytes(f.read_bytes() + b"\n# edited\n")                   # tracked change: git diff HEAD
+        code, out = self.run_tool()
+        self.assertEqual(code, 0, out)
+        self.assertFalse(out.startswith("reused: "), out)
+        self.assertTrue(self.run_tool()[1].startswith("reused: "))
+        (self.repo / "tools" / "new.txt").write_bytes(b"new\n")           # untracked, not ignored, under tools/
+        self.assertFalse(self.run_tool()[1].startswith("reused: "))
+
+    def test_fresh_ignores_the_cache(self):
+        self.use("pass_a")
+        self.assertEqual(self.run_tool()[0], 0)
+        ran = len(self.events())
+        code, out = self.run_tool("--fresh")
+        self.assertEqual(code, 0, out)
+        self.assertFalse(out.startswith("reused: "), out)
+        self.assertGreater(len(self.events()), ran)
+
+
+class SerialLane(Case):
+    def test_lane_ids_run_alone_after_the_parallel_run_and_count(self):
+        self.use("pass_a", "pass_b", "lane")
+        code, out = self.run_tool(lane="test_lane.Heavy.test_alone,test_lane.WholeClass")
+        self.assertEqual(code, 0, out)
+        ev = self.events()
+        self.assertEqual(ev.count("lane-alone"), 1)                       # not also run in the parallel phase
+        self.assertEqual(ev.count("lane-class"), 2)
+        last_parallel = max(i for i, e in enumerate(ev) if e in ("a", "b", "lane-other"))
+        lane_idx = [i for i, e in enumerate(ev) if e.startswith("lane-") and e != "lane-other"]
+        self.assertGreater(min(lane_idx), last_parallel)
+        self.assertIn("Ran 8 tests in ", out)                            # 2 + 2 + 1 other + 1 alone + 2 class
+
+    def test_a_lane_id_that_matches_no_test_exits_2(self):
+        self.use("pass_a", "lane")
+        code, out = self.run_tool(lane="test_lane.Heavy.test_renamed")
+        self.assertEqual(code, 2, out)
+        self.assertIn("test_lane.Heavy.test_renamed", out)
+
+    def test_default_lane_names_real_tests(self):
+        tool = load_tool()
+        self.assertEqual(tool.DEFAULT_SERIAL_LANE, (
+            "test_identity_scan.TestRealTree.test_full_repo_scan_is_fast",
+            "test_serve_progress.AdapterRun", "test_serve_progress.ThroughTheDaemon"))
+        tests = SK / "tests"
+        self.assertIn("    def test_full_repo_scan_is_fast(self):",
+                      (tests / "test_identity_scan.py").read_text(encoding="utf-8"))
+        src = (tests / "test_serve_progress.py").read_text(encoding="utf-8")
+        self.assertIn("\nclass AdapterRun(", src)
+        self.assertIn("\nclass ThroughTheDaemon(", src)
+
+
+class RamBrake(Case):
+    def test_no_module_starts_while_ram_is_high_then_it_goes_on(self):
+        self.use("pass_a")
+        ram = self.tmp / "ram.txt"
+        ram.write_bytes(b"92\n")
+        p = subprocess.Popen(self.argv(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             env=self.env(WHYNOT_PARALLEL_FAKE_RAM_FILE=str(ram)))
+        try:
+            time.sleep(3)
+            self.assertIsNone(p.poll(), "the run must wait, not finish or give up")
+            self.assertEqual(self.events(), [], "no module may start at RAM >= 85 %")
+            ram.write_bytes(b"40\n")
+            raw, _ = p.communicate(timeout=120)
+        finally:
+            if p.poll() is None:
+                p.kill()
+                p.communicate()
+        out = raw.decode("utf-8").replace("\r\n", "\n")
+        self.assertEqual(p.returncode, 0, out)
+        self.assertIn("RAM brake", out)
+        self.assertIn("Ran 2 tests in ", out)
+        self.assertIn("ram_peak=92%", out)
+
+    def test_unreadable_ram_is_said_once_and_the_run_goes_on(self):
+        self.use("pass_a")
+        code, out = self.run_tool(env=self.env(WHYNOT_PARALLEL_FAKE_RAM_FILE=str(self.tmp / "missing.txt")))
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.count("RAM cannot be read"), 1, out)
+
+
+class ThroughTestSh(Case):
+    def test_test_sh_parallel_dispatches_to_the_tool(self):
+        from test_wrappers import git_bash
+        bash = git_bash()
+        if not bash:
+            self.skipTest("no bash")
+        self.use("pass_a")
+        r = subprocess.run([bash, str(REPO / "tools" / "test.sh"), "--parallel", "2", "--repo", str(self.repo),
+                            "--tests-dir", str(self.tests), "--serial-lane", ""], capture_output=True,
+                           env=self.env(WHYNOT_HOME=str(_isolation.REAL_ENGINE_HOME)), timeout=300)  # read only
+        out = r.stdout.decode("utf-8") + r.stderr.decode("utf-8")
+        self.assertEqual(r.returncode, 0, out)
+        self.assertIn("Ran 2 tests in ", out)
+        self.assertIn("parallel: workers=2", out)
+
+
+if __name__ == "__main__":
+    unittest.main()
