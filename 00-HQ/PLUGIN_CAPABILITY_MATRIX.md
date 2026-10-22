@@ -32,3 +32,28 @@ Runtime: Claude Code (desktop app, Windows 11) on three seats: Yunus (info@, use
 
 ## Minimal toolchain (recommended, no installs needed)
 superpowers + plugin-dev + the Karpathy text + the built-in review skills. Nothing else to install.
+
+## Update 2026-10-22 — AI-infra restart Phase 4 (this file is also the PLUGIN_COMPATIBILITY_MATRIX)
+
+The restart brief asked for `PLUGIN_COMPATIBILITY_MATRIX.md`; this existing file is that matrix (no duplicate made,
+D-011). Rows above are the 2026-10-20 audit; the rows below supersede them where they differ (e.g. whynot-cut is now
+**3.0.0** user scope, not 2.2.1).
+
+| Capability | Version / scope | Installed | Activated | Role | Test evidence | State |
+|---|---|---|---|---|---|---|
+| **gstack** | 1.91.176.0, global, prefix `gstack-*`, proactive off | YES (main seat) | main seat, every folder | specialist checks (`AGENT_ROUTING_RULES.md` §2) | doctor 0 fail; `/gstack-browse`, `/gstack-review` in real sessions (`setup/GSTACK_INSTALLATION_REPORT.md` §5) | VERIFIED |
+| **OMC** | 5.7.6, project scope `Editing Plugin` (+ test bed `D:\ClaudeData\omc-pilot`) | YES | main seat in this folder | execution layer inside a card | omc-doctor no critical; plan / executor edit+verify / trace in real sessions (`omc/OMC_INSTALLATION_REPORT.md` Part A); Phase 4 load + guard tests (below) | VERIFIED (pilot), Phase 4 tests below |
+| whynot-cut | 3.0.0 user; 3.0.0 live (try folder) | YES | YES | the product | `plugin validate --strict` ✔ (Phase 1) | VERIFIED (validate) |
+| superpowers / Karpathy / plugin-dev | unchanged | YES | unchanged | method / principles / plugin building | — | unchanged |
+
+### Compatibility (pairwise)
+
+| Pair | Overlap / risk | Resolution | Status |
+|---|---|---|---|
+| OMC ↔ gstack | review, plan, qa, debug, release, browse names | gstack prefixed `gstack-*`; OMC namespaced `oh-my-claudecode:*`; routing table decides which one | no name clash; both load together (58 + 49 skills, hooks all `success`) |
+| OMC ↔ superpowers | two "use skills first" instruction sources; `tdd`, `plan`, `verify` | superpowers = method, OMC = delegation; OMC `tdd` skill not used | resolved by D-011 rules |
+| OMC ↔ whynot-cut | `autopilot` name; both add PreToolUse hooks | OMC autopilot never used; OMC keyword detector off; guard interplay tested in Phase 4 | see Phase 4 test |
+| gstack ↔ whynot-cut | gstack `careful`/`guard` hooks + whynot-cut guard on Bash | both may run; strictest wins | see Phase 4 test |
+| gstack ↔ Claude in Chrome / app browser | gstack wants "browse only" | not merged; app browser default, gstack browse for dev checks | rule §2 |
+| OMC HUD ↔ Claude login | HUD can refresh/rewrite `.credentials.json` | HUD not enabled | blocked |
+| Any ↔ outside providers | Codex, Gemini, Jev, gbrain, ngrok | all off / not installed | blocked |

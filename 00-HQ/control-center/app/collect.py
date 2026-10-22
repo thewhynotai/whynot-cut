@@ -9,7 +9,7 @@ from pathlib import Path
 import common
 import agency_live as al  # noqa: E402  (session readers, queue parser, card finder, usage line, agent scan)
 import hq_status as hq  # noqa: E402
-import ownermsg, runlog, status as S, tasks as T
+import ownermsg, runlog, status as S, tasks as T, trackers
 
 MAIN_CONFIG = Path.home() / ".claude.json"
 
@@ -34,7 +34,7 @@ def identity(path):
 
 
 def process_names():
-    """Lower-case image names of running processes (Win32, no spawn)."""
+    """Lower-case full image paths of running processes (Win32, no spawn)."""
     if os.name != "nt":
         return set()
     import ctypes
@@ -54,7 +54,7 @@ def process_names():
         try:
             buf, size = ctypes.create_unicode_buffer(260), wintypes.DWORD(260)
             if k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
-                names.add(os.path.basename(buf.value).lower())
+                names.add(buf.value.lower())
         finally:
             k32.CloseHandle(h)
     return names
@@ -77,7 +77,9 @@ class Collector:
         errors = {}
         queue = ""
         try:
-            queue, _ = al._run(["bash", al.HEAVY, "status"])
+            queue, rc = al._run(["bash", al.HEAVY, "status"])
+            if rc is None or not queue.strip():
+                errors["queue"] = "heavy.sh status gave no answer (queue numbers unknown)"
         except Exception as e:  # noqa: BLE001
             errors["queue"] = str(e)
         repo = str(hq.REPO)
@@ -157,6 +159,10 @@ class Collector:
                     current[acc["task_id"]] = {"account": a["id"], "action": acc["action"],
                                                "run_started": acc["session"]["started"]}
         task_list = T.build_tasks(common.HQ, slow["branches"], q, current=current)
+        fresh = trackers.mark_new(str(common.state_path(self.cfg, "seen_tasks.json")), [x["id"] for x in task_list],
+                                  now, self.cfg.get("new_badge_hours", 48))
+        for x in task_list:
+            x["new"] = x["id"] in fresh
         by_id = {t["id"]: t for t in task_list}
         for acc in accounts:
             t = by_id.get(acc.get("task_id") or "")
@@ -172,6 +178,7 @@ class Collector:
             "pc": {"ram": hq.ram_percent(), "queue": {"running": q["running"], "waiting": q["waiting"]},
                    "top_memory": slow["top"], "queue_at": iso(slow["t"])},
             "goal": self.goal(slow),
+            "trackers": [trackers.read(s, common.HQ) for s in self.cfg.get("trackers", [])],
             "needs_you": [r for r in hq.open_requests(common.HQ / "PRIMARY_ACCOUNT_INBOX.md")],
             "sources": sources,
             "monitoring": {"llm_calls": 0, "method": "local files, process list, git, heavy-queue status"},
@@ -202,37 +209,48 @@ class Collector:
                 Path(s.get("cwd") or "?").name, "model": model, "model_name": al.model_name(model),
                 "effort": s.get("effort"), "status": st, "started": ms_iso(s.get("createdAt")),
                 "last_activity": last.isoformat(timespec="seconds") if last else None,
-                "context": S.context_view((ctx or {}).get("tokens"), self.windows.get(model), (ctx or {}).get("at"),
-                                          self.th["context_warn_percent"], self.th["context_danger_percent"]),
+                "context": dict(S.context_view((ctx or {}).get("tokens"), self.windows.get(model), (ctx or {}).get("at"),
+                                               self.th["context_warn_percent"], self.th["context_danger_percent"]),
+                                estimated=True),  # the desktop app reports no window: same model's CLI report
                 "doing": runlog.one_line(doing, 300), "primary": sid == a.get("primary_session"),
                 "folder": Path(s.get("cwd") or "").name,
             })
-        rows.sort(key=lambda r: (not r["primary"], -(S.CODES[r["status"]["code"]][2]), r["last_activity"] or ""))
+        rows.sort(key=lambda r: (not r["primary"], -(S.CODES[r["status"]["code"]][3]), r["last_activity"] or ""))
         primary = next((r for r in rows if r["primary"]), rows[0] if rows else None)
         ident = identity(MAIN_CONFIG)
-        app_up = any(n == "claude.exe" for n in slow["procs"]) if slow["t"] else None
-        code = S.rollup([r["status"]["code"] for r in rows])
-        reason = next((f"{r['name']}: {r['status']['reason']}" for r in rows if r["status"]["code"] == code), "")
+        app_up = desktop_app_running(slow["procs"]) if slow["t"] else None
+        recent = [r for r in rows if r["primary"] or (r["last_activity"] and now - dt.datetime.fromisoformat(r["last_activity"])
+                                                       <= dt.timedelta(hours=2))]
+        for r in rows:
+            r["recent"] = r in recent
+        code = S.rollup([r["status"]["code"] for r in recent])
+        top = next((r for r in recent if r["status"]["code"] == code), None)
+        status = S.make(code, f"{top['name']}: {top['status']['reason']}" if top else "",
+                        f"{top['name']}: {top['status']['reason_ar']}" if top else "") if code != "CHECKING" \
+            else S.make("CHECKING")
         if app_up is False and code in ("WORKING", "QUIET"):
-            code, reason = "DISCONNECTED", "The Claude desktop app is not running."
+            status = S.make("DISCONNECTED", "The Claude desktop app is not running.", "برنامج Claude مقفول.")
         try:
             usage = al.usage_line(json.loads(al.USAGE.read_text(encoding="utf-8")).get("samples") or [], now)
         except (OSError, ValueError):
             usage = ""
         return {
             "id": a["id"], "name": a["name"], "role": a["role"], "email": a["email"], "kind": "desktop",
+            "name_ar": a.get("name_ar"), "role_ar": a.get("role_ar"),
             "connection": {"signed_in": ident["email"], "org": ident["org"],
                            "ok": ident["email"] == a["email"] and app_up is not False,
                            "detail": ("Desktop app running" if app_up else "Desktop app not running" if app_up is False
-                                      else "checking…") + (f" · signed in as {ident['email']}" if ident["email"] else "")},
-            "status": S.make(code, reason) if code != "CHECKING" else S.make("CHECKING"),
+                                      else "checking…") + (f" · signed in as {ident['email']}" if ident["email"] else ""),
+                           "detail_ar": ("برنامج Claude شغّال" if app_up else "برنامج Claude مقفول" if app_up is False
+                                         else "بيتأكد…") + (f" · داخل بـ {ident['email']}" if ident["email"] else "")},
+            "status": status,
             "model": primary["model"] if primary else None, "model_name": primary["model_name"] if primary else "?",
             "effort": primary["effort"] if primary else None,
             "session": {"id": primary["id"] if primary else None, "name": primary["name"] if primary else None,
                         "started": primary["started"] if primary else None,
                         "last_activity": max((r["last_activity"] or "" for r in rows), default=None) or None},
             "context": primary["context"] if primary else S.context_view(None, None, None, 0, 0),
-            "usage": usage, "sessions": rows, "task_id": None, "action": primary["doing"] if primary else "",
+            "usage": usage, "usage_ar": usage_ar(usage), "sessions": rows, "task_id": None, "action": primary["doing"] if primary else "",
             "recent": [],
         }
 
@@ -244,7 +262,7 @@ class Collector:
         except (OSError, ValueError):
             raw = {}
         state = raw.get("state", "missing")
-        log = raw.get("log") or ""
+        log = runlog.run_log(raw, auto)
         feed, new = self.feed(log) if log else (None, [])
         rec = self.recent.setdefault(h, collections.deque(maxlen=12))
         rec.extend(e for e in new if e["kind"] in ("say", "tool", "error", "end", "start", "denied"))
@@ -287,9 +305,12 @@ class Collector:
         doing_kind = "peer review" if (card_text or "").startswith("peer review") else "card"
         return {
             "id": h, "name": a["name"], "role": a["role"], "email": a["email"], "kind": "helper",
+            "name_ar": a.get("name_ar"), "role_ar": a.get("role_ar"),
             "connection": {"signed_in": ident["email"], "org": ident["org"], "ok": ok_ident,
                            "detail": (f"Signed in as {ident['email']} ({ident['org']})" if ident["email"] else
                                       "Not signed in") + ("" if ok_ident else f" · expected {a['email']}"),
+                           "detail_ar": (f"داخل بـ {ident['email']} ({ident['org']})" if ident["email"] else
+                                         "مش مسجّل دخول") + ("" if ok_ident else f" · المفروض {a['email']}"),
                            "loop": "running" if slow["alive"].get(h) else "not running" if slow["t"] else "checking…",
                            "auto_on": (auto / "AUTO-ON").exists()},
             "status": st, "model": model, "model_name": al.model_name(model), "effort": raw.get("effort"),
@@ -299,6 +320,8 @@ class Collector:
             "context": ctx,
             "usage": (f"5-hour window {feed.rate['five_hour_pct']}% used" if feed and feed.rate and
                       feed.rate.get("five_hour_pct") is not None else ""),
+            "usage_ar": (f"اتستهلك {feed.rate['five_hour_pct']}% من نافذة الـ 5 ساعات" if feed and feed.rate and
+                         feed.rate.get("five_hour_pct") is not None else ""),
             "usage_resets": iso(feed.rate.get("resets_at")) if feed and feed.rate and feed.rate.get("resets_at") else None,
             "task_id": task_id, "task_kind": doing_kind if task_id else None,
             "action": (feed.action if feed and running else "") or "",
@@ -318,7 +341,10 @@ class Collector:
             if a["kind"] == "helper":
                 names[a["id"]] = a["name"]
         out = []
-        for parent, meta, last, model, effort, age in slow["agents"]:
+        for row in slow["agents"]:
+            # agency_live.scan_agents: (parent, meta, last, model, effort[, context tokens], age seconds)
+            parent, meta, last, model, effort, age = *row[:5], row[-1]
+            ctx_tokens = row[5] if len(row) >= 7 else None
             ps = by_cli.get(parent) or {}
             err_at = al._ms(ps.get("errorAt"))
             limited = bool(ps.get("error") and "limit" in ps["error"].lower() and err_at and err_at.timestamp() >= now_ts - age)
@@ -328,7 +354,8 @@ class Collector:
                 out.append({"parent": names.get(parent) or title or "Other chat", "model_name": al.model_name(model or meta.get("model")),
                             "effort": effort, "state": st[0], "colour": st[1],
                             "task": runlog.one_line(meta.get("description") or meta.get("agentType") or "", 140),
-                            "account": parent if parent in ("h1", "h2") else "main", "age_min": int(age // 60)})
+                            "account": parent if parent in ("h1", "h2") else "main", "age_min": int(age // 60),
+                            "context_tokens": ctx_tokens or None})
         return sorted(out, key=lambda x: x["age_min"])
 
     def routines(self, sessions, now, now_ts):
@@ -336,7 +363,7 @@ class Collector:
         for r in self.cfg["routines"]:
             runs = sorted((s for s in sessions if s.get("scheduledTaskId") == r["id"]), key=lambda s: int(s.get("createdAt") or 0))
             nxt = al.next_run(r.get("minutes", []), r.get("hours"), now) if r.get("minutes") else None
-            item = {"id": r["id"], "name": r["name"], "next": nxt.isoformat(timespec="minutes") if nxt else None}
+            item = {"id": r["id"], "name": r["name"], "name_ar": r.get("name_ar"), "next": nxt.isoformat(timespec="minutes") if nxt else None}
             if not runs:
                 out.append({**item, "last": None, "result": "no run yet", "colour": "gray"})
                 continue
@@ -355,8 +382,21 @@ class Collector:
     def goal(self, slow):
         tag, ahead = slow["git"]
         g = self.cfg.get("goal") or {}
-        return {"text": g.get("text"), "tag": g.get("tag"), "reached": tag == g.get("tag"), "last_tag": tag,
+        return {"text": g.get("text"), "text_ar": g.get("text_ar"), "tag": g.get("tag"), "reached": tag == g.get("tag"), "last_tag": tag,
                 "unpushed": ahead}
+
+
+def usage_ar(text):
+    """agency_live's English usage line -> Egyptian Arabic (numbers kept)."""
+    if not text:
+        return ""
+    out = re.sub(r"used (\d+)% of the 5-hour limit \(at ([\d:]+)\)", r"اتستهلك \1% من ليمت الـ 5 ساعات (الساعة \2)", text)
+    return re.sub(r"weekly (\d+)%", r"الأسبوعي \1%", out)
+
+
+def desktop_app_running(paths):
+    """The Claude desktop app's claude.exe, not a Claude Code CLI (helpers, terminals: ...\\claude-code\\...\\claude.exe)."""
+    return any(p.endswith("\\claude.exe") and "\\claude-code\\" not in p for p in paths)
 
 
 def board_id(ref, board_ids):
@@ -371,40 +411,57 @@ def board_id(ref, board_ids):
 
 
 def alerts(snap, th):
-    """Plain-language list of what needs attention, most serious first. Pure (only reads the snapshot)."""
+    """Plain-language list of what needs attention, most serious first, in English and Arabic. Pure."""
     out = []
-    def add(level, who, text, action=""):
-        out.append({"level": level, "who": who, "text": text, "action": action})
+
+    def add(key, level, who, text, text_ar, action="", action_ar="", who_ar=None):
+        """key names WHAT is wrong (stable); text may carry live numbers. Pages and history compare keys."""
+        out.append({"key": key, "level": level, "who": who, "who_ar": who_ar or who, "text": text, "text_ar": text_ar,
+                    "action": action, "action_ar": action_ar})
     for a in snap["accounts"]:
-        code = a["status"]["code"]
+        code, st, nm, nm_ar = a["status"]["code"], a["status"], a["name"], a.get("name_ar") or a["name"]
         if code in ("ERROR", "STALLED", "DISCONNECTED"):
-            add("red", a["name"], f"{a['status']['label']}: {a['status']['reason']}",
-                "Open its terminal to see the run, then decide; nothing is stopped automatically.")
+            add(f"{a['id']}|status|{code}", "red", nm, f"{st['label']}: {st['reason']}",
+                f"{st['label_ar']}: {st['reason_ar']}",
+                "Open its terminal to see the run, then decide; nothing is stopped automatically.",
+                "افتح التيرمنال بتاعه وشوف الشغل، وبعدين قرّر؛ مفيش حاجة بتتوقف لوحدها.", nm_ar)
         elif code == "WAITING_INPUT":
-            add("amber", a["name"], a["status"]["reason"], "Answer in its card or its terminal.")
+            add(f"{a['id']}|status|{code}", "amber", nm, st["reason"], st["reason_ar"],
+                "Answer in its card or its terminal.", "ردّ عليه في الكارت أو في التيرمنال بتاعه.", nm_ar)
         if not a["connection"]["ok"] and a["connection"].get("signed_in") is not None:
-            add("red", a["name"], f"Account check failed: {a['connection']['detail']}",
-                "Sign this profile in with its own seat (see README, troubleshooting).")
+            add(f"{a['id']}|account", "red", nm, f"Account check failed: {a['connection']['detail']}",
+                f"الأكونت مش مظبوط: {a['connection']['detail']}",
+                "Sign this profile in with its own seat (see README, troubleshooting).",
+                "سجّل دخول البروفايل ده بالأكونت بتاعه هو (شوف README، جزء حل المشاكل).", nm_ar)
         c = a["context"]
         if c.get("level") == "danger":
-            add("amber", a["name"], f"Context {c['percent']}% full ({c['tokens']:,} of {c['window']:,} tokens).",
-                "Expect an automatic compaction soon; long sessions lose detail when that happens.")
+            add(f"{a['id']}|context", "amber", nm,
+                f"Context {c['percent']}% full ({c['tokens']:,} of {c['window']:,} tokens).",
+                f"الذاكرة (context) مليانة {c['percent']}% ({c['tokens']:,} من {c['window']:,}).",
+                "Use its Compact button: a long session loses detail when it compacts by itself.",
+                "دوس زرار Compact بتاعه: الجلسة الطويلة بتنسى تفاصيل لما تضغط نفسها لوحدها.", nm_ar)
         for s in a.get("sessions") or []:
-            if s["status"]["code"] in ("ERROR",) and s["id"] != (a["session"] or {}).get("id"):
-                add("red", a["name"], f"{s['name']}: {s['status']['reason']}")
+            if s["status"]["code"] == "ERROR" and s.get("recent") and s["id"] != (a["session"] or {}).get("id"):
+                add(f"{a['id']}|session|{s['id']}|ERROR", "red", nm, f"{s['name']}: {s['status']['reason']}",
+                    f"{s['name']}: {s['status']['reason_ar']}", who_ar=nm_ar)
     for t in snap["tasks"]:
         if t["display"] in ("Blocked",):
-            add("amber", t["id"], f"{t['id']} — {t['title']}: blocked. {t['blocker']}")
+            add(f"task|{t['id']}|blocked", "amber", t["id"], f"{t['id']} — {t['title']}: blocked. {t['blocker']}",
+                f"{t['id']} — {t['title']}: واقفة (Blocked). {t['blocker']}")
     ram = snap["pc"].get("ram")
     if ram and ram >= 85:
-        add("amber", "PC", f"RAM {ram}%: new heavy jobs wait until it is under 85%.")
+        add("pc|ram", "amber", "PC", f"RAM {ram}%: new heavy jobs wait until it is under 85%.",
+            f"الرامات {ram}%: الشغل التقيل الجديد بيستنى لحد ما تنزل تحت 85%.", who_ar="الجهاز")
     for r in snap["routines"]:
         if r["colour"] == "red":
-            add("amber", "Routine", f"{r['name']}: {r['result']} (last run {r['last'] or '?'}).")
+            add(f"routine|{r['id']}", "amber", "Routine", f"{r['name']}: {r['result']} (last run {r['last'] or '?'}).",
+                f"{r.get('name_ar') or r['name']}: فشلت (آخر مرة {r['last'] or '?'}).", who_ar="مهمة تلقائية")
     for q in snap["needs_you"]:
         if not re.search(r"Optional|only when|only matters", q, re.I):
-            add("amber", "You", q)
+            add("you|" + q.split(" ")[0], "amber", "You", q, "طلب مفتوح ليك: " + q, who_ar="انت")
     if snap["sources"]["slow"]["errors"]:
-        add("gray", "Monitor", "Some sources failed: " + ", ".join(snap["sources"]["slow"]["errors"]))
+        names = ", ".join(snap["sources"]["slow"]["errors"])
+        add("monitor|sources", "gray", "Monitor", "Some sources failed: " + names,
+            "مصادر بيانات فشلت: " + names, who_ar="المراقبة")
     rank = {"red": 0, "amber": 1, "gray": 2}
     return sorted(out, key=lambda x: rank[x["level"]])

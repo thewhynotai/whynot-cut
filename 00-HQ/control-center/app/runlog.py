@@ -5,6 +5,7 @@ assistant line (the same number Claude Code shows); the window size comes only f
 (`modelUsage.<model>.contextWindow` in a run's final line), learned in WindowRegistry.
 """
 import collections, json, os, re, time
+from pathlib import Path
 
 TEXT_MAX = 400
 
@@ -161,8 +162,7 @@ class RunFeed:
             self.rate = {"five_hour_pct": round(util * 100) if isinstance(util, (int, float)) else None,
                          "resets_at": five.get("resetsAt") or info.get("resetsAt"), "status": info.get("status")}
         elif t == "system" and e.get("subtype") == "permission_denied":
-            self.denials += 1
-            self._event(out, "denied", e.get("message") or "permission denied")
+            self.denials += 1  # counted only: the tool's own error line already tells it
         elif t == "result":
             self.tool_wait = 0
             usage = e.get("modelUsage") or {}
@@ -233,3 +233,11 @@ class WindowRegistry:
             os.replace(tmp, self.path)
         except OSError:
             pass
+
+
+def run_log(status, auto):
+    """The current run's log; between runs (idle, yielding, waiting) the newest one, so the card shows the last run."""
+    if status.get("log"):
+        return status["log"]
+    logs = list(Path(auto).glob("run-*.jsonl"))
+    return str(max(logs, key=os.path.getmtime)) if logs else ""

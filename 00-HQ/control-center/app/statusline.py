@@ -59,8 +59,8 @@ def line(acct_id, data, cfg, now=None):
     out = [head, model, context_part(data, cfg)]
     try:
         p = common.state_path(cfg, "snapshot.json")
-        age = (now.timestamp() - os.path.getmtime(p)) / 60
         snap = json.loads(p.read_text(encoding="utf-8"))
+        age = common.snapshot_age_min(snap, now) or 0
         mine = next((a for a in snap["accounts"] if a["id"] == acct_id), {})
         if mine.get("kind") == "helper":
             out.append(f"AUTO {'on' if mine['connection'].get('auto_on') else 'off'} · msgs waiting {mine['mailbox']['pending']}")

@@ -20,7 +20,7 @@ Labels: **VERIFIED** = seen directly in this audit · **REPORTED** = taken from 
 | F2 | **HIGH** | **Three setup/orchestration threads exist at once.** (a) the Command Center = master (`local_a36b6974`, running), owner of 00-HQ; (b) "Multi-account Claude control center" (`local_15b89011`, running) is building `00-HQ/control-center/` right now (files written 03:37–03:52); (c) the OMC preflight/installation sessions (`local_10ffbedc`, `local_77ee42a8`) that wrote `00-HQ/omc/` and `omc-lab/`. This session is a fourth. Risk: competing orchestrators and conflicting charters. | §9, §10 |
 | F3 | **HIGH** | **Work exists only on this PC.** `release/3.0` is **114 commits ahead** of GitHub (local c963132, origin 322d8a5). The newest off-PC copy is `ops/backup-release-3.0-20261020` = 4c1e59c (2 days old). Helper branches (`h1/*`, `h2/*`) are local only. The main checkout has 42 uncommitted files; 5 other worktrees are dirty. One disk failure would lose 2 days of work. | §3 |
 | F4 | MEDIUM | **OMC is installed in two places, one undocumented.** `oh-my-claudecode@omc 5.7.6` has project scope in `D:\ClaudeData\omc-pilot` (in the installation report) **and** in `Editing Plugin\omc-lab` (created 03:48, after the report; not in it). `omc-lab/README.md` points to `00-HQ/AGENT_COORDINATION.md`, which does not exist (D-001 maps that name to `PLAYBOOK.md`). | §7 |
-| F5 | MEDIUM | **Docs disagree with the machine.** (a) `PROJECT_PLAN_AR.md` §5 and memory say the installed plugin is 2.2.1; installed is **whynot-cut 3.0.0** (user scope, plus a 3.0.0 "live" copy for `D:\ClaudeData\wnc-live\try`). (b) OMC preflight says `wsl.exe` present; WSL is **not installed**. | §4, §6 |
+| F5 | MEDIUM | **Docs disagree with the machine.** (a) `PROJECT_PLAN_AR.md` §5 and memory say the installed plugin is 2.2.1; installed is **whynot-cut 3.0.0** (user scope, plus a 3.0.0 "live" copy for `D:\ClaudeData\wnc-live\try`). (b) OMC preflight says `wsl.exe` present; that is only the Windows stub — **no WSL distro is installed** (`wsl --version` prints "not installed"). | §4, §6 |
 | F6 | MEDIUM | **Bun is not a real install.** The only `bun` (1.3.4) is bundled in the Jan app and is on PATH from Jan's folder, together with Jan's `uv` 0.9.16. Any tool that calls `bun` or `uv` gets Jan's copies. gstack needs bun ≥ 1.3.3 (tested 1.4.2). | §4 |
 | F7 | INFO | **gstack is not installed** (no trace in `~/.claude`, `D:\Claude`, `D:\ClaudeData`). The OMC report records the owner dropping it on 2026-10-22. | §7 |
 | F8 | LOW | `claude` CLI and `ffmpeg` are not on PATH. The CLI exists only inside the desktop app (`AppData\Roaming\Claude\claude-code\2.1.304`). The engine uses its own runtimes. | §4 |
@@ -84,7 +84,9 @@ stray `whynot-cut/p.out`); `D:\WNC-work\h1` (9 dirty, `h1/BL-17`), `h2` (clean, 
 (`bl24-f3` 8, `bl24-mut3` 14, `fix3-wt` 10, `t26r6-wt` 4 dirty) used by live mutation/fix runs.
 
 **Risks:** F3 (unpushed), uncommitted work that belongs to running sessions (must not be touched by setup work), temp
-worktrees under TEMP (a TEMP clean-up would break them), the shared-index commit race already recorded in memory.
+worktrees under TEMP (a TEMP clean-up would break them), the shared-index commit race already recorded in memory, and the shared `.git/config` rule (AUTOMATION_RUNBOOK
+incident 10-20 01:35: use `git config --worktree`, read `--show-origin` before any change). 00-HQ is mirrored to GitHub
+`ops/hq`, so this file (it lists helper emails) must not be made public.
 
 ## 4. Toolchain — VERIFIED
 
@@ -167,7 +169,7 @@ session on either seat.
 
 ## 9. Live processes at 03:53 — VERIFIED
 
-- Claude desktop app + **8 Claude Code sessions** (stream-json) on the main account, incl. the running sessions
+- Claude desktop app + **11 Claude Code processes** (stream-json; sessions and sub-sessions) on the main account; the app lists as running
   Command Center `local_a36b6974`, K+M builder `local_b32f950e`, control-center builder `local_15b89011`.
 - Helpers: `helper_loop.py h1` (pid 9756), `helper_loop.py h2` (pid 21664), headless `claude -p` for h1 (pid 51304)
   and for h2's peer review (pid 56052).

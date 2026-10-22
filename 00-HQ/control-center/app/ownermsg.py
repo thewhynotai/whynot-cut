@@ -62,12 +62,33 @@ def deliver(state, acct, session_id):
         try:
             with open(dst, encoding="utf-8") as f:
                 msg = json.load(f)
-        except (OSError, ValueError):
+            msg.update(delivered_to=session_id, delivered_at=dt.datetime.now().isoformat(timespec="seconds"))
+            _write(dst, msg)
+        except (OSError, ValueError):  # unreadable or the mark could not be written: not delivered
+            _move_back(pend, dst, name)
             continue
-        msg.update(delivered_to=session_id, delivered_at=dt.datetime.now().isoformat(timespec="seconds"))
-        _write(dst, msg)
         out.append(msg)
     return out
+
+
+def _move_back(pend, dst, name):
+    try:
+        os.replace(dst, os.path.join(pend, name))
+    except OSError:
+        pass
+
+
+def undeliver(state, acct, msgs):
+    """The session never got them (the hook could not print): back to pending, delivery marks removed."""
+    pend, done = _dir(state, acct, "pending"), _dir(state, acct, "delivered")
+    for m in msgs:
+        name = m["id"] + ".json"
+        m = {k: v for k, v in m.items() if k not in ("delivered_to", "delivered_at")}
+        try:
+            _write(os.path.join(pend, name), m)
+            os.remove(os.path.join(done, name))
+        except OSError:
+            pass
 
 
 def recent(state, acct, n=10):
@@ -109,11 +130,18 @@ def hook_main(argv, stdin_text, out, state=None):
             data = {}
         if not isinstance(data, dict):
             data = {}
+        if data.get("agent_id") or data.get("agent_type"):
+            return 0  # a sub-agent's tool call: the message is for the main thread (Claude Code 2.1.304 sends these)
         msgs = deliver(state, acct, data.get("session_id") or "?")
         if msgs:
             event = data.get("hook_event_name") or "PostToolUse"
-            out.write(json.dumps({"hookSpecificOutput": {"hookEventName": event,
-                                                         "additionalContext": hook_text(msgs)}}, ensure_ascii=False))
+            text = json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": hook_text(msgs)}},
+                              ensure_ascii=False)
+            try:
+                out.write(text)
+                out.flush()
+            except Exception:  # noqa: BLE001
+                undeliver(state, acct, msgs)
     except Exception:  # noqa: BLE001  a hook must never break the session
         pass
     return 0

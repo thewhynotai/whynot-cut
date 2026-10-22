@@ -1,4 +1,5 @@
 import io, json, os, subprocess, sys, tempfile, unittest
+from unittest import mock
 from pathlib import Path
 
 APP = Path(__file__).resolve().parent.parent / "app"
@@ -44,6 +45,42 @@ class Mailbox(unittest.TestCase):
         self.assertIn("Stop after this card.", d["hookSpecificOutput"]["additionalContext"])
         self.assertIn("Yunus", d["hookSpecificOutput"]["additionalContext"])
 
+    def test_hook_ignores_sub_agent_tool_calls(self):
+        M.send(self.state, "h1", "for the main thread")
+        out = io.StringIO()
+        M.hook_main(["h1"], json.dumps({"session_id": "abc", "hook_event_name": "PostToolUse",
+                                        "agent_id": "a83", "agent_type": "general-purpose"}), out, self.state)
+        self.assertEqual(out.getvalue(), "")
+        self.assertEqual(M.counts(self.state, "h1"), {"pending": 1, "delivered": 0})
+
+    def test_failed_output_puts_the_message_back(self):
+        M.send(self.state, "h1", "do not lose me")
+
+        class Broken:
+            def write(self, _):
+                raise OSError("pipe closed")
+        M.hook_main(["h1"], json.dumps({"session_id": "abc"}), Broken(), self.state)
+        self.assertEqual(M.counts(self.state, "h1"), {"pending": 1, "delivered": 0})
+        self.assertNotIn("delivered_at", M.recent(self.state, "h1")[0])
+
+    def test_unreadable_message_goes_back_to_pending(self):
+        os.makedirs(os.path.join(self.state, "mailbox", "h1", "pending"))
+        with open(os.path.join(self.state, "mailbox", "h1", "pending", "bad.json"), "w") as f:
+            f.write("{broken")
+        self.assertEqual(M.deliver(self.state, "h1", "s"), [])
+        self.assertEqual(M.counts(self.state, "h1")["delivered"], 0)
+
+    def test_failed_delivery_mark_puts_the_message_back(self):
+        M.send(self.state, "h1", "keep me")
+        real = M._write
+        def boom(path, data):
+            if "delivered" in path:
+                raise OSError("locked by antivirus")
+            return real(path, data)
+        with mock.patch.object(M, "_write", boom):
+            self.assertEqual(M.deliver(self.state, "h1", "s"), [])
+        self.assertEqual(M.counts(self.state, "h1"), {"pending": 1, "delivered": 0})
+
     def test_hook_with_nothing_prints_nothing(self):
         out = io.StringIO()
         M.hook_main(["h1"], "{}", out, self.state)
@@ -85,6 +122,13 @@ class History(unittest.TestCase):
         ev = H.transitions(snap(), snap(task="BL-19", run="s2", display="Delivered, waiting for peer review"))
         kinds = sorted(e["kind"] for e in ev)
         self.assertEqual(kinds, ["run", "task", "task_state"])
+
+    def test_alert_recorded_once_while_its_text_changes(self):
+        a, b, c = snap(), snap(), snap()
+        b["alerts"] = [{"key": "h1|status|STALLED", "level": "red", "who": "Helper 1", "text": "silent 61 min"}]
+        c["alerts"] = [{"key": "h1|status|STALLED", "level": "red", "who": "Helper 1", "text": "silent 62 min"}]
+        self.assertEqual([e["kind"] for e in H.transitions(a, b)], ["alert"])
+        self.assertEqual(H.transitions(b, c), [])
 
     def test_append_and_search(self):
         p = os.path.join(tempfile.mkdtemp(), "history.jsonl")

@@ -67,6 +67,13 @@ class ParseCard(unittest.TestCase):
         self.assertEqual(c["fix_round"], 2)
         self.assertEqual(c["summary"], "Eval cases for every Phase 4 skill, graded by rubric.")
 
+    def test_spec_heading_is_the_objective_when_no_prose(self):
+        d = tempfile.mkdtemp()
+        write(Path(d, "BL-02-spec.md"), "<!-- copy -->\n### BL-02 [Gate 4]: Task 18 (part 1) licence files + notices "
+                                        "generator  [Gate 4 value: high]  Model: opus\n- Depends on: none\n")
+        p = write(Path(d, "BL-02.md"), "# BL-02 — t\n\n## Spec (binding)\n`tasks/BL-02-spec.md`, a copy.\n")
+        self.assertEqual(T.parse_card(p)["summary"], "Task 18 (part 1) licence files + notices generator")
+
     def test_missing_card(self):
         self.assertEqual(T.parse_card(Path(tempfile.mkdtemp(), "x.md"))["summary"], "")
 
@@ -148,6 +155,10 @@ class Build(unittest.TestCase):
         self.assertEqual(self.tasks["BL-03"]["display"], "Accepted, waiting for merge")
         self.assertEqual(self.tasks["BL-16"]["display"], "Merged")
         self.assertEqual(self.step("BL-16", "merged")["state"], "done")
+
+    def test_no_peer_review_is_skipped_not_verified(self):
+        self.assertEqual(self.step("BL-16", "peer")["state"], "skipped")
+        self.assertEqual(self.tasks["BL-16"]["progress"], {"done": 5, "total": 5})
 
     def test_blocked_has_blocker_text(self):
         t = self.tasks["BL-20"]

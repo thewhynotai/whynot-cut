@@ -141,10 +141,19 @@ commit/push والتأكد من الـ SHA ← محضر أدلة + أرشفة س
 
 ## 7. Plugins / Skills / Routines
 
-- **الـ Plugins:** superpowers (TDD/review)، plugin-dev، andrej-karpathy-skills (اتسطّب امبارح، نفس نص `CLAUDE.md`)،
-  whynot-cut 2.2.1. التفاصيل والتجارب: `00-HQ/PLUGIN_CAPABILITY_MATRIX.md`.
-- **الـ Routines (شغالة، Bypass، من غير موافقات):** التقرير (9/1/5/9)، الاستلام (كل ساعة :37)، والـ watchdog
-  (:13/:43) اللي بيرجّع الشغل بعد الـ limit ويوقف أي تشغيلة معلّقة. التفاصيل: `00-HQ/AUTOMATION_RUNBOOK.md`.
+- **الـ Plugins:** superpowers (TDD/review)، plugin-dev، andrej-karpathy-skills (نفس نص `CLAUDE.md`)،
+  whynot-cut **3.0.0** (المتسطّب دلوقتي). التفاصيل والتجارب: `00-HQ/PLUGIN_CAPABILITY_MATRIX.md`.
+- **نظام الهندسة الموحّد (22 أكتوبر، إعادة تأسيس الـ AI، Phase 4):**
+  - **gstack 1.91.176** متسطّب للحساب الأساسي كله: مراجعات، تحقيق في الأخطاء، QA، browser. الـ telemetry مقفول،
+    ومفيش كود بيروح لـ Codex أو أي موديل برّه، وأوامره كلها بتبدأ بـ `gstack-`.
+  - **OMC 5.7.6** شغال على فولدر المشروع ده بس، كـ «طبقة تنفيذ» جوه التاسك الواحدة: يخطط، ويوزّع على agents،
+    ويتابع. ممنوع عليه الـ autopilot والـ loops المستمرة والـ team.
+  - **اللي بيدير المشروع واحد بس:** الـ Command Center والـ `00-HQ` (التاسكات، الحالة، القبول، التقارير).
+    القواعد: `00-HQ/AGENT_ROUTING_RULES.md`، والشكل العام: `00-HQ/AI_TOOLING_ARCHITECTURE.md`.
+  - المساعدين (H1/H2) لسه من غيرهم لحد ما Phase 6 تجرّبهم على كل حساب.
+- **الـ Routines:** **متوقفة كلها بأمرك من 22 أكتوبر 04:15** (إعادة تأسيس الـ AI، D1): التقرير والاستلام والـ
+  watchdog القديم. الشغّال بس: روتين بيرجّع شغل المراحل 2–8 بعد أي limit (الساعة 8:30 وكل نص ساعة). بيرجعوا يشتغلوا
+  في Phase 8. التفاصيل: `00-HQ/AUTOMATION_RUNBOOK.md` و `00-HQ/setup/SETUP_PHASE_TRACKER.md`.
 - **Checklist الـ charter §29 (M0):**
   - [x] Inventory للمشروع والـ agents والـ routines والشاتات
   - [x] Baseline محفوظ (backup + git bundle + branch على GitHub)

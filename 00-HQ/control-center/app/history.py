@@ -30,9 +30,9 @@ def transitions(prev, cur):
         p = prev_tasks.get(t["id"])
         if p and p["display"] != t["display"]:
             add("task_state", t.get("owner", ""), t["id"], f"{t['id']} — {t['title']}: {p['display']} → {t['display']}")
-    seen = {x["text"] for x in prev.get("alerts", [])}
+    seen = {x.get("key") or x["text"] for x in prev.get("alerts", [])}
     for x in cur.get("alerts", []):
-        if x["text"] not in seen and x["level"] == "red":
+        if (x.get("key") or x["text"]) not in seen and x["level"] == "red":
             add("alert", "", "", f"{x['who']}: {x['text']}")
     return out
 

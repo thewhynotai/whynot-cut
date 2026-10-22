@@ -27,6 +27,11 @@ class HelperStatus(unittest.TestCase):
         self.assertEqual(s["code"], "STALLED")
         self.assertIn("1 h 01 min", s["reason"])
 
+    def test_running_without_any_log_is_not_working(self):
+        s = helper(log_age_sec=None)
+        self.assertEqual(s["code"], "QUIET")
+        self.assertIn("no output", s["reason"])
+
     def test_quiet_between(self):
         self.assertEqual(helper(log_age_sec=25 * 60)["code"], "QUIET")
 
@@ -96,6 +101,39 @@ class SessionStatus(unittest.TestCase):
     def test_quiet(self):
         s = sess(last_activity=NOW - dt.timedelta(minutes=10), transcript_age_sec=600)
         self.assertEqual(s["code"], "QUIET")
+
+
+class Arabic(unittest.TestCase):
+    """Every status the screen can show has an Arabic label, and an Arabic reason whenever it has an English one."""
+
+    def check(self, s):
+        self.assertTrue(s["label_ar"], s)
+        if s["reason"]:
+            self.assertTrue(s["reason_ar"], s)
+            self.assertRegex(s["reason_ar"], "[؀-ۿ]")
+
+    def test_all_helper_states(self):
+        cases = [dict(loop_alive=None), dict(), dict(log_age_sec=None), dict(log_age_sec=61 * 60),
+                 dict(log_age_sec=25 * 60), dict(log_age_sec=400), dict(tool_wait_sec=20 * 60),
+                 dict(tests=("running", 3)), dict(tests=("waiting", 3)),
+                 dict(state="waiting", reason="usage limit", until="2026-10-22 06:03"),
+                 dict(state="waiting", reason="quick failure back-off", until="x 04:10"),
+                 dict(state="yielding", reason="Gate 4 job 'g4' waits"), dict(state="idle"),
+                 dict(state="idle", report_blocked=True), dict(state="stopped", reason="STOP file"),
+                 dict(state="weird"), dict(loop_alive=False), dict(loop_alive=False, stop_file=True),
+                 dict(loop_alive=False, auto_on=False, state="stalled")]
+        for c in cases:
+            self.check(helper(**c))
+
+    def test_all_session_states(self):
+        for kw in (dict(), dict(error="hit your limit · resets 6am", error_at=NOW - dt.timedelta(minutes=1),
+                                transcript_age_sec=600),
+                   dict(error="hit your limit · resets 1am", error_at=NOW - dt.timedelta(minutes=1), transcript_age_sec=600),
+                   dict(error="API Error: 500", error_at=NOW - dt.timedelta(minutes=1), transcript_age_sec=600),
+                   dict(awaiting_person=True, transcript_age_sec=600),
+                   dict(last_activity=NOW - dt.timedelta(minutes=100), transcript_age_sec=6000),
+                   dict(last_activity=NOW - dt.timedelta(minutes=10), transcript_age_sec=600)):
+            self.check(sess(**kw))
 
 
 class Rollup(unittest.TestCase):

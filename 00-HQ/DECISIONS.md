@@ -75,3 +75,16 @@ ACCEPTED · SUPERSEDED · PROPOSED.
 - **Trade-off:** Bypass runs act without review; their procedures stay narrow (read state, nudge, stop stuck runs,
   write 00-HQ files) and never push anything but `ops/hq`.
 
+
+## D-011 · 2026-10-22 · One engineering system: Master Orchestrator + OMC (execution) + gstack (specialist checks)
+- **Context:** the owner's AI-infra restart (Phases 0–8, `setup/SETUP_PHASE_TRACKER.md`) installed gstack 1.91.176.0
+  (global, privacy-locked) and re-validated OMC 5.7.6. Both overlap with superpowers, built-in review skills and the
+  product's `autopilot`, and OMC can run its own persistent loops.
+- **Chosen:** 00-HQ stays the only project manager. OMC is enabled at project scope in `Editing Plugin` with the
+  conservative pilot profile (no keywords, no persistent modes, no HUD, no team, no providers) as the execution layer
+  inside one card. gstack is used on demand for specialist checks with `proactive` off. Routing and the "never use"
+  lists: `AGENT_ROUTING_RULES.md`. Layout: `AI_TOOLING_ARCHITECTURE.md`. The `omc-lab` duplicate registration is
+  removed (folder kept). gstack Team Mode / `required` are deferred to Phase 6 (all seats verified first).
+- **Trade-off:** more hooks in every main-seat session in this folder (latency measured in Phase 4); helper seats get
+  the tools only after Phase 6 tests; the acceptance gate is unchanged (fresh independent reviewer), so plugin
+  reviews are an extra lens, not the gate.

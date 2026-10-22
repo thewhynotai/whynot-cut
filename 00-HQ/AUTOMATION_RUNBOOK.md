@@ -46,6 +46,13 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
 
 ## 3. Checks (copy-paste)
 
+- **Since 2026-10-22: WhyNot Control Center** (desktop shortcut **WhyNot - Control Center**, `00-HQ\control-center\`):
+  browser dashboard (all 3 accounts, context, tasks with lifecycle, alerts, history; zero LLM tokens) + one terminal per
+  account; typing in a helper's tab reaches its running session through the profile hook (`ownermsg.py`), and an idle
+  loop wakes for it (`helper_loop.owner_message_waiting`). The Agency LIVE shortcut was retired (backup in
+  `D:\ClaudeData\control-center\backups\`); `agency_live.py` stays as the text view and as a library the control center
+  imports. Undo: `python -X utf8 00-HQ\control-center\app\install.py --undo`.
+
 - Live view of the whole agency (2026-10-21): desktop shortcut **WhyNot - Agency LIVE** = `00-HQ\tools\agency_live.py`
   (read-only: each session and helper with model, level, status and what it does; the main-account limit; routines;
   tasks; what needs Yunus). One helper's raw steps: `python -X utf8 D:\ClaudeData\accounts\helper_peek.py h1`. The old
@@ -80,7 +87,18 @@ usage limit 2026-10-19 ~21:30 ("resets 12:50am"). UI-P4 and REL-PREVIEW are ENDe
 - Not covered (known limits): helper peer-review and executor suites are not tagged, so a frozen one is still ended by
   hand after checking its CPU on the CHILD python (the venv `python.exe` launcher always shows 0 CPU).
 
+## 5c. Unattended runs and the OMC hooks (from 2026-10-22, D-011)
+Every routine or headless run opened in the `Editing Plugin` folder (resume watchdogs now; intake and report when they
+return in restart Phase 8) loads OMC's hooks: `context-guard-stop` can block a Stop up to 2 times at 94 % context
+(extra turns), and OMC's permission-handler auto-approves read-only `ls`/`git status`/`cat`/`sed`/`rg`. Session start
+is ≈ 1.4 s slower. Keep routine prompts narrow. If a routine misbehaves, open it in a folder without OMC instead
+(e.g. `D:\ClaudeData\routines`) and file a card.
+
 ## 6. Incidents
+- 2026-10-22 04:15: **planned full stop (owner, AI-infra restart D1).** Routines auto-resume-2, hq-intake,
+  primary-report-2 and the 10:00 one-time remeasure disabled; both helpers STOP + AUTO-ON removed; Windows tasks
+  WNC-Queue and API-lanes keepalive disabled; running suites left to finish; Yunus restarts the Claude app. Record and
+  undo: `00-HQ/setup/SETUP_PHASE_TRACKER.md` "D1 stop record". **Do not re-enable anything until the restart's Phase 2+ says so.**
 - 2026-10-22 04:00: **limit drain measured (OPS-08).** 24 h main-account use: executor sub-agents 59%, Builder A's
   Task 29 sub-agent 15%, Adobe 5%, Command Center 4%, intake 5.6%, watchdog 1.3%, report 0.2%. Cause: fix agents
   continued for 1-2 days at 0.4-0.95M context; each pause over 5 min re-wrote it (65-76% of their cost). Rule:

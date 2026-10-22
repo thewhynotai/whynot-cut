@@ -56,6 +56,14 @@ def _first_prose(text):
     return ""
 
 
+def _spec_heading(text):
+    """'### BL-02 [Gate 4]: Task 18 licence files  [Gate 4 value: high]  Model: opus' -> 'Task 18 licence files'."""
+    m = re.search(r"^#{2,4}\s+\S+\s*(?:\[[^\]]*\])?\s*:?\s*(.+)$", text, re.M)
+    if not m:
+        return ""
+    return re.split(r"\s{2,}\[|\s{2,}Model:", m.group(1))[0].strip()
+
+
 def _short(t, n=300):
     t = " ".join(t.split())
     return t if len(t) <= n else t[: n - 1] + "…"
@@ -73,6 +81,7 @@ def parse_card(path):
     spec = Path(path).with_name(Path(path).stem + "-spec.md")
     out["summary"] = _short(_section(text, "Goal", "Decision for this card", "Why")
                             or _first_prose(re.sub(r"^#.*$", "", _read(spec), flags=re.M))
+                            or _spec_heading(_read(spec))
                             or _section(text, "Spec"))
     ticks = re.findall(r"^\s*- \[( |x|X)\]", text, re.M)
     out["acceptance"] = (sum(1 for t in ticks if t.lower() == "x"), len(ticks))
@@ -132,6 +141,58 @@ def clean_title(title):
     if m and re.search(r"gate|stage|light|high|tier|\bS\b|\bM\b", m.group(1), re.I):
         return title[: m.start()].strip()
     return title
+
+
+STEP_AR = {"ready": "الكارت جاهز", "started": "الشغل بدأ", "delivered": "اتسلّمت", "peer": "مراجعة الزميل",
+           "decision": "قرار المراجعة النهائية", "merged": "اتدمجت"}
+OWNER_EN = {"h1": "Helper 1", "h2": "Helper 2", "main": "the main account", "lane": "an API lane"}
+OWNER_AR = {"h1": "المساعد 1", "h2": "المساعد 2", "main": "الأكونت الرئيسي", "lane": "خط الـ API"}
+
+
+def describe(dcode, status, note, fix_round, owner, blocker):
+    """What a task's state means and what happens next, in plain English and Egyptian Arabic."""
+    who, who_ar = OWNER_EN.get(owner, "its owner"), OWNER_AR.get(owner, "المسؤول عنها")
+    n = fix_round or "?"
+    table = {
+        "NOT_READY": ("Not ready yet", "لسه مش جاهزة",
+                      f"Planned, but it waits for something first ({note}). Nobody starts it before that.",
+                      f"متخطّط لها، بس مستنية حاجة الأول ({note}). محدش هيبدأ فيها قبل كده."),
+        "OTHER": (status.replace("_", " ").capitalize().replace(" not ", ", not "), note,
+                  f"The board marks it '{note}'. Nobody works on it until that changes.",
+                  f"البورد كاتب عليها «{note}». محدش بيشتغل فيها لحد ما ده يتغيّر."),
+        "DONE": ("Done (archived)", "خلصت (متأرشفة)", "Finished and archived. Nothing is left to do.",
+                 "خلصت واتأرشفت. مفيش حاجة فاضلة فيها."),
+        "MERGED": ("Merged", "اتدمجت", "Accepted and merged into the release branch. Done.",
+                   "اتقبلت واتدمجت في فرع الإصدار. خلصت."),
+        "ACCEPTED_NOCODE": ("Accepted (nothing to merge)", "اتقبلت (مفيش كود يتدمج)",
+                            "Accepted. It produced no code, so there is nothing to merge.",
+                            "اتقبلت. ما طلعش منها كود، فمفيش حاجة تتدمج."),
+        "ACCEPTED": ("Accepted, waiting for merge", "اتقبلت ومستنية الدمج",
+                     "The master accepted it. It waits in MERGE-QUEUE.md until the executor merges it.",
+                     "المراجعة النهائية وافقت عليها. مستنية في طابور الدمج (MERGE-QUEUE) لحد ما الـ executor يدمجها."),
+        "BLOCKED": ("Blocked", "واقفة",
+                    f"Stopped: {blocker or note}. It needs a decision or an answer on its card before it can go on.",
+                    f"واقفة: {blocker or note}. محتاجة قرار أو إجابة في الكارت بتاعها عشان تكمّل."),
+        "PARKED": ("Parked", "متركونة", "Put aside on purpose. It will be picked up later.",
+                   "متركونة على جنب عن قصد. هتترجع لها بعدين."),
+        "FIXING": (f"Fixing (round {n})", f"بيتصلّح (الجولة {n})",
+                   f"The review asked for fixes (round {n}). {who} fixes them on the same branch, then delivers again.",
+                   f"المراجعة طلبت تصليحات (الجولة {n}). {who_ar} بيصلّحها على نفس الفرع وبعدين يسلّمها تاني."),
+        "AWAIT_DECISION": ("Peer review passed, waiting for the master's decision", "عدّت مراجعة الزميل، ومستنية القرار",
+                           "The other helper's review passed. Next, the master's hourly intake decides: accept, or ask for fixes.",
+                           "مراجعة المساعد التاني عدّت. اللي بعد كده: المراجعة النهائية (كل ساعة) تقرّر تقبلها ولا تطلب تصليح."),
+        "AWAIT_PEER": ("Delivered, waiting for peer review", "اتسلّمت، ومستنية مراجعة الزميل",
+                       "Delivered. Next, the other helper reviews the code and runs the full tests, then the master decides.",
+                       "اتسلّمت. اللي بعد كده: المساعد التاني يراجع الكود ويشغّل كل الاختبارات، وبعدين المراجعة النهائية تقرّر."),
+        "IN_PROGRESS": ("In progress", "شغّالة",
+                        f"{who} is building it now: its own branch, tests first, then a report in the inbox.",
+                        f"{who_ar} بيشتغل فيها دلوقتي: فرع خاص بيها، الاختبارات الأول، وبعدين تقرير في الـ inbox."),
+        "READY": ("Ready (queued)", "جاهزة (في الدور)",
+                  f"Ready and queued for {who}. It starts when {who} finishes the cards before it.",
+                  f"جاهزة ومستنية دورها عند {who_ar}. هتبدأ لما يخلّص الكروت اللي قبلها."),
+    }
+    d, d_ar, e, e_ar = table[dcode]
+    return {"display": d, "display_ar": d_ar, "explain": e, "explain_ar": e_ar}
 
 
 def _same_mtime(written, mtime):
@@ -224,7 +285,7 @@ def _task(hq_dir, r, reports, peers, verdicts, branches, queue, cur):
         put("peer", "failed" if peer["verdict"].startswith("FAIL") else "done",
             f"{peer['reviewer']}: {peer['verdict']}", dt.datetime.fromtimestamp(peer["mtime"]).strftime("%Y-%m-%d %H:%M"))
     elif accepted:
-        put("peer", "done", "decided without a recorded peer review")
+        put("peer", "skipped", "decided without a recorded peer review")
     elif delivered:
         put("peer", "current", "waiting for the other helper's peer review")
     if accepted:
@@ -247,27 +308,30 @@ def _task(hq_dir, r, reports, peers, verdicts, branches, queue, cur):
         blocker = newest["note"]
 
     if status == "NOT READY":
-        display = "Not ready yet"
+        dcode = "NOT_READY"
     elif not known:
-        display = status.replace("_", " ").capitalize().replace(" not ", ", not ")
+        dcode = "OTHER"
     elif status == "DONE_ARCHIVED":
-        display = "Done (archived)"
+        dcode = "DONE"
     elif merged:
-        display = "Merged"
+        dcode = "MERGED"
     elif status == "ACCEPTED":
-        display = "Accepted (nothing to merge)" if no_code else "Accepted, waiting for merge"
+        dcode = "ACCEPTED_NOCODE" if no_code else "ACCEPTED"
     elif status in ("BLOCKED", "PARKED", "STOPPED") or blocker:
-        display = "Blocked" if status != "PARKED" else "Parked"
+        dcode = "PARKED" if status == "PARKED" else "BLOCKED"
     elif fixing:
-        display = f"Fixing (round {card['fix_round'] or '?'})"
+        dcode = "FIXING"
     elif steps["decision"]["state"] == "current" and steps["peer"]["state"] == "done":
-        display = "Peer review passed, waiting for the master's decision"
+        dcode = "AWAIT_DECISION"
     elif steps["peer"]["state"] == "current":
-        display = "Delivered, waiting for peer review"
+        dcode = "AWAIT_PEER"
     elif steps["started"]["state"] == "done":
-        display = "In progress"
+        dcode = "IN_PROGRESS"
     else:
-        display = "Ready (queued)"
+        dcode = "READY"
+    words = describe(dcode, status, r["status_note"], card["fix_round"], owner, blocker)
+    for k, lab_ar in STEP_AR.items():
+        steps[k]["label_ar"] = lab_ar
 
     jobs = []
     pat = re.compile(rf"(^|[-_/]){re.escape(cid.lower())}($|[-_/])")
@@ -281,11 +345,14 @@ def _task(hq_dir, r, reports, peers, verdicts, branches, queue, cur):
     mtimes = [x["mtime"] for x in reports] + [p["mtime"] for p in peers]
     last = max(mtimes) if mtimes else None
     done = sum(1 for s in steps.values() if s["state"] == "done")
+    total = sum(1 for s in steps.values() if s["state"] != "skipped")  # a skipped step is neither done nor owed
     return {
         "id": cid, "title": clean_title(r["title"]), "summary": card["summary"], "owner": owner,
-        "owner_text": r["owner"], "board_status": r["status_note"], "status": status, "display": display,
+        "owner_text": r["owner"], "board_status": r["status_note"], "status": status, "display": words["display"],
+        "display_code": dcode, "display_ar": words["display_ar"], "explain": words["explain"],
+        "explain_ar": words["explain_ar"], "owner_ar": OWNER_AR.get(owner, r["owner"]),
         "parent": card["stage"] or "", "tier": card["tier"], "depends": card["depends"], "blocker": blocker,
-        "steps": [steps[k] for k, _ in STEPS], "progress": {"done": done, "total": len(STEPS)},
+        "steps": [steps[k] for k, _ in STEPS], "progress": {"done": done, "total": total},
         "acceptance": {"ticked": card["acceptance"][0], "total": card["acceptance"][1]},
         "branch": branch, "jobs": jobs, "card": r["card"], "latest_report": newest,
         "result": (newest["status"] + " " + newest["note"]).strip() if newest else "",

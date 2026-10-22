@@ -7,14 +7,15 @@ How it stays light and token-free: every `watch_seconds` it only stats the files
 when one changed, after every slow refresh (`slow_seconds`) and at the latest every `full_minutes`. Clients get a
 push only when the snapshot really changed. No model is ever called.
 """
-import hashlib, http.server, json, os, queue, secrets, socket, sys, threading, time, traceback, urllib.parse
+import hashlib, hmac, http.server, json, os, queue, secrets, sys, threading, time, traceback, urllib.parse, urllib.request
 from pathlib import Path
 
 import common
-import collect, history, ownermsg
+import actions, collect, history, ownermsg
 
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-          "/style.css": ("style.css", "text/css; charset=utf-8")}
+          "/style.css": ("style.css", "text/css; charset=utf-8"), "/i18n.js": ("i18n.js", "text/javascript; charset=utf-8"),
+          "/logo.svg": ("logo.svg", "image/svg+xml"), "/favicon.png": ("favicon.png", "image/png")}
 
 
 class Hub:
@@ -29,6 +30,9 @@ class Hub:
         self.hist = str(common.state_path(cfg, "history.jsonl"))
         self.log = str(common.state_path(cfg, "server.log"))
         self.stamp = None
+        self.last_error = None
+        self.csrf = secrets.token_urlsafe(24)  # per server run; the page fetches it with its cookie
+        self.actions = actions.Actions(cfg)
 
     def note(self, msg):
         with open(self.log, "a", encoding="utf-8") as f:
@@ -68,13 +72,12 @@ class Hub:
         os.replace(path + ".tmp", path)
 
     def rebuild(self, why):
-        try:
-            return self._rebuild(why)
-        finally:
-            with self.lock:
-                snap = self.snap
-            if snap:
-                self.save(snap)
+        """A failed build raises before anything is saved, so snapshot.json keeps its true (old) generated_at."""
+        changed = self._rebuild(why)
+        with self.lock:
+            snap = self.snap
+        self.save(snap)
+        return changed
 
     def _rebuild(self, why):
         snap = self.col.build()
@@ -102,10 +105,15 @@ class Hub:
     def push(self, snap):
         data = json.dumps(snap, default=str)
         for q in list(self.clients):
-            try:
-                q.put_nowait(data)
-            except queue.Full:
-                pass
+            for _ in range(2):
+                try:
+                    q.put_nowait(data)
+                    break
+                except queue.Full:
+                    try:
+                        q.get_nowait()  # a slow page: drop its oldest, keep the newest
+                    except queue.Empty:
+                        pass
 
     def run(self):
         r = self.cfg["refresh"]
@@ -125,7 +133,12 @@ class Hub:
                 if why or self.snap is None:
                     self.rebuild(why or "start")
             except Exception:  # noqa: BLE001  the loop must survive a reader hiccup
-                self.note("refresh error:\n" + traceback.format_exc())
+                err = traceback.format_exc()
+                if err != self.last_error:  # the same failure every 5 s is logged once
+                    self.note("refresh error:\n" + err)
+                self.last_error = err
+            else:
+                self.last_error = None
             time.sleep(r["watch_seconds"])
 
 
@@ -146,7 +159,9 @@ def make_handler(hub, token, port):
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'")
+            self.send_header("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; "
+                                                        "style-src 'self' https://fonts.googleapis.com; "
+                                                        "font-src https://fonts.gstatic.com")
             for k, v in (extra or {}).items():
                 self.send_header(k, v)
             self.end_headers()
@@ -154,13 +169,15 @@ def make_handler(hub, token, port):
 
         def authed(self):
             cookie = self.headers.get("Cookie") or ""
-            return any(c.strip() == f"wnc_cc={token}" for c in cookie.split(";"))
+            return any(hmac.compare_digest(c.strip().encode(), f"wnc_cc={token}".encode()) for c in cookie.split(";"))
 
         def do_GET(self):  # noqa: N802
             if self.headers.get("Host") not in allowed_hosts:
                 return self.send(403, "forbidden host", "text/plain")
             url = urllib.parse.urlparse(self.path)
             qs = urllib.parse.parse_qs(url.query)
+            if url.path == "/whoami":  # no key needed, reveals nothing secret: lets the launcher tell us from a stranger
+                return self.send(200, json.dumps({"app": "WhyNotCC", "pid": os.getpid()}))
             if url.path == "/" and qs.get("t", [""])[0] == token:
                 return self.send(303, "", "text/plain", {
                     "Location": "/", "Set-Cookie": f"wnc_cc={token}; HttpOnly; SameSite=Strict; Path=/"})
@@ -183,9 +200,38 @@ def make_handler(hub, token, port):
                     return self.send(200, json.dumps(ownermsg.recent(hub.cfg["state_dir"], acct, 20)))
                 except ValueError:
                     return self.send(400, "[]")
+            if url.path == "/api/csrf":
+                return self.send(200, json.dumps({"csrf": hub.csrf}))
             if url.path == "/api/stream":
                 return self.stream()
             return self.send(404, "not found", "text/plain")
+
+        def do_POST(self):  # noqa: N802
+            """Buttons only. Needs: right Host, the page cookie, a local Origin, and the per-run CSRF token."""
+            try:  # read the (small) body first: answering before it is read makes Windows reset the connection
+                raw = self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 4096))
+            except (ValueError, OSError):
+                raw = b""
+            if self.headers.get("Host") not in allowed_hosts:
+                return self.send(403, "forbidden host", "text/plain")
+            if not self.authed():
+                return self.send(401, json.dumps({"ok": False}))
+            origin = self.headers.get("Origin")
+            if origin and origin not in (f"http://127.0.0.1:{port}", f"http://localhost:{port}"):
+                return self.send(403, json.dumps({"ok": False, "msg": "foreign origin"}))
+            if not hmac.compare_digest((self.headers.get("X-CC-CSRF") or "").encode(), hub.csrf.encode()):
+                return self.send(403, json.dumps({"ok": False, "msg": "missing or wrong CSRF token"}))
+            if urllib.parse.urlparse(self.path).path != "/api/action":
+                return self.send(404, json.dumps({"ok": False}))
+            try:
+                body = json.loads(raw or b"{}")
+                name, acct = str(body.get("action", "")), str(body.get("account", ""))
+            except (ValueError, AttributeError):
+                return self.send(400, json.dumps({"ok": False}))
+            out = hub.actions.perform(name, acct)
+            history.append(hub.hist, [{"at": time.strftime("%Y-%m-%dT%H:%M:%S"), "kind": "action", "account": acct,
+                                       "task": "", "text": f"Button '{name}' for {acct}: {out['msg']}"}])
+            return self.send(200, json.dumps(out, ensure_ascii=False))
 
         def stream(self):
             q = queue.Queue(maxsize=4)
@@ -226,9 +272,13 @@ def running_url(cfg):
     """URL of a live server, else None."""
     try:
         info = json.loads(info_file(cfg).read_text(encoding="utf-8"))
-        with socket.create_connection(("127.0.0.1", info["port"]), timeout=1):
-            return f"http://127.0.0.1:{info['port']}/?t={info['token']}"
-    except (OSError, ValueError, KeyError):
+        req = urllib.request.Request(f"http://127.0.0.1:{info['port']}/whoami", headers={"Host": f"127.0.0.1:{info['port']}"})
+        with urllib.request.urlopen(req, timeout=2) as r:
+            me = json.loads(r.read().decode("utf-8"))
+        if me.get("app") != "WhyNotCC" or me.get("pid") != info.get("pid"):
+            return None  # something else holds the port: never hand it the key
+        return f"http://127.0.0.1:{info['port']}/?t={info['token']}"
+    except (OSError, ValueError, KeyError, AttributeError):
         return None
 
 
@@ -244,7 +294,11 @@ def main():
     host, port = cfg["server"]["host"], int(cfg["server"]["port"])
     if host not in ("127.0.0.1", "localhost"):
         raise SystemExit("server.host must stay 127.0.0.1 (this PC only)")
-    token = secrets.token_urlsafe(24)
+    try:  # keep the key across restarts, so an open page and its cookie keep working
+        token = json.loads(info_file(cfg).read_text(encoding="utf-8"))["token"]
+        assert len(token) >= 24
+    except (OSError, ValueError, KeyError, AssertionError):
+        token = secrets.token_urlsafe(24)
     hub = Hub(cfg)
     srv = http.server.ThreadingHTTPServer((host, port), make_handler(hub, token, port))
     srv.daemon_threads = True

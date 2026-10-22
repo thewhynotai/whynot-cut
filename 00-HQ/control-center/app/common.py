@@ -26,6 +26,16 @@ def state_path(cfg, *parts):
     return p
 
 
+def snapshot_age_min(snap, now=None):
+    """Minutes since the snapshot was BUILT (its generated_at), not since the file was written. None = unknown."""
+    import datetime as dt
+    try:
+        built = dt.datetime.fromisoformat(snap["generated_at"])
+    except (TypeError, KeyError, ValueError):
+        return None
+    return ((now or dt.datetime.now()) - built).total_seconds() / 60
+
+
 def account(cfg, acct_id):
     for a in cfg["accounts"]:
         if a["id"] == acct_id:

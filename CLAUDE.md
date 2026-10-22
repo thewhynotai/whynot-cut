@@ -27,6 +27,17 @@ For these: TDD, a fresh independent Opus review, a mutation check, the full suit
 
 Hardening against Claude bypassing its own lead-only steps waits for the paid edition.
 
+## AI tooling: who does what (owner-approved restart, 2026-10-22)
+- **Master Orchestrator** (`00-HQ`: BOARD, cards, DECISIONS, `PROJECT_PLAN_AR.md`) owns tasks, status, acceptance
+  and reports. No plugin creates or closes tasks or keeps its own task list.
+- **OMC** (`/oh-my-claudecode:*`) = execution inside one card only: `plan`, executor/test-engineer/debugger/verifier
+  agents, its agent-replay record. Never autopilot, ralph, ultragoal, ralplan, team, trace, ask, release, pr,
+  drydock, deepinit (the full list is enforced in `.claude/settings.json`).
+- **gstack** (`/gstack-*`) = specialist checks on demand: review, investigate, qa, browse (always `browse stop`
+  after), careful/guard. Never ship, deploy, codex, gbrain sync, pair-agent, cookies or scrape.
+- `/whynot-cut:autopilot` is the product's autopilot; OMC's autopilot is never used.
+- Full rules and the overlap table: `00-HQ/AGENT_ROUTING_RULES.md`. Layout: `00-HQ/AI_TOOLING_ARCHITECTURE.md`.
+
 **Automatic review flags** (medical, religious, business) are helpers. The editor's final read is the check, and the human medical/religious approval gate stays ON.
 
 ---

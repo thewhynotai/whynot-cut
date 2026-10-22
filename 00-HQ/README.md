@@ -22,9 +22,13 @@ It does not read the old plan files unless a task card points at one. `DOC-MAP.m
 | `TASK_QUEUE.yaml` | machines | Generated, read-only view of BOARD + cards + intake + inbox |
 | `DECISIONS.md` | everyone | How the project is run (ADR-lite); product decisions stay in PROGRESS/spec |
 | `AUTOMATION_RUNBOOK.md` | master | Every routine, its state, pause/stop/restart steps, incidents |
-| `PLUGIN_CAPABILITY_MATRIX.md` | everyone | Plugins and skills: installed, active, tested |
+| `PLUGIN_CAPABILITY_MATRIX.md` | everyone | Plugins and skills: installed, active, tested (= the plugin compatibility matrix, D-011) |
+| `AGENT_ROUTING_RULES.md` | every session | Who does what: Master Orchestrator vs OMC vs gstack vs superpowers; the enforced never-use list (2026-10-22) |
+| `AI_TOOLING_ARCHITECTURE.md` | everyone | Where each AI tool is installed, its config, hooks, test evidence and rollback |
+| `setup/` | Yunus / master | AI-infra restart Phases 0–9: tracker, audit, baseline, environment, gstack report (OMC report: `omc/`) |
 | `ARCHIVE_MANIFEST.md` | everyone | What was archived where, and the hold list |
 | `reports/` · `tasks/archive/<ID>/` | everyone | Dated reports (immutable) · closed task packets |
+| `control-center/` | Yunus | **WhyNot Control Center** (2026-10-22): live dashboard + one terminal per account (desktop shortcut "WhyNot - Control Center"); replaces the Agency LIVE screen. `control-center/README.md` |
 | `tools/hq_status.py` | master | Status generator + GitHub mirror (`ops/hq`); `tools/archive_docs.py` safe archiving |
 | `PLAYBOOK.md` | every session | Rules: roles, the task life-cycle, models and usage, safety, Windows + Mac |
 | `roles/MASTER.md` | Yunus's account (master) | Integrator: receives, reviews, merges, plans. Does not build |
