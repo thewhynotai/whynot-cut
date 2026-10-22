@@ -157,6 +157,12 @@ Read the exact need.
   - Add one line under "Needs Yunus" in `HQ\STATUS.md`.
   - The card stays BLOCKED.
   - The helper's other READY cards continue as normal.
+- **Reopening always adds `## Answer (YYYY-MM-DD HH:MM)`** (Phase 8, 2026-10-22), also when Yunus answers or the
+  card comes back from PARKED. Setting READY alone does not reopen it: a helper skips a card whose newest report of
+  its own says BLOCKED until a newer `## Answer` or `## FIX round n` exists.
+- **A BLOCKED report written by the helper loop** (`…-<ID>-loop.md`, "**Written by:** helper_loop.py"): the same
+  card ended PARTIAL 6 runs in one FIX/Answer round. Read that helper's PARTIAL reports for the card, then answer,
+  split, or PARK it.
 
 ## 2. Write the outcome (all of these, every time)
 1. **Card header.** Set `**Status:**` to ACCEPTED, FIX, READY or BLOCKED.

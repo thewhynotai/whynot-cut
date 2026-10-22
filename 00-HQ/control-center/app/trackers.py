@@ -29,8 +29,41 @@ def read(spec, hq_dir):
                     break
                 out["rows"].append([_clean(c) for c in row.strip().strip("|").split("|")])
             break
+    n = len(out["headers"])
+    if n:  # a stray "|" inside a cell adds cells: keep the column count, merge the overflow into the last column
+        out["rows"] = [r[:n - 1] + [" | ".join(x for x in r[n - 1:] if x)] if len(r) > n else r + [""] * (n - len(r))
+                       for r in out["rows"]]
     out["status_col"] = next((k for k, h in enumerate(out["headers"]) if h.lower().startswith("status")), None)
+    out["file_changed"] = dt.datetime.fromtimestamp(Path(hq_dir, spec["file"]).stat().st_mtime).isoformat(timespec="minutes")
+    out["items"] = _items(out)
+    out["done"] = sum(1 for i in out["items"] if i["status_short"].upper().startswith("DONE"))
     return out
+
+
+def _col(headers, pattern, default=None):
+    return next((k for k, h in enumerate(headers) if re.search(pattern, h, re.I)), default)
+
+
+def _items(t):
+    """Each table row as one readable item: number, title, short status word, full status, next step, blockers, rest."""
+    h = t["headers"]
+    if not h:
+        return []
+    num = _col(h, r"^#$|^no\b|^id$", 0)
+    title = _col(h, r"phase|task|title|item|name", 1 if len(h) > 1 else 0)
+    stat, nxt, blk = t["status_col"], _col(h, r"^next"), _col(h, r"block")
+    used = {num, title, stat, nxt, blk}
+    items = []
+    for r in t["rows"]:
+        status = r[stat] if stat is not None else ""
+        items.append({
+            "num": r[num], "title": r[title], "status": status,
+            "status_short": re.split(r"\s*[(:;—–]", status, maxsplit=1)[0].strip() or status,
+            "next": r[nxt] if nxt is not None and r[nxt] not in ("—", "-") else "",
+            "blockers": r[blk] if blk is not None and r[blk] not in ("—", "-") else "",
+            "more": [[h[k], r[k]] for k in range(len(h)) if k not in used and r[k] not in ("", "—", "-")],
+        })
+    return items
 
 
 def mark_new(path, ids, now, hours):

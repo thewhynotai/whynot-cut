@@ -40,6 +40,17 @@ ported into the engine; kept as reference source); `خد دا كوبي` preview 
 holds a `.git`, the tool moves plain files only; deletion needs the owner); `T4.14-راجع-التفريغ/` (46 MB, may hold
 client media; owner's call).
 
+## Batch 2026-10-22-b3 (1 folder; owner chat 2026-10-22 «أرشف omc-lab»)
+
+One same-volume folder rename (no tree walk; checked first: no links inside), all 35 files incl. its `.git`
+hash-verified identical after the move. Undo: rename `_archive/tools-2026-10/omc-lab` back to `omc-lab`.
+
+| Original path | Class | Replaced by | Reason |
+|---|---|---|---|
+| `omc-lab/` | OBSOLETE | `oh-my-claudecode@omc` 5.7.6 (official, project scope) | duplicate OMC pilot, de-registered in Phase 4 |
+
+`T4.14-راجع-التفريغ/`: the owner says that task is finished (chat 2026-10-22); the folder stays where it is.
+
 ## Hold list (not moved, on purpose)
 
 | Path | Why held |

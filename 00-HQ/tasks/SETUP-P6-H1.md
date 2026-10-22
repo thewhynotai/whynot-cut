@@ -1,6 +1,6 @@
 # SETUP-P6-H1 — seat check + handoff test (AI-infra restart Phase 6)
 
-- **Assigned:** H1    **Model:** Sonnet 5.5 (effort medium)    **Size:** S    **Status:** READY
+- **Assigned:** H1    **Model:** Sonnet 5.5 (effort medium)    **Size:** S    **Status:** ARCHIVED (not run: superseded 2026-10-22 by the owner-approved real-card handoff test on BL-20 = Phase 6 + 7 pilot)
 - **Tier:** LIGHT (read-only seat check; no product code)
 - **Stage / gate:** AI-infra restart Phase 6 (`00-HQ/setup/SETUP_PHASE_TRACKER.md`)    **Depends on:** none
 

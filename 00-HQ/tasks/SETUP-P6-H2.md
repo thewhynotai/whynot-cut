@@ -1,6 +1,6 @@
 # SETUP-P6-H2 — independent check of H1's seat report (AI-infra restart Phase 6)
 
-- **Assigned:** H2    **Model:** Sonnet 5.5 (effort medium)    **Size:** S    **Status:** NOT READY (the master sets READY when SETUP-P6-H1 is DONE)
+- **Assigned:** H2    **Model:** Sonnet 5.5 (effort medium)    **Size:** S    **Status:** ARCHIVED (not run: superseded 2026-10-22 by the owner-approved real-card handoff test on BL-20 = Phase 6 + 7 pilot)
 - **Tier:** LIGHT (read-only verification; no product code)
 - **Stage / gate:** AI-infra restart Phase 6    **Depends on:** SETUP-P6-H1 (its DONE report in `00-HQ/inbox/h1/`)
 

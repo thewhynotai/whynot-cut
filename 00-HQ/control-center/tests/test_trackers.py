@@ -49,6 +49,23 @@ class NewBadge(unittest.TestCase):
         self.assertEqual(trackers.mark_new(p, ["A", "B", "C"], later, 48), set())
 
 
+class Clean(unittest.TestCase):
+    def test_extra_cells_merge_into_the_last_column_and_status_gets_a_short_word(self):
+        d = tempfile.mkdtemp()
+        Path(d, "T.md").write_text(
+            "| # | Phase | Status | Next action |\n|---|---|---|---|\n"
+            "| 6 | Accounts | IN PROGRESS (10:20): owner paused | x | run the pilot |\n"
+            "| 7 | Pilot | **DONE** (09:15; review PASS) | — |\n", encoding="utf-8")
+        t = trackers.read({"id": "r", "title": "R", "file": "T.md"}, d)
+        self.assertEqual(len(t["rows"][0]), 4)
+        self.assertEqual(t["rows"][0][3], "x | run the pilot")
+        self.assertEqual([i["status_short"] for i in t["items"]], ["IN PROGRESS", "DONE"])
+        self.assertEqual(t["items"][0]["title"], "Accounts")
+        self.assertEqual(t["items"][0]["next"], "x | run the pilot")
+        self.assertEqual(t["done"], 1)
+        self.assertTrue(t["file_changed"])
+
+
 class NewBadgeSafety(unittest.TestCase):
     def test_unreadable_file_does_not_wipe_badges(self):
         d = tempfile.mkdtemp()

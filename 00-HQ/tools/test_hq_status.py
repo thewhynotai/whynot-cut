@@ -323,5 +323,55 @@ class Preview(unittest.TestCase):
             self.assertEqual(hs.refresh_failure(Path(d, "none.log")), "")
 
 
+class Phase8Fields(unittest.TestCase):
+    """AI-infra restart Phase 8: the brief's report fields 'current milestone', 'account assignments', 'new handoffs'."""
+
+    S = {"time": "t", "rows": [], "tasks": {}, "verdicts": {}, "reports": {}, "helpers": [], "api": "X",
+         "api_month": {}, "ram": 10, "requests": [], "git": {"branch": "b", "local": "1", "remote": "1",
+                                                          "label": "SYNCED", "dirty_files": 0}}
+
+    def test_current_milestone_is_the_first_open_one(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d, "PROJECT_PLAN_AR.md")
+            p.write_text("## 3. Milestones\n\n- [x] **M0 — نظام الإدارة** · x\n- [ ] **M1 — Gate 4 → `v3.0.0-p4`** · y\n"
+                         "- [ ] **M2 — خطة V1** · z\n", encoding="utf-8")
+            self.assertEqual(hs.current_milestone(p), "M1 — Gate 4 → `v3.0.0-p4`")
+            p.write_text("- [x] **M0 — done**\n", encoding="utf-8")
+            self.assertEqual(hs.current_milestone(p), "")
+            self.assertEqual(hs.current_milestone(Path(d, "none.md")), "")
+
+    def test_report_names_milestone_and_main_seat(self):
+        out = hs.render_report(dict(self.S, milestone="M1 — Gate 4"), None, "t")
+        self.assertIn("M1 — Gate 4", out)
+        self.assertIn("PRIMARY (info@)", out)
+        self.assertIn("مش متحدد", hs.render_report(dict(self.S, milestone=""), None, "t"))
+
+    def test_new_handoffs_since_the_last_report(self):
+        reps = {"BL-20": {"who": "h2", "file": "inbox/h2/2026-10-22-1830-BL-20.md", "status": "DONE",
+                          "mtime": hs.datetime.datetime(2026, 10, 22, 18, 30).timestamp()},
+                "BL-04": {"who": "h2", "file": "inbox/h2/2026-10-22-0316-BL-04.md", "status": "DONE",
+                          "mtime": hs.datetime.datetime(2026, 10, 22, 3, 16).timestamp()}}
+        out = hs.render_report(dict(self.S, reports=reps), {"time": "2026-10-22 17:00", "tasks": {}}, "t")
+        self.assertIn("inbox/h2/2026-10-22-1830-BL-20.md", out.split("## 2.")[0])
+        self.assertNotIn("BL-04", out.split("## 2.")[0])
+        self.assertIn("مفيش تسليم جديد", hs.render_report(dict(self.S, reports=reps),
+                                                          {"time": "2026-10-22 19:00", "tasks": {}}, "t"))
+        same_minute = {"BL-20": dict(reps["BL-20"], mtime=hs.datetime.datetime(2026, 10, 22, 17, 0, 30).timestamp())}
+        self.assertIn("BL-20", hs.render_report(dict(self.S, reports=same_minute),
+                                                {"time": "2026-10-22 17:00", "tasks": {}}, "t").split("## 2.")[0])
+        for prev in ({"tasks": {}}, {"tasks": {}, "time": None}):
+            self.assertIn("مش معروفة", hs.render_report(dict(self.S, reports=reps), prev, "t"))
+
+    def test_helper_lines_name_the_account(self):
+        h = {"who": "h2", "state": "idle", "auto_on": True, "stop": False, "at": "", "beat": "", "model": "", "reason": ""}
+        self.assertIn("H2 (marketing@)", hs.render_report(dict(self.S, helpers=[h]), None, "t"))
+
+    def test_h2_report_names_with_a_time_map_to_the_task(self):
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "inbox" / "h2").mkdir(parents=True)
+            Path(d, "inbox/h2/2026-10-22-0316-BL-04.md").write_text("**Status:** DONE", encoding="utf-8")
+            self.assertEqual(list(hs.inbox_reports(Path(d))), ["BL-04"])
+
+
 if __name__ == "__main__":
     unittest.main()

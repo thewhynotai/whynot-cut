@@ -16,6 +16,7 @@ REPO = EP / "WhyNotCut"
 ACCOUNTS = Path(r"D:\ClaudeData\accounts")
 API_DIR = Path(r"D:\ClaudeData\claude-api-lane")
 OPS_WT = Path(r"D:\WNC-work\ops")
+SEATS = {"h1": "mayar@", "h2": "marketing@"}  # helper seat -> Claude account (Start-Helper.cmd profiles)
 START, END = "<!-- AUTO:STATUS START -->", "<!-- AUTO:STATUS END -->"
 # Task lifecycle (AI-infra restart Phase 5); BOARD keeps its own words (the helper loops read them), mapped here.
 LIFECYCLE = ("BACKLOG", "READY", "IN_PROGRESS", "IN_REVIEW", "IN_TESTING", "DONE", "ARCHIVED")
@@ -241,7 +242,7 @@ def inbox_reports(hq):
     out = {}
     for who in ("h1", "h2"):
         for f in sorted(Path(hq, "inbox", who).glob("*.md")):
-            m = re.match(r"\d{4}-\d{2}-\d{2}-(.+?)(?:-r\d+)?\.md$", f.name)
+            m = re.match(r"\d{4}-\d{2}-\d{2}-(?:\d{4}-)?(.+?)(?:-r\d+)?\.md$", f.name)  # H2 names carry HHMM
             if not m:
                 continue
             head = f.read_text(encoding="utf-8", errors="replace")[:2000]
@@ -251,6 +252,16 @@ def inbox_reports(hq):
                 out[m.group(1)] = {"who": who, "file": f"inbox/{who}/{f.name}", "status": s.group(1) if s else "?",
                                    "mtime": f.stat().st_mtime}
     return out
+
+
+def current_milestone(plan_md):
+    """First milestone of PROJECT_PLAN_AR.md §3 not yet ticked '[x]' ('' if none or no file)."""
+    try:
+        t = Path(plan_md).read_text(encoding="utf-8")
+    except (OSError, ValueError):  # a missing or mis-saved plan must not stop the scheduled report
+        return ""
+    m = re.search(r"^- \[ \] \*\*(M\d+ — .+?)\*\*", t, re.M)
+    return m.group(1) if m else ""
 
 
 # ----------------------------------------------------------------------------------------------------- writers
@@ -391,7 +402,8 @@ def snapshot(hq=HQ, repo=REPO, accounts=ACCOUNTS, api_dir=API_DIR):
             "helpers": [helper_state(accounts, h) for h in ("h1", "h2")], "git": git_state(repo),
             "tag": _git(repo, "describe", "--tags", "--abbrev=0", "release/3.0"),
             "api": api_state(Path(hq, "BUDGET-API.md")), "api_month": api_month_estimate(api_dir), "ram": ram_percent(),
-            "requests": open_requests(Path(hq, "PRIMARY_ACCOUNT_INBOX.md"))}
+            "requests": open_requests(Path(hq, "PRIMARY_ACCOUNT_INBOX.md")),
+            "milestone": current_milestone(Path(hq).parent / "PROJECT_PLAN_AR.md")}
 
 
 def preview_line(p):
@@ -417,19 +429,33 @@ def render_report(s, prev, slot_title, sync=None):
     else:
         L += [f"- {k}: {a or 'جديد'} ← **{b or 'اتشال من الـ BOARD'}**" for k, a, b in ch] \
             or ["- مفيش تغيير في حالة أي تاسك على الـ BOARD."]
-    L += ["", "## 2. شغالين على إيه (المصدر: helper status.json + آخر كتابة في run log)"]
+        try:  # same minute as the last report counts again: a repeat beats a missed handoff
+            since = datetime.datetime.strptime(prev.get("time", ""), "%Y-%m-%d %H:%M").timestamp()
+        except (ValueError, TypeError):
+            since = None
+        if since is None:
+            L.append("- التسليمات الجديدة: مش معروفة (وقت آخر تقرير مش مقروء من `.last-snapshot.json`).")
+        else:
+            new = sorted((v["mtime"], k, v) for k, v in s["reports"].items() if v["mtime"] >= since)
+            L += [f"- تسليم جديد (inbox): {k} ({v['status']}) من {v['who'].upper()}: `{v['file']}`" for _, k, v in new] \
+                or ["- مفيش تسليم جديد في الـ inbox من آخر تقرير."]
+    L += ["", "## 2. شغالين على إيه (المصدر: helper status.json + آخر كتابة في run log)",
+          "- PRIMARY (info@): الماستر (استلام ومراجعة وقبول في 00-HQ) + الـ executor (الـ merge على release/3.0) + "
+          "الـ routines (المصدر `AGENT_ROUTING_RULES.md`)."]
     for h in s.get("helpers", []):
         flags = ("AUTO-ON" if h["auto_on"] else "AUTO off") + (" · STOP" if h["stop"] else "")
         age = beat_age_min(h)
         state = h["state"] + (" (STALE)" if h["state"] == "running" and age is not None and age > STALE_MIN else "")
         age_txt = "—" if age is None else f"{age} دقيقة"
-        L.append(f"- {h['who'].upper()}: {state} — آخر heartbeat {h.get('beat') or h['at'] or '—'}"
+        L.append(f"- {h['who'].upper()} ({SEATS.get(h['who'], '—')}): {state} — آخر heartbeat {h.get('beat') or h['at'] or '—'}"
                  f" ({age_txt}), {h['model'] or '—'}, {flags} {h['reason']}".rstrip())
     L += [f"- {r['id']} — {r['owner']} — {r['status']}" for r in s["rows"]
           if charter_status(r["status"]) in ("IN_PROGRESS", "IN_REVIEW", "IN_TESTING")]
     tag, prev_tag = s.get("tag"), (prev or {}).get("tag")
     new_tag = bool(prev_tag and tag and tag != prev_tag)  # no earlier tag on record = nothing to compare
     L += ["", "## 3. حالة المنتج (المصدر: git tags + `PROJECT_PLAN_AR.md` §5)",
+          f"- الـ milestone الحالي (`PROJECT_PLAN_AR.md` §3، أول واحد مش مقفول): "
+          f"**{s.get('milestone') or 'مش متحدد (مفيش milestone مفتوح أو الملف مش مقروء)'}**",
           f"- آخر tag على release/3.0: {tag or '—'}"
           + (" — **tag جديد من آخر تقرير** (محتاج تأكيد التجربة في Premiere قبل ما يتسمّى verified)"
              if new_tag else " — **NO NEW VERIFIED BUILD**"),
