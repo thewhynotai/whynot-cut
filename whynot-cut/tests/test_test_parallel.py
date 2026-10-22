@@ -358,7 +358,7 @@ class Cache(Case):
     def test_test_switch_env_vars_are_in_the_key(self):                  # review r1 P2-2
         self.use("pass_a")
         self.assertEqual(self.run_tool()[0], 0)
-        for name in ("WHYNOT_SLOW_TESTS", "WNC_INSTALLER_LIVE", "NH_INTEGRATION"):
+        for name in ("WHYNOT_SLOW_TESTS", "WNC_INSTALLER_LIVE", "NH_INTEGRATION", "WHYNOTCUT_SHELLCHECK"):
             out = self.run_tool(env=self.env(**{name: "wnc-key-probe"}))[1]
             self.assertFalse(out.startswith("reused: "), name + "\n" + out)
             self.assertTrue(self.run_tool(env=self.env(**{name: "wnc-key-probe"}))[1].startswith("reused: "), name)
@@ -374,6 +374,57 @@ class Cache(Case):
         git(self.repo, "checkout", "--", "tools/x.txt")                   # back to exactly the committed tree
         code, out = self.run_tool()
         self.assertFalse(out.startswith("reused: "), out)
+
+    def test_a_tree_edited_and_reverted_during_the_run_is_not_cached(self):   # review r2 P1-1
+        self.use("pass_a", "edits_and_reverts")
+        before = (self.repo / "tools" / "x.txt").read_bytes()
+        code, out = self.run_tool()
+        self.assertEqual(code, 0, out)
+        self.assertEqual((self.repo / "tools" / "x.txt").read_bytes(), before)   # same bytes at the end
+        self.assertIn("parallel: tree touched during the run; not cached", out)
+        self.assertEqual(self.cache_entries(), [])
+        self.assertFalse((self.cache / "durations.json").exists(), "store nothing")
+        code, out = self.run_tool()
+        self.assertFalse(out.startswith("reused: "), out)
+
+    def test_git_takes_no_optional_index_lock(self):                     # review r2 P3-1
+        self.use("pass_a")
+        x = self.repo / "tools" / "x.txt"
+        time.sleep(0.05)
+        x.write_bytes(x.read_bytes())                                     # same bytes, new mtime: a stale index entry
+        index = self.repo / ".git" / "index"
+        st = index.stat()
+        self.assertEqual(self.run_tool()[0], 0)
+        st2 = index.stat()
+        self.assertEqual((st.st_mtime_ns, st.st_size), (st2.st_mtime_ns, st2.st_size),
+                         "the tool rewrote .git/index (git status without --no-optional-locks)")
+        src = TOOL.read_text(encoding="utf-8")
+        self.assertIn('["git", "--no-optional-locks", *args]', src)
+        self.assertEqual(src.count('["git"'), 1, "every git call goes through g()")
+
+    def test_cache_and_durations_are_written_atomically(self):           # review r2 P3-2
+        tool = load_tool()
+        d = self.tmp / "w"
+        d.mkdir()
+        calls = []
+        real = tool.os.replace
+
+        def spy(src, dst):
+            calls.append((Path(src), Path(dst)))
+            return real(src, dst)
+        tool.os.replace = spy
+        try:
+            tool.atomic_write(d / "entry.json", "عربي")
+        finally:
+            tool.os.replace = real
+        self.assertEqual((d / "entry.json").read_text(encoding="utf-8"), "عربي")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0].parent, d)                           # temp file in the same folder
+        self.assertEqual(calls[0][1], d / "entry.json")
+        self.assertEqual(sorted(p.name for p in d.iterdir()), ["entry.json"])   # no temp file left
+        src = TOOL.read_text(encoding="utf-8")
+        self.assertNotIn("dur_file.write_text", src)
+        self.assertNotIn("entry.write_text", src)
 
     def test_fresh_ignores_the_cache(self):
         self.use("pass_a")

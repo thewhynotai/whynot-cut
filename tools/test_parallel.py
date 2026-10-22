@@ -33,7 +33,7 @@ DEFAULT_SERIAL_LANE = ("test_identity_scan.TestRealTree.test_full_repo_scan_is_f
 VALID_MODULE = re.compile(r"[_a-z]\w*\.py$", re.IGNORECASE)        # unittest.loader.VALID_MODULE_NAME
 HOLDER_ID = re.compile(r"^\w+ \((.+)\)$")                           # "setUpClass (mod.Class)" -> "mod.Class"
 SUBTEST_ID = re.compile(r"^(\w+(?:\.\w+)+) [\[(]")                  # "mod.C.test_x (i=1)" -> "mod.C.test_x"
-ENV_KEY_PREFIXES = ("WHYNOT_", "WNC_", "NH_")                       # env that switches tests on/off: in the key
+ENV_KEY_PREFIXES = ("WHYNOT_", "WHYNOTCUT_", "WNC_", "NH_")         # env that switches tests on/off: in the key
 ENV_KEY_SKIP = ("WHYNOT_SUITE_CACHE", "WHYNOT_PARALLEL_")           # ...except the tool's own control vars
 RECORD_INTS = ("tests_run", "skipped", "expected_failures")
 RUN_DIR = Path(tempfile.gettempdir()) / f"wnc-par-{os.getpid()}"   # per-module records, logs and TEMP folders
@@ -265,13 +265,48 @@ def run_jobs(specs, workers, stats):
     return done
 
 
+def git_out(repo: Path, *args) -> bytes:
+    """git without optional locks: a `git status` must never take index.lock in a shared checkout (review r2 P3-1)."""
+    return subprocess.run(["git", "--no-optional-locks", *args], cwd=str(repo), capture_output=True,
+                          check=True).stdout
+
+
+def tree_stamp(repo: Path):
+    """(path, mtime_ns, size) of every tracked or untracked non-ignored file, or None when git can't tell. Compared
+    at the start and the end of a run: an edit that is reverted during the run still moves the mtime, so it is seen
+    even when the key is the same at both ends (review r2 P1-1)."""
+    try:
+        listed = git_out(repo, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    stamp = []
+    for rel in sorted(set(listed.split(b"\0")) - {b""}):
+        try:
+            st = (repo / rel.decode("utf-8", "surrogateescape")).stat()
+            stamp.append((rel, st.st_mtime_ns, st.st_size))
+        except OSError:
+            stamp.append((rel, None, None))
+    return stamp
+
+
+def atomic_write(path: Path, text: str):
+    """Write via a temp file in the same folder + os.replace, so a parallel reader never sees half a file (r2 P3-2)."""
+    tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(str(tmp), str(path))
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
 def dirty_key(repo: Path):
     """sha + hash of the dirty tree, or None when git can't tell (then: no cache). The hash covers `git status` of the
     whole repo (modified, staged, deleted, untracked non-ignored) plus the RAW working-tree bytes of every path it
     lists, so a line-ending-only change counts too (review r1 P2-1, P3-7), and the binary diff without external
     diff/textconv drivers."""
     def g(*args):
-        return subprocess.run(["git", *args], cwd=str(repo), capture_output=True, check=True).stdout
+        return git_out(repo, *args)
     try:
         sha = g("rev-parse", "HEAD").decode().strip()
         status = g("status", "--porcelain=v1", "-z", "--untracked-files=all")
@@ -416,6 +451,7 @@ def parent(a) -> int:
                            .encode("utf-8")).hexdigest()[:20]
         return f"{dk[0][:12]}-{h}"
     key = cache_key()
+    stamp0 = tree_stamp(Path(a.repo))
     if not key:
         out("parallel: no git state for the cache key; the cache is not used")
     entry = cdir / f"{key}.json" if key else None
@@ -476,16 +512,18 @@ def parent(a) -> int:
     # note here comes before it and the verdict stays the last line. A failed write is only a note (r1 P3-5).
     if code != 2 and key and cache_key() != key:
         out("parallel: tree changed during the run; not cached")
+    elif code != 2 and key and (stamp0 is None or tree_stamp(Path(a.repo)) != stamp0):
+        out("parallel: tree touched during the run; not cached")
     elif code != 2:
         try:
             cdir.mkdir(parents=True, exist_ok=True)
             for j in results:
                 if j.tag.startswith("m-"):
                     durations[j.module] = j.rec["duration"]
-            dur_file.write_text(json.dumps(durations, indent=1, sort_keys=True), encoding="utf-8")
+            atomic_write(dur_file, json.dumps(durations, indent=1, sort_keys=True))
             if entry:
-                entry.write_text(json.dumps({"date": datetime.datetime.now().isoformat(timespec="seconds"),
-                                             "code": code, "report": report}, ensure_ascii=False), encoding="utf-8")
+                atomic_write(entry, json.dumps({"date": datetime.datetime.now().isoformat(timespec="seconds"),
+                                                "code": code, "report": report}, ensure_ascii=False))
         except OSError as e:
             out(f"parallel: could not write the cache ({e}); not cached")
     sys.stdout.write(report)
