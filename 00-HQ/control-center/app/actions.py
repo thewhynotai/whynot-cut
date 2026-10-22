@@ -7,7 +7,7 @@
 - start_auto (helper):  only when its loop is NOT running: Start-Helper.cmd <h> --auto (the same as its AUTO shortcut).
 - open_terminals:       opens the missing Control Center terminal tabs (never a second one).
 """
-import os, subprocess, sys, time
+import os, subprocess, sys, threading, time
 from pathlib import Path
 
 import ownermsg
@@ -25,7 +25,7 @@ COMPACT = ("Owner asks (Compact button): your context is getting large. Finish t
 
 def _alive(h):
     r = subprocess.run([sys.executable, "-X", "utf8", str(ACCOUNTS / "helper_loop.py"), h, "--alive"],
-                       capture_output=True, creationflags=NO_WINDOW)
+                       capture_output=True, creationflags=NO_WINDOW, timeout=30)
     return r.returncode == 0
 
 
@@ -43,6 +43,7 @@ class Actions:
     def __init__(self, cfg, alive=_alive, run=_run):
         self.cfg, self.alive, self.run = cfg, alive, run
         self.last = {}
+        self.lock = threading.Lock()  # the server answers clicks in parallel threads
 
     def helper(self, acct):
         return any(a["id"] == acct and a["kind"] == "helper" for a in self.cfg["accounts"])
@@ -54,13 +55,18 @@ class Actions:
             return res(False, f"Unknown action '{name}'.", f"أمر غير معروف «{name}».")
         if name != "open_terminals" and not self.helper(acct):
             return res(False, "This button is for Helper 1 or Helper 2 only.", "الزرار ده للمساعد 1 أو 2 بس.")
-        key = (name, acct)
-        if time.time() - self.last.get(key, 0) < COOLDOWN_S:
-            return res(False, "Already done a moment ago; wait 30 seconds before repeating it.",
-                       "اتعمل من ثواني؛ استنى 30 ثانية قبل ما تكرّره.")
-        out = fn(acct)
-        if out["ok"]:
+        key = (name, "*") if name == "open_terminals" else (name, acct)  # one terminal window for all cards
+        with self.lock:  # claim before running: two quick clicks never both pass
+            if time.time() - self.last.get(key, 0) < COOLDOWN_S:
+                return res(False, "Already done a moment ago; wait 30 seconds before repeating it.",
+                           "اتعمل من ثواني؛ استنى 30 ثانية قبل ما تكرّره.")
             self.last[key] = time.time()
+        try:
+            out = fn(acct)
+        except Exception as e:  # noqa: BLE001  a click always gets a clear answer
+            out = res(False, f"It failed: {type(e).__name__}: {e}", f"فشل: {type(e).__name__}: {e}")
+        if not out["ok"]:
+            self.last.pop(key, None)  # a refused or failed click may be retried at once
         return out
 
     def ask_status(self, acct):
@@ -77,7 +83,21 @@ class Actions:
                    "اتطلب منه يخلّص الخطوة اللي فيها ويبدأ الجولة الجاية بذاكرة جديدة. مفيش حاجة بتتوقف؛ "
                    "بيخلّص اللي في إيده الأول.")
 
+    def talk_open(self, acct):
+        """A chat opened from this account's terminal (/chat, /continue) is running in its worktree."""
+        p = os.path.join(self.cfg["state_dir"], "consoles", f"{acct}.talk")
+        try:
+            pid = int(open(p).read().split()[0])
+        except (OSError, ValueError, IndexError):
+            return False
+        import console
+        return console.pid_alive(pid)
+
     def start_auto(self, acct):
+        if self.talk_open(acct):
+            return res(False, "A chat is open on this seat in its terminal (/chat). Close it first: two Claude "
+                              "sessions must not work in one worktree.",
+                       "في شات مفتوح على الأكونت ده من التيرمنال (/chat). اقفله الأول: مينفعش جلستين Claude في نفس الفولدر.")
         if self.alive(acct):
             return res(False, "Its AUTO loop is already running; nothing to start.",
                        "اللوب بتاعه شغّال أصلاً؛ مفيش حاجة تتشغّل.")

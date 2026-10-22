@@ -74,6 +74,10 @@ class ParseCard(unittest.TestCase):
         p = write(Path(d, "BL-02.md"), "# BL-02 — t\n\n## Spec (binding)\n`tasks/BL-02-spec.md`, a copy.\n")
         self.assertEqual(T.parse_card(p)["summary"], "Task 18 (part 1) licence files + notices generator")
 
+    def test_spec_heading_ignores_plain_headings(self):
+        for text in ("## Objective\n", "## Goal\n- do x\n", "# Title\n\n## Scope\n- a\n"):
+            self.assertEqual(T._spec_heading(text), "", text)
+
     def test_missing_card(self):
         self.assertEqual(T.parse_card(Path(tempfile.mkdtemp(), "x.md"))["summary"], "")
 

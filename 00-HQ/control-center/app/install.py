@@ -124,7 +124,9 @@ def move_old_shortcuts(cfg, bk):
             shutil.move(str(lnk), OLD_DIR / lnk.name)
             print(f"{lnk.name} -> {OLD_DIR.name}")
     if OLD_LNK.exists():
-        shutil.move(str(OLD_LNK), OLD_DIR / OLD_LNK.name)
+        shutil.copy2(OLD_LNK, bk / OLD_LNK.name)
+        if not (OLD_DIR / OLD_LNK.name).exists():
+            shutil.move(str(OLD_LNK), OLD_DIR / OLD_LNK.name)
     elif not (OLD_DIR / OLD_LNK.name).exists():
         olds = sorted(Path(cfg["state_dir"], "backups").glob(f"*/{OLD_LNK.name}"))
         if olds:
@@ -176,6 +178,11 @@ def undo(cfg):
                 print(f"{lnk.name} back on the desktop")
         if not any(OLD_DIR.iterdir()):
             OLD_DIR.rmdir()
+    for name in {p.name for p in Path(cfg["state_dir"], "backups").glob(f"*/{OLD_GLOB}")}:
+        if not (DESKTOP / name).exists():  # the folder was removed: take the newest backup copy
+            newest = sorted(Path(cfg["state_dir"], "backups").glob(f"*/{name}"))[-1]
+            shutil.copy2(newest, DESKTOP / name)
+            print(f"{name} restored from {newest.parent.name}")
     olds = sorted(Path(cfg["state_dir"], "backups").glob(f"*/{OLD_LNK.name}"))
     if olds and not OLD_LNK.exists():
         shutil.copy2(olds[-1], OLD_LNK)

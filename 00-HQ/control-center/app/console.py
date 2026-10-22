@@ -370,7 +370,16 @@ class HelperConsole:
         if interactive:
             self.teardown()
             os.system("cls")
-            subprocess.call(["cmd", "/c", script] + args[1:])
+            talk = common.state_path(self.cfg, "consoles", f"{self.h}.talk")
+            proc = subprocess.Popen(["cmd", "/c", script] + args[1:])
+            talk.write_text(str(proc.pid))  # the dashboard's Start AUTO refuses while this chat is open
+            try:
+                proc.wait()
+            finally:
+                try:
+                    talk.unlink()
+                except OSError:
+                    pass
             input("\n(chat closed) Press Enter to return to the helper terminal… ")
             self.setup()
             return

@@ -24,12 +24,28 @@ and V1 spec (lines 8, 10) name `PROJECT-PLAN-AR.md`, `V1-SCOPE-AR.md`, `NEW-PLAN
 executor's tree (release/3.0, dirty), so they are fixed after the Gate 4 tag by card OPS-04, not now. 00-HQ references
 (README, DOC-MAP, roles/API-LANES) were updated on 2026-10-20.
 
+## Batch 2026-10-22-b2 (2 files; AI-infra restart Phase 5)
+
+Tool: `WNC_ARCHIVE_BATCH=2026-10-22-b2 python -X utf8 00-HQ/tools/archive_docs.py --apply` (undo: same with `--undo`).
+Self-tested first on a mirror tree (`D:\ClaudeData\Temp\archive-selftest`: apply → 2 manifest rows → undo restored).
+
+| Original path | Class | Replaced by | Reason |
+|---|---|---|---|
+| `PARKED-SESSIONS.md` | HISTORICAL | `AUTOMATION_RUNBOOK.md` + the app's Archived sessions | chats archived 10-18; all came back or ended |
+| `API-PAUSE-AR.md` | HISTORICAL | `BUDGET-API.md` (HOLD) | API pause record of 10-18; only the retired lane-watch routine named it |
+
+Reviewed and **kept** in Phase 5 (classification in `setup/PROJECT_INVENTORY.md`): every file a live tool, role,
+routine or helper loop reads; the business docs at the root; `new plugin code/` (original Kalam/Hush/Tidy source drop,
+ported into the engine; kept as reference source); `خد دا كوبي` preview folders (release track); `omc-lab/` (retired,
+holds a `.git`, the tool moves plain files only; deletion needs the owner); `T4.14-راجع-التفريغ/` (46 MB, may hold
+client media; owner's call).
+
 ## Hold list (not moved, on purpose)
 
 | Path | Why held |
 |---|---|
-| `API-PAUSE-AR.md` | Read by the lane-watch routine prompt (step 0c); historical once lane-watch is retired (OPS-03) |
-| `PARKED-SESSIONS.md` | Referenced by `D:\ClaudeData\claude-api-lane\TRACKS.md` (old-system charters still running) |
+| ~~`API-PAUSE-AR.md`~~ | **Archived in b2 (2026-10-22).** lane-watch is retired; re-enabling it needs its step 0c pointed at `_archive/plans-2026-10/API-PAUSE-AR.md` or `BUDGET-API.md` |
+| ~~`PARKED-SESSIONS.md`~~ | **Archived in b2 (2026-10-22).** `TRACKS.md` lines 52/56 now point to `_archive/plans-2026-10/PARKED-SESSIONS.md` (old copy: `D:\ClaudeData\setup-phase5\TRACKS.md.before-b2`) |
 | `Start-Claude-API-lane.cmd` | The way Yunus re-logs the API lane at API-500 activation |
 | `كارت-جرّب-3.0.md` | Owner try card for the live preview (in use) |
 | `T4.14-راجع-التفريغ/` | Open owner task (Q-001) |

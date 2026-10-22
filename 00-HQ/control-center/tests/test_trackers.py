@@ -49,5 +49,17 @@ class NewBadge(unittest.TestCase):
         self.assertEqual(trackers.mark_new(p, ["A", "B", "C"], later, 48), set())
 
 
+class NewBadgeSafety(unittest.TestCase):
+    def test_unreadable_file_does_not_wipe_badges(self):
+        d = tempfile.mkdtemp()
+        p = os.path.join(d, "seen.json")
+        now = dt.datetime(2026, 10, 22, 5, 0)
+        trackers.mark_new(p, ["A"], now, 48)
+        trackers.mark_new(p, ["A", "B"], now, 48)  # B is new
+        open(p, "w").write("{broken")              # transient corruption
+        self.assertEqual(trackers.mark_new(p, ["A", "B"], now, 48), set())
+        self.assertEqual(open(p).read(), "{broken")  # not rewritten as a "first run"
+
+
 if __name__ == "__main__":
     unittest.main()

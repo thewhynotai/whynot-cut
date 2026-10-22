@@ -58,7 +58,7 @@ def _first_prose(text):
 
 def _spec_heading(text):
     """'### BL-02 [Gate 4]: Task 18 licence files  [Gate 4 value: high]  Model: opus' -> 'Task 18 licence files'."""
-    m = re.search(r"^#{2,4}\s+\S+\s*(?:\[[^\]]*\])?\s*:?\s*(.+)$", text, re.M)
+    m = re.search(r"^#{2,4}[ \t]+[A-Z][\w-]*\d[\w-]*[ \t]*(?:\[[^\]\n]*\])?[ \t]*:[ \t]*(.+)$", text, re.M)
     if not m:
         return ""
     return re.split(r"\s{2,}\[|\s{2,}Model:", m.group(1))[0].strip()

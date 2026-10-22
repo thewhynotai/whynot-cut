@@ -56,7 +56,7 @@ The audit that led to this design is in `AUDIT.md`.
 |---|---|
 | `00-HQ\control-center\app\` | `collect.py` (snapshot), `runlog.py` (log parsing, context), `status.py` (states), `tasks.py` (task lifecycle), `server.py` (dashboard server), `console.py` (terminals), `ownermsg.py` (mailbox + hook), `statusline.py`, `history.py`, `launch.py`, `install.py` |
 | `00-HQ\control-center\web\` | The dashboard page (no external requests) |
-| `00-HQ\control-center\tests\` | 116 tests: `python -X utf8 -m unittest discover -s tests` |
+| `00-HQ\control-center\tests\` | 122 tests: `python -X utf8 -m unittest discover -s tests` |
 | `00-HQ\control-center\config.json` | Accounts, session names, routines, goal, thresholds, refresh times, port. **Edit names and thresholds here.** |
 | `D:\ClaudeData\control-center\` (state) | `snapshot.json`, `history.jsonl`, `mailbox\`, `consoles\*.lock`, `model_windows.json`, `server.json` (port + page key), `server.log`, `backups\` |
 

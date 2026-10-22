@@ -36,9 +36,19 @@ class Board(unittest.TestCase):
 
     def test_status_words_map_to_charter_states(self):
         self.assertEqual(hs.charter_status("IN PROGRESS"), "IN_PROGRESS")
-        self.assertEqual(hs.charter_status("MERGED"), "DONE_ARCHIVED")
         self.assertEqual(hs.charter_status("FIX"), "IN_PROGRESS")
         self.assertEqual(hs.charter_status("weird"), "UNKNOWN")
+
+    def test_board_words_map_to_the_restart_lifecycle(self):
+        # AI-infra restart Phase 5: BACKLOG → READY → IN_PROGRESS → IN_REVIEW → IN_TESTING → DONE → ARCHIVED
+        # (+ BLOCKED). BOARD keeps its words because the helper loops read them.
+        want = {"NOT READY": "BACKLOG", "READY": "READY", "IN PROGRESS": "IN_PROGRESS", "FIX": "IN_PROGRESS",
+                "DONE": "IN_REVIEW", "ACCEPTED": "IN_TESTING", "MERGED": "DONE", "DONE_ARCHIVED": "ARCHIVED",
+                "ARCHIVED": "ARCHIVED", "IN_TESTING": "IN_TESTING", "BLOCKED": "BLOCKED", "PARKED": "BLOCKED"}
+        for word, state in want.items():
+            self.assertEqual(hs.charter_status(word), state, word)
+        self.assertEqual(hs.LIFECYCLE, ("BACKLOG", "READY", "IN_PROGRESS", "IN_REVIEW", "IN_TESTING", "DONE",
+                                        "ARCHIVED"))
 
 
 class Helpers(unittest.TestCase):

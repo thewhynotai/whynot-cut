@@ -36,7 +36,7 @@ It does not read the old plan files unless a task card points at one. `DOC-MAP.m
 | `roles/HELPER-PRODUCT.md` | Helper 2's account | Builder: panels/UI, installer, guide |
 | `roles/API-LANES.md` | headless API lanes | Mechanical tasks + first-pass reviews on the Console credit |
 | `roles/MAC-TESTER.md` | Claude on the agency Mac | Final Mac test and report |
-| `BUDGET-API.md` | master + lanes | The two API plans: October USD 200 (now), November USD 450 (from 1 Nov) |
+| `BUDGET-API.md` | master + lanes | The API plan: API-500 = PLANNED_NOT_AUTHORIZED (HOLD until the owner says «نفذ خطة الـ API») |
 | `DOC-MAP.md` | everyone | Every old .md file: current, partly stale or superseded, plus the 15 contradictions and how they are settled |
 | `templates/TASK-CARD.md` | master | How a task is handed out |
 | `templates/UPDATE-REPORT.md` | builders | How work is handed back |

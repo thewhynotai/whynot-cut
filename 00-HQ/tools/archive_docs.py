@@ -10,10 +10,10 @@ import datetime, hashlib, json, os, shutil, stat, sys
 EP = os.environ.get("WNC_EP") or r"D:\0 Work\0 Pegasus IMC Agency\00 TWN\0 TWN AI\Editing Plugin"  # WNC_EP: mirror for the self-test
 ARCH = os.path.join(EP, "_archive", "plans-2026-10")
 MANIFEST = os.path.join(EP, "00-HQ", "archive-manifest.jsonl")
-BATCH = "2026-10-20-b1"
+BATCH = os.environ.get("WNC_ARCHIVE_BATCH") or "2026-10-20-b1"  # which batch below to dry-run / apply / undo
 SPEC = "WhyNotCut/docs/superpowers/specs/2026-10-18-v1-premiere-panel-design.md"
 ROADMAP = "WhyNotCut/docs/superpowers/plans/2026-10-18-master-roadmap-v1.md"
-ITEMS = [  # (relative path, classification, replacement, reason)
+B1 = [  # (relative path, classification, replacement, reason)
     ("V1-SCOPE-AR.md", "REFERENCE_ONLY", SPEC, "Superseded by the approved V1 spec (DOC-MAP 'Superseded'); spec cites it as a source"),
     ("NEW-PLAN-BRIEF-AR.md", "REFERENCE_ONLY", SPEC, "Owner answers folded into the V1 spec; §4 duplicates SAVED-LATER §4 (DOC-MAP #15)"),
     ("WhyNot-Cut-3.1-Plan/WHYNOT-CUT-3.1-PLAN.md", "ARCHIVE_READY", ROADMAP, "'3.1' is no longer used: V1 + Stage 11+ (DOC-MAP #8)"),
@@ -23,6 +23,14 @@ ITEMS = [  # (relative path, classification, replacement, reason)
     ("WhyNot-Cut-3.0-Addendum/ADDENDUM-M-owner-requests-2026-10-16.md.bak-kt8", "DUPLICATE_VERIFIED", "WhyNot-Cut-3.0-Addendum/ADDENDUM-M-owner-requests-2026-10-16.md", "Pre-kt8 backup copy of the live addendum"),
     ("00-HQ/MASTER-PLAN-AR.md", "ARCHIVE_READY", "PROJECT_PLAN_AR.md", "Owner plan v2 of 10-19 00:46 (design, approved); live view moved to PROJECT_PLAN_AR.md"),
 ]
+B2 = [  # AI-infra restart Phase 5 (2026-10-22): only files no live code, role or enabled routine reads
+    ("PARKED-SESSIONS.md", "HISTORICAL", "00-HQ/AUTOMATION_RUNBOOK.md + the app's Archived sessions list", "List of chats archived 10-18; all came back or ended since"),
+    ("API-PAUSE-AR.md", "HISTORICAL", "00-HQ/BUDGET-API.md", "API pause record of 10-18; the API state lives in BUDGET-API.md (HOLD); only the retired lane-watch routine named it"),
+]
+BATCHES = {"2026-10-20-b1": B1, "2026-10-22-b2": B2}
+if BATCH not in BATCHES:
+    raise SystemExit(f"unknown WNC_ARCHIVE_BATCH {BATCH!r}; valid: {', '.join(BATCHES)}")
+ITEMS = BATCHES[BATCH]
 
 
 def is_link(p):

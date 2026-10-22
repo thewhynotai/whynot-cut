@@ -17,11 +17,13 @@ ACCOUNTS = Path(r"D:\ClaudeData\accounts")
 API_DIR = Path(r"D:\ClaudeData\claude-api-lane")
 OPS_WT = Path(r"D:\WNC-work\ops")
 START, END = "<!-- AUTO:STATUS START -->", "<!-- AUTO:STATUS END -->"
+# Task lifecycle (AI-infra restart Phase 5); BOARD keeps its own words (the helper loops read them), mapped here.
+LIFECYCLE = ("BACKLOG", "READY", "IN_PROGRESS", "IN_REVIEW", "IN_TESTING", "DONE", "ARCHIVED")
 CHARTER = {"NOT READY": "BACKLOG", "READY": "READY", "IN PROGRESS": "IN_PROGRESS", "FIX": "IN_PROGRESS",
-           "BLOCKED": "BLOCKED", "PARKED": "BLOCKED", "ACCEPTED": "ACCEPTED", "MERGED": "DONE_ARCHIVED",
+           "BLOCKED": "BLOCKED", "PARKED": "BLOCKED", "ACCEPTED": "IN_TESTING", "MERGED": "DONE",
            "RUNNING": "IN_PROGRESS", "STOPPED": "BLOCKED", "DONE": "IN_REVIEW", "IN_PROGRESS": "IN_PROGRESS",
-           "IN_REVIEW": "IN_REVIEW", "DONE_ARCHIVED": "DONE_ARCHIVED", "BACKLOG": "BACKLOG",
-           "PLANNED_NOT_AUTHORIZED": "BACKLOG"}
+           "IN_REVIEW": "IN_REVIEW", "IN_TESTING": "IN_TESTING", "DONE_ARCHIVED": "ARCHIVED", "ARCHIVED": "ARCHIVED",
+           "BACKLOG": "BACKLOG", "PLANNED_NOT_AUTHORIZED": "BACKLOG"}
 SLOTS = {9: "تقرير الصبح", 13: "تقرير الضهر", 17: "تقرير العصر", 21: "تقرير الليل"}
 
 
@@ -424,7 +426,7 @@ def render_report(s, prev, slot_title, sync=None):
         L.append(f"- {h['who'].upper()}: {state} — آخر heartbeat {h.get('beat') or h['at'] or '—'}"
                  f" ({age_txt}), {h['model'] or '—'}, {flags} {h['reason']}".rstrip())
     L += [f"- {r['id']} — {r['owner']} — {r['status']}" for r in s["rows"]
-          if charter_status(r["status"]) in ("IN_PROGRESS", "IN_REVIEW")]
+          if charter_status(r["status"]) in ("IN_PROGRESS", "IN_REVIEW", "IN_TESTING")]
     tag, prev_tag = s.get("tag"), (prev or {}).get("tag")
     new_tag = bool(prev_tag and tag and tag != prev_tag)  # no earlier tag on record = nothing to compare
     L += ["", "## 3. حالة المنتج (المصدر: git tags + `PROJECT_PLAN_AR.md` §5)",

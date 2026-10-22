@@ -365,7 +365,7 @@ class Collector:
             nxt = al.next_run(r.get("minutes", []), r.get("hours"), now) if r.get("minutes") else None
             item = {"id": r["id"], "name": r["name"], "name_ar": r.get("name_ar"), "next": nxt.isoformat(timespec="minutes") if nxt else None}
             if not runs:
-                out.append({**item, "last": None, "result": "no run yet", "colour": "gray"})
+                out.append({**item, "last": None, "result": "no run yet", "result_ar": "لسه ما اشتغلتش", "colour": "gray"})
                 continue
             s = runs[-1]
             age = al.transcript_age(s.get("cliSessionId"), now_ts)
@@ -375,7 +375,8 @@ class Collector:
                 res, col = "Running", "green"
             else:
                 res, col = "Done", "green"
-            out.append({**item, "last": ms_iso(s.get("createdAt")), "result": res, "colour": col,
+            res_ar = {"Failed: usage limit": "فشلت: الليمت", "Failed": "فشلت", "Running": "شغّالة", "Done": "خلصت"}[res]
+            out.append({**item, "last": ms_iso(s.get("createdAt")), "result": res, "result_ar": res_ar, "colour": col,
                         "detail": runlog.one_line((s.get("postTurnSummary") or {}).get("status_detail"), 200)})
         return out
 
@@ -430,7 +431,7 @@ def alerts(snap, th):
                 "Answer in its card or its terminal.", "ردّ عليه في الكارت أو في التيرمنال بتاعه.", nm_ar)
         if not a["connection"]["ok"] and a["connection"].get("signed_in") is not None:
             add(f"{a['id']}|account", "red", nm, f"Account check failed: {a['connection']['detail']}",
-                f"الأكونت مش مظبوط: {a['connection']['detail']}",
+                f"الأكونت مش مظبوط: {a['connection'].get('detail_ar') or a['connection']['detail']}",
                 "Sign this profile in with its own seat (see README, troubleshooting).",
                 "سجّل دخول البروفايل ده بالأكونت بتاعه هو (شوف README، جزء حل المشاكل).", nm_ar)
         c = a["context"]
@@ -439,7 +440,7 @@ def alerts(snap, th):
                 f"Context {c['percent']}% full ({c['tokens']:,} of {c['window']:,} tokens).",
                 f"الذاكرة (context) مليانة {c['percent']}% ({c['tokens']:,} من {c['window']:,}).",
                 "Use its Compact button: a long session loses detail when it compacts by itself.",
-                "دوس زرار Compact بتاعه: الجلسة الطويلة بتنسى تفاصيل لما تضغط نفسها لوحدها.", nm_ar)
+                "دوس زرار «ضغط الذاكرة» بتاعه: الجلسة الطويلة بتنسى تفاصيل لما تضغط نفسها لوحدها.", nm_ar)
         for s in a.get("sessions") or []:
             if s["status"]["code"] == "ERROR" and s.get("recent") and s["id"] != (a["session"] or {}).get("id"):
                 add(f"{a['id']}|session|{s['id']}|ERROR", "red", nm, f"{s['name']}: {s['status']['reason']}",

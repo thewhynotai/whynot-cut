@@ -1,5 +1,22 @@
 # Control Center audit (2026-10-22, before any change)
 
+## UI ROUND 2026-10-22 05:20 (Yunus: Arabic/English, thewhynot.ai brand, clear tasks, buttons, desktop app)
+- Arabic/English switch (RTL); every status, alert, task state and step comes with Arabic from the server. Task
+  titles and summaries stay English (they come from English cards; no model is called to translate).
+- Brand from thewhynot.ai: black + glass panels, gradient #d95c9b→#5400fb, Syne/Inter (+ IBM Plex Sans Arabic), the
+  official TWN logo, and a TWN icon on the desktop shortcut.
+- Every task explains what its state means and what happens next. A "How it works" section shows the 6-step road,
+  the roles and the status words. Summary numbers sit at the top.
+- New things: config `trackers` panels (the AI-infra restart phases now), plus a "New" badge on tasks for 48 h.
+- Buttons, none of which stops running work:
+  - helpers: "What are you doing?", "Compact" (finish the step, then start fresh), "Start AUTO" (only when the loop
+    is down, and refused while a /chat is open), "Open terminal";
+  - Main sessions: "Compact" copies /compact and shows the steps.
+  - Every button needs the key, a local Origin and the CSRF token; a lock with a 30 s cooldown stops double clicks.
+- Desktop: "WhyNot - Control Center" opens as its own window (Edge app mode, own profile on D). The 7 old shortcuts
+  are in "WhyNot - Old tools" and still work.
+- Review (fresh Opus): PASS-WITH-MINORS, no P1. All P2s and the listed P3s are fixed with tests. **122 tests pass.**
+
 ## DONE 2026-10-22 04:50 (resumed after the restart on Yunus's «كمل»)
 
 - Review round 2 (fresh Opus): **PASS-WITH-MINORS**. All 12 round-1 fixes were confirmed and no new P1 was found. The

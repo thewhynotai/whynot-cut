@@ -1,0 +1,375 @@
+path	kind	bytes	modified	referenced_by
+.claude/settings.json	doc	2645	2026-10-22 05:06	00-HQ\PLAYBOOK.md; 00-HQ\control-center\app\install.py; CLAUDE.md; helper_loop.py
+.claude/settings.local.json	doc	845	2026-10-20 02:59	
+.claude/skills/skill-finder/SKILL.md	doc	8525	2026-10-11 00:46	SKILL.md
+.gstack/browse-audit.jsonl	doc	974	2026-10-22 04:43	
+00-HQ/AGENT_ROUTING_RULES.md	doc	7797	2026-10-22 05:07	00-HQ\README.md; CLAUDE.md
+00-HQ/AI_TOOLING_ARCHITECTURE.md	doc	8019	2026-10-22 05:07	00-HQ\README.md; CLAUDE.md
+00-HQ/archive-manifest.jsonl	doc	4683	2026-10-22 08:23	00-HQ\tools\archive_docs.py
+00-HQ/ARCHIVE_MANIFEST.md	doc	4595	2026-10-22 08:23	00-HQ\README.md
+00-HQ/AUTOMATION_RUNBOOK.md	doc	20082	2026-10-22 05:07	00-HQ\README.md; 00-HQ\tools\archive_docs.py
+00-HQ/BOARD.md	doc	7576	2026-10-22 03:55	00-HQ\PLAYBOOK.md; 00-HQ\README.md; 00-HQ\control-center\app\collect.py; 00-HQ\control-center\app\server.py; 00-HQ\control-center\app\status.py; 00-HQ\control-center\app\tasks.py; 00-HQ\profile\CLAUDE.md; 00-HQ\roles\API-LANES.md; 00-HQ\roles\MASTER.md; 00-HQ\tools\agency_live.py; 00-HQ\tools\hq_status.py; helper_loop.py
+00-HQ/BUDGET-API.md	doc	4894	2026-10-20 01:26	00-HQ\README.md; 00-HQ\roles\API-LANES.md; 00-HQ\roles\MASTER.md; 00-HQ\tools\archive_docs.py; 00-HQ\tools\hq_status.py; 00-HQ\tools\test_hq_status.py
+00-HQ/DECISIONS.md	doc	7508	2026-10-22 04:58	00-HQ\README.md
+00-HQ/DOC-MAP.md	doc	6747	2026-10-22 08:23	00-HQ\README.md
+00-HQ/MERGE-QUEUE.md	doc	1059	2026-10-21 22:40	00-HQ\PLAYBOOK.md; 00-HQ\control-center\app\tasks.py; 00-HQ\roles\MASTER-INTAKE.md
+00-HQ/PLAYBOOK.md	doc	20744	2026-10-22 05:09	00-HQ\README.md; 00-HQ\profile\CLAUDE.md; SKILL.md; helper_loop.py
+00-HQ/PLUGIN_CAPABILITY_MATRIX.md	doc	7045	2026-10-22 04:58	00-HQ\README.md
+00-HQ/PRIMARY_ACCOUNT_INBOX.md	doc	9077	2026-10-22 03:59	00-HQ\README.md; 00-HQ\control-center\app\collect.py; 00-HQ\control-center\app\server.py; 00-HQ\tools\agency_live.py; 00-HQ\tools\hq_status.py; 00-HQ\tools\test_hq_status.py
+00-HQ/README.md	doc	5190	2026-10-22 05:07	00-HQ\profile\CLAUDE.md; SKILL.md; helper_loop.py
+00-HQ/STATUS.md	doc	8246	2026-10-21 03:41	00-HQ\roles\MASTER-INTAKE.md; 00-HQ\roles\MASTER.md
+00-HQ/TASK_QUEUE.yaml	doc	10152	2026-10-22 03:59	00-HQ\PLAYBOOK.md; 00-HQ\README.md; 00-HQ\roles\PRIMARY-REPORT.md; 00-HQ\tools\hq_status.py
+00-HQ/YIELD.txt	doc	215	2026-10-19 20:20	00-HQ\PLAYBOOK.md; helper_loop.py
+00-HQ/tools/agency_live.py	doc	33617	2026-10-22 03:54	00-HQ\control-center\app\install.py; 00-HQ\tools\test_agency_live.py
+00-HQ/tools/archive_docs.py	doc	5536	2026-10-22 08:23	00-HQ\README.md
+00-HQ/tools/big_agents.py	doc	6162	2026-10-22 03:59	00-HQ\roles\WATCHDOG.md
+00-HQ/tools/hq_status.py	doc	27263	2026-10-22 05:09	00-HQ\PLAYBOOK.md; 00-HQ\README.md; 00-HQ\roles\PRIMARY-REPORT.md; 00-HQ\roles\WATCHDOG.md; 00-HQ\tools\test_hq_status.py; SKILL.md
+00-HQ/tools/stale_suites.py	doc	5313	2026-10-21 17:45	00-HQ\roles\MASTER-INTAKE.md; 00-HQ\roles\PRIMARY-REPORT.md; 00-HQ\roles\WATCHDOG.md; 00-HQ\tools\test_stale_suites.py
+00-HQ/tools/test_agency_live.py	doc	15242	2026-10-22 03:54	
+00-HQ/tools/test_big_agents.py	doc	3873	2026-10-22 03:59	
+00-HQ/tools/test_hq_status.py	doc	16542	2026-10-22 05:08	
+00-HQ/tools/test_stale_suites.py	doc	6281	2026-10-21 17:46	
+00-HQ/tools/usage_by_session.py	doc	2488	2026-10-22 03:45	SKILL.md
+00-HQ/templates/TASK-CARD.md	doc	1024	2026-10-19 19:57	00-HQ\PLAYBOOK.md; 00-HQ\README.md; 00-HQ\roles\MASTER-INTAKE.md
+00-HQ/templates/UPDATE-REPORT.md	doc	620	2026-10-19 00:06	00-HQ\PLAYBOOK.md; 00-HQ\README.md
+00-HQ/tasks/BL-02-spec.md	doc	3535	2026-10-19 00:37	
+00-HQ/tasks/BL-02.md	doc	1207	2026-10-19 19:57	00-HQ\tools\test_agency_live.py
+00-HQ/tasks/BL-03-spec.md	doc	1216	2026-10-19 00:37	
+00-HQ/tasks/BL-03.md	doc	5520	2026-10-21 22:40	00-HQ\tools\test_agency_live.py
+00-HQ/tasks/BL-04-spec.md	doc	2319	2026-10-19 10:07	
+00-HQ/tasks/BL-04.md	doc	3779	2026-10-20 09:38	00-HQ\tools\test_agency_live.py; 00-HQ\tools\test_hq_status.py
+00-HQ/tasks/BL-16-spec.md	doc	4778	2026-10-19 10:07	
+00-HQ/tasks/BL-16.md	doc	5583	2026-10-21 12:39	00-HQ\tools\test_agency_live.py; 00-HQ\tools\test_hq_status.py
+00-HQ/tasks/BL-17-spec.md	doc	2379	2026-10-19 15:24	
+00-HQ/tasks/BL-17.md	doc	2001	2026-10-19 19:57	
+00-HQ/tasks/BL-18-spec.md	doc	1216	2026-10-19 15:24	
+00-HQ/tasks/BL-18.md	doc	1822	2026-10-20 03:53	
+00-HQ/tasks/BL-19-spec.md	doc	841	2026-10-20 08:28	
+00-HQ/tasks/BL-19.md	doc	6038	2026-10-20 08:28	
+00-HQ/tasks/BL-20-spec.md	doc	3648	2026-10-20 12:44	
+00-HQ/tasks/BL-20.md	doc	7738	2026-10-20 12:45	
+00-HQ/tasks/BL-22-spec.md	doc	3107	2026-10-21 03:43	
+00-HQ/tasks/BL-22.md	doc	7715	2026-10-21 03:43	
+00-HQ/tasks/OPS-04.md	doc	713	2026-10-20 01:34	
+00-HQ/tasks/S1-R51.md	doc	8677	2026-10-21 17:46	
+00-HQ/tasks/S6b.md	doc	4938	2026-10-21 17:41	00-HQ\tools\test_agency_live.py
+00-HQ/tasks/SETUP-H1.md	doc	4670	2026-10-20 08:26	00-HQ\roles\HELPER-ENGINE.md; 00-HQ\tools\test_hq_status.py
+00-HQ/tasks/SETUP-H2.md	doc	3368	2026-10-20 11:38	
+00-HQ/tasks/archive/OPS-07/OPS-07.md	doc	2704	2026-10-20 06:16	
+00-HQ/tasks/archive/OPS-06/OPS-06.md	doc	1653	2026-10-20 02:20	
+00-HQ/tasks/archive/OPS-05/OPS-05.md	doc	2283	2026-10-21 13:02	
+00-HQ/tasks/archive/OPS-03/OPS-03.md	doc	1490	2026-10-20 02:20	
+00-HQ/tasks/archive/OPS-02/OPS-02.md	doc	1893	2026-10-20 17:08	
+00-HQ/tasks/archive/OPS-01/HANDOFF.md	doc	1136	2026-10-20 02:00	SKILL.md
+00-HQ/tasks/archive/OPS-01/OPS-01.md	doc	3580	2026-10-20 02:00	
+00-HQ/tasks/archive/ENV-01/ENV-01.md	doc	4052	2026-10-20 16:22	
+00-HQ/setup/ENVIRONMENT_VERIFICATION.md	doc	14479	2026-10-22 04:14	
+00-HQ/setup/GSTACK_INSTALLATION_REPORT.md	doc	12658	2026-10-22 04:52	
+00-HQ/setup/PHASE4_CONFIG_SNAPSHOT.md	doc	3545	2026-10-22 05:07	
+00-HQ/setup/SETUP_AUDIT.md	doc	18476	2026-10-22 04:03	
+00-HQ/setup/SETUP_BASELINE.md	doc	5089	2026-10-22 04:03	
+00-HQ/setup/SETUP_PHASE_TRACKER.md	doc	7545	2026-10-22 05:08	SKILL.md
+00-HQ/roles/API-LANES.md	doc	1878	2026-10-20 01:35	00-HQ\PLAYBOOK.md; 00-HQ\README.md; 00-HQ\tools\archive_docs.py
+00-HQ/roles/HELPER-ENGINE.md	doc	2002	2026-10-19 10:20	00-HQ\PLAYBOOK.md; 00-HQ\README.md; 00-HQ\profile\CLAUDE.md; 00-HQ\roles\HELPER-PRODUCT.md
+00-HQ/roles/HELPER-PRODUCT.md	doc	1513	2026-10-19 00:46	00-HQ\PLAYBOOK.md; 00-HQ\README.md; 00-HQ\profile\CLAUDE.md
+00-HQ/roles/MAC-TESTER.md	doc	1753	2026-10-19 00:24	00-HQ\PLAYBOOK.md; 00-HQ\README.md
+00-HQ/roles/MASTER-INTAKE.md	doc	15338	2026-10-21 22:29	00-HQ\PLAYBOOK.md; SKILL.md; helper_loop.py
+00-HQ/roles/MASTER.md	doc	2653	2026-10-19 00:25	00-HQ\PLAYBOOK.md; 00-HQ\README.md
+00-HQ/roles/PRIMARY-REPORT.md	doc	2264	2026-10-20 11:42	SKILL.md
+00-HQ/roles/WATCHDOG.md	doc	6858	2026-10-22 03:57	SKILL.md
+00-HQ/reviews/BL-02-r2.md	doc	598	2026-10-21 22:59	00-HQ\tools\test_agency_live.py
+00-HQ/reviews/BL-03-peer-h1-20261020-1616.md	doc	9655	2026-10-20 21:06	
+00-HQ/reviews/BL-03-peer-h1-20261021-1627.md	doc	9532	2026-10-21 20:29	
+00-HQ/reviews/BL-16-peer-h2-20261020-0522.md	doc	13176	2026-10-20 08:00	
+00-HQ/reviews/BL-16-peer-h2-20261021-0122.md	doc	9324	2026-10-21 03:31	
+00-HQ/reviews/BL-16-r1.md	doc	22037	2026-10-20 08:23	
+00-HQ/reviews/OPS-01-r1.md	doc	8600	2026-10-20 01:39	
+00-HQ/reviews/OPS-01-r2.md	doc	7289	2026-10-20 01:52	
+00-HQ/reviews/OPS-03-r1.md	doc	3392	2026-10-20 02:08	
+00-HQ/reviews/OPS-06-r1.md	doc	4210	2026-10-20 02:07	
+00-HQ/reviews/OPS-07-r1.md	doc	5293	2026-10-20 06:08	
+00-HQ/reviews/OPS-07-r2.md	doc	8545	2026-10-20 06:14	
+00-HQ/reviews/S6b-peer-h2-20261021-1224.md	doc	8084	2026-10-21 15:13	
+00-HQ/reviews/SETUP-H1-r3.md	doc	1897	2026-10-20 08:27	
+00-HQ/reviews/SETUP-H2-r1.md	doc	1639	2026-10-20 11:38	
+00-HQ/reports/.last-snapshot.json	doc	661	2026-10-22 03:59	00-HQ\tools\hq_status.py
+00-HQ/reports/2026-10-20-0136.md	doc	2495	2026-10-20 01:36	
+00-HQ/reports/2026-10-20-0150.md	doc	3791	2026-10-20 01:50	
+00-HQ/reports/2026-10-20-0159.md	doc	3564	2026-10-20 02:00	
+00-HQ/reports/2026-10-20-0230.md	doc	3836	2026-10-20 02:30	
+00-HQ/reports/2026-10-20-0247.md	doc	3747	2026-10-20 02:47	
+00-HQ/reports/2026-10-20-0249.md	doc	3397	2026-10-20 02:49	
+00-HQ/reports/2026-10-20-0250.md	doc	3397	2026-10-20 02:50	
+00-HQ/reports/2026-10-20-0352.md	doc	3443	2026-10-20 03:53	
+00-HQ/reports/2026-10-20-0603.md	doc	3340	2026-10-20 06:03	
+00-HQ/reports/2026-10-20-0615.md	doc	3199	2026-10-20 06:15	
+00-HQ/reports/2026-10-20-1123.md	doc	3322	2026-10-20 11:23	
+00-HQ/reports/2026-10-20-1138.md	doc	3366	2026-10-20 11:38	
+00-HQ/reports/2026-10-20-1140.md	doc	3301	2026-10-20 11:40	
+00-HQ/reports/2026-10-20-1143.md	doc	3174	2026-10-20 11:43	
+00-HQ/reports/2026-10-20-1147.md	doc	3174	2026-10-20 11:47	
+00-HQ/reports/2026-10-20-1256.md	doc	3264	2026-10-20 12:56	
+00-HQ/reports/2026-10-20-1303.md	doc	3387	2026-10-20 13:04	
+00-HQ/reports/2026-10-20-1623.md	doc	3261	2026-10-20 16:23	
+00-HQ/reports/2026-10-20-1704.md	doc	3437	2026-10-20 17:04	
+00-HQ/reports/2026-10-20-1709.md	doc	3509	2026-10-20 17:09	
+00-HQ/reports/2026-10-20-2156.md	doc	3423	2026-10-20 21:56	
+00-HQ/reports/2026-10-20-2157.md	doc	3467	2026-10-20 21:57	
+00-HQ/reports/2026-10-20-2158.md	doc	3467	2026-10-20 21:58	
+00-HQ/reports/2026-10-20-2201.md	doc	3491	2026-10-20 22:01	
+00-HQ/reports/2026-10-20-audit.md	doc	7283	2026-10-20 01:33	
+00-HQ/reports/2026-10-21-0226.md	doc	3513	2026-10-21 02:26	
+00-HQ/reports/2026-10-21-0356.md	doc	3576	2026-10-21 03:56	
+00-HQ/reports/2026-10-21-0726.md	doc	3515	2026-10-21 07:26	
+00-HQ/reports/2026-10-21-0858.md	doc	3895	2026-10-21 08:58	
+00-HQ/reports/2026-10-21-1228.md	doc	3827	2026-10-21 12:28	
+00-HQ/reports/2026-10-21-1302.md	doc	3790	2026-10-21 13:03	
+00-HQ/reports/2026-10-21-1303.md	doc	3784	2026-10-21 13:03	
+00-HQ/reports/2026-10-21-1728.md	doc	3715	2026-10-21 17:28	
+00-HQ/reports/2026-10-21-1729.md	doc	3715	2026-10-21 17:29	
+00-HQ/reports/2026-10-21-1747.md	doc	3763	2026-10-21 17:47	
+00-HQ/reports/2026-10-21-1856.md	doc	3773	2026-10-21 18:56	
+00-HQ/reports/2026-10-21-2227.md	doc	3774	2026-10-21 22:27	
+00-HQ/reports/2026-10-21-2228.md	doc	3774	2026-10-21 22:29	
+00-HQ/reports/2026-10-21-2229.md	doc	3774	2026-10-21 22:29	
+00-HQ/reports/2026-10-21-2307.md	doc	3564	2026-10-21 23:07	
+00-HQ/reports/2026-10-21-2331.md	doc	3641	2026-10-21 23:32	
+00-HQ/reports/2026-10-21-2357.md	doc	3462	2026-10-21 23:57	
+00-HQ/reports/2026-10-22-0326.md	doc	3659	2026-10-22 03:26	
+00-HQ/reports/2026-10-22-0345.md	doc	3744	2026-10-22 03:45	
+00-HQ/reports/2026-10-22-0346.md	doc	3744	2026-10-22 03:46	
+00-HQ/reports/2026-10-22-0347.md	doc	3744	2026-10-22 03:47	
+00-HQ/reports/2026-10-22-0359.md	doc	3744	2026-10-22 03:59	
+00-HQ/profile/CLAUDE.md	doc	5576	2026-10-19 20:25	00-HQ\PLAYBOOK.md; 00-HQ\roles\HELPER-ENGINE.md; 00-HQ\tools\hq_status.py; CLAUDE.md; helper_loop.py
+00-HQ/omc/OMC_INSTALLATION_REPORT.md	doc	22301	2026-10-22 04:55	
+00-HQ/omc/OMC_INTEGRATION_PREFLIGHT.md	doc	18883	2026-10-22 03:28	
+00-HQ/intake/big-agents-flagged.json	doc	214	2026-10-22 03:54	00-HQ\tools\big_agents.py
+00-HQ/intake/state.json	doc	3395	2026-10-22 03:39	00-HQ\control-center\app\server.py; 00-HQ\control-center\app\tasks.py; 00-HQ\roles\MASTER-INTAKE.md; 00-HQ\tools\agency_live.py; 00-HQ\tools\hq_status.py; 00-HQ\tools\test_hq_status.py; helper_loop.py
+00-HQ/intake/watchdog-nudges.json	doc	303	2026-10-22 03:25	00-HQ\roles\WATCHDOG.md
+00-HQ/inbox/h2/2026-10-20-0808-BL-03.md	doc	3787	2026-10-20 08:09	
+00-HQ/inbox/h2/2026-10-20-0856-BL-04.md	doc	10104	2026-10-20 08:57	
+00-HQ/inbox/h2/2026-10-20-1133-SETUP-H2.md	doc	6029	2026-10-20 11:33	
+00-HQ/inbox/h2/2026-10-20-1350-BL-03.md	doc	2262	2026-10-20 13:46	
+00-HQ/inbox/h2/2026-10-20-BL-03.md	doc	2463	2026-10-20 08:06	
+00-HQ/inbox/h2/2026-10-20-SETUP-H2.md	doc	3927	2026-10-20 08:02	
+00-HQ/inbox/h2/2026-10-21-0817-BL-03.md	doc	5398	2026-10-21 08:18	00-HQ\tools\test_agency_live.py
+00-HQ/inbox/h2/2026-10-21-1627-BL-04.md	doc	1238	2026-10-21 16:27	
+00-HQ/inbox/h2/2026-10-21-1902-BL-04.md	doc	5565	2026-10-21 19:03	00-HQ\tools\test_agency_live.py
+00-HQ/inbox/h2/2026-10-21-2352-BL-04.md	doc	5217	2026-10-21 23:51	
+00-HQ/inbox/h2/2026-10-21-2356-BL-04.md	doc	4250	2026-10-21 23:56	
+00-HQ/inbox/h2/2026-10-22-0316-BL-04.md	doc	6423	2026-10-22 03:16	
+00-HQ/inbox/h1/2026-10-19-BL-16.md	doc	10762	2026-10-19 23:29	00-HQ\tools\test_agency_live.py
+00-HQ/inbox/h1/2026-10-19-SETUP-H1-r2.md	doc	5598	2026-10-19 21:43	00-HQ\tools\test_hq_status.py
+00-HQ/inbox/h1/2026-10-19-SETUP-H1.md	doc	2945	2026-10-19 20:25	00-HQ\tools\test_hq_status.py
+00-HQ/inbox/h1/2026-10-20-BL-02-r2.md	doc	5938	2026-10-20 14:09	00-HQ\tools\test_agency_live.py
+00-HQ/inbox/h1/2026-10-20-BL-02.md	doc	9490	2026-10-20 03:40	
+00-HQ/inbox/h1/2026-10-20-SETUP-H1-r3.md	doc	7166	2026-10-20 07:23	
+00-HQ/inbox/h1/2026-10-21-BL-16.md	doc	8650	2026-10-21 00:52	00-HQ\tools\test_agency_live.py
+00-HQ/inbox/h1/2026-10-21-S6b-r2.md	doc	4571	2026-10-21 23:55	
+00-HQ/inbox/h1/2026-10-21-S6b.md	doc	9372	2026-10-21 07:35	
+00-HQ/inbox/h1/2026-10-22-S6b-r3.md	doc	2854	2026-10-22 02:55	
+00-HQ/inbox/h1/BL-16-patches/README.md	doc	2197	2026-10-20 21:16	00-HQ\README.md; 00-HQ\profile\CLAUDE.md; SKILL.md; helper_loop.py
+00-HQ/inbox/h1/BL-02-patches/README.md	doc	2140	2026-10-19 23:58	00-HQ\README.md; 00-HQ\profile\CLAUDE.md; SKILL.md; helper_loop.py
+00-HQ/control-center/AUDIT.md	doc	13614	2026-10-22 05:11	
+00-HQ/control-center/config.json	doc	3663	2026-10-22 04:54	00-HQ\control-center\app\common.py; 00-HQ\control-center\app\trackers.py
+00-HQ/control-center/README.md	doc	14505	2026-10-22 05:11	00-HQ\README.md; 00-HQ\profile\CLAUDE.md; SKILL.md; helper_loop.py
+00-HQ/control-center/Start-Control-Center.cmd	doc	454	2026-10-22 04:01	
+00-HQ/control-center/tests/test_actions.py	doc	6268	2026-10-22 05:09	
+00-HQ/control-center/tests/test_collect.py	doc	5191	2026-10-22 04:52	
+00-HQ/control-center/tests/test_console.py	doc	6327	2026-10-22 04:44	
+00-HQ/control-center/tests/test_install.py	doc	2726	2026-10-22 04:44	
+00-HQ/control-center/tests/test_mailbox_history.py	doc	7194	2026-10-22 04:44	
+00-HQ/control-center/tests/test_runlog.py	doc	7468	2026-10-22 03:39	
+00-HQ/control-center/tests/test_server.py	doc	1640	2026-10-22 04:44	
+00-HQ/control-center/tests/test_status.py	doc	7833	2026-10-22 04:50	
+00-HQ/control-center/tests/test_tasks.py	doc	10834	2026-10-22 05:09	
+00-HQ/control-center/tests/test_trackers.py	doc	2684	2026-10-22 05:09	
+00-HQ/control-center/app/actions.py	doc	7130	2026-10-22 05:10	
+00-HQ/control-center/app/collect.py	doc	28036	2026-10-22 05:10	
+00-HQ/control-center/app/common.py	doc	1365	2026-10-22 04:13	
+00-HQ/control-center/app/console.py	doc	24617	2026-10-22 05:10	00-HQ\control-center\app\launch.py
+00-HQ/control-center/app/history.py	doc	3102	2026-10-22 04:13	
+00-HQ/control-center/app/install.py	doc	9766	2026-10-22 05:10	
+00-HQ/control-center/app/launch.py	doc	4231	2026-10-22 05:10	00-HQ\control-center\app\actions.py; 00-HQ\control-center\app\install.py
+00-HQ/control-center/app/ownermsg.py	doc	6140	2026-10-22 04:44	00-HQ\control-center\app\install.py
+00-HQ/control-center/app/runlog.py	doc	10610	2026-10-22 04:41	
+00-HQ/control-center/app/server.py	doc	16441	2026-10-22 05:10	00-HQ\control-center\app\launch.py
+00-HQ/control-center/app/status.py	doc	10861	2026-10-22 04:51	00-HQ\PLAYBOOK.md; 00-HQ\README.md; 00-HQ\roles\PRIMARY-REPORT.md; 00-HQ\roles\WATCHDOG.md; 00-HQ\tools\hq_status.py; 00-HQ\tools\test_hq_status.py; SKILL.md
+00-HQ/control-center/app/statusline.py	doc	3535	2026-10-22 04:13	00-HQ\control-center\app\console.py; 00-HQ\control-center\app\install.py
+00-HQ/control-center/app/tasks.py	doc	19348	2026-10-22 05:10	
+00-HQ/control-center/app/trackers.py	doc	2597	2026-10-22 05:10	
+CLAUDE.md	root-file	5198	2026-10-22 05:07	00-HQ\PLAYBOOK.md; 00-HQ\profile\CLAUDE.md; 00-HQ\roles\HELPER-ENGINE.md; 00-HQ\tools\hq_status.py; helper_loop.py
+COMPETITORS-AR.md	root-file	9779	2026-10-18 01:00	
+PROJECT_PLAN_AR.md	root-file	21407	2026-10-22 04:59	00-HQ\README.md; 00-HQ\roles\PRIMARY-REPORT.md; 00-HQ\roles\WATCHDOG.md; 00-HQ\tools\archive_docs.py; 00-HQ\tools\hq_status.py; CLAUDE.md
+SAVED-LATER-licensing-updates-AR.md	root-file	5088	2026-10-18 12:36	
+Start-Claude-API-lane.cmd	root-file	807	2026-10-17 02:18	
+T4.14-راجع-التفريغ/	FOLDER	46536211 (3 files)	2026-10-20 02:57	
+VALIDATION-PLAN-AR.md	root-file	12634	2026-10-21 17:34	
+WhyNot-Cut-3.0-Addendum/ADDENDUM-A-kalam-hush-tidy.md	doc	14448	2026-10-12 21:41	
+WhyNot-Cut-3.0-Addendum/ADDENDUM-B-ui-ux-website-look.md	doc	7928	2026-10-12 21:49	
+WhyNot-Cut-3.0-Addendum/ADDENDUM-C-one-ecosystem.md	doc	8266	2026-10-13 02:13	
+WhyNot-Cut-3.0-Addendum/ADDENDUM-D-zero-effort-install.md	doc	13564	2026-10-13 02:36	
+WhyNot-Cut-3.0-Addendum/ADDENDUM-E-design-excellence-secure-installers.md	doc	10228	2026-10-13 12:17	
+WhyNot-Cut-3.0-Addendum/ADDENDUM-F-zero-cost-and-D-drive.md	doc	6403	2026-10-13 12:32	
+WhyNot-Cut-3.0-Addendum/ADDENDUM-G-premium-1000-bar.md	doc	25436	2026-10-14 22:32	
+WhyNot-Cut-3.0-Addendum/ADDENDUM-H-source-r-ours-and-ip-protection.md	doc	17274	2026-10-16 01:51	
+WhyNot-Cut-3.0-Addendum/ADDENDUM-I-open-source-strongest.md	doc	5201	2026-10-15 15:01	
+WhyNot-Cut-3.0-Addendum/ADDENDUM-J-brand-from-website.md	doc	82777	2026-10-17 10:04	
+WhyNot-Cut-3.0-Addendum/ADDENDUM-K-adopted-ideas.md	doc	53481	2026-10-18 12:36	00-HQ\tools\archive_docs.py
+WhyNot-Cut-3.0-Addendum/ADDENDUM-L-security.md	doc	90491	2026-10-17 10:04	
+WhyNot-Cut-3.0-Addendum/ADDENDUM-M-owner-requests-2026-10-16.md	doc	77545	2026-10-18 12:36	00-HQ\tools\archive_docs.py
+WhyNot-Cut-3.0-Addendum/prd/hush-prd.md	doc	10676	2026-10-12 21:17	
+WhyNot-Cut-3.0-Addendum/prd/kalam-prd.md	doc	13887	2026-10-12 21:17	
+WhyNot-Cut-3.0-Addendum/prd/tidy-prd.md	doc	12757	2026-10-12 21:17	
+WhyNot-Cut-3.0-Addendum/evidence/codex-claude.md	doc	32281	2026-10-13 02:12	
+WhyNot-Cut-3.0-Addendum/evidence/dns-backup-thewhynot.ai-2026-10-13.md	doc	1997	2026-10-13 02:48	
+WhyNot-Cut-3.0-Addendum/evidence/ecosystem.md	doc	49712	2026-10-13 02:12	
+WhyNot-Cut-3.0-Addendum/evidence/reel-studio-analysis.md	doc	99393	2026-10-15 03:31	
+WhyNot-Cut-3.0-Addendum/evidence/source-r-identity-tokens.txt	doc	2658	2026-10-17 02:05	
+WhyNot-Cut-3.0-Addendum/evidence/source-r-frames/README.txt	doc	560	2026-10-16 16:15	
+WhyNot-Cut-3.0-Addendum/addendum-k-research/K-DRAFT-ideas-and-placement.md	doc	4112	2026-10-16 21:36	
+WhyNot-Cut-3.0-Addendum/addendum-k-research/OSS-AUDIT-video-ad-editor.md	doc	3729	2026-10-16 21:32	
+WhyNotCut/LOCKED-AREAS.md	repo-doc	18800	2026-10-19 00:15	00-HQ\README.md; 00-HQ\roles\MASTER.md
+WhyNotCut/MAC-INBOX.md	repo-doc	1173	2026-10-14 17:09	
+WhyNotCut/PROGRESS.md	repo-doc	109233	2026-10-21 19:26	00-HQ\README.md; 00-HQ\roles\MASTER-INTAKE.md; 00-HQ\roles\MASTER.md; 00-HQ\roles\WATCHDOG.md; SKILL.md
+WhyNotCut/README.md	repo-doc	472	2026-10-11 01:21	00-HQ\README.md; 00-HQ\profile\CLAUDE.md; SKILL.md; helper_loop.py
+WhyNotCut/docs/adobe/cep-bridge.md	repo-doc	26984	2026-10-17 20:27	
+WhyNotCut/docs/adobe/eng-data-contract.md	repo-doc	48831	2026-10-21 17:26	
+WhyNotCut/docs/adobe/evidence/h6-live-checklist.md	repo-doc	7336	2026-10-16 16:17	
+WhyNotCut/docs/adobe/g2-reliability-speed-gaps.md	repo-doc	8670	2026-10-14 01:29	
+WhyNotCut/docs/adobe/gate4-live-checklist.md	repo-doc	15888	2026-10-19 15:03	
+WhyNotCut/docs/adobe/jt9a-mockup-verdict.md	repo-doc	39956	2026-10-18 01:07	
+WhyNotCut/docs/adobe/live-risks.md	repo-doc	7055	2026-10-18 17:55	
+WhyNotCut/docs/adobe/live-roundtrip-2026-10-14.md	repo-doc	11904	2026-10-15 03:52	
+WhyNotCut/docs/adobe/phase-6b-reservations.md	repo-doc	16875	2026-10-12 21:48	
+WhyNotCut/docs/adobe/photoshop-route.md	repo-doc	15713	2026-10-17 02:17	
+WhyNotCut/docs/adobe/uxp-parity.md	repo-doc	83462	2026-10-18 02:57	
+WhyNotCut/docs/benchmark/benchmark.md	repo-doc	43822	2026-10-14 01:36	
+WhyNotCut/docs/ci.md	repo-doc	19291	2026-10-20 18:28	
+WhyNotCut/docs/design/STATE.md	repo-doc	3510	2026-10-16 07:42	
+WhyNotCut/docs/design/brand-facts.md	repo-doc	21052	2026-10-13 12:23	
+WhyNotCut/docs/design/direction.md	repo-doc	22171	2026-10-13 12:44	
+WhyNotCut/docs/design/reviews/ED3-r1-designer.md	repo-doc	3529	2026-10-13 17:01	
+WhyNotCut/docs/design/reviews/ED3-r1-first-time-editor.md	repo-doc	3077	2026-10-13 16:58	
+WhyNotCut/docs/design/reviews/ED3-r2-designer.md	repo-doc	22092	2026-10-15 03:51	
+WhyNotCut/docs/design/reviews/ED3-r2-first-time-editor.md	repo-doc	18526	2026-10-15 03:33	
+WhyNotCut/docs/design/reviews/G2-r1-agency-owner.md	repo-doc	4343	2026-10-14 09:45	
+WhyNotCut/docs/design/reviews/G2-r1-designer.md	repo-doc	4814	2026-10-14 01:29	
+WhyNotCut/docs/design/reviews/G2-r2-agency-owner.md	repo-doc	14848	2026-10-15 03:31	
+WhyNotCut/docs/design/reviews/R2-ar-register-pass.md	repo-doc	11616	2026-10-16 00:54	
+WhyNotCut/docs/design/reviews/R2-fix-list.md	repo-doc	49824	2026-10-15 09:03	
+WhyNotCut/docs/design/reviews/R2-owner-decisions.md	repo-doc	8350	2026-10-16 06:13	
+WhyNotCut/docs/design/reviews/R3-agency-owner.md	repo-doc	16525	2026-10-16 01:46	
+WhyNotCut/docs/design/reviews/R3-designer.md	repo-doc	28201	2026-10-16 02:14	
+WhyNotCut/docs/design/reviews/R3-first-time-editor.md	repo-doc	20433	2026-10-16 01:49	
+WhyNotCut/docs/design/reviews/R3-fix-list.md	repo-doc	29322	2026-10-16 03:57	
+WhyNotCut/docs/design/screen-inventory.md	repo-doc	93946	2026-10-13 12:29	
+WhyNotCut/docs/dev/wnc-queue.md	repo-doc	14651	2026-10-17 15:13	
+WhyNotCut/docs/legal/ffmpeg/NOTICE.md	repo-doc	6425	2026-10-14 09:17	
+WhyNotCut/docs/legal/third-party-licences.md	repo-doc	43441	2026-10-14 09:21	
+WhyNotCut/docs/review/2026-10-11/adobe.md	repo-doc	60147	2026-10-11 15:59	
+WhyNotCut/docs/review/2026-10-11/chats-main.md	repo-doc	46165	2026-10-11 15:59	
+WhyNotCut/docs/review/2026-10-11/chats-other.md	repo-doc	51769	2026-10-11 15:59	
+WhyNotCut/docs/review/2026-10-11/chats-podcast-motion.md	repo-doc	68589	2026-10-11 15:59	
+WhyNotCut/docs/review/2026-10-11/engine.md	repo-doc	74869	2026-10-11 15:59	
+WhyNotCut/docs/review/2026-10-11/installer.md	repo-doc	78031	2026-10-11 15:59	
+WhyNotCut/docs/review/2026-10-11/integrator-status.md	repo-doc	1614	2026-10-11 15:59	
+WhyNotCut/docs/review/2026-10-11/magnific-brand.md	repo-doc	38340	2026-10-11 15:59	
+WhyNotCut/docs/review/2026-10-11/plugin-structure.md	repo-doc	47252	2026-10-11 15:59	
+WhyNotCut/docs/security/lead-token.md	repo-doc	11167	2026-10-21 03:40	
+WhyNotCut/docs/security/scan-2026-10-17-L-T1-first.md	repo-doc	16543	2026-10-17 12:36	
+WhyNotCut/docs/security/scan-2026-10-17-L-T1-locks.md	repo-doc	34345	2026-10-17 13:23	
+WhyNotCut/docs/security/scan-2026-10-17-L-T2-history.md	repo-doc	1343	2026-10-17 21:01	
+WhyNotCut/docs/security/scan-2026-10-18-L-T10-fuzz.md	repo-doc	3143	2026-10-18 02:55	
+WhyNotCut/docs/superpowers/evidence/2026-10-12-gate2-live.md	repo-doc	9573	2026-10-13 03:00	
+WhyNotCut/docs/superpowers/evidence/2026-10-13-gate2-recheck.md	repo-doc	20037	2026-10-13 03:00	
+WhyNotCut/docs/superpowers/evidence/2026-10-13-t3.4-if-filter-probes.md	repo-doc	6882	2026-10-13 12:05	
+WhyNotCut/docs/superpowers/evidence/2026-10-13-t3.4-session-ids.md	repo-doc	6606	2026-10-13 07:04	
+WhyNotCut/docs/superpowers/evidence/2026-10-13-t3.7-evals.md	repo-doc	23123	2026-10-15 23:52	
+WhyNotCut/docs/superpowers/evidence/2026-10-17-cut-proposals-precision.md	repo-doc	9673	2026-10-17 16:26	
+WhyNotCut/docs/superpowers/evidence/2026-10-17-g-gpu-ab.md	repo-doc	4059	2026-10-17 15:57	
+WhyNotCut/docs/superpowers/evidence/2026-10-17-g13-run-footprint.md	repo-doc	4766	2026-10-17 16:14	
+WhyNotCut/docs/superpowers/evidence/2026-10-17-g13-transcription-precision.md	repo-doc	10382	2026-10-17 16:14	
+WhyNotCut/docs/superpowers/evidence/2026-10-17-safe-zones-sources.md	repo-doc	8020	2026-10-17 10:37	
+WhyNotCut/docs/superpowers/evidence/2026-10-18-m2-font-pairing.md	repo-doc	27926	2026-10-19 20:20	
+WhyNotCut/docs/superpowers/evidence/2026-10-18-m5-briefs.md	repo-doc	10159	2026-10-20 03:01	
+WhyNotCut/docs/superpowers/evidence/2026-10-18-m5-token-baseline.md	repo-doc	6669	2026-10-19 10:40	
+WhyNotCut/docs/superpowers/evidence/2026-10-19-m1-review-evals.md	repo-doc	15449	2026-10-20 03:10	
+WhyNotCut/docs/superpowers/evidence/2026-10-19-m2-latin-terms.md	repo-doc	11910	2026-10-19 06:06	
+WhyNotCut/docs/superpowers/evidence/2026-10-19-m5-budget-report.md	repo-doc	12626	2026-10-20 16:29	
+WhyNotCut/docs/superpowers/evidence/k1-switches-dryrun.md	repo-doc	2761	2026-10-20 13:25	
+WhyNotCut/docs/superpowers/plans/2026-10-11-3.0-phase-1.md	repo-doc	16229	2026-10-11 16:01	
+WhyNotCut/docs/superpowers/plans/2026-10-11-3.0-phase-10-guide-track.md	repo-doc	15514	2026-10-12 10:38	
+WhyNotCut/docs/superpowers/plans/2026-10-11-3.0-phase-2.md	repo-doc	15034	2026-10-11 22:58	
+WhyNotCut/docs/superpowers/plans/2026-10-11-3.0-phase-3.md	repo-doc	9887	2026-10-12 16:27	
+WhyNotCut/docs/superpowers/plans/2026-10-11-3.0-phase-4.md	repo-doc	79392	2026-10-20 21:22	
+WhyNotCut/docs/superpowers/plans/2026-10-11-3.0-phase-5.md	repo-doc	10601	2026-10-12 16:27	
+WhyNotCut/docs/superpowers/plans/2026-10-11-3.0-phase-6-adobe-track.md	repo-doc	20195	2026-10-12 11:37	
+WhyNotCut/docs/superpowers/plans/2026-10-11-3.0-phase-6.md	repo-doc	12353	2026-10-13 01:29	
+WhyNotCut/docs/superpowers/plans/2026-10-11-3.0-phase-7-installer-track.md	repo-doc	63112	2026-10-16 08:37	
+WhyNotCut/docs/superpowers/plans/2026-10-11-motion-from-audio.md	repo-doc	61550	2026-10-11 14:26	
+WhyNotCut/docs/superpowers/plans/2026-10-11-podcast-mode.md	repo-doc	34655	2026-10-11 02:48	
+WhyNotCut/docs/superpowers/plans/2026-10-12-3.0-phase-6-panel-link.md	repo-doc	7811	2026-10-12 16:36	
+WhyNotCut/docs/superpowers/plans/2026-10-12-3.0-phase-6-serve-core.md	repo-doc	13372	2026-10-12 11:07	
+WhyNotCut/docs/superpowers/plans/2026-10-12-3.0-phase-6-ui-kit.md	repo-doc	8906	2026-10-13 11:52	
+WhyNotCut/docs/superpowers/plans/2026-10-12-3.0-phase-6b-reservations.md	repo-doc	5760	2026-10-12 21:20	
+WhyNotCut/docs/superpowers/plans/2026-10-13-3.0-phase-10-guide-round-2.md	repo-doc	14626	2026-10-13 12:45	
+WhyNotCut/docs/superpowers/plans/2026-10-13-3.0-phase-6-ecosystem-c2.md	repo-doc	8690	2026-10-13 02:16	
+WhyNotCut/docs/superpowers/plans/2026-10-13-3.0-phase-6-t63-bridge.md	repo-doc	21147	2026-10-13 06:51	
+WhyNotCut/docs/superpowers/plans/2026-10-14-3.0-adobe-g2-hardening.md	repo-doc	8328	2026-10-14 22:33	
+WhyNotCut/docs/superpowers/plans/2026-10-14-3.0-phase-10-guide-round-3-premium-bar.md	repo-doc	15808	2026-10-14 01:23	
+WhyNotCut/docs/superpowers/plans/2026-10-15-3.0-addendum-h-r-schedule.md	repo-doc	5183	2026-10-16 16:05	
+WhyNotCut/docs/superpowers/plans/2026-10-18-master-roadmap-v1.md	repo-doc	20947	2026-10-18 12:29	00-HQ\tools\archive_docs.py; SKILL.md
+WhyNotCut/docs/superpowers/specs/2026-10-11-motion-from-audio-design.md	repo-doc	47997	2026-10-11 14:26	
+WhyNotCut/docs/superpowers/specs/2026-10-11-podcast-mode-design.md	repo-doc	25617	2026-10-11 02:45	
+WhyNotCut/docs/superpowers/specs/2026-10-11-whynot-cut-3.0-master-plan.md	repo-doc	93157	2026-10-11 15:59	
+WhyNotCut/docs/superpowers/specs/2026-10-18-v1-premiere-panel-design.md	repo-doc	17028	2026-10-18 02:18	00-HQ\tools\archive_docs.py
+WhyNotCut/docs/superpowers/specs/addendum-a/ADDENDUM-A-kalam-hush-tidy.md	repo-doc	14448	2026-10-12 21:42	
+WhyNotCut/docs/superpowers/specs/addendum-a/portability-audit.md	repo-doc	45909	2026-10-12 21:50	
+WhyNotCut/docs/superpowers/specs/addendum-a/prd/hush-prd.md	repo-doc	10676	2026-10-12 21:18	
+WhyNotCut/docs/superpowers/specs/addendum-a/prd/kalam-prd.md	repo-doc	13887	2026-10-12 21:18	
+WhyNotCut/docs/superpowers/specs/addendum-a/prd/tidy-prd.md	repo-doc	12757	2026-10-12 21:18	
+WhyNotCut/docs/superpowers/specs/addendum-b/ADDENDUM-B-ui-ux-website-look.md	repo-doc	7928	2026-10-12 21:49	
+WhyNotCut/docs/superpowers/specs/addendum-c/ADDENDUM-C-one-ecosystem.md	repo-doc	8300	2026-10-13 12:31	
+WhyNotCut/docs/superpowers/specs/addendum-c/evidence/codex-claude.md	repo-doc	32281	2026-10-13 02:13	
+WhyNotCut/docs/superpowers/specs/addendum-c/evidence/ecosystem.md	repo-doc	49712	2026-10-13 02:13	
+WhyNotCut/docs/superpowers/specs/addendum-d/ADDENDUM-D-zero-effort-install.md	repo-doc	13564	2026-10-13 02:36	
+WhyNotCut/docs/superpowers/specs/addendum-e/ADDENDUM-E-design-excellence-secure-installers.md	repo-doc	10228	2026-10-13 12:17	
+WhyNotCut/docs/superpowers/specs/addendum-f/ADDENDUM-F-zero-cost-and-D-drive.md	repo-doc	6403	2026-10-13 12:32	
+WhyNotCut/docs/superpowers/specs/addendum-g/ADDENDUM-G-premium-1000-bar.md	repo-doc	25436	2026-10-14 22:32	
+WhyNotCut/docs/superpowers/specs/addendum-h/ADDENDUM-H-source-r-ours-and-ip-protection.md	repo-doc	17051	2026-10-16 09:05	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/00-INDEX.md	repo-doc	10073	2026-10-16 21:07	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-3.1-backlog.md	repo-doc	8832	2026-10-16 16:24	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-4.1-caption-looks.md	repo-doc	18187	2026-10-17 10:38	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-4.2-burned-in-captions.md	repo-doc	4914	2026-10-16 11:58	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-4.3-cut-proposals.md	repo-doc	8116	2026-10-16 21:07	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-4.4-intake-normalisation.md	repo-doc	3694	2026-10-16 21:07	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-4.5-safe-zone-profiles.md	repo-doc	6325	2026-10-16 16:24	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-4.6-look-recommender.md	repo-doc	8539	2026-10-17 20:14	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-4.7-punch-in-emphasis-and-endings.md	repo-doc	3781	2026-10-16 16:24	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-4.8-publish-check-rules.md	repo-doc	2085	2026-10-16 16:03	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-6.1-look-system.md	repo-doc	28972	2026-10-16 21:07	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-6.2-ae-scenes-wave-1.md	repo-doc	18802	2026-10-16 21:07	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-6.4-head-keep-out.md	repo-doc	7396	2026-10-16 16:24	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-6.5-panel-review-tab.md	repo-doc	5137	2026-10-16 16:24	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-6.6-panel-settings-tab.md	repo-doc	2815	2026-10-16 15:55	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-6.7-sfx-cue-palettes.md	repo-doc	3486	2026-10-16 21:07	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-6B.1-alignment-contract.md	repo-doc	2584	2026-10-16 15:55	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-7.1-installer-steps-and-proof-render.md	repo-doc	3159	2026-10-16 16:24	
+WhyNotCut/docs/superpowers/specs/addendum-h/source-r-specs/R-9-qa-identity-rtl-matrix-distinctiveness.md	repo-doc	11926	2026-10-16 16:39	
+WhyNotCut/docs/superpowers/specs/addendum-i/ADDENDUM-I-open-source-strongest.md	repo-doc	5201	2026-10-16 09:05	
+WhyNotCut/docs/superpowers/specs/addendum-j/ADDENDUM-J-brand-from-website.md	repo-doc	82777	2026-10-17 10:04	
+WhyNotCut/docs/superpowers/specs/addendum-k/ADDENDUM-K-adopted-ideas.md	repo-doc	51392	2026-10-18 12:29	00-HQ\tools\archive_docs.py
+WhyNotCut/docs/superpowers/specs/addendum-l/ADDENDUM-L-security.md	repo-doc	90491	2026-10-17 10:04	
+WhyNotCut/docs/superpowers/specs/addendum-m/ADDENDUM-M-owner-requests-2026-10-16.md	repo-doc	77545	2026-10-18 12:31	00-HQ\tools\archive_docs.py
+WhyNotCut/docs/superpowers/specs/ui-coverage-map.md	repo-doc	31426	2026-10-19 15:13	00-HQ\roles\HELPER-PRODUCT.md
+WhyNotCut/ (code, git)	REPO	1331519209 (8990 files)	2026-10-22 04:27	
+_archive/	FOLDER	6693068 (331 files)	2026-10-19 00:46	
+_private-evidence	CLIENT-DIR	 ( files)		not inspected (client data)
+_private-profiles	CLIENT-DIR	 ( files)		not inspected (client data)
+new plugin code/	FOLDER	948288 (217 files)	2026-10-12 21:30	
+omc-lab/	FOLDER	1760 (5 files)	2026-10-22 04:59	
+whynot-test/	FOLDER	6177857180 (2596 files)	2026-10-17 23:31	
+خد دا كوبي للماك/	FOLDER	57258617 (3974 files)	2026-10-19 04:55	
+خد دا كوبي للويندوز/	FOLDER	14361249 (12 files)	2026-10-19 04:55	
+كارت-جرّب-3.0.md	root-file	4651	2026-10-18 23:59	

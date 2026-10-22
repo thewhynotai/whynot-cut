@@ -209,18 +209,20 @@ def make_handler(hub, token, port):
         def do_POST(self):  # noqa: N802
             """Buttons only. Needs: right Host, the page cookie, a local Origin, and the per-run CSRF token."""
             try:  # read the (small) body first: answering before it is read makes Windows reset the connection
-                raw = self.rfile.read(min(int(self.headers.get("Content-Length") or 0), 4096))
+                raw = self.rfile.read(max(0, min(int(self.headers.get("Content-Length") or 0), 4096)))
             except (ValueError, OSError):
                 raw = b""
             if self.headers.get("Host") not in allowed_hosts:
                 return self.send(403, "forbidden host", "text/plain")
             if not self.authed():
-                return self.send(401, json.dumps({"ok": False}))
+                return self.send(401, json.dumps({"ok": False, "msg": "Open the page from its shortcut (missing key).",
+                                                  "msg_ar": "افتح الصفحة من الاختصار (المفتاح ناقص)."}))
             origin = self.headers.get("Origin")
             if origin and origin not in (f"http://127.0.0.1:{port}", f"http://localhost:{port}"):
-                return self.send(403, json.dumps({"ok": False, "msg": "foreign origin"}))
+                return self.send(403, json.dumps({"ok": False, "msg": "foreign origin", "msg_ar": "طلب من صفحة غريبة."}))
             if not hmac.compare_digest((self.headers.get("X-CC-CSRF") or "").encode(), hub.csrf.encode()):
-                return self.send(403, json.dumps({"ok": False, "msg": "missing or wrong CSRF token"}))
+                return self.send(403, json.dumps({"ok": False, "csrf": True, "msg": "The page key changed; try again.",
+                                                  "msg_ar": "مفتاح الصفحة اتغيّر؛ جرّب تاني."}))
             if urllib.parse.urlparse(self.path).path != "/api/action":
                 return self.send(404, json.dumps({"ok": False}))
             try:

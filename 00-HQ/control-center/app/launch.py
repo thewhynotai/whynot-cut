@@ -37,7 +37,7 @@ def window_args(cfg, url):
     """The dashboard as its own app window (Edge --app, own profile on D, so it never mixes with your browsing)."""
     w = cfg.get("app_window") or {}
     exe = w.get("browser")
-    if not exe or not os.path.exists(exe):
+    if not exe or not os.path.exists(exe) or not w.get("profile_dir"):
         return None
     return [exe, f"--app={url}", f"--user-data-dir={w.get('profile_dir')}", "--no-first-run",
             "--no-default-browser-check", "--window-size=1500,950"]

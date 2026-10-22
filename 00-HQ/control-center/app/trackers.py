@@ -38,8 +38,10 @@ def mark_new(path, ids, now, hours):
     try:
         with open(path, encoding="utf-8") as f:
             seen = json.load(f)
-    except (OSError, ValueError):
+    except FileNotFoundError:
         seen = None
+    except (OSError, ValueError):
+        return set()  # unreadable for now: never rewrite it as a "first run" (that would wipe every New badge)
     first = seen is None
     seen = seen or {}
     for i in ids:

@@ -75,6 +75,25 @@ Yunus (owner) ── decides product, money, accounts, anything public, medical/
 A builder never waits for an answer in chat: if blocked, write `BLOCKED:` in the update report, deliver what is
 safe, and take the next task assigned to you on the BOARD.
 
+### 2a. Official task lifecycle (AI-infra restart Phase 5, 2026-10-22)
+**BACKLOG → READY → IN_PROGRESS → IN_REVIEW → IN_TESTING → DONE → ARCHIVED** (+ BLOCKED at any point). The BOARD keeps
+its short words because the helper loops, intake and dashboards read them; `tools/hq_status.py` (`CHARTER`,
+`LIFECYCLE`) maps each word to the lifecycle, and `TASK_QUEUE.yaml` shows both (`status` + `charter_status`).
+
+| BOARD word | Lifecycle | Meaning / exit to the next state |
+|---|---|---|
+| NOT READY, PLANNED_NOT_AUTHORIZED | BACKLOG | spec or authorisation missing |
+| READY | READY | card complete (ID, owner, dependencies, fence, acceptance, tests, model) |
+| IN PROGRESS, FIX, RUNNING | IN_PROGRESS | builder on its branch; FIX = back from review |
+| (report `DONE` in inbox) | IN_REVIEW | delivered, waiting for the intake's independent review |
+| ACCEPTED | IN_TESTING | review passed; full suite on the merge snapshot and, for host features, the Premiere live check |
+| MERGED | DONE | merged and pushed, evidence recorded in the card |
+| DONE_ARCHIVED | ARCHIVED | card + evidence moved to `tasks/archive/<ID>/` |
+| BLOCKED, PARKED, STOPPED | BLOCKED | needs an answer or owner decision |
+
+Every card carries: unique ID, owner, dependencies, status, expected output, verification criteria, and the handoff
+(inbox report path). Evidence is stored in the card or `reviews/` **before** archiving.
+
 ## 2b. Quality tiers and coding guidelines (owner decision 2026-10-19)
 
 The full text is in `D:\0 Work\0 Pegasus IMC Agency\00 TWN\0 TWN AI\Editing Plugin\CLAUDE.md`. Every card names its tier.

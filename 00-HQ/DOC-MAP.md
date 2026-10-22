@@ -1,5 +1,31 @@
 # DOC-MAP — every plan file, and which one wins
 
+## One authoritative file per function (AI-infra restart Phase 5, 2026-10-22) — this table wins
+
+| Function | The one file | Not this (competitor and why) |
+|---|---|---|
+| Owner dashboard (Arabic): state, roadmap, milestones, tasks, risks, next | `..\PROJECT_PLAN_AR.md` | `00-HQ/STATUS.md` = master's English working notes, read by intake/master roles; not for the owner |
+| Product roadmap detail (stages 0–11, R) | `WhyNotCut/docs/superpowers/plans/2026-10-18-master-roadmap-v1.md` | milestone summary lives in PROJECT_PLAN_AR §2 and points here |
+| Product spec (V1) | `WhyNotCut/docs/superpowers/specs/2026-10-18-v1-premiere-panel-design.md` (+ addenda A–M it cites) | archived V1-SCOPE / NEW-PLAN-BRIEF |
+| Task list (the only one) | `00-HQ/BOARD.md` + cards `00-HQ/tasks/` (machine view `TASK_QUEUE.yaml`, generated) | OMC `.omc/`, gstack `~/.gstack/projects` = scratch only (D-011) |
+| Task lifecycle | `00-HQ/PLAYBOOK.md` §2a (mapping in `tools/hq_status.py`) | — |
+| Executor per-task truth, gate record, test numbers | `WhyNotCut/PROGRESS.md` (Gate 4 until the tag) | — |
+| How the project is run (decisions) | `00-HQ/DECISIONS.md` | product decisions stay in PROGRESS/spec |
+| Rules for every session | `00-HQ/PLAYBOOK.md` + `..\CLAUDE.md` (+ owner's global CLAUDE.md) | — |
+| Who does what among AI tools | `00-HQ/AGENT_ROUTING_RULES.md` | plugin-injected instructions |
+| AI tooling install/config/rollback | `00-HQ/AI_TOOLING_ARCHITECTURE.md` (+ `setup/`, `omc/` reports) | — |
+| Plugin matrix / compatibility | `00-HQ/PLUGIN_CAPABILITY_MATRIX.md` | — |
+| Automation (routines, loops, recovery) | `00-HQ/AUTOMATION_RUNBOOK.md` | — |
+| API budget | `00-HQ/BUDGET-API.md` (HOLD) | archived API-PAUSE-AR, API-LANES-PLAN |
+| Reports to the owner | `00-HQ/reports/` + `PRIMARY_ACCOUNT_INBOX.md` | — |
+| Archive record | `00-HQ/ARCHIVE_MANIFEST.md` + `archive-manifest.jsonl` | — |
+| Path ownership | `WhyNotCut/LOCKED-AREAS.md` | — |
+| AI-infra restart progress | `00-HQ/setup/SETUP_PHASE_TRACKER.md` | — |
+| Business strategy (kept at the root for the owner) | `COMPETITORS-AR.md`, `VALIDATION-PLAN-AR.md`, `SAVED-LATER-licensing-updates-AR.md` | — |
+
+Archived 2026-10-22 (batch b2): `PARKED-SESSIONS.md`, `API-PAUSE-AR.md` (see ARCHIVE_MANIFEST). The 10-19 table below
+is history; where it disagrees with this table, this table wins.
+
 > **2026-10-20 update:** the "Superseded" files below and `00-HQ/MASTER-PLAN-AR.md` were archived to
 > `_archive/plans-2026-10/` (see `ARCHIVE_MANIFEST.md`). The owner view is now `..\PROJECT_PLAN_AR.md`; the API plan is
 > `BUDGET-API.md` (API-500, held). The table below is the 10-19 snapshot, kept for its 15 settled contradictions.
@@ -16,7 +42,7 @@
 | `WhyNotCut/docs/superpowers/specs/ui-coverage-map.md` | Every feature → its panel screen |
 | `D:\ClaudeData\claude-api-lane\TRACKS.md` | Track charters (until the switch to `00-HQ/BOARD.md`) |
 | `D:\ClaudeData\claude-api-lane\SUBSCRIPTION-LEDGER.md` | Event log (append only) |
-| `<EP>\API-PAUSE-AR.md`, `<EP>\PARKED-SESSIONS.md` | Lane pause record; archived chats |
+| `<EP>\API-PAUSE-AR.md`, `<EP>\PARKED-SESSIONS.md` (**archived b2, 2026-10-22**) | Lane pause record; archived chats |
 | `<EP>\SAVED-LATER-licensing-updates-AR.md`, `<EP>\COMPETITORS-AR.md` | Parked licensing material; competitor analysis |
 | `WhyNot-Cut-3.0-Addendum/ADDENDUM-A…M` | Feature detail per topic (the spec links to them) |
 

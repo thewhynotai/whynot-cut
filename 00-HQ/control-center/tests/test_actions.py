@@ -44,6 +44,44 @@ class Actions(unittest.TestCase):
         self.assertTrue(a.perform("ask_status", "h1")["ok"])
         self.assertFalse(a.perform("ask_status", "h1")["ok"])
 
+    def test_parallel_clicks_run_once(self):
+        import threading as th
+        calls = []
+        gate = th.Event()
+        def slow_run(args):
+            calls.append(args); gate.wait(2); return 0, "started"
+        a = actions.Actions(cfg(), alive=lambda h: False, run=slow_run)
+        out = []
+        ts = [th.Thread(target=lambda: out.append(a.perform("start_auto", "h1"))) for _ in range(3)]
+        for t in ts: t.start()
+        gate.set()
+        for t in ts: t.join()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(sum(1 for r in out if r["ok"]), 1)
+
+    def test_open_terminals_cooldown_is_shared_by_all_cards(self):
+        a = actions.Actions(cfg(), alive=lambda h: True, run=lambda args: (0, "ok"))
+        self.assertTrue(a.perform("open_terminals", "h1")["ok"])
+        self.assertFalse(a.perform("open_terminals", "h2")["ok"])
+
+    def test_start_is_refused_while_a_chat_is_open_in_its_worktree(self):
+        import os
+        c = cfg()
+        p = os.path.join(c["state_dir"], "consoles")
+        os.makedirs(p)
+        open(os.path.join(p, "h1.talk"), "w").write(str(os.getpid()))
+        a = actions.Actions(c, alive=lambda h: False, run=lambda *x: self.fail("must not start"))
+        r = a.perform("start_auto", "h1")
+        self.assertFalse(r["ok"])
+        self.assertIn("chat", r["msg"])
+
+    def test_a_crash_in_an_action_is_a_clean_answer(self):
+        def boom(args): raise TimeoutError("slow")
+        a = actions.Actions(cfg(), alive=lambda h: False, run=boom)
+        r = a.perform("start_auto", "h1")
+        self.assertFalse(r["ok"])
+        self.assertTrue(r["msg_ar"])
+
     def test_helper_actions_need_a_helper(self):
         a = actions.Actions(cfg(), alive=lambda h: True, run=lambda *x: (0, ""))
         self.assertFalse(a.perform("compact", "main")["ok"])
