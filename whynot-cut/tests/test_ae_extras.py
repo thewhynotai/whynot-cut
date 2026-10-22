@@ -735,7 +735,10 @@ class TestAsciiStaging(AerenderCase):
                 mock.patch.object(ae_builder, "run", side_effect=AssertionError("must not start")):
             r = ae_builder.render(self.paths)
         self.assertEqual(r["status"], "FAILED", r)
-        self.assertIn("TEMP", r["msg"])
+        # c082489 (BL-16 patch 2): the message names the temp folder and the way out (an ASCII engine home, reel setup)
+        self.assertIn(f"the temp folder {self.tmp / ARABIC} is not ASCII", r["msg"])
+        self.assertIn("WHYNOT_HOME", r["msg"])
+        self.assertIn("reel setup", r["msg"])
 
     def test_one_staging_helper(self):
         """No second copy of the staging code: ae_builder uses ae_render.stage_ascii."""

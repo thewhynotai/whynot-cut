@@ -4022,7 +4022,10 @@ class TestArabicPaths(unittest.TestCase):
             tf.tempdir = saved
         self.assertEqual(r["status"], "FAILED", r)
         self.assertIn("ASCII", r.get("msg", ""))
-        self.assertIn("TEMP", r.get("msg", ""))
+        # c082489 (BL-16 patch 2): the message names the temp folder and the way out (an ASCII engine home, reel setup)
+        self.assertIn(f"the temp folder {temp} is not ASCII", r.get("msg", ""))
+        self.assertIn("WHYNOT_HOME", r.get("msg", ""))
+        self.assertIn("reel setup", r.get("msg", ""))
         self.assertEqual(calls, [])
 
     def test_non_ascii_temp_folder_falls_back_to_an_ascii_stage(self):
