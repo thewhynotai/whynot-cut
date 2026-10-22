@@ -178,6 +178,31 @@ class SameAsSerial(Case):
         self.assertIn("FAILED (errors=2)", out)
         self.assertIn("FAILED (errors=2)", sout)
 
+    def test_workers_keep_the_parent_temp_variables_unchanged(self):     # fix round 3: semgrep fails on a long TEMP
+        self.use("tempenv")
+        dirs = [self.tmp / n for n in ("parent-temp", "parent-tmp", "parent-tmpdir")]
+        for d in dirs:
+            d.mkdir()
+        cases = (dict(TEMP=str(dirs[0]), TMP=str(dirs[1]), TMPDIR=str(dirs[2])),   # three different strings
+                 dict(TEMP=str(dirs[0]), TMP=str(dirs[1])))                          # no TMPDIR: none in the worker
+        seen = self.state / "tempenv.json"
+        for parent in cases:
+            with self.subTest(parent=sorted(parent)):
+                env = self.env(**parent)
+                if "TMPDIR" not in parent:
+                    env.pop("TMPDIR", None)
+                want = {"TEMP": parent["TEMP"], "TMP": parent["TMP"], "TMPDIR": parent.get("TMPDIR")}
+                code, out = self.run_serial(env=env)
+                self.assertEqual(code, 0, out)
+                serial = json.loads(seen.read_text(encoding="utf-8"))
+                seen.unlink()
+                code, out = self.run_tool("--fresh", env=env)
+                self.assertEqual(code, 0, out)
+                par = json.loads(seen.read_text(encoding="utf-8"))
+                seen.unlink()
+                self.assertEqual({k: par[k] for k in want}, want)               # the same strings as the parent
+                self.assertEqual(par, serial)                                     # and as the serial run
+
 
 class Ordering(unittest.TestCase):
     def test_lpt_order_from_recorded_durations(self):
@@ -252,6 +277,23 @@ class Results(Case):
         self.assertIn("FAILED (failures=1, skipped=1)", out)
         self.assertIn("test_flaky.Flaky.test_fails_first_time: load-sensitive (passed alone)", out)
         self.assertEqual(self.events().count("flaky"), 2)                # first run + the labelling re-run
+
+    def test_problem_and_incomplete_modules_keep_their_log_clean_ones_do_not(self):   # fix round 3
+        self.use("pass_a", "fail", "xpass", "killed")
+        ptemp = self.tmp / "ptemp"
+        ptemp.mkdir()
+        code, out = self.run_tool(env=self.env(TEMP=str(ptemp), TMP=str(ptemp), TMPDIR=str(ptemp)))
+        self.assertEqual(code, 2, out)
+        runs = list(ptemp.glob("wnc-par-*"))
+        self.assertEqual(len(runs), 1, out)
+        for tag in ("m-test_fail", "m-test_xpass", "m-test_killed"):      # failure/error, unexpected success, killed
+            log = runs[0] / tag / "worker.log"
+            self.assertTrue(log.is_file(), tag + "\n" + out)
+            self.assertIn(f"parallel: log kept: {tag}: {log}\n", out)
+        self.assertIn("boom", (runs[0] / "m-test_fail" / "worker.log").read_text(encoding="utf-8", errors="replace"))
+        self.assertFalse((runs[0] / "m-test_pass_a").exists(), "a clean module's log is tidied away")
+        self.assertNotIn("log kept: m-test_pass_a", out)
+        self.assert_last_line(out, "FAILED (incomplete: m-test_killed: ")
 
     def test_arabic_test_names_and_messages_print_as_utf8(self):
         self.use("arabic")

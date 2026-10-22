@@ -1,9 +1,9 @@
 """Parallel full suite (OPS-09): `tools/test.sh --parallel N [--fresh]` runs this with the engine runtime.
 
 Each top-level test module that `unittest discover -s whynot-cut/tests` finds runs in its own fresh process (same
-interpreter flags as the serial run, its own TEMP sub-folder), N at a time, longest first. No new module starts while
-RAM >= 85 %. The serial-lane ids run alone after the parallel phase. The strict rule: every test that fails or errors
-in its first run is a failure; each one is then re-run alone only to label it ("fails alone too" /
+interpreter flags as the serial run, TEMP/TMP/TMPDIR inherited unchanged), N at a time, longest first. No new module
+starts while RAM >= 85 %. The serial-lane ids run alone after the parallel phase. The strict rule: every test that fails
+or errors in its first run is a failure; each one is then re-run alone only to label it ("fails alone too" /
 "load-sensitive (passed alone)"); the label never changes the exit code. A run counts only when every worker wrote its
 result record and exited by itself: otherwise exit 2, and no cache entry and no durations are written.
 Exit: 0 complete and green, 1 complete with failures, 2 incomplete or refused. Stdlib only, Python 3.9+.
@@ -36,7 +36,7 @@ SUBTEST_ID = re.compile(r"^(\w+(?:\.\w+)+) [\[(]")                  # "mod.C.tes
 ENV_KEY_PREFIXES = ("WHYNOT_", "WHYNOTCUT_", "WNC_", "NH_")         # env that switches tests on/off: in the key
 ENV_KEY_SKIP = ("WHYNOT_SUITE_CACHE", "WHYNOT_PARALLEL_")           # ...except the tool's own control vars
 RECORD_INTS = ("tests_run", "skipped", "expected_failures")
-RUN_DIR = Path(tempfile.gettempdir()) / f"wnc-par-{os.getpid()}"   # per-module records, logs and TEMP folders
+RUN_DIR = Path(tempfile.gettempdir()) / f"wnc-par-{os.getpid()}"   # per-module records and logs (not the tests' TEMP)
 
 
 def out(line=""):
@@ -178,8 +178,6 @@ class Job:
         self.log = base / "worker.log"
         if self.record.exists():
             self.record.unlink()
-        tmp = base / "tmp"
-        tmp.mkdir(exist_ok=True)
         cmd = [sys.executable] + (["-s"] if sys.flags.no_user_site else []) + \
               ["-B", "-W", "error::ResourceWarning", str(Path(__file__).resolve()), "--worker", module,
                "--tests-dir", a.tests_dir, "--record", str(self.record)]
@@ -187,8 +185,9 @@ class Job:
             cmd += ["--only", s]
         for s in exclude:
             cmd += ["--exclude", s]
-        env = dict(os.environ, PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1", TEMP=str(tmp), TMP=str(tmp),
-                   TMPDIR=str(tmp))
+        # TEMP/TMP/TMPDIR stay exactly the parent's (= serial's, set by tools/test.sh): a longer TEMP broke semgrep
+        # (fix round 3), and a shorter one could turn a serial failure into a pass. Each module sandboxes inside TEMP.
+        env = dict(os.environ, PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1")
         self.t0 = time.time()
         with open(self.log, "wb") as logf:
             self.proc = subprocess.Popen(cmd, cwd=a.repo, env=env, stdout=logf, stderr=subprocess.STDOUT,
@@ -219,11 +218,10 @@ class Job:
                 f.unlink()
             except OSError:
                 pass
-        for d in (self.record.parent / "tmp", self.record.parent):
-            try:
-                d.rmdir()
-            except OSError:
-                pass
+        try:
+            self.record.parent.rmdir()
+        except OSError:
+            pass
 
     def log_tail(self, n=30):
         try:
@@ -501,8 +499,14 @@ def parent(a) -> int:
                 labels.append((p["id"], "load-sensitive (passed alone)"))
 
     report, code = format_report(results, incomplete, labels, lane, a.workers, wall, stats, len(mods))
-    for j in results + relabel:                   # an incomplete worker's log stays for diagnosis
-        j.tidy()
+    kept = list(incomplete)                       # an incomplete or problem module's log stays for diagnosis
+    for j in results + relabel:
+        if j in results and j.rec["problems"]:
+            kept.append(j)
+        else:
+            j.tidy()
+    for j in kept:
+        out(f"parallel: log kept: {j.tag}: {j.log}")
     try:
         RUN_DIR.rmdir()
     except OSError:
