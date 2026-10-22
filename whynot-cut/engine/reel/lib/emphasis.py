@@ -799,7 +799,8 @@ def build(inp: dict) -> dict:
         prot = [p for p in prot if isinstance(p, list) and len(p) == 2 and all(_num(x) is not None for x in p)]
         if prot:
             keep = union_ranges(keep, prot)
-    wranges, wcut, _ = word_cut_ranges([w for w in words if isinstance(w["id"], int)], g.get("cut_words") or [], dur)
+    wranges, wcut, _ = word_cut_ranges([w for w in words if isinstance(w["id"], int)], g.get("cut_words") or [], dur,
+                                       whole=bool(inp.get("t25_whole")))
     cut_ids = {c["word_id"] for c in wcut}
     if wranges:
         keep = subtract_ranges(keep, wranges)
@@ -1490,6 +1491,7 @@ def gather(paths, ctx=None, audio: bool = True) -> dict:
     from . import endings
     from .camera_ease import ease_settings
     from .common import current_context, frame_size, load_config, seq_fps, source_range
+    from .plan import task25_plan_proposals
     from .recipes import for_paths
     ctx = ctx or current_context()
     wj = _words_doc(paths)
@@ -1536,7 +1538,8 @@ def gather(paths, ctx=None, audio: bool = True) -> dict:
             "verse": spans, "verse_known": known, "ease_ms": ease_settings(style)[0],
             "fps": seq_fps(ctx), "settings": settings(ctx), "head": head_ratio(ctx),
             "templates": (load_config("graphics-templates.json", ctx) or {}).get("templates", {}),
-            "inputs_sha1": inputs_sha1(paths, ctx), "main_file": main_file, "range": rng}
+            "inputs_sha1": inputs_sha1(paths, ctx), "main_file": main_file, "range": rng,
+            "t25_whole": task25_plan_proposals(ctx)}
 
 
 def run(paths, ctx=None, faces: bool = False, faces_fn=None, decode=None, audio: bool = True) -> dict:

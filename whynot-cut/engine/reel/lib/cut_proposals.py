@@ -45,6 +45,7 @@ from . import cut_proposals_norm as N
 from .safety.differences import compare as compare_takes, describe as describe_differences, reading
 
 FILE = "01_analysis/cut-proposals.json"
+ED_FILE = "01_analysis/edit-decisions.json"
 SCHEMA = 1
 KINDS = ("pause", "retake", "false_start", "filler", "repeat_word")
 WORD_KINDS = ("retake", "false_start", "filler", "repeat_word")
@@ -762,7 +763,7 @@ def compute(words, pauses=None, *, cfg: dict | None = None, lang: str = "ar", pr
             continue
         if any(w in pid for w in p["word_ids"]):
             continue
-        if any(p["start_ms"] < b and a < p["end_ms"] for a, b in spans):
+        if any(touches(p, a, b) for a, b in spans):
             continue
         if any(p["start_ms"] < a < p["end_ms"] for a in anchors):
             continue
@@ -939,6 +940,39 @@ def _protections(paths, ws: list, toks: list, lang: str, ctx=None, media_end_ms=
     return {"word_ids": ids, "anchors": anchors, "turns": turns, "after_ms": after, "spans": []}, notes
 
 
+def touches(p: dict, a: float, b: float) -> bool:
+    """A proposal touches [a, b): its own span overlaps it, or (a retake) the take it keeps does."""
+    keep = p.get("keep") if isinstance(p.get("keep"), dict) else {}
+    return any(_num(x) is not None and _num(y) is not None and x < b and a < y
+               for x, y in ((p.get("start_ms"), p.get("end_ms")), (keep.get("start_ms"), keep.get("end_ms"))))
+
+
+def verse_ranges(paths, words, ed=None, ctx=None) -> list:
+    """[(start_ms, end_ms)] of every recited verse on the source clock, which no proposal, take, table row, marker or
+    saved reason may touch (owner rule: WhyNot Cut never writes Quran text; review 4fb97dd P1-1). The same source the
+    plan and emphasis use: manual_verse.detect over the words with this client's verse config, then the story-editor's
+    `manual_verse` / `manual_verse_off` (resolve). The verse fix round 2's held runs (manual_verse.held, when that
+    module has it) count until the editor releases them."""
+    from . import manual_verse as mv
+    from .common import load_config
+    if ed is None:
+        _, ed = _read(paths.p(ED_FILE))
+    ed = ed if isinstance(ed, dict) else {}
+    good = [w for w in words or [] if isinstance(w, dict) and isinstance(w.get("id"), int)]
+    try:
+        prof = load_config("profile.json", ctx)
+    except Exception:  # noqa: BLE001  a profile that cannot be read: fail closed (the religious phrases count too)
+        prof = None
+    prof = prof if isinstance(prof, dict) else {"domain": "religious"}
+    spans, _e, _w = mv.resolve(mv.detect(good, mv.config(prof)), ed)
+    out = [(int(s["src_start_ms"]), int(s["src_end_ms"])) for s in spans]
+    held = getattr(mv, "held", None)
+    if held is not None:
+        runs, _e, _w = held(spans, good, ed)
+        out += [(int(h["src_start_ms"]), int(h["src_end_ms"])) for h in runs if not h.get("released")]
+    return sorted(out)
+
+
 def _inputs(paths, data: bytes, wj: dict, ctx=None) -> dict:
     """Everything the proposals depend on (words, settings, pause map, protections, clip length) and its hash: a
     later --accept recomputes the hash, so it refuses ids from a list made with other inputs."""
@@ -949,11 +983,12 @@ def _inputs(paths, data: bytes, wj: dict, ctx=None) -> dict:
     ws = clean_words(wj["words"])
     media_end = _num(meta.get("duration_ms"))
     protect, notes = _protections(paths, ws, [norm_word(w["word"]) for w in ws], lang, ctx, media_end)
+    protect["spans"] = verse_ranges(paths, wj["words"], ctx=ctx)
     _, pj = _read(paths.p("06_audio/dialogue/pauses.json"))
     pauses = pj.get("cuts_ms") if isinstance(pj, dict) and isinstance(pj.get("cuts_ms"), list) else []
     key = json.dumps([hashlib.sha1(data).hexdigest(), cfg["values"], cfg["fillers"], pauses,
                       sorted(map(str, protect["word_ids"])), protect["anchors"], protect["turns"],
-                      protect["after_ms"], media_end, lang,
+                      protect["after_ms"], protect["spans"], media_end, lang,
                       [rule[k] for k in ("never", "domains", "client", "unset", "unclear")]],
                      ensure_ascii=False, sort_keys=True, default=str)
     return {"words": ws, "lang": lang, "cfg": cfg, "rule": rule, "protect": protect, "notes": notes, "pauses": pauses,
@@ -1011,8 +1046,9 @@ def accept(paths, ids, by: str = "editor", ctx=None) -> dict:
     data, wj = _read(paths.p("02_transcription/words.json"))
     stale = not data or not isinstance(wj, dict) or not isinstance(wj.get("words"), list) \
         or hashlib.sha1(data).hexdigest() != doc.get("words_sha1")
+    inp = None if stale else _inputs(paths, data, wj, ctx)
     if not stale:
-        stale = _inputs(paths, data, wj, ctx).get("sha1") != doc.get("inputs_sha1")
+        stale = inp.get("sha1") != doc.get("inputs_sha1")
     if stale:
         raise Guidance("التفريغ أو الإعدادات اتغيرت بعد الاقتراحات، فالأرقام ممكن تكون اتغيرت / the transcript or the "
                        "settings changed after these proposals, so their numbers may point at other words",
@@ -1024,6 +1060,12 @@ def accept(paths, ids, by: str = "editor", ctx=None) -> dict:
         raise Guidance(f"رقم اقتراح مش موجود: {', '.join(unknown) or '(ولا رقم)'} / unknown proposal id(s): "
                        f"{', '.join(unknown) or '(none given)'}",
                        "Use the ids listed in 01_analysis/cut-proposals.json (e.g. CP-001)", where=str(paths.p(FILE)))
+    verse = [i for i in want if any(touches(by_id[i], a, b) for a, b in inp["protect"]["spans"])]
+    if verse:                           # belt and braces: a current list never holds one (compute drops them)
+        raise Guidance(f"الاقتراح ده جوه آية بتتقري، فمينفعش يتقص: {', '.join(verse)} / inside a recited verse, so it "
+                       f"is never cut: {', '.join(verse)}",
+                       "Leave the verse whole; the editor adds it by hand (manual verse slot)",
+                       where=str(paths.p(FILE)))
     ef = paths.p("01_analysis/edit-decisions.json")
     ed = read_json(ef)
     if not isinstance(ed, dict):
@@ -1033,6 +1075,7 @@ def accept(paths, ids, by: str = "editor", ctx=None) -> dict:
     cw = g.setdefault("cut_words", [])
     # the same words are never added twice, whatever id they had in an earlier list
     have = {tuple(sorted(map(str, c.get("word_ids") or []))) for c in cw if isinstance(c, dict)}
+    cut_before = {str(w) for c in cw if isinstance(c, dict) for w in (c.get("word_ids") or [])}
     added, already, pauses = [], [], []
     for i in want:
         p = by_id[i]
@@ -1045,14 +1088,24 @@ def accept(paths, ids, by: str = "editor", ctx=None) -> dict:
             continue
         # range_ms: the proposal's own span (padding, the breath after a take, the snapped edges), so the plan cuts
         # the take whole instead of word by word
+        # no transcript words in the saved reason (they stay in cut-proposals.json); words_sha1: the plan refuses
+        # the entry once the transcript changes (review 4fb97dd P2-2)
         cw.append({"word_ids": list(p["word_ids"]), "range_ms": [p["start_ms"], p["end_ms"]],
-                   "reason": f"{i} {p['kind']}: {p['reason_en']}", "by": by})
+                   "reason": f"{i} {p['kind']}", "by": by, "words_sha1": doc["words_sha1"]})
         have.add(key)
         added.append(i)
+    gone = _lines_lost(doc, inp, cut_before, {str(w) for c in cw if isinstance(c, dict) for w in
+                                              (c.get("word_ids") or [])})
+    if gone:
+        raise Guidance(f"كده الجملة هتختفي خالص: سيب نسخة ({', '.join(gone)}) / this would remove the last copy of the "
+                       f"line ({', '.join(gone)}): keep one",
+                       "Accept fewer ids, or bring a take back with `reel takes --keep N` first", where=str(ef))
     if added:
         write_json(ef, ed)
     res = {"added": added, "already": already,
            "next": "`reel plan`, then the editor approves the plan again (nothing is cut before that)"}
+    if added and not whole_takes(ctx):
+        res["note"] = WORD_BY_WORD_NOTE
     if pauses:
         res["pauses"] = pauses
         res["pauses_note"] = ("السكتات دي بتتشال لما «شيل السكتات» يكون شغال في الخطة (remove_pauses)، مش من هنا / "
@@ -1060,21 +1113,90 @@ def accept(paths, ids, by: str = "editor", ctx=None) -> dict:
     return res
 
 
-def plan_table(doc: dict | None) -> list:
-    """The "Proposed cuts" lines for edit-plan.md (Arabic first), with seconds saved per kind."""
+WORD_BY_WORD_NOTE = ("لحد ما مفتاح task25_plan_proposals يتفتح، الجزء ده بيتقص كلمة كلمة، فممكن تفضل سكتات قصيرة بين "
+                     "كلماته / until the task25_plan_proposals switch is on, this is cut word by word: the short gaps "
+                     "between its words stay in as short pieces")
+
+
+def whole_takes(ctx=None) -> bool:
+    """Task 25's switch: an accepted cut with its range is cut whole (plan.task25_plan_proposals)."""
+    from .safety import switches
+    return switches.enabled(switches.TASK25_PLAN_PROPOSALS, ctx)
+
+
+def _lines_lost(doc: dict, inp: dict, before: set, now: set) -> list:
+    """Labels of the lines this accept would remove whole: a retake proposal's two takes, or a `reel takes` group,
+    every take of which is cut now while not every one was before (the same rule `takes --drop` keeps)."""
+    from .safety import takes as TK
+    lines = []
+    for p in doc.get("proposals") or []:
+        if p.get("kind") == "retake" and isinstance(p.get("keep"), dict):
+            keep = {str(w) for w in p["keep"].get("word_ids") or []}
+            lines.append((p["id"], [{str(w) for w in p["word_ids"]}, keep]))
+    for g in TK.groups(inp["words"], inp["cfg"], lang=inp["lang"], verse=inp["protect"]["spans"]):
+        lines.append((" / ".join(f"TK-{t['n']}" for t in g["takes"]), [{str(w) for w in t["word_ids"]}
+                                                                        for t in g["takes"]]))
+    out = []
+    for label, takes in lines:
+        takes = [t for t in takes if t]
+        if len(takes) < 2 or all(t <= before for t in takes):
+            continue
+        if all(t <= now for t in takes):
+            out.append(label)
+    return out
+
+
+def spec_verse(spec: dict) -> list:
+    """The recited-verse ranges a compiled plan holds (source clock): its spans, the spans cut away, and the held runs
+    (verse fix round 2) not released."""
+    rs = list(spec.get("manual_verse") or []) + list(spec.get("verse_cut") or []) + \
+        [h for h in spec.get("verse_hold") or [] if isinstance(h, dict) and not h.get("released")]
+    return [(r["src_start_ms"], r["src_end_ms"]) for r in rs if isinstance(r, dict) and "src_start_ms" in r]
+
+
+def current(paths, doc: dict | None) -> bool:
+    """The proposals belong to today's transcript (words.json unchanged since `reel cut-proposals`)."""
+    data, _ = _read(paths.p("02_transcription/words.json"))
+    return bool(doc) and bool(data) and hashlib.sha1(data).hexdigest() == doc.get("words_sha1")
+
+
+def shown(doc: dict | None, verse=()) -> list:
+    """The proposals the plan may show (table, markers): none that touches a recited verse."""
+    return [p for p in (doc or {}).get("proposals") or [] if not any(touches(p, a, b) for a, b in verse or [])]
+
+
+TABLE_HEAD = "## اقتراحات القص — Proposed cuts"
+
+
+def plan_table(doc: dict | None, verse=(), cut_ids=(), is_current: bool = True) -> list:
+    """The "Proposed cuts" lines for edit-plan.md (Arabic first): times in SOURCE seconds, which rows are in the
+    plan's cut (cut_ids: the word ids the plan cuts), pauses as removed by remove_pauses. None touching a recited
+    verse (verse: source ranges). A list made on an older transcript shows one stale line instead of rows."""
     if not doc or not doc.get("proposals"):
         return []
-    L = ["## اقتراحات القص — Proposed cuts", "", "| # | النوع / kind | من / from | إلى / to | السبب / reason | الافتراضي |",
-         "|---|---|---|---|---|---|"]
-    for p in doc["proposals"]:
+    if not is_current:
+        return [TABLE_HEAD, "", "الاقتراحات دي قديمة / stale: the transcript changed after `reel cut-proposals`; "
+                "run it again to see current proposals.", ""]
+    rows = shown(doc, verse)
+    if not rows:
+        return []
+    cut = {str(w) for w in cut_ids or []}
+    L = [TABLE_HEAD, "", "| # | النوع / kind | من (المصدر، ث) / from (source s) | إلى (المصدر، ث) / to (source s) | "
+         "السبب / reason | الافتراضي | في القص؟ / in the cut? |", "|---|---|---|---|---|---|---|"]
+    for p in rows:
         ar, en = LABEL[p["kind"]]
+        if p["kind"] not in WORD_KINDS:
+            inside = "بيتشال بالسكتات / via remove_pauses"
+        else:
+            inside = "✔" if p["word_ids"] and {str(w) for w in p["word_ids"]} <= cut else ""
         L.append(f"| {p['id']} | {ar} / {en} | {p['start_ms'] / 1000:.2f} | {p['end_ms'] / 1000:.2f} | {p['reason']} | "
-                 f"{'مقترح' if p['default'] == 'proposed' else 'سيبه'} |")
+                 f"{'مقترح' if p['default'] == 'proposed' else 'سيبه'} | {inside} |")
     L.append("")
     for k, t in (doc.get("totals") or {}).items():
         ar, en = LABEL.get(k, (k, k))
         L.append(f"- {ar} / {en}: {t['count']} ({t['seconds']:.1f} s)")
-    L += ["", "لا شيء يتقص قبل موافقتك / nothing is cut before your approval.", ""]
+    L += ["", "اللي عليه ✔ بس هو اللي هيتقص بعد موافقتك؛ عشان تضيف واحد: `reel cut-proposals --accept CP-…` / only ✔ "
+          "rows are cut once you approve; to add one, run `reel cut-proposals --accept CP-…`.", ""]
     return L
 
 
@@ -1096,12 +1218,12 @@ def seq_ms(src_ms: float, keep_ms: list | None) -> float:
     return t
 
 
-def markers(doc: dict | None, fps: float, keep_ms: list | None = None) -> list:
+def markers(doc: dict | None, fps: float, keep_ms: list | None = None, verse=()) -> list:
     """Sequence markers for the Premiere build: one per proposal, colour per kind, name = kind + reason, placed on
     the sequence clock (keep_ms: the plan's time_map.keep_ms when it removed pauses). A proposal the plan already
-    removed whole (a pause the plan cut) gets no marker."""
+    removed whole (a pause the plan cut) gets no marker, nor one touching a recited verse (verse: source ranges)."""
     out = []
-    for p in (doc or {}).get("proposals") or []:
+    for p in shown(doc, verse):
         a, b = seq_ms(p["start_ms"], keep_ms), seq_ms(p["end_ms"], keep_ms)
         if b <= a:
             continue

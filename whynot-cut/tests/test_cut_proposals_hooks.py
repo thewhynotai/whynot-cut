@@ -178,44 +178,40 @@ class TestCli(unittest.TestCase):
 
 class TestRangeCut(unittest.TestCase):
     """plan.word_cut_ranges honours an accepted proposal's range_ms (one range: no slivers of silence between the
-    words of a take, the breath after it goes too), and falls back to word by word when the range is unsafe. With the
-    switch off it is always word by word."""
-    def setUp(self):
-        from unittest import mock
-        p = mock.patch("lib.plan.task25_plan_proposals", return_value=True)
-        p.start()
-        self.addCleanup(p.stop)
-
-    def test_switch_off_is_word_by_word(self):
-        from unittest import mock
-        from lib.plan import word_cut_ranges
-        with mock.patch("lib.plan.task25_plan_proposals", return_value=False):
-            r, _, _ = word_cut_ranges(self.WORDS, [{"word_ids": [2, 3, 4], "range_ms": [360, 1860]}], 5000)
-        self.assertEqual(len(r), 3)
+    words of a take, the breath after it goes too) when `whole` (the switch, read by the caller) is on; off, word by
+    word. Fix round 2 (review 4fb97dd P2-1/P2-2): a range that no longer fits its words is an error and nothing of it
+    is cut (test_t25_r2.TestWordCutRanges has the cases)."""
     WORDS = [{"id": i, "word": w, "start_ms": a, "end_ms": b} for i, (w, a, b) in enumerate(
         [("قال", 0, 300), ("أول", 400, 650), ("حاجة", 710, 1000), ("لازم", 1060, 1360), ("أول", 1900, 2150)], 1)]
 
+    def test_switch_off_is_word_by_word(self):
+        from lib.plan import word_cut_ranges
+        r, _, err = word_cut_ranges(self.WORDS, [{"word_ids": [2, 3, 4], "range_ms": [360, 1860]}], 5000, whole=False)
+        self.assertEqual((len(r), err), (3, []))
+
     def test_range_is_one_cut(self):
         from lib.plan import word_cut_ranges
-        r, cut, err = word_cut_ranges(self.WORDS, [{"word_ids": [2, 3, 4], "range_ms": [360, 1860]}], 5000)
+        r, cut, err = word_cut_ranges(self.WORDS, [{"word_ids": [2, 3, 4], "range_ms": [360, 1860]}], 5000, whole=True)
         self.assertEqual((r, err), ([(360, 1860)], []))
         self.assertEqual([c["word_id"] for c in cut], [2, 3, 4])
 
-    def test_unsafe_range_falls_back_to_word_by_word(self):
+    def test_unsafe_range_is_refused(self):
         from lib.plan import word_cut_ranges
         for bad in ([200, 1860], [360, 2000], [500, 1860], [360, 1200], "x", [5, 1]):
             with self.subTest(range_ms=bad):
-                r, _, _ = word_cut_ranges(self.WORDS, [{"word_ids": [2, 3, 4], "range_ms": bad}], 5000)
-                self.assertEqual(len(r), 3)
+                r, cut, err = word_cut_ranges(self.WORDS, [{"word_ids": [2, 3, 4], "range_ms": bad}], 5000,
+                                              whole=True)
+                self.assertEqual((r, cut, len(err)), ([], [], 1))
 
-    def test_range_with_no_or_unknown_words_falls_back(self):
-        """A range on no words, or on a word not in words.json, is never one cut: word by word, the unknown id named."""
+    def test_range_with_no_or_unknown_words_is_refused(self):
+        """A range on no words, or on a word not in words.json: an older transcript, nothing cut."""
         from lib.plan import word_cut_ranges
-        r, cut, err = word_cut_ranges(self.WORDS, [{"word_ids": [], "range_ms": [360, 1860]}], 5000)
-        self.assertEqual((r, cut, err), ([], [], []))
-        r, cut, err = word_cut_ranges(self.WORDS, [{"word_ids": [2, 99], "range_ms": [360, 1860]}], 5000)
-        self.assertEqual(len(r), 1)
-        self.assertEqual(err, ["cut_words: word 99 not in words.json"])
+        for ids in ([], [2, 99]):
+            with self.subTest(word_ids=ids):
+                r, cut, err = word_cut_ranges(self.WORDS, [{"word_ids": ids, "range_ms": [360, 1860]}], 5000,
+                                              whole=True)
+                self.assertEqual((r, cut), ([], []))
+                self.assertTrue(err and "older transcript" in err[0], err)
 
 
 class TestGuard(ClientFixture):

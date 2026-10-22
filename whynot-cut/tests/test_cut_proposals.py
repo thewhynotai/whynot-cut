@@ -515,7 +515,7 @@ class TestProject(Project):
         doc = C.propose(self.p)
         table = "\n".join(C.plan_table(doc))
         self.assertTrue(table.startswith("## اقتراحات القص — Proposed cuts"))
-        self.assertIn("nothing is cut before your approval", table)
+        self.assertIn("only ✔ rows are cut once you approve", table)        # r2: the footer never says pending
         ms = C.markers(doc, 25)
         self.assertEqual(len(ms), len(doc["proposals"]))
         self.assertEqual(ms[0]["frame"], round(doc["proposals"][0]["start_ms"] / 1000 * 25))

@@ -652,8 +652,13 @@ def cmd_takes(a):
         from lib.transcribe import whisper_audio
         samples, sr = whisper_audio(wav), 16000
     rep = takes.report(p, samples=samples, sr=sr)
-    out({"ok": True, "groups": [{"takes": [t["n"] for t in g["takes"]], "best": g["best"], "line": g["line_ar"],
-                                 "line_en": g["line_en"]} for g in rep["groups"]], "next": rep["how"]})
+    from lib.common import fmt_ts
+    # each take with its source time and its words, so the editor knows which one is which (review 4fb97dd P2-3)
+    out({"ok": True, "audio": samples is not None,
+         "groups": [{"takes": [{"n": t["n"], "from": fmt_ts(t["start_ms"], "."), "to": fmt_ts(t["end_ms"], "."),
+                                "text": t["text"]} for t in g["takes"]],
+                     "best": g["best"], "line": g["line_ar"], "line_en": g["line_en"]} for g in rep["groups"]],
+         "next": rep["how"]})
 
 
 def cmd_approve_plan(a):

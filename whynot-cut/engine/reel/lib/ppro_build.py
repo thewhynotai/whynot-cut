@@ -190,14 +190,19 @@ def job_data(paths: Paths, overwrite: bool = False, stage_media: bool = False, f
 
 def _cut_proposal_markers(paths: Paths, spec: dict, F: float) -> list:
     """Task 25: one sequence marker per cut proposal (t, name, comment) on the sequence clock; none when there are none
-    and none while the switch task25_plan_proposals is off (the job of before). Only the contract's three marker keys:
+    and none while the switch task25_plan_proposals is off (the job of before); none on a recited verse, none from
+    a list made on an older transcript. Only the contract's three marker keys:
     the colour per kind waits for marker colours in the build contract (ADOBE-G4)."""
     from .plan import task25_plan_proposals
     if not task25_plan_proposals():
         return []
-    from .cut_proposals import load, markers
+    from . import cut_proposals as cps
+    doc = cps.load(paths)
+    if not cps.current(paths, doc):                 # made on an older transcript: no marker (review 4fb97dd P3-3)
+        return []
     return [{"t": m["t"], "name": m["name"], "comment": m["comment"]}
-            for m in markers(load(paths), round(1 / F, 3), (spec.get("time_map") or {}).get("keep_ms"))]
+            for m in cps.markers(doc, round(1 / F, 3), (spec.get("time_map") or {}).get("keep_ms"),
+                                 verse=cps.spec_verse(spec))]
 
 
 FADE_JOB_KEYS = ("video_in", "video_out", "audio_in", "audio_out")

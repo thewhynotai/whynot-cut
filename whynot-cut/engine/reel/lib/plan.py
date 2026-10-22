@@ -7,6 +7,7 @@ Outputs: 01_analysis/timeline-spec.json, 03_broll/broll-manifest.json,
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import unicodedata
 from pathlib import Path
@@ -109,24 +110,77 @@ def union_ranges(a: list, b: list) -> list:
     return out
 
 
-def word_cut_ranges(words: list, cut_words: list, dur_ms: int, pad_ms: int = 30) -> tuple[list, list, list]:
+STALE_CUT = ("القص ده ({label}) اتختار على تفريغ قديم: شغّل `reel cut-proposals` / `reel takes` تاني واختار من جديد / "
+             "this accepted cut ({label}) was chosen on an older transcript: run `reel cut-proposals` / `reel takes` "
+             "again and choose again")
+SPLIT_CUT = ("كلمات القص ده ({label}) مش ورا بعض بترتيب الوقت، فاترفض / this cut ({label}) lists words that are not "
+             "next to each other in time order, so it is refused: give each run of words its own entry")
+BAD_RANGE = ("range_ms بتاع القص ده ({label}) لازم يكون رقمين [البداية، النهاية] / this cut's range_ms ({label}) must "
+             "be [start_ms, end_ms]: two numbers, the end after the start")
+_CUT_LABEL = re.compile(r"^(?:CP|TK)-\d+")
+
+
+def cut_label(c, n: int) -> str:
+    """How an error names a cut_words entry: its CP-/TK- id, else its place in the list. Never the reason's text (a
+    hand-written reason may quote the words, and a verse word must never be printed)."""
+    m = _CUT_LABEL.match(str(c.get("reason") or "")) if isinstance(c, dict) else None
+    return m.group(0) if m else f"cut_words[{n}]"
+
+
+def _range_problem(c: dict, ids: list, words: list, by_id: dict, words_sha1) -> str | None:
+    """Task 25 (review 4fb97dd P2-1, P2-2): why an entry carrying `range_ms` or `words_sha1` no longer fits this
+    transcript, or None. It must come from this transcript, list one run of words in time order with no other word
+    among them, and its range must cover them and stay clear of every other word."""
+    sha = c.get("words_sha1")
+    if sha is not None and words_sha1 is not None and sha != words_sha1:
+        return STALE_CUT
+    if "range_ms" not in c:
+        return None
+    r = c["range_ms"]
+    if not (isinstance(r, list) and len(r) == 2 and all(isinstance(x, (int, float)) and not isinstance(x, bool)
+                                                         for x in r) and r[0] < r[1]):
+        return BAD_RANGE
+    if not ids or any(wid not in by_id for wid in ids):
+        return STALE_CUT
+    mine = [by_id[wid] for wid in ids]
+    if len(set(ids)) != len(ids) or any(x["start_ms"] > y["start_ms"] for x, y in zip(mine, mine[1:])):
+        return SPLIT_CUT
+    first, last, own = mine[0], mine[-1], set(ids)
+    others = [w for w in words if w["id"] not in own]
+    if any(w["start_ms"] < last["end_ms"] and first["start_ms"] < w["end_ms"] for w in others):
+        return SPLIT_CUT
+    a, b = r
+    if a > first["start_ms"] or b < last["end_ms"] or any(w["start_ms"] < b and a < w["end_ms"] for w in others):
+        return STALE_CUT
+    return None
+
+
+def word_cut_ranges(words: list, cut_words: list, dur_ms: int, pad_ms: int = 30, whole: bool = False,
+                    words_sha1: str | None = None) -> tuple[list, list, list]:
     """global.cut_words -> ([a, b] ms ranges, cut word records, errors). Each word is cut from just before it starts to
     just after it ends, never into its neighbours, so the words around it stay whole.
-    Entries: a word id, or {"word_ids": [..], "reason": "..."}."""
+    Entries: a word id, or {"word_ids": [..], "reason": "..."}.
+    Task 25: an entry with `range_ms` / `words_sha1` (an accepted proposal, a dropped take) that no longer fits this
+    transcript (words_sha1: words.json's sha1) is an error and nothing of it is cut, never a silent cut of other
+    words. `whole` (the switch task25_plan_proposals, read by the caller) cuts a fitting range as one piece; off, its
+    words are cut one by one as before."""
     by_id = {w["id"]: w for w in words}
     order = sorted(by_id)
     pos = {wid: i for i, wid in enumerate(order)}
     ranges, cut, errors = [], [], []
-    for c in cut_words:
+    for n, c in enumerate(cut_words):
         ids = c.get("word_ids", []) if isinstance(c, dict) else [c]
         reason = c.get("reason", "") if isinstance(c, dict) else ""
-        # Task 25 (switch task25_plan_proposals, off until the executor turns it on): an accepted take is cut whole
-        span = _range_cut(c, ids, by_id, order, pos, dur_ms) if task25_plan_proposals() else None
-        if span:
-            ranges.append(span)
-            cut += [{"word_id": wid, "word": by_id[wid]["word"], "start_ms": by_id[wid]["start_ms"], "reason": reason}
-                    for wid in ids]
-            continue
+        if isinstance(c, dict) and ("range_ms" in c or "words_sha1" in c):
+            bad = _range_problem(c, ids, words, by_id, words_sha1)
+            if bad:
+                errors.append(bad.format(label=cut_label(c, n)))
+                continue
+            if whole and "range_ms" in c:
+                ranges.append(tuple(c["range_ms"]))
+                cut += [{"word_id": wid, "word": by_id[wid]["word"], "start_ms": by_id[wid]["start_ms"],
+                         "reason": reason} for wid in ids]
+                continue
         for wid in ids:
             w = by_id.get(wid)
             if not w:
@@ -142,30 +196,11 @@ def word_cut_ranges(words: list, cut_words: list, dur_ms: int, pad_ms: int = 30)
     return ranges, cut, errors
 
 
-def task25_plan_proposals() -> bool:
+def task25_plan_proposals(ctx=None) -> bool:
     """Task 25's switch (config/defaults/safety.json `switches.task25_plan_proposals`, client reel-profile on top): on
     only when exactly JSON true. Off: the plan, edit-plan.md and the build are byte-identical to before Task 25."""
     from .safety import switches
-    return switches.enabled(switches.TASK25_PLAN_PROPOSALS)
-
-
-def _range_cut(c, ids, by_id, order, pos, dur_ms):
-    """Task 25: a cut_words entry with "range_ms" (an accepted cut proposal: its padding, the breath after a take,
-    snapped edges) is one range, used only when it covers its words and stays clear of the words around them;
-    otherwise None and the words are cut one by one as before."""
-    r = c.get("range_ms") if isinstance(c, dict) else None
-    if not (isinstance(r, list) and len(r) == 2 and all(isinstance(x, (int, float)) and not isinstance(x, bool)
-                                                          for x in r) and r[0] < r[1]):
-        return None
-    if not ids or any(wid not in by_id for wid in ids):
-        return None
-    first, last = min(pos[w] for w in ids), max(pos[w] for w in ids)
-    lo = by_id[order[first - 1]]["end_ms"] if first > 0 else 0
-    hi = by_id[order[last + 1]]["start_ms"] if last + 1 < len(order) else dur_ms
-    a, b = r
-    if a < lo or b > hi or a > by_id[order[first]]["start_ms"] or b < by_id[order[last]]["end_ms"]:
-        return None
-    return (a, b)
+    return switches.enabled(switches.TASK25_PLAN_PROPOSALS, ctx)
 
 
 def window_rect(framing: str | None, y: int | None = None, seq_w: int = 1080, seq_h: int = 1920) -> dict | None:
@@ -281,7 +316,11 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
     words = [w for w in raw_words if _word_ok(w)]          # T4.2: an entry without id/word/times is skipped (warned)
     bad_words = len(raw_words) - len(words)
     pauses = read_json(paths.p("06_audio/dialogue/pauses.json")) if rp else None
-    wranges, wcut, _ = word_cut_ranges(words, base.get("cut_words") or [], dur_ms)
+    t25_whole = task25_plan_proposals(ctx)                  # Task 25's switch, read once (review 4fb97dd P3-5)
+    wfile = paths.p("02_transcription/words.json")
+    words_sha1 = hashlib.sha1(wfile.read_bytes()).hexdigest() if wfile.exists() else None
+    wranges, wcut, _ = word_cut_ranges(words, base.get("cut_words") or [], dur_ms, whole=t25_whole,
+                                       words_sha1=words_sha1)
     timemap_on = bool((rp and pauses) or wranges)
     srts = {}                      # the caption files apply_timemap maps onto the sequence clock (None = no file)
     if timemap_on and not wcut:    # with words cut, the captions are rebuilt from words.json instead
@@ -326,7 +365,8 @@ def _read_inputs(paths: Paths, ctx) -> PlanInputs:
         if (wcut and timemap_on) or knobs[0].get("caption_short_max_chars") else None,
         flagged=flagged, profile=profile, sfx_kinds=_sfx_kinds(paths),
         exists=lambda rel: (paths.root / rel).exists(), is_file=lambda rel: (paths.root / rel).is_file(),
-        verse_cfg=manual_verse.config(profile), read_caption=lambda name: _read_caption(paths, name))
+        verse_cfg=manual_verse.config(profile), read_caption=lambda name: _read_caption(paths, name),
+        t25_whole=t25_whole, words_sha1=words_sha1)
 
 
 def _read_caption(paths: Paths, name: str):
@@ -816,7 +856,9 @@ def apply_timemap(inp: PlanInputs, camera: list, merged: list, events: list, bro
     out = {"merged": merged, "events": events, "broll": broll, "cues": cues, "tmap": None, "time_map_info": None,
            "seq_srts": {}, "seq_words": None, "dur_ms": dur_ms, "dur_f": dur_f}
     rp = base.get("remove_pauses")
-    wcut_ranges, words_cut, wcut_err = word_cut_ranges(words_all, base.get("cut_words") or [], dur_ms)
+    wcut_ranges, words_cut, wcut_err = word_cut_ranges(words_all, base.get("cut_words") or [], dur_ms,
+                                                       whole=getattr(inp, "t25_whole", False),
+                                                       words_sha1=getattr(inp, "words_sha1", None))
     errors += wcut_err
     pz = None
     if rp:
@@ -1055,7 +1097,8 @@ def apply_manual_verse(inp: PlanInputs, tm: dict):
         tmi = copy.deepcopy(tmi)
         for wc in tmi["words_cut"]:
             if any(a <= wc["start_ms"] < b for a, b in all_src):
-                wc.update(word="…", in_verse=True)
+                m = _CUT_LABEL.match(str(wc.get("reason") or ""))       # Task 25 r2: nor its reason's words
+                wc.update(word="…", in_verse=True, reason=m.group(0) if m else "")
         out["time_map_info"] = tmi
     recs, markers = [], []
     for s in live:
@@ -1667,8 +1710,9 @@ def write_edit_plan(paths: Paths) -> Path:
         L += [f"- {h['id']} · {frame_to_tc(h['start_frame'])} – {frame_to_tc(h['end_frame'])} على التايملاين (المصدر "
               f"{fmt_ts(h['src_start_ms'], '.')} – {fmt_ts(h['src_end_ms'], '.')}) · بعد {h['after']}" for h in live_holds]
     if task25_plan_proposals():          # Task 25: the "Proposed cuts" table, only when proposals exist
-        from .cut_proposals import load as load_cut_proposals, plan_table
-        pt = plan_table(load_cut_proposals(paths))
+        from . import cut_proposals as cps
+        doc = cps.load(paths)
+        pt = cps.plan_table(doc, cps.spec_verse(spec), [w["word_id"] for w in wc], cps.current(paths, doc))
         if pt:
             L += [""] + pt
     L += ["", "## Not included (and why)", ""]

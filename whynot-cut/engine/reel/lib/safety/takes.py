@@ -307,16 +307,19 @@ def _named(p: dict, takes: int, lang: str) -> str:
     return f"{_ar(a)} مقابل {_ar(b)}: {d_ar}" if lang == "ar" else f"{a} vs {b}: {d_en}"
 
 
-def groups(words, cfg=None, samples=None, sr=0, lang: str = "ar") -> list:
+def groups(words, cfg=None, samples=None, sr=0, lang: str = "ar", verse=()) -> list:
     """Take groups: [{"takes": [sentence + features], "best": n or None (the takes differ in meaning), "differ": {...},
     "line_ar", "line_en"}], in time
     order. A sentence joins the first group whose first take it matches within the retake window (no chains: A~B and
-    B~C never pull in a C unlike A)."""
+    B~C never pull in a C unlike A). A sentence touching a recited verse (verse: source ranges,
+    cut_proposals.verse_ranges) is never a take: it keeps its number and joins no group."""
     cfg = _settings(cfg)
     V, F = cfg["values"], cfg["fillers"]
     ss = sentences(words, cfg)
     members = []                      # [[sentence indexes]] with the first take as the group's reference
     for j, s in enumerate(ss):
+        if any(s["start_ms"] < b and a < s["end_ms"] for a, b in verse or []):
+            continue
         for g in members:
             ref = ss[g[0]]
             if s["start_ms"] - ss[g[-1]]["end_ms"] <= V["retake_window_s"] * 1000 and _same(ref, s, F, V):
@@ -429,7 +432,7 @@ def report(paths, ctx=None, samples=None, sr=0) -> dict:
     other words."""
     ws, sha, lang = _words(paths)
     cfg = CP.settings(ctx)
-    res = groups(ws, cfg, samples, sr, lang)
+    res = groups(ws, cfg, samples, sr, lang, verse=CP.verse_ranges(paths, ws, ctx=ctx))
     _save(paths.p(FILE), {"schema": 2, "words_sha1": sha, "settings_sha1": _cfg_sha(cfg), "groups": _shape(res),
                           "best": [g["best"] for g in res]})
     return {"groups": res, "lines": [g["line_ar"] for g in res], "lines_en": [g["line_en"] for g in res],
@@ -469,7 +472,7 @@ def apply(paths, drop=(), keep=(), by: str = "editor", ctx=None) -> dict:
         raise Guidance("مفيش أرقام / no take numbers given", "e.g. `reel takes --drop 4 --keep 5`")
     ws, sha, lang = _words(paths)
     cfg = CP.settings(ctx)
-    res = groups(ws, cfg, lang=lang)
+    res = groups(ws, cfg, lang=lang, verse=CP.verse_ranges(paths, ws, ctx=ctx))
     state = _load(paths.p(FILE))
     if not state or state.get("words_sha1") != sha or state.get("settings_sha1") != _cfg_sha(cfg) \
             or state.get("groups") != _shape(res):
@@ -527,7 +530,7 @@ def apply(paths, drop=(), keep=(), by: str = "editor", ctx=None) -> dict:
         best = best_of.get(tuple(x["n"] for x in g["takes"]), g["best"])      # the best the editor was shown
         why = f"best take: {best}" if best is not None else             f"no best proposed: the takes differ in {'meaning' if g['differ'].get('pairs') else 'words'}"
         new.append({"word_ids": list(t["word_ids"]), "range_ms": [int(start), int(end)],
-                    "reason": f"TK-{n} take dropped ({why})", "by": by})
+                    "reason": f"TK-{n} take dropped ({why})", "by": by, "words_sha1": sha})
         cut_now |= words_of(n)
     for g in res:                  # a line never disappears whole by this step, whoever cut its other takes
         nums = [t["n"] for t in g["takes"]]
@@ -559,9 +562,12 @@ def apply(paths, drop=(), keep=(), by: str = "editor", ctx=None) -> dict:
     steps.append({"before": base64.b64encode(before).decode("ascii"), "after_sha1": hashlib.sha1(data).hexdigest()})
     _write_atomic(ef, data)                            # the plan first: a lost history step never blocks an undo
     _save(paths.p(HISTORY), {"schema": 1, "steps": steps})
-    return {"changed": True, "dropped": [n for n in drop if n not in already], "already": already, "kept": keep,
-            "next": "`reel plan`, then the editor approves the plan again (nothing is cut before that); "
-                    "`reel takes --undo` goes back one step"}
+    done = {"changed": True, "dropped": [n for n in drop if n not in already], "already": already, "kept": keep,
+           "next": "`reel plan`, then the editor approves the plan again (nothing is cut before that); "
+                   "`reel takes --undo` goes back one step"}
+    if done["dropped"] and not CP.whole_takes(ctx):
+        done["note"] = CP.WORD_BY_WORD_NOTE
+    return done
 
 
 def undo(paths) -> dict:
