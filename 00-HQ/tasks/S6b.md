@@ -1,6 +1,6 @@
 # S6b — Gate 4 eval cases for the Phase 4 skills
 
-- **Assigned:** H1    **Model:** Opus 5.5 high    **Size:** M    **Status:** FIX (round 1, 2026-10-21 17:55)
+- **Assigned:** H1    **Model:** Opus 5.5 high    **Size:** M    **Status:** PARKED (AI-infra restart Phase 6–7 hold, 2026-10-22; restored in Phase 8 to: FIX (round 1, 2026-10-21 17:55))
 - **Tier:** LIGHT (eval cases: dev workflow; they test the product, they don't change it)
 - **Stage / gate:** Gate 4 (`WhyNotCut/PROGRESS.md` line "Evals": "Add cases for the Phase 4 skills (rules/T4.3,
   episode sheet, autopilot, music NEEDS-YOU): S6 work for a free builder")    **Depends on:** the executor naming

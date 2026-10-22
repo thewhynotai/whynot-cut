@@ -25,6 +25,7 @@ It does not read the old plan files unless a task card points at one. `DOC-MAP.m
 | `PLUGIN_CAPABILITY_MATRIX.md` | everyone | Plugins and skills: installed, active, tested (= the plugin compatibility matrix, D-011) |
 | `AGENT_ROUTING_RULES.md` | every session | Who does what: Master Orchestrator vs OMC vs gstack vs superpowers; the enforced never-use list (2026-10-22) |
 | `AI_TOOLING_ARCHITECTURE.md` | everyone | Where each AI tool is installed, its config, hooks, test evidence and rollback |
+| `ACCOUNT_STATUS.md` | everyone | Verified state of the three accounts (role, runtime, task, worktree, last handoff/sync, blockers). Coordination/handoff/startup docs map to PLAYBOOK and this README (D-012) |
 | `setup/` | Yunus / master | AI-infra restart Phases 0–9: tracker, audit, baseline, environment, gstack report (OMC report: `omc/`) |
 | `ARCHIVE_MANIFEST.md` | everyone | What was archived where, and the hold list |
 | `reports/` · `tasks/archive/<ID>/` | everyone | Dated reports (immutable) · closed task packets |
@@ -52,13 +53,13 @@ Paste the one for the seat you open. Each points at the canonical files; none ne
 
 - **PRIMARY / Command Center (Yunus's account, Claude app):**
   > You are the WhyNot Cut Command Center (master). Read `00-HQ/README.md`, `00-HQ/PLAYBOOK.md`, `00-HQ/roles/MASTER.md`,
-  > `00-HQ/DECISIONS.md`, then `..\PROJECT_PLAN_AR.md`. Run `python -X utf8 00-HQ/tools/hq_status.py` for the live state.
+  > `00-HQ/DECISIONS.md`, `00-HQ/AGENT_ROUTING_RULES.md`, `00-HQ/ACCOUNT_STATUS.md`, then `..\PROJECT_PLAN_AR.md`. Run `python -X utf8 00-HQ/tools/hq_status.py` for the live state.
   > Reconcile git (fetch, local vs origin, dirty files) and the routines (enabled?), then take the first READY card
   > assigned to MASTER on `BOARD.md`. Reply to Yunus in Egyptian Arabic.
 - **ASSISTANT_A = H1 (Mayar) and ASSISTANT_B = H2 (marketing@):** started by their desktop shortcuts (AUTO mode sends
   its own kickoff). For an interactive chat on that seat:
   > Read `00-HQ/README.md`, then `00-HQ/PLAYBOOK.md`, then `00-HQ/roles/HELPER-ENGINE.md` (H1) or
-  > `00-HQ/roles/HELPER-PRODUCT.md` (H2), then `00-HQ/BOARD.md`. Work only on cards assigned to you, in your own
+  > `00-HQ/roles/HELPER-PRODUCT.md` (H2), then `00-HQ/AGENT_ROUTING_RULES.md`, then `00-HQ/BOARD.md`. Work only on cards assigned to you, in your own
   > worktree, and hand back through `00-HQ/inbox/<h>/`.
 - **Executor / Gate 4 tracks (until the tag):** keep their existing charters (`D:\ClaudeData\claude-api-lane\TRACKS.md`).
 

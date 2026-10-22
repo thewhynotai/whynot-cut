@@ -17,18 +17,20 @@ H2's code and the other way round, PLAYBOOK §3c). The master intake decides eac
 
 | ID | Title | Assigned | Status | Card | Next |
 |---|---|---|---|---|---|
+| SETUP-P6-H1 | Seat check + handoff test (AI-infra restart Phase 6, LIGHT, read-only) | H1 | READY | `tasks/SETUP-P6-H1.md` | report → master verdict |
+| SETUP-P6-H2 | Independent check of H1's seat report (Phase 6, LIGHT, read-only) | H2 | NOT READY (after SETUP-P6-H1 DONE) | `tasks/SETUP-P6-H2.md` | — |
 | SETUP-H1 | First login (mayar@) + full suite baseline | H1 (Mayar) | ACCEPTED — closed, no code (nothing to merge) | `tasks/SETUP-H1.md` | r3 2026-10-20 08:26: 8226 run, 51 env/timing; ENV-01 gaps routed |
 | BL-16 | Safe ASCII engine home for a non-ASCII Windows user (Gate 4, high) | H1 | MERGED (890b144 + patch 1 7db98a5, 2026-10-21 12:25; patch 2 at ADOBE-G4) | `tasks/BL-16.md` | merged by executor |
-| BL-02 | Licence files, notices generator, SPDX tool (tool only) (Gate 4, high) | H1 | READY | `tasks/BL-02.md` | — |
-| S6b | Gate 4 eval cases for the Phase 4 skills (LIGHT) | H1 | FIX (round 1, 2026-10-21 17:55) | `tasks/S6b.md` | peer h2 PASS-WITH-MINORS but P2-1 autopilot grader vs default `ask`; P3-1..5 |
-| BL-17 | Second install must not overwrite the first install's pointer files (Gate 5) | H1 | READY | `tasks/BL-17.md` | — |
-| BL-19 | Root-normalised fingerprints, so a client move keeps its approvals (Stage 2) | H1 | READY | `tasks/BL-19.md` | — |
-| S1-R51 | Installer r5_1: the engine-home drift test says which list to edit (Gate 4 exit prep, LIGHT) | H1 | READY · fallback executor 28 Oct | `tasks/S1-R51.md` | new card 2026-10-21 (intake top-up) |
+| BL-02 | Licence files, notices generator, SPDX tool (tool only) (Gate 4, high) | H1 | PARKED (restart hold; was: READY) | `tasks/BL-02.md` | — |
+| S6b | Gate 4 eval cases for the Phase 4 skills (LIGHT) | H1 | PARKED (restart hold; was: FIX (round 1, 2026-10-21 17:55)) | `tasks/S6b.md` | peer h2 PASS-WITH-MINORS but P2-1 autopilot grader vs default `ask`; P3-1..5 |
+| BL-17 | Second install must not overwrite the first install's pointer files (Gate 5) | H1 | PARKED (restart hold; was: READY) | `tasks/BL-17.md` | — |
+| BL-19 | Root-normalised fingerprints, so a client move keeps its approvals (Stage 2) | H1 | PARKED (restart hold; was: READY) | `tasks/BL-19.md` | — |
+| S1-R51 | Installer r5_1: the engine-home drift test says which list to edit (Gate 4 exit prep, LIGHT) | H1 | PARKED (restart hold; was: READY · fallback executor 28 Oct) | `tasks/S1-R51.md` | new card 2026-10-21 (intake top-up) |
 | SETUP-H2 | First login (marketing@) + full suite baseline | H2 (marketing@) | ACCEPTED — closed, no code (nothing to merge) | `tasks/SETUP-H2.md` | r1 2026-10-20 11:40: 8753 run, 77 env/timing (ENV-01 classes); npm ci + 296 panel tests + 1 render OK |
 | BL-03 | GPL-compliance + trademark notice templates (AR + EN) (Gate 4) | H2 | ACCEPTED (2026-10-21 22:40) | `tasks/BL-03.md` | peer h1 PASS (none) on ca8c783 → MERGE-QUEUE |
-| BL-04 | run-state.json + resume, preflight-first in `reel next` (Gate 4) | H2 | IN PROGRESS · fallback executor 25 Oct | `tasks/BL-04.md` | PARTIAL 2026-10-21 19:02: 1 real failure (test_t45_guard) → 4th patch; confirm run + full suite with 4 patches pending (queue) |
-| BL-20 | Gate check: no temporary dated skips in the suite (`tools/skip_audit.py`) (Gate 4 exit, LIGHT, S) | H2 | READY · fallback executor 25 Oct | `tasks/BL-20.md` | — |
-| BL-22 | AE build warnings reach NEEDS-YOU: a missing logo or image becomes a checklist line (Stage 2, LIGHT) | H2 | READY · fallback executor 28 Oct | `tasks/BL-22.md` | — |
+| BL-04 | run-state.json + resume, preflight-first in `reel next` (Gate 4) | H2 | PARKED (restart hold; was: IN PROGRESS · fallback executor 25 Oct) | `tasks/BL-04.md` | PARTIAL 2026-10-21 19:02: 1 real failure (test_t45_guard) → 4th patch; confirm run + full suite with 4 patches pending (queue) |
+| BL-20 | Gate check: no temporary dated skips in the suite (`tools/skip_audit.py`) (Gate 4 exit, LIGHT, S) | H2 | PARKED (restart hold; was: READY · fallback executor 25 Oct) | `tasks/BL-20.md` | — |
+| BL-22 | AE build warnings reach NEEDS-YOU: a missing logo or image becomes a checklist line (Stage 2, LIGHT) | H2 | PARKED (restart hold; was: READY · fallback executor 28 Oct) | `tasks/BL-22.md` | — |
 | BL-18 | Two wrong fix lines in installer/onboarding (Gate 4) | EXECUTOR (done) | MERGED (f2ca516 on release/3.0, 2026-10-20) | `tasks/BL-18.md` | H2 does NOT take it |
 | BL-14 | Portable client copy | EXECUTOR | MERGED (API-200 closed it: 5 commits + executor hooks 7f0c00a; `tracks\API-200-BL-14-HANDOVER.md`) | — | not a card |
 | (lane 1) | API lane 1 | — | STOPPED (owner budget ruling 10-19 10:03); BL-16 and BL-04 moved to cards above | — | — |

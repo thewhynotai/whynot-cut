@@ -88,3 +88,12 @@ ACCEPTED · SUPERSEDED · PROPOSED.
 - **Trade-off:** more hooks in every main-seat session in this folder (latency measured in Phase 4); helper seats get
   the tools only after Phase 6 tests; the acceptance gate is unchanged (fresh independent reviewer), so plugin
   reviews are an extra lens, not the gate.
+
+## D-012 · 2026-10-22 · Three-account coordination reuses the existing 00-HQ files
+- **Context:** the restart brief (Phase 6) names `AGENT_COORDINATION.md`, `AGENT_HANDOFF_PROTOCOL.md`,
+  `AGENT_STARTUP_PROMPTS.md`, `ACCOUNT_STATUS.md` and says "reuse existing files wherever possible".
+- **Chosen:** coordination = PLAYBOOK §1/§3b–§3d + AGENT_ROUTING_RULES; handoff = PLAYBOOK §2/§2a + templates;
+  startup prompts = README "Startup prompts per account". Only `ACCOUNT_STATUS.md` is new (no equivalent existed).
+  gstack Team Mode / `required` stay **off**: helper seats have no gstack, so `required` would block them (brief rule).
+  Helper loops are started only by the owner (desktop shortcut / Control Center) or the keepalive; Claude does not start them.
+- **Trade-off:** brief names map to section names, recorded here and in ACCOUNT_STATUS.md.
