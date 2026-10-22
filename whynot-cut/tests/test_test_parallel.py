@@ -497,17 +497,40 @@ class SerialLane(Case):
         self.assertEqual(code, 2, out)
         self.assertIn("test_lane.Heavy.test_renamed", out)
 
+    def test_a_lane_id_loaded_under_another_module_name(self):           # fix round 4 (test_wnc_queue's shape)
+        self.use("pass_a", "alias")
+        code, out = self.run_tool(lane="test_alias/alias_inner.Inner.test_timed")
+        self.assertEqual(code, 0, out)
+        ev = self.events()
+        self.assertEqual(ev.count("alias-timed"), 1)                      # not also run in the parallel phase
+        self.assertEqual(ev.count("alias-plain"), 1)
+        self.assertEqual(ev[-1], "alias-timed")                           # alone, after the parallel phase
+        self.assertIn("Ran 4 tests in ", out)
+
+    def test_a_module_qualified_lane_id_must_still_match(self):
+        self.use("pass_a", "alias")
+        for lane in ("test_alias/alias_inner.Inner.test_renamed", "test_nomodule/alias_inner.Inner.test_timed",
+                     "alias_inner.Inner.test_timed"):
+            code, out = self.run_tool(lane=lane)
+            self.assertEqual(code, 2, f"{lane}: {out}")
+
     def test_default_lane_names_real_tests(self):
         tool = load_tool()
         self.assertEqual(tool.DEFAULT_SERIAL_LANE, (
             "test_identity_scan.TestRealTree.test_full_repo_scan_is_fast",
-            "test_serve_progress.AdapterRun", "test_serve_progress.ThroughTheDaemon"))
+            "test_serve_progress.AdapterRun", "test_serve_progress.ThroughTheDaemon",
+            "test_wnc_queue/wnc_queue_tool_tests.RunnerTests.test_timeout_kills_the_whole_tree"))
         tests = SK / "tests"
         self.assertIn("    def test_full_repo_scan_is_fast(self):",
                       (tests / "test_identity_scan.py").read_text(encoding="utf-8"))
         src = (tests / "test_serve_progress.py").read_text(encoding="utf-8")
         self.assertIn("\nclass AdapterRun(", src)
         self.assertIn("\nclass ThroughTheDaemon(", src)
+        self.assertIn('spec_from_file_location("wnc_queue_tool_tests"',
+                      (tests / "test_wnc_queue.py").read_text(encoding="utf-8"))
+        q = (SK.parent / "tools" / "wnc_queue" / "tests" / "test_wnc_queue.py").read_text(encoding="utf-8")
+        self.assertIn("\nclass RunnerTests(", q)
+        self.assertIn("    def test_timeout_kills_the_whole_tree(self):", q)
 
 
 class RamBrake(Case):

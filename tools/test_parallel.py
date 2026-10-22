@@ -29,7 +29,9 @@ RAM_LIMIT = 85
 STILL_RUNNING_S = 300
 SEP1, SEP2 = "=" * 70, "-" * 70
 DEFAULT_SERIAL_LANE = ("test_identity_scan.TestRealTree.test_full_repo_scan_is_fast",
-                       "test_serve_progress.AdapterRun", "test_serve_progress.ThroughTheDaemon")
+                       "test_serve_progress.AdapterRun", "test_serve_progress.ThroughTheDaemon",
+                       # loaded by test_wnc_queue under its own module name; failed only under load (fix round 4)
+                       "test_wnc_queue/wnc_queue_tool_tests.RunnerTests.test_timeout_kills_the_whole_tree")
 VALID_MODULE = re.compile(r"[_a-z]\w*\.py$", re.IGNORECASE)        # unittest.loader.VALID_MODULE_NAME
 HOLDER_ID = re.compile(r"^\w+ \((.+)\)$")                           # "setUpClass (mod.Class)" -> "mod.Class"
 SUBTEST_ID = re.compile(r"^(\w+(?:\.\w+)+) [\[(]")                  # "mod.C.test_x (i=1)" -> "mod.C.test_x"
@@ -116,6 +118,15 @@ def read_ram():
 def _selector(test_id: str) -> str:
     m = HOLDER_ID.match(test_id) or SUBTEST_ID.match(test_id)
     return m.group(1) if m else test_id
+
+
+def lane_entry(s: str) -> tuple:
+    """Serial-lane entry -> (test module, selector). 'mod.Class.test' -> ('mod', 'mod.Class.test');
+    'mod/other.Class.test' -> ('mod', 'other.Class.test') for a test its module loads under another module name."""
+    if "/" in s:
+        module, sel = s.split("/", 1)
+        return module, sel
+    return s.split(".")[0], s
 
 
 def _matches(test_id: str, sels) -> bool:
@@ -432,7 +443,7 @@ def parent(a) -> int:
     except (OSError, ValueError) as e:
         out(f"parallel: refused: {e}")
         return 2
-    missing = [s for s in lane if s.split(".")[0] not in mods]
+    missing = [s for s in lane if lane_entry(s)[0] not in mods]
     if missing:
         out("parallel: refused: serial-lane id(s) name no test module: " + ", ".join(missing))
         return 2
@@ -472,9 +483,10 @@ def parent(a) -> int:
     stats = {"ram_peak": None}
     out(f"parallel: {len(mods)} modules, {a.workers} workers, serial lane {len(lane)} id(s)")
     t0 = time.time()
-    specs = [(a, m, f"m-{m}", (), tuple(s for s in lane if s.split(".")[0] == m)) for m in order]
+    entries = [lane_entry(s) for s in lane]
+    specs = [(a, m, f"m-{m}", (), tuple(sel for mod, sel in entries if mod == m)) for m in order]
     done = run_jobs(specs, a.workers, stats)
-    done += run_jobs([(a, s.split(".")[0], f"lane-{i}", (s,), ()) for i, s in enumerate(lane)], 1, stats)
+    done += run_jobs([(a, mod, f"lane-{i}", (sel,), ()) for i, (mod, sel) in enumerate(entries)], 1, stats)
     wall = time.time() - t0
     incomplete = [j for j in done if j.rec is None]
     results = [j for j in done if j.rec is not None]
