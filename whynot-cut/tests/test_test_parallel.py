@@ -52,6 +52,7 @@ class Case(unittest.TestCase):
         self.cache = self.tmp / "cache"
         self.state = self.tmp / "state"
         self.state.mkdir()
+        self.tool = TOOL
 
     def use(self, *cases, commit=True):
         for c in cases:
@@ -69,7 +70,7 @@ class Case(unittest.TestCase):
         return e
 
     def argv(self, *extra, workers="2", lane=""):
-        return [sys.executable, "-B", str(TOOL), "--workers", workers, "--repo", str(self.repo),
+        return [sys.executable, "-B", str(self.tool), "--workers", workers, "--repo", str(self.repo),
                 "--tests-dir", str(self.tests), "--serial-lane", lane, *extra]
 
     def run_tool(self, *extra, lane="", env=None, workers="2"):
@@ -81,6 +82,21 @@ class Case(unittest.TestCase):
     def events(self):
         f = self.state / "events.txt"
         return f.read_text(encoding="utf-8").split() if f.exists() else []
+
+    def run_serial(self, env=None):
+        """The serial run exactly as tools/test.sh does it (cwd = repo root, -m unittest discover -s ...)."""
+        r = subprocess.run([sys.executable, "-B", "-W", "error::ResourceWarning", "-m", "unittest", "discover",
+                            "-s", "whynot-cut/tests"], cwd=str(self.repo), capture_output=True,
+                           env=env or self.env(), timeout=300)
+        return r.returncode, (r.stdout.decode("utf-8", "replace") + r.stderr.decode("utf-8", "replace")
+                              ).replace("\r\n", "\n")
+
+    def assert_last_line(self, out, prefix):
+        self.assertTrue(out.rstrip("\n").splitlines()[-1].startswith(prefix), out)
+
+    def cache_entries(self):
+        return sorted(p.name for p in self.cache.glob("*.json") if p.name != "durations.json") \
+            if self.cache.exists() else []
 
 
 class Discovery(Case):
@@ -125,6 +141,44 @@ class Discovery(Case):
         self.assertNotIn("\nOK", out)
 
 
+class SameAsSerial(Case):
+    """Review r1 P1-1 / P3-3: a worker imports and prints exactly like the serial `-m unittest discover` run.
+    The tool runs from <repo>/tools/, as in the real repo, so its own folder is the one that must not leak in."""
+
+    def setUp(self):
+        super().setUp()
+        self.tool = self.repo / "tools" / "test_parallel.py"
+        shutil.copyfile(TOOL, self.tool)
+
+    def test_sys_path_is_the_same_as_the_serial_run(self):
+        self.use("syspath")
+        code, out = self.run_serial()
+        self.assertEqual(code, 0, out)
+        serial = json.loads((self.state / "syspath.json").read_text(encoding="utf-8"))
+        (self.state / "syspath.json").unlink()
+        code, out = self.run_tool()
+        self.assertEqual(code, 0, out)
+        par = json.loads((self.state / "syspath.json").read_text(encoding="utf-8"))
+        self.assertEqual(par, serial)                                     # same entries, same order
+        self.assertNotIn(str(self.repo / "tools"), par)
+
+    def test_a_module_only_in_tools_fails_to_import_in_both_modes(self):
+        (self.repo / "tools" / "wnc_tools_only_helper.py").write_bytes(b"X = 1\n")
+        self.use("tools_import", "pass_b", "surrogate")
+        scode, sout = self.run_serial()
+        self.assertEqual(scode, 1, sout)
+        code, out = self.run_tool()
+        self.assertEqual(code, 1, out)
+
+        def problems(text):
+            return sorted(x for x in text.splitlines() if x.startswith(("FAIL: ", "ERROR: ")))
+        self.assertEqual(problems(out), problems(sout))
+        self.assertEqual(len(problems(out)), 2, out)                      # the tools/ import + the lone surrogate
+        self.assertIn("wnc_tools_only_helper", out)
+        self.assertIn("FAILED (errors=2)", out)
+        self.assertIn("FAILED (errors=2)", sout)
+
+
 class Ordering(unittest.TestCase):
     def test_lpt_order_from_recorded_durations(self):
         tool = load_tool()
@@ -142,6 +196,13 @@ class Ordering(unittest.TestCase):
         # a and b known (1 s per 100 bytes); c has no duration but 5000 bytes -> ~50 s: first
         order = tool.order_modules(["a", "b", "c"], {"a": 10.0, "b": 2.0}, {"a": 1000, "b": 200, "c": 5000})
         self.assertEqual(order, ["c", "a", "b"])
+
+    def test_relabel_selector_strips_holders_and_subtest_params(self):   # review r1 P3-4
+        tool = load_tool()
+        self.assertEqual(tool._selector("setUpClass (test_m.C)"), "test_m.C")
+        self.assertEqual(tool._selector("test_m.C.test_x (i=1)"), "test_m.C.test_x")
+        self.assertEqual(tool._selector("test_m.C.test_x [msg] (i=1)"), "test_m.C.test_x")
+        self.assertEqual(tool._selector("test_m.C.test_x"), "test_m.C.test_x")
 
 
 class Results(Case):
@@ -164,6 +225,25 @@ class Results(Case):
         self.assertIn("FAILED (failures=1, errors=1, skipped=1)", out)
         self.assertIn("test_fail.Fails.test_always_fails: fails alone too", out)
         self.assertIn("test_fail.Fails.test_raises: fails alone too", out)
+        # review r1 P3-1: the labels come before the verdict, so the last lines are always `Ran ...` / FAILED
+        self.assertLess(out.rindex("parallel: label: "), out.rindex("\nRan 5 tests in "))
+        self.assert_last_line(out, "FAILED (failures=1, errors=1, skipped=1)")
+
+    def test_green_run_ends_with_the_ok_line(self):
+        self.use("pass_a")
+        code, out = self.run_tool()
+        self.assertEqual(code, 0, out)
+        self.assert_last_line(out, "OK (skipped=1)")
+        self.assertLess(out.rindex("parallel: workers="), out.rindex("\nRan 2 tests in "))
+
+    def test_an_unexpected_success_is_a_failure(self):                   # review r1 P2-3
+        self.use("pass_b", "xpass")
+        code, out = self.run_tool()
+        self.assertEqual(code, 1, out)
+        self.assertIn("FAILED (unexpected successes=1)", out)
+        self.assertNotIn("\nOK", out)
+        self.assertEqual(len(self.cache_entries()), 1)                   # complete, so stored, with its exit code 1
+        self.assertEqual(self.run_tool()[0], 1)
 
     def test_load_sensitive_failure_is_labelled_and_still_fails(self):
         self.use("pass_a", "flaky")
@@ -194,6 +274,25 @@ class Incomplete(Case):
         self.assertIn("INCOMPLETE", out)
         self.assertIn("test_killed", out)
         self.assertNotIn("\nOK", out)
+        self.assert_nothing_stored()
+        self.assert_last_line(out, "FAILED (incomplete: m-test_killed: ")   # review r1 P3-2: greps fail closed
+
+    def test_a_record_then_a_non_zero_exit_is_incomplete(self):          # review r1 P2-4
+        self.use("pass_a", "exit_after_record")
+        code, out = self.run_tool()
+        self.assertEqual(code, 2, out)
+        self.assertIn("test_exit_after_record", out)
+        self.assertIn("did not exit by itself (exit code 3)", out)
+        self.assertNotIn("\nOK", out)
+        self.assert_nothing_stored()
+        self.assert_last_line(out, "FAILED (incomplete: ")
+
+    def test_a_crash_inside_the_tool_exits_2(self):                      # review r1 P3-5
+        self.use("pass_a")
+        code, out = self.run_tool(env=self.env(WHYNOT_PARALLEL_POLL="not-a-number"))
+        self.assertEqual(code, 2, out)
+        self.assertNotIn("\nOK", out)
+        self.assert_last_line(out, "FAILED (incomplete: tool error: ")
         self.assert_nothing_stored()
 
     def test_missing_record_exits_2_even_with_rc_0(self):
@@ -236,6 +335,45 @@ class Cache(Case):
         self.assertTrue(self.run_tool()[1].startswith("reused: "))
         (self.repo / "tools" / "new.txt").write_bytes(b"new\n")           # untracked, not ignored, under tools/
         self.assertFalse(self.run_tool()[1].startswith("reused: "))
+
+    def test_a_line_ending_only_change_misses_the_cache(self):           # review r1 P2-1
+        (self.repo / ".gitattributes").write_bytes(b"* text=auto eol=lf\n")   # this repo's own settings
+        self.use("pass_a")
+        git(self.repo, "config", "core.autocrlf", "true")
+        self.assertEqual(self.run_tool()[0], 0)
+        self.assertTrue(self.run_tool()[1].startswith("reused: "))
+        f = self.tests / "test_pass_a.py"
+        f.write_bytes(f.read_bytes().replace(b"\n", b"\r\n"))             # LF -> CRLF only
+        code, out = self.run_tool()
+        self.assertEqual(code, 0, out)
+        self.assertFalse(out.startswith("reused: "), out)
+
+    def test_an_untracked_file_anywhere_in_the_repo_misses_the_cache(self):   # review r1 P3-7
+        self.use("pass_a")
+        self.assertEqual(self.run_tool()[0], 0)
+        self.assertTrue(self.run_tool()[1].startswith("reused: "))
+        (self.repo / "notes.txt").write_bytes(b"untracked, not ignored, at the repo root\n")
+        self.assertFalse(self.run_tool()[1].startswith("reused: "))
+
+    def test_test_switch_env_vars_are_in_the_key(self):                  # review r1 P2-2
+        self.use("pass_a")
+        self.assertEqual(self.run_tool()[0], 0)
+        for name in ("WHYNOT_SLOW_TESTS", "WNC_INSTALLER_LIVE", "NH_INTEGRATION"):
+            out = self.run_tool(env=self.env(**{name: "wnc-key-probe"}))[1]
+            self.assertFalse(out.startswith("reused: "), name + "\n" + out)
+            self.assertTrue(self.run_tool(env=self.env(**{name: "wnc-key-probe"}))[1].startswith("reused: "), name)
+        # the tool's own control vars are not part of the key
+        self.assertTrue(self.run_tool(env=self.env(WHYNOT_PARALLEL_POLL="0.3"))[1].startswith("reused: "))
+
+    def test_a_tree_changed_during_the_run_is_not_cached(self):          # review r1 P1-2
+        self.use("pass_a", "edits_tree")
+        code, out = self.run_tool()
+        self.assertEqual(code, 0, out)
+        self.assertIn("parallel: tree changed during the run; not cached", out)
+        self.assertEqual(self.cache_entries(), [])
+        git(self.repo, "checkout", "--", "tools/x.txt")                   # back to exactly the committed tree
+        code, out = self.run_tool()
+        self.assertFalse(out.startswith("reused: "), out)
 
     def test_fresh_ignores_the_cache(self):
         self.use("pass_a")

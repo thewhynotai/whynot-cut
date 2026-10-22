@@ -32,6 +32,9 @@ DEFAULT_SERIAL_LANE = ("test_identity_scan.TestRealTree.test_full_repo_scan_is_f
                        "test_serve_progress.AdapterRun", "test_serve_progress.ThroughTheDaemon")
 VALID_MODULE = re.compile(r"[_a-z]\w*\.py$", re.IGNORECASE)        # unittest.loader.VALID_MODULE_NAME
 HOLDER_ID = re.compile(r"^\w+ \((.+)\)$")                           # "setUpClass (mod.Class)" -> "mod.Class"
+SUBTEST_ID = re.compile(r"^(\w+(?:\.\w+)+) [\[(]")                  # "mod.C.test_x (i=1)" -> "mod.C.test_x"
+ENV_KEY_PREFIXES = ("WHYNOT_", "WNC_", "NH_")                       # env that switches tests on/off: in the key
+ENV_KEY_SKIP = ("WHYNOT_SUITE_CACHE", "WHYNOT_PARALLEL_")           # ...except the tool's own control vars
 RECORD_INTS = ("tests_run", "skipped", "expected_failures")
 RUN_DIR = Path(tempfile.gettempdir()) / f"wnc-par-{os.getpid()}"   # per-module records, logs and TEMP folders
 
@@ -111,7 +114,7 @@ def read_ram():
 
 # ---------------------------------------------------------------------------------------------------------- worker
 def _selector(test_id: str) -> str:
-    m = HOLDER_ID.match(test_id)
+    m = HOLDER_ID.match(test_id) or SUBTEST_ID.match(test_id)
     return m.group(1) if m else test_id
 
 
@@ -131,6 +134,11 @@ def _flat(suite):
 def worker(a) -> int:
     """Run one module (optionally only / except some ids) and write its result record."""
     t0 = time.time()
+    # Import exactly like the serial `python -m unittest discover` run from the repo root: there sys.path[0] is the
+    # cwd (repo root), not this script's tools/ folder (review r1 P1-1). With -P/PYTHONSAFEPATH neither is added.
+    if sys.path and not getattr(sys.flags, "safe_path", False) \
+            and Path(sys.path[0] or ".").resolve() == Path(__file__).resolve().parent:
+        sys.path[0] = os.getcwd()
     tests_dir = str(Path(a.tests_dir).resolve())
     suite = unittest.TestLoader().discover(tests_dir, pattern=a.worker + ".py")
     if a.only or a.exclude:
@@ -228,8 +236,13 @@ def run_jobs(specs, workers, stats):
     """specs: list of (args for Job). Runs them `workers` at a time with the RAM brake. Returns finished Jobs."""
     poll = float(os.environ.get("WHYNOT_PARALLEL_POLL", "2"))
     pending, running, done = list(specs), [], []
-    waiting_said, last_report = False, time.time()
+    waiting_said, last_report, last_sample = False, time.time(), 0.0
     while pending or running:
+        if time.time() - last_sample >= 1:        # the peak also covers the tail after the last start (r1 P3-6)
+            last_sample = time.time()
+            ram = read_ram()
+            if ram is not None:
+                stats["ram_peak"] = max(stats["ram_peak"] or 0, ram)
         for j in [j for j in running if j.proc.poll() is not None]:
             running.remove(j)
             j.finish()
@@ -253,24 +266,42 @@ def run_jobs(specs, workers, stats):
 
 
 def dirty_key(repo: Path):
-    """sha + hash of the dirty tree (git diff HEAD + untracked, non-ignored files under whynot-cut/ and tools/), or
-    None when git can't tell (then: no cache)."""
+    """sha + hash of the dirty tree, or None when git can't tell (then: no cache). The hash covers `git status` of the
+    whole repo (modified, staged, deleted, untracked non-ignored) plus the RAW working-tree bytes of every path it
+    lists, so a line-ending-only change counts too (review r1 P2-1, P3-7), and the binary diff without external
+    diff/textconv drivers."""
     def g(*args):
         return subprocess.run(["git", *args], cwd=str(repo), capture_output=True, check=True).stdout
     try:
         sha = g("rev-parse", "HEAD").decode().strip()
-        h = hashlib.sha256(g("diff", "HEAD", "--binary"))
-        for rel in sorted(x for x in g("ls-files", "--others", "--exclude-standard", "-z", "--", "whynot-cut",
-                                       "tools").decode("utf-8", "surrogateescape").split("\0") if x):
-            h.update(rel.encode("utf-8", "surrogateescape") + b"\0")
+        status = g("status", "--porcelain=v1", "-z", "--untracked-files=all")
+        h = hashlib.sha256(status + b"\0" + g("diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv"))
+        paths, toks, i = set(), status.split(b"\0"), 0
+        while i < len(toks):
+            t = toks[i]
+            if len(t) > 3:
+                paths.add(t[3:])
+                if t[:1] in (b"R", b"C") and i + 1 < len(toks):   # rename/copy: the next token is the source path
+                    i += 1
+                    paths.add(toks[i])
+            i += 1
+        for rel in sorted(paths):
+            f = repo / rel.decode("utf-8", "surrogateescape")
+            h.update(rel + b"\0")
             try:
-                h.update((repo / rel).read_bytes())
+                h.update(f.read_bytes() if f.is_file() else b"<not a file>")
             except OSError:
                 h.update(b"<unreadable>")
             h.update(b"\0")
         return sha, h.hexdigest()[:16]
     except (OSError, subprocess.CalledProcessError):
         return None
+
+
+def env_key() -> str:
+    """The environment variables that switch tests on or off (review r1 P2-2), sorted, as one string."""
+    return "\0".join(f"{k}={v}" for k, v in sorted(os.environ.items())
+                     if k.upper().startswith(ENV_KEY_PREFIXES) and not k.upper().startswith(ENV_KEY_SKIP))
 
 
 def cache_dir() -> Path:
@@ -295,22 +326,7 @@ def format_report(results, incomplete, labels, lane, workers, wall, stats, n_mod
             counts[p["kind"]] += 1
             if p["kind"] != "UNEXPECTED SUCCESS":
                 lines += [SEP1, f"{p['kind']}: {p['desc']}", SEP2, p["tb"].rstrip("\n"), ""]
-    lines += [SEP2, "Ran %d test%s in %.3fs" % (total, "" if total == 1 else "s", wall), ""]
-    extra = [f"skipped={skipped}"] if skipped else []
-    extra += [f"expected failures={xfail}"] if xfail else []
-    if incomplete:
-        code = 2
-        lines.append("INCOMPLETE (" + ", ".join(f"{j.tag}: {j.why}" for j in incomplete) + ")")
-    elif any(counts.values()):
-        code = 1
-        parts = [f"failures={counts['FAIL']}"] if counts["FAIL"] else []
-        parts += [f"errors={counts['ERROR']}"] if counts["ERROR"] else []
-        parts += extra
-        parts += [f"unexpected successes={counts['UNEXPECTED SUCCESS']}"] if counts["UNEXPECTED SUCCESS"] else []
-        lines.append("FAILED (" + ", ".join(parts) + ")")
-    else:
-        code = 0
-        lines.append("OK" + (" (" + ", ".join(extra) + ")" if extra else ""))
+    # the parallel: summary first, so the last lines are always `Ran ...` and the verdict, as in serial (r1 P3-1)
     peak = "n/a" if stats["ram_peak"] is None else f"{stats['ram_peak']:.0f}%"
     lines.append(f"parallel: workers={workers} wall={wall:.1f}s modules={n_modules} serial_lane={len(lane)} "
                  f"ram_peak={peak}")
@@ -322,15 +338,26 @@ def format_report(results, incomplete, labels, lane, workers, wall, stats, n_mod
         lines += ["    " + x for x in j.log_tail()]
     for tid, label in labels:
         lines.append(f"parallel: label: {tid}: {label}")
+    lines += [SEP2, "Ran %d test%s in %.3fs" % (total, "" if total == 1 else "s", wall), ""]
+    extra = [f"skipped={skipped}"] if skipped else []
+    extra += [f"expected failures={xfail}"] if xfail else []
+    if incomplete:                                # every OK/FAILED grep fails closed on it (r1 P3-2)
+        code = 2
+        lines.append("FAILED (incomplete: " + ", ".join(f"{j.tag}: {j.why}" for j in incomplete) + ")")
+    elif any(counts.values()):
+        code = 1
+        parts = [f"failures={counts['FAIL']}"] if counts["FAIL"] else []
+        parts += [f"errors={counts['ERROR']}"] if counts["ERROR"] else []
+        parts += extra
+        parts += [f"unexpected successes={counts['UNEXPECTED SUCCESS']}"] if counts["UNEXPECTED SUCCESS"] else []
+        lines.append("FAILED (" + ", ".join(parts) + ")")
+    else:
+        code = 0
+        lines.append("OK" + (" (" + ", ".join(extra) + ")" if extra else ""))
     return "\n".join(lines) + "\n", code
 
 
 def main(argv=None) -> int:
-    for s in (sys.stdout, sys.stderr):
-        try:
-            s.reconfigure(encoding="utf-8", errors="replace")
-        except AttributeError:
-            pass
     ap = argparse.ArgumentParser(prog="tools/test.sh --parallel")
     ap.add_argument("--workers", type=int)
     ap.add_argument("--fresh", action="store_true", help="ignore the per-commit cache")
@@ -345,7 +372,23 @@ def main(argv=None) -> int:
     a.repo = str(Path(a.repo).resolve())
     a.tests_dir = str(Path(a.tests_dir or Path(a.repo) / "whynot-cut" / "tests").resolve())
     if a.worker:
-        return worker(a)
+        return worker(a)                          # stdout/stderr left as serial unittest has them (r1 P3-3)
+    for s in (sys.stdout, sys.stderr):
+        try:
+            s.reconfigure(encoding="utf-8", errors="replace")
+        except AttributeError:
+            pass
+    try:
+        return parent(a)
+    except Exception as e:                        # a crash inside the tool is "broken" (2), never "failures" (1)
+        import traceback
+        traceback.print_exc(file=sys.stdout)   # on stdout, so the FAILED line below stays the last line
+        sys.stdout.flush()
+        out(f"FAILED (incomplete: tool error: {type(e).__name__}: {e})")
+        return 2
+
+
+def parent(a) -> int:
     if a.workers is None or a.workers < 2:
         out("parallel: --parallel needs N >= 2 workers")
         return 2
@@ -364,13 +407,16 @@ def main(argv=None) -> int:
     cdir = cache_dir()
     tool_ver = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
     runtime = f"{sys.executable}|{sys.version}|s={sys.flags.no_user_site}"
-    dk = dirty_key(Path(a.repo))
-    key = None
-    if dk:
-        key = hashlib.sha256("|".join([dk[0], dk[1], runtime, tool_ver, a.tests_dir, ",".join(lane)])
-                             .encode("utf-8")).hexdigest()[:20]
-        key = f"{dk[0][:12]}-{key}"
-    else:
+
+    def cache_key():
+        dk = dirty_key(Path(a.repo))
+        if not dk:
+            return None
+        h = hashlib.sha256("|".join([dk[0], dk[1], runtime, tool_ver, a.tests_dir, ",".join(lane), env_key()])
+                           .encode("utf-8")).hexdigest()[:20]
+        return f"{dk[0][:12]}-{h}"
+    key = cache_key()
+    if not key:
         out("parallel: no git state for the cache key; the cache is not used")
     entry = cdir / f"{key}.json" if key else None
     if entry and not a.fresh and entry.is_file():
@@ -419,23 +465,31 @@ def main(argv=None) -> int:
                 labels.append((p["id"], "load-sensitive (passed alone)"))
 
     report, code = format_report(results, incomplete, labels, lane, a.workers, wall, stats, len(mods))
-    sys.stdout.write(report)
-    sys.stdout.flush()
     for j in results + relabel:                   # an incomplete worker's log stays for diagnosis
         j.tidy()
     try:
         RUN_DIR.rmdir()
     except OSError:
         pass
-    if code != 2:                                 # complete or nothing: only a complete run is stored
-        cdir.mkdir(parents=True, exist_ok=True)
-        for j in results:
-            if j.tag.startswith("m-"):
-                durations[j.module] = j.rec["duration"]
-        dur_file.write_text(json.dumps(durations, indent=1, sort_keys=True), encoding="utf-8")
-        if entry:
-            entry.write_text(json.dumps({"date": datetime.datetime.now().isoformat(timespec="seconds"),
-                                         "code": code, "report": report}, ensure_ascii=False), encoding="utf-8")
+    # complete or nothing: only a complete run of the code the key names is stored (r1 P1-2: the key is taken again
+    # after the run; if the tree changed meanwhile, nothing is stored). Stored before the report is printed, so any
+    # note here comes before it and the verdict stays the last line. A failed write is only a note (r1 P3-5).
+    if code != 2 and key and cache_key() != key:
+        out("parallel: tree changed during the run; not cached")
+    elif code != 2:
+        try:
+            cdir.mkdir(parents=True, exist_ok=True)
+            for j in results:
+                if j.tag.startswith("m-"):
+                    durations[j.module] = j.rec["duration"]
+            dur_file.write_text(json.dumps(durations, indent=1, sort_keys=True), encoding="utf-8")
+            if entry:
+                entry.write_text(json.dumps({"date": datetime.datetime.now().isoformat(timespec="seconds"),
+                                             "code": code, "report": report}, ensure_ascii=False), encoding="utf-8")
+        except OSError as e:
+            out(f"parallel: could not write the cache ({e}); not cached")
+    sys.stdout.write(report)
+    sys.stdout.flush()
     return code
 
 
