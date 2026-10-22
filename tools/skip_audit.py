@@ -13,14 +13,17 @@ assigned to a name. Each site is classed:
   dated          a dated-skip marker ("dated skip", a name with _PENDING, "waits for ... patch", "until ... lands",
                  an ISO date in the reason) in the reason, the condition, a comment on the skip or 3 lines above it, or
                  the block that sets the condition's name (the `except ImportError:` shape of 61feeb2). Always a FAIL.
-  platform/tool  the condition is about the machine (platform, a tool, a file in a checkout, free RAM, an opt-in env var).
+  platform/tool  the condition is about the machine (platform, a tool, a file in a checkout, free RAM, an opt-in env var),
+                 and neither the reason nor a comment on the skip (or 3 lines above) says "for now" ("yet", "not built",
+                 "executor", "patch" ...): that wording makes it unknown, since a file that "is not built yet" is a temporary skip.
   unknown        the rest. Listed; a FAIL only for a line added since --since.
 The classes are a helper, not a proof: the executor reads the list. A moved or reformatted old skip shows as added
 since the tag, so it is listed as unknown (known limit; moves are not diffed). Aliased imports (`import unittest as u`)
 are not followed.
 
 Exit: 0 clean | 1 at least one FAIL | 2 the check could not run (a file that does not parse, git missing, the tag
-missing, --root not the top of a repo). Read-only: files are opened "rb" and git runs only `rev-parse` and `diff`.
+missing, --root not the top of a repo, uncommitted test changes in --since mode). Read-only: files are opened "rb" and
+git runs only `rev-parse`, `diff` and `status`.
 Stdlib only.
 """
 import argparse
@@ -42,6 +45,7 @@ CLASSES = ("dated", "platform/tool", "unknown")
 Site = collections.namedtuple("Site", "file line end kind cls reason cond")
 
 CALL_KINDS = {
+    "unittest.expectedFailure": "expectedFailure", "expectedFailure": "expectedFailure",
     "unittest.skip": "skip", "skip": "skip", "pytest.skip": "skip", "pytest.mark.skip": "skip", "mark.skip": "skip",
     "unittest.skipIf": "skipIf", "skipIf": "skipIf", "unittest.skipUnless": "skipUnless", "skipUnless": "skipUnless",
     "pytest.mark.skipif": "skipif", "mark.skipif": "skipif", "pytest.mark.xfail": "xfail", "mark.xfail": "xfail",
@@ -54,10 +58,13 @@ CONDITION_KINDS = ("skipIf", "skipUnless", "skipif", "xfail")
 DATED_RE = re.compile(r"dated skip|\bwaits? for\b[^\n]*\bpatch\b|\buntil\b[^\n]*\blands?\b", re.I)
 DATED_NAME_RE = re.compile(r"_PENDING")       # a name: case matters (a prose "pending" is not a marker)
 ISO_DATE_RE = re.compile(r"\b20\d\d-\d\d-\d\d\b")
+TEMPORARY_RE = re.compile(r"\byet\b|\bnot (?:built|applied|ported|generated|committed)|\bexecutor\b|\bpatch\b", re.I)
 PLATFORM_RE = re.compile(
     r"sys\.platform|\bos\.name\b|platform\.system|\bwindows\b|\bwin32\b|\bdarwin\b|\bmacos\b|\bIS_(?:WIN|MAC)\w*"
     r"|shutil\.which|\bNODE\b|\w*AVAILABLE\b|\bHAVE_\w+|\w*_PRESENT\b|\.is_file\(\)|\.is_dir\(\)|\.exists\(\)"
     r"|os\.environ|\bgetenv\b|\bfree_?(?:ram|disk)|\bavailable_ram|\bram\b|\bsymlinks?\b|\bjunctions?\b", re.I)
+# the reason is prose: only words that say "this machine" count there (not "available", "node", "windows", "ram")
+REASON_PLATFORM_RE = re.compile(r"\bsymlinks?\b|\bjunctions?\b|\bfree RAM\b|\bMB free\b", re.I)
 
 
 class NotRun(Exception):
@@ -189,9 +196,11 @@ def audit_source(rel, text):
         end = getattr(node, "end_lineno", node.lineno)
         context = " ".join([comment_text(node.lineno - 3, end), cond, ast.unparse(node), *raw])
         if DATED_RE.search(context) or DATED_RE.search(reason) or ISO_DATE_RE.search(reason) \
-                or DATED_NAME_RE.search(" ".join(sorted(_names(cond_nodes + reason_nodes)))):
+                or DATED_NAME_RE.search(" ".join(sorted(_names(cond_nodes + reason_nodes + resolved)))):
             cls = "dated"
-        elif PLATFORM_RE.search(" ".join([cond, reason, *(ast.unparse(r) for r in resolved)])):
+        elif TEMPORARY_RE.search(reason + " " + comment_text(node.lineno - 3, end)):
+            cls = "unknown"                     # "not built yet" beats a platform-looking condition
+        elif PLATFORM_RE.search(" ".join([cond, *(ast.unparse(r) for r in resolved)])) or REASON_PLATFORM_RE.search(reason):
             cls = "platform/tool"
         else:
             cls = "unknown"
@@ -216,6 +225,16 @@ def _check_repo(root):
         raise NotRun("--root %s is not a git repo top (the top is %s)" % (root, top.strip()))
     if not (root / TESTS).is_dir():
         raise NotRun("%s not found under %s" % (TESTS, root))
+
+
+def _check_committed(root):
+    """--since reads `git diff <tag>..HEAD`: a test change that is not committed would be missed, so say so."""
+    rc, out, err = _git(root, "status", "--porcelain", "--", TESTS)
+    if rc != 0:
+        raise NotRun("git status failed: %s" % err)
+    if out.strip():
+        raise NotRun("uncommitted test changes under %s, so --since cannot see them: commit or stash, then rerun:\n  %s"
+                     % (TESTS, "\n  ".join(out.rstrip().splitlines()[:10])))
 
 
 def _added_lines(root, tag):
@@ -274,6 +293,8 @@ def _site_dict(s, new):
 
 def run(root, since, show_all, as_json):
     _check_repo(root)
+    if since:
+        _check_committed(root)
     added = _added_lines(root, since) if since else None
     count, sites = audit_tree(root)
     rows = []
@@ -294,7 +315,7 @@ def run(root, since, show_all, as_json):
         line += "; new since %s: %d unknown" % (since, sum(1 for s, n in rows if s.cls == "unknown" and n))
     print(line)
     for s, new in (rows if show_all else fails):
-        mark = "FAIL" if (s, new) in fails else "    "
+        mark = "FAIL" if (s, new) in fails else "NEW " if new else "    "
         print("%s  %s:%d  %s  %s  %s" % (mark, s.file, s.line, s.cls, s.kind, s.reason[:100]))
     if fails:
         print("RESULT: FAIL (%d site%s), exit 1" % (len(fails), "" if len(fails) == 1 else "s"))

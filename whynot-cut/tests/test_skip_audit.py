@@ -78,7 +78,8 @@ class TestForms(unittest.TestCase):
     def test_every_form_is_found(self):
         sites = SA.audit_source("x.py", (FIX / "case_forms.py").read_text(encoding="utf-8"))
         reasons = sorted(s.reason for s in sites)
-        self.assertEqual(len(sites), 12, [(s.line, s.kind) for s in sites])
+        self.assertEqual(len(sites), 13, [(s.line, s.kind) for s in sites])
+        self.assertEqual(sum(1 for s in sites if s.kind == "expectedFailure"), 2)     # the decorator and the call form
         for want in ("form: skip", "form: skipIf", "form: skipUnless", "form: skipTest", "form: raise unittest.SkipTest",
                      "form: raise SkipTest", "form: pytest skip", "form: pytest skipif", "form: pytest xfail",
                      "the thing is not ready"):
@@ -135,6 +136,34 @@ class TestClasses(unittest.TestCase):
                 '@unittest.skipIf(GATE, "later")\ndef test_a():\n    pass\n')
         (s,) = audit_text(text)
         self.assertEqual(s.cls, "dated")
+
+    def test_a_dated_name_is_found_through_an_assignment(self):
+        text = ('import unittest\ntry:\n    from helper import X\n    _PENDING = None\nexcept ImportError:\n'
+                '    _PENDING = "later"\nGATE = _PENDING\n\n@unittest.skipIf(GATE, "later")\ndef test_a():\n    pass\n')
+        (s,) = audit_text(text)
+        self.assertEqual(s.cls, "dated")
+
+    def test_temporary_skips_are_never_platform_tool(self):
+        sites = SA.audit_source("x.py", (FIX / "case_temporary.py").read_text(encoding="utf-8"))
+        self.assertEqual(len(sites), 4, [(s.line, s.reason) for s in sites])
+        self.assertEqual([(s.line, s.cls) for s in sites if s.cls != "unknown"], [])
+
+    def test_temporary_wording_in_a_comment_beats_a_platform_condition(self):
+        for label, text in (
+            ("yet", '# not wired yet\n@unittest.skipUnless(NODE, "needs node")'),
+            ("executor", '# the executor applies hooks.json.patch\n@unittest.skipUnless(os.environ.get("X"), "x")'),
+            ("patch in the reason", '@unittest.skipIf(sys.platform == "win32", "waits on a patch")'),
+            ("not ported", '@unittest.skipUnless(P.is_file(), "lib is not ported")'),
+        ):
+            with self.subTest(label):
+                (s,) = audit_text("import unittest\n%s\ndef test_a():\n    pass\n" % text)
+                self.assertEqual(s.cls, "unknown")
+
+    def test_ordinary_words_in_a_reason_are_not_a_platform_look(self):
+        for reason in ("the feature is not available", "no node here", "needs a window", "out of ram"):
+            with self.subTest(reason):
+                (s,) = audit_text('import unittest\n@unittest.skipIf(FLAG, "%s")\ndef test_a():\n    pass\n' % reason)
+                self.assertEqual(s.cls, "unknown")
 
     def test_a_date_outside_the_reason_does_not_make_it_dated(self):
         (s,) = audit_text('import unittest\n# review 2026-10-19\n@unittest.skipUnless(sys.platform == "win32", "windows only")\ndef test_a():\n    pass\n')
@@ -239,6 +268,36 @@ class TestSince(unittest.TestCase):
         self.assertIn("test_a.py:8", out)
         self.assertNotIn("test_a.py:3", out)
 
+    def test_all_marks_the_new_sites(self):
+        r = Repo(self)
+        r.write("test_old.py", UNKNOWN_SKIP)
+        r.commit("one")
+        git(r.root, "tag", "t0")
+        r.write("test_new.py", 'import unittest\n\n@unittest.skipUnless(os.name == "nt", "windows only")\ndef test_n():\n    pass\n')
+        r.commit("two")
+        code, out, _ = run_main("--root", str(r.root), "--since", "t0", "--all")
+        self.assertEqual(code, 0, out)
+        self.assertTrue(any(l.startswith("NEW ") and "test_new.py:3" in l for l in out.splitlines()), out)
+        self.assertFalse(any(l.startswith("NEW ") and "test_old.py:3" in l for l in out.splitlines()), out)
+
+    def test_uncommitted_test_changes_are_exit_2(self):
+        r = Repo(self)
+        r.write("test_old.py", PLAIN)
+        r.commit("one")
+        git(r.root, "tag", "t0")
+        r.write("test_new.py", UNKNOWN_SKIP)                # untracked: git diff t0..HEAD cannot see it
+        code, out, err = run_main("--root", str(r.root), "--since", "t0")
+        self.assertEqual(code, 2, out)
+        self.assertIn("uncommitted", out + err)
+        self.assertIn("test_new.py", out + err)
+        r.write("test_old.py", PLAIN + "\n# edit\n")        # tracked and modified
+        r.commit("two")
+        r.write("test_old.py", PLAIN + "\n# edit again\n")
+        code, out, _ = run_main("--root", str(r.root), "--since", "t0")
+        self.assertEqual(code, 2, out)
+        code, _, _ = run_main("--root", str(r.root))        # without --since the working tree is what is read
+        self.assertEqual(code, 0)
+
     def test_dated_fails_before_the_tag_too(self):
         r = Repo(self)
         r.write("test_d.py", DATED_SKIP)
@@ -337,6 +396,21 @@ class TestReadOnly(unittest.TestCase):
 
 
 class TestPaths(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows paths are case-insensitive")
+    def test_a_root_in_another_case_still_gives_repo_relative_paths(self):
+        r = Repo(self)
+        r.write("security/fuzz/test_d.py", DATED_SKIP)
+        r.commit("one")
+        git(r.root, "tag", "t0")
+        r.write("test_n.py", UNKNOWN_SKIP)
+        r.commit("two")
+        code, out, _ = run_main("--root", str(r.root).swapcase(), "--since", "t0")
+        self.assertEqual(code, 1, out)
+        self.assertIn("whynot-cut/tests/security/fuzz/test_d.py:3", out)
+        self.assertIn("whynot-cut/tests/test_n.py:3", out)       # new since the tag: found despite the case of --root
+        self.assertIn("new since t0: 1 unknown", out)
+
+
     def test_output_paths_are_repo_relative_with_forward_slashes(self):
         r = Repo(self)
         r.write("security/fuzz/test_d.py", DATED_SKIP)

@@ -49,3 +49,8 @@ class A(unittest.TestCase):
     @pytest.mark.xfail(reason="form: pytest xfail")
     def test_k(self):
         pass
+
+    def test_l(self):
+        pass
+
+    test_l = unittest.expectedFailure(test_l)       # the call form
