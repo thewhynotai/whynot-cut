@@ -1,25 +1,27 @@
 # خطة المشروع التنفيذية — WhyNot Cut (Adobe Premiere Pro Plugin)
 
 <!-- AUTO:STATUS START -->
-> آخر تحديث فعلي: 2026-10-22 03:59 — Africa/Cairo
-> مصدر التحديث: hq_status.py / info@ / release/3.0 @ c9631323
+> آخر تحديث فعلي: 2026-10-22 21:03 — Africa/Cairo
+> مصدر التحديث: hq_status.py / info@ / release/3.0 @ 3aa61675
 > حالة التشغيل: RUNNING
-> حالة المزامنة: HQ = LOCAL+GITHUB_VERIFIED · release/3.0 = LOCAL_AHEAD 114
+> حالة المزامنة: HQ = LOCAL+GITHUB_VERIFIED · release/3.0 = LOCAL_AHEAD 115
 
 | Task | Owner | Status (BOARD) |
 |---|---|---|
+| SETUP-P6-H1 | H1 | ARCHIVED |
+| SETUP-P6-H2 | H2 | ARCHIVED |
 | SETUP-H1 | H1 (Mayar) | ACCEPTED |
 | BL-16 | H1 | MERGED |
-| BL-02 | H1 | READY |
-| S6b | H1 | FIX |
-| BL-17 | H1 | READY |
-| BL-19 | H1 | READY |
-| S1-R51 | H1 | READY |
+| BL-02 | H1 | PARKED |
+| S6b | H1 | PARKED |
+| BL-17 | H1 | PARKED |
+| BL-19 | H1 | PARKED |
+| S1-R51 | H1 | PARKED |
 | SETUP-H2 | H2 (marketing@) | ACCEPTED |
 | BL-03 | H2 | ACCEPTED |
-| BL-04 | H2 | IN PROGRESS |
-| BL-20 | H2 | READY |
-| BL-22 | H2 | READY |
+| BL-04 | H2 | PARKED |
+| BL-20 | H2 | FIX round 1 |
+| BL-22 | H2 | PARKED |
 | BL-18 | EXECUTOR (done) | MERGED |
 | BL-14 | EXECUTOR | MERGED |
 | (lane 1) | — | STOPPED |
@@ -33,6 +35,7 @@
 | OPS-06 | MASTER | DONE_ARCHIVED |
 | OPS-07 | MASTER | DONE_ARCHIVED |
 | OPS-08 | MASTER | IN PROGRESS |
+| OPS-09 | MASTER | IN PROGRESS |
 | API-500 | LANE | PLANNED_NOT_AUTHORIZED |
 <!-- AUTO:STATUS END -->
 
