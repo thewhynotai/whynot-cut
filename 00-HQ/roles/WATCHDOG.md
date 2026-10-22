@@ -3,8 +3,8 @@
 Yunus wants stopped work resumed automatically with no approvals asked («احلها بدون اي ابروف مني وكمل شغل»).
 Keep this run CHEAP: few tool calls, no thinking out loud, no project work.
 **Time box:** if any single step takes more than 2 minutes, or a tool asks for a permission, stop and end the run
-(the next run in 30 min retries). No PowerShell at all; the only shell call allowed is the one-line Bash
-`stale_suites.py age` below (it worked unattended in every report run).
+(the next run in 30 min retries). No PowerShell at all; the only shell calls allowed are the one-line Bash
+`stale_suites.py age` and `big_agents.py` below (read-only scripts that run unattended).
 
 `HQ` = `D:\0 Work\0 Pegasus IMC Agency\00 TWN\0 TWN AI\Editing Plugin\00-HQ`. Nudge log = `HQ\intake\watchdog-nudges.json`
 (`{"<session id>": "<ISO time with offset>", …}`). Read and write it ONLY with the Read and Write tools; the time to
@@ -26,6 +26,15 @@ without an offset counts as "nudged just now" until rewritten.
    If `run_scheduled_task` is refused (unattended runs cannot approve it; seen 2026-10-21 22:24), do not retry:
    `send_message` the Command Center (`local_a36b6974-0281-4d5f-b70f-d0bd7c51b4ef`) "Watchdog: the <HH:MM> report was lost to a
    limit and I cannot re-run it; re-run `whynot-cut-primary-report-2` now." This counts as its nudge (step 4).
+1c. **Oversized sub-agents (OPS-08, PLAYBOOK §4).** ONE Bash call: `python -X utf8 "<HQ>\tools\big_agents.py"`.
+   It prints `none`, or one `BIG <session id> <N>k <description>` line per sub-agent that is over 250k tokens of
+   context, unfinished, and written in the last 35 min (it remembers what it printed and repeats an agent only after
+   2 h). For each BIG line whose session id is one of the step 2 targets, `send_message` that session:
+   "Watchdog (PLAYBOOK §4): your sub-agent '<description>' is at <N>k tokens of context and is still being continued.
+   Let its current run finish, then have it write a handoff of at most 300 words into its card and continue with a
+   fresh sub-agent. Never continue a sub-agent over 250k." These messages do not count toward step 4's two nudges
+   and are not written to the nudge log. BIG lines for any other session (Yunus's own chats): ignore; Agency LIVE
+   shows them.
 2. **Targets, in this order** (skip any with `isRunning: true` or archived; `get_session` each):
    - executor `local_22b44953-13e2-409d-93c1-3b201b119548` (work track)
    - Command Center `local_a36b6974-0281-4d5f-b70f-d0bd7c51b4ef` (work track)

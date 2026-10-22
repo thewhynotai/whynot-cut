@@ -9,7 +9,7 @@ from pathlib import Path
 import common
 import agency_live as al  # noqa: E402  (session readers, queue parser, card finder, usage line, agent scan)
 import hq_status as hq  # noqa: E402
-import runlog, status as S, tasks as T
+import ownermsg, runlog, status as S, tasks as T
 
 MAIN_CONFIG = Path.home() / ".claude.json"
 
@@ -268,7 +268,7 @@ class Collector:
         task_id = None
         m = re.match(r"(?:card|peer review of) (\S+)", card_text or "")
         if m:
-            task_id = m.group(1)
+            task_id = board_id(m.group(1), board_ids)
         newest = max((r for v in reps.values() for r in v if r["who"] == h), key=lambda r: r["mtime"], default=None)
         st = S.helper_status({
             "loop_alive": slow["alive"].get(h) if slow["t"] else None, "auto_on": (auto / "AUTO-ON").exists(),
@@ -304,7 +304,7 @@ class Collector:
             "action": (feed.action if feed and running else "") or "",
             "said": feed.last_text if feed else "", "result": feed.result if feed else None,
             "denials": feed.denials if feed else 0, "recent": list(rec)[-8:],
-            "mailbox": mailbox_counts(self.cfg, h),
+            "mailbox": ownermsg.counts(self.cfg["state_dir"], h),
         }
 
     def agents(self, sessions, slow, now_ts):
@@ -359,14 +359,15 @@ class Collector:
                 "unpushed": ahead}
 
 
-def mailbox_counts(cfg, acct):
-    base = Path(cfg["state_dir"], "mailbox", acct)
-    def n(sub):
-        try:
-            return len([p for p in (base / sub).iterdir() if p.suffix == ".json"])
-        except OSError:
-            return 0
-    return {"pending": n("pending"), "delivered": n("delivered")}
+def board_id(ref, board_ids):
+    """'S6b-r3' -> 'S6b': the longest BOARD id that the reference starts with."""
+    ids = {i.lower(): i for i in board_ids}
+    parts = ref.split("-")
+    for n in range(len(parts), 0, -1):
+        hit = ids.get("-".join(parts[:n]).lower())
+        if hit:
+            return hit
+    return None
 
 
 def alerts(snap, th):

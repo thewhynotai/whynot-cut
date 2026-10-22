@@ -55,6 +55,8 @@ def human_tool(name, inp):
         return "Updating its to-do list"
     if name in ("WebSearch", "WebFetch"):
         return one_line(f"Web: {inp.get('query') or inp.get('url') or ''}", 100)
+    if name == "ToolSearch":
+        return "Loading tool definitions"
     if name == "Skill":
         return f"Using skill {inp.get('skill') or inp.get('name') or '?'}"
     return name or "?"

@@ -15,6 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hq_status as hq  # noqa: E402  (parse_board, helper_state, open_requests, inbox_reports, intake_verdicts)
+import big_agents  # noqa: E402  (OPS-08: context size of a sub-agent, the 250k limit)
 
 APP_SESSIONS = Path(os.environ.get("APPDATA", ""), "Claude", "claude-code-sessions")
 TRANSCRIPTS = Path.home() / ".claude" / "projects"
@@ -112,6 +113,15 @@ def usage_line(samples, now):
     if sd and now - dt.datetime.fromtimestamp(sd["t"] / 1000) < dt.timedelta(hours=24):
         parts.append(f"weekly {sd['u']['sd']}%")
     return " · ".join(parts)
+
+
+def context_label(ctx):
+    """A sub-agent's memory size; over the 250k limit is red (PLAYBOOK §4: hand off, never continue it)."""
+    if not ctx:
+        return "", ""
+    if ctx > big_agents.LIMIT:
+        return f"{ctx // 1000}k TOO BIG", "red"
+    return f"{ctx // 1000}k ctx", "gray"
 
 
 def subagent_state(meta, last, age_sec, parent_limited=False):
@@ -374,7 +384,8 @@ _slow = {"t": 0, "queue": "", "git": ("?", "?"), "alive": {}, "agents": [], "top
 
 
 def _tail(path, size=262144):
-    """Read only a transcript's end -> (last JSON line, model and effort of the last line that names them)."""
+    """Read only a transcript's end -> (last JSON line, model and effort of the last line that names them,
+    context tokens of the newest call)."""
     last, model, effort = {}, "", ""
     try:
         with open(path, "rb") as f:
@@ -382,7 +393,7 @@ def _tail(path, size=262144):
             f.seek(max(0, f.tell() - size))
             raws = f.read().splitlines()
     except OSError:
-        return last, model, effort
+        return last, model, effort, 0
     for raw in reversed(raws):
         try:
             e = json.loads(raw)
@@ -394,12 +405,12 @@ def _tail(path, size=262144):
         effort = effort or e.get("effort") or ""
         if model and effort:
             break
-    return last, model, effort
+    return last, model, effort, big_agents.last_context(raws)
 
 
 def scan_agents(now_ts):
     """Unfinished sub-agents of the main account's sessions and of both helpers' runs, active in the last 6 h.
-    -> [(parent cli id or helper, meta, last line, model, effort, age seconds)]."""
+    -> [(parent cli id or helper, meta, last line, model, effort, context tokens, age seconds)]."""
     roots = [(str(TRANSCRIPTS / "*" / "*" / "subagents" / "agent-*.jsonl"), None)]
     roots += [(str(hq.ACCOUNTS / h / "projects" / "*" / "*" / "subagents" / "agent-*.jsonl"), h) for h, _, _ in HELPERS]
     out = []
@@ -588,22 +599,24 @@ def build(now=None):
             names[s["cliSessionId"]] = latin(s.get("title"), 26) or f"Chat in {Path(s.get('cwd') or '?').name}"
     by_cli = {s.get("cliSessionId"): s for s in sessions if s.get("cliSessionId")}
     agents = []
-    for parent, meta, last, model, effort, age in slow["agents"]:
+    for parent, meta, last, model, effort, ctx, age in slow["agents"]:
         ps = by_cli.get(parent) or {}
         err_at = _ms(ps.get("errorAt"))
         limited = bool(ps.get("error") and "limit" in ps["error"].lower() and err_at and
                        err_at.timestamp() >= now_ts - age)
         state = subagent_state(meta, last, age, limited)
         if state:
-            agents.append((names.get(parent, "Other chat"), meta, model, effort, age, state))
+            agents.append((names.get(parent, "Other chat"), meta, model, effort, ctx, age, state))
     add(f"AGENTS working inside those sessions ({len(agents) if slow['t'] else '…'})", "bold")
     if not slow["t"]:
         add("  checking…", "gray")
     elif not agents:
         add("  none right now", "gray")
-    for parent, meta, model, effort, age, (word, colour) in sorted(agents, key=lambda a: a[4])[:12]:
+    for parent, meta, model, effort, ctx, age, (word, colour) in sorted(agents, key=lambda a: a[5])[:12]:
         add(f"  {parent[:28]:<28}{model_name(model or meta.get('model')):<10}{(effort or '?'):<8}")
         lines.append(("\0" + word.ljust(28), colour))
+        word, colour = context_label(ctx)
+        lines.append(("\0" + word.ljust(14), colour))
         lines.append(("\0" + (latin(meta.get("description"), 90) or meta.get("agentType") or "-"), ""))
     if len(agents) > 12:
         add(f"  … and {len(agents) - 12} more", "gray")

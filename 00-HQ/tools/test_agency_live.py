@@ -212,6 +212,12 @@ class SubAgents(unittest.TestCase):
         self.assertEqual(al.subagent_state({}, tool, 600, parent_limited=True), ("STOPPED: usage limit", "red"))
         self.assertEqual(al.subagent_state({}, tool, 3600), ("STOPPED? quiet 1 h 00 min", "gray"))
 
+    def test_context_label(self):
+        self.assertEqual(al.context_label(0), ("", ""))
+        self.assertEqual(al.context_label(120_400), ("120k ctx", "gray"))
+        self.assertEqual(al.context_label(250_000), ("250k ctx", "gray"))
+        self.assertEqual(al.context_label(947_100), ("947k TOO BIG", "red"))
+
 
 class Render(unittest.TestCase):
     def test_continuation_parts_and_width(self):
