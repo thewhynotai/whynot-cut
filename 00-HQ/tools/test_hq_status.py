@@ -372,6 +372,15 @@ class Phase8Fields(unittest.TestCase):
             Path(d, "inbox/h2/2026-10-22-0316-BL-04.md").write_text("**Status:** DONE", encoding="utf-8")
             self.assertEqual(list(hs.inbox_reports(Path(d))), ["BL-04"])
 
+    def test_a_fix_round_verdict_is_not_waiting_for_intake(self):
+        # the intake writes "FIX r1", "FIX r2": a decided report, not one still waiting
+        reps = {"BL-20": {"who": "h2", "file": "inbox/h2/a-BL-20.md", "status": "DONE", "mtime": 0},
+                "BL-04": {"who": "h2", "file": "inbox/h2/a-BL-04.md", "status": "DONE", "mtime": 0}}
+        verdicts = {"inbox/h2/a-BL-20.md": {"verdict": "FIX r1"}, "inbox/h2/a-BL-04.md": {"verdict": "awaiting-peer"}}
+        blocks = hs.render_report(dict(self.S, reports=reps, verdicts=verdicts), None, "t").split("## 5.")[1]
+        self.assertNotIn("a-BL-20.md", blocks)
+        self.assertIn("a-BL-04.md", blocks)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -474,7 +474,7 @@ def render_report(s, prev, slot_title, sync=None):
           if charter_status(r["status"]) == "UNKNOWN"]
     for k, v in s["reports"].items():
         verdict = s["verdicts"].get(v["file"], {}).get("verdict", "")
-        if v["status"] in ("DONE", "BLOCKED") and verdict not in ("ACCEPTED", "FIX", "answered", "noted"):
+        if v["status"] in ("DONE", "BLOCKED") and verdict.split(" ")[0] not in ("ACCEPTED", "FIX", "answered", "noted"):
             extra = f" (intake: {verdict})" if verdict else ""
             L.append(f"- تقرير {k} ({v['status']}) من {v['who'].upper()} مستني الاستلام{extra}: `{v['file']}`")
     if (s.get("preview") or {}).get("failed"):
