@@ -4,7 +4,7 @@ Nothing here calls a model. Context in use = input + cache read + cache creation
 assistant line (the same number Claude Code shows); the window size comes only from a CLI report
 (`modelUsage.<model>.contextWindow` in a run's final line), learned in WindowRegistry.
 """
-import json, os, re, time
+import collections, json, os, re, time
 
 TEXT_MAX = 400
 
@@ -81,6 +81,7 @@ class RunFeed:
         self.result = None
         self.denials = 0
         self.last_event_at = None
+        self.tool_inputs = collections.deque(maxlen=400)  # raw tool inputs (JSON), to find which card a run is on
 
     def poll(self):
         try:
@@ -138,6 +139,7 @@ class RunFeed:
                     self._event(out, "say", b["text"], ts)
                 elif b.get("type") == "tool_use":
                     self.action, self.action_at = human_tool(b.get("name"), b.get("input")), ts
+                    self.tool_inputs.append(json.dumps(b.get("input"), ensure_ascii=False))
                     self._event(out, "tool", self.action, ts)
         elif t == "tool_progress" and e.get("heartbeat") and not e.get("parent_tool_use_id"):
             self.tool_wait = int(e.get("elapsed_time_seconds") or 0)
