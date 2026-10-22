@@ -389,7 +389,8 @@ def _tail(path, size=262144):
         except ValueError:
             continue
         last = last or e
-        model = model or (e.get("message") or {}).get("model") or ""
+        m = (e.get("message") or {}).get("model") or ""
+        model = model or ("" if m.startswith("<") else m)  # "<synthetic>" = an app-written error line, not a model
         effort = effort or e.get("effort") or ""
         if model and effort:
             break
