@@ -123,8 +123,10 @@ never review yourself. Give it the card, the spec, the report, the sha, the patc
   - **Otherwise run** the parallel suite (OPS-09, 2026-10-23: ~28 min, same result as serial, every first-run
     failure counts), with the log kept:
     `bash HEAVY psuite review-<ID> -- env WNC_RUN=<this intake run's session id> PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 bash -c 'set -o pipefail; L="/d/0 Work/0 Pegasus IMC Agency/00 TWN/0 TWN AI/Editing Plugin/00-HQ/reviews/suites/review-<ID>-<sha8>.log"; bash tools/test.sh --parallel 6 2>&1 | tee "$L.part"; rc=$?; mv -f "$L.part" "$L"; exit $rc'`
-    If the reviewed tree has no `tools/test_parallel.py` (a base older than b81baaa), use the same line with
-    `suite` instead of `psuite` and `bash tools/test.sh` without `--parallel 6`. Both logs end with `Ran N tests` and
+    Use the same line with `suite` instead of `psuite`, and `bash tools/test.sh` without `--parallel 6`, when either
+    is true:
+    - `bash HEAVY status` shows RAM ≥ 75% (a psuite then waits, and it blocks every suite behind it: 10-23, 4 h);
+    - the reviewed tree has no `tools/test_parallel.py` (a base older than b81baaa). Both logs end with `Ran N tests` and
     the OK/FAILED line, so the reuse check above works for both.
   (the `WNC_RUN` tag lets the next intake end this suite if this run is cut by a usage limit, OPS-07; give the
   reviewer subagent the id and the log path). Known limit: a suite still running when the next intake ends it

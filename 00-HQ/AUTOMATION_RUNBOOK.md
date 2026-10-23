@@ -95,6 +95,11 @@ is ≈ 1.4 s slower. Keep routine prompts narrow. If a routine misbehaves, open 
 (e.g. `D:\ClaudeData\routines`) and file a card.
 
 ## 6. Incidents
+- 2026-10-23 09:55: **heavy queue blocked 4 h by the psuite switch.** RAM sat at 77-78% (the Claude app holds ~10.5 GB
+  with the open sessions). A psuite needs < 75%, and suite/psuite share one FCFS queue, so `t29-fu2c-psuite` (256 min)
+  held 3 more psuites behind it. Stopgap: queue a psuite only at RAM < 75%, else the serial suite (PLAYBOOK §2,
+  MASTER-INTAKE 1B, helper prompt, WATCHDOG). The execution chat was asked to re-queue the 4 as serial. Fix: OPS-10.
+  The 09:00 report was lost to the limit (reset 09:30) and re-run by the master at 09:52.
 - 2026-10-23 06:20: the report routine `whynot-cut-primary-report-2` was found `enabled: false` (last run 10-22
   18:03Z), so the 09:00 report would not have fired. The restart handoff lists it ON, and nobody recorded turning it
   off. The master re-enabled it. It also disabled `whynot-infra-resume-watch` (C4): Phase 8 is DONE and the handoff
