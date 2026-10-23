@@ -1,7 +1,7 @@
 # خطة المشروع التنفيذية — WhyNot Cut (Adobe Premiere Pro Plugin)
 
 <!-- AUTO:STATUS START -->
-> آخر تحديث فعلي: 2026-10-23 05:32 — Africa/Cairo
+> آخر تحديث فعلي: 2026-10-23 05:37 — Africa/Cairo
 > مصدر التحديث: hq_status.py / info@ / release/3.0 @ abdece5e
 > حالة التشغيل: RUNNING
 > حالة المزامنة: HQ = LOCAL+GITHUB_VERIFIED · release/3.0 = SYNCED
@@ -13,14 +13,14 @@
 | SETUP-H1 | H1 (Mayar) | ACCEPTED |
 | BL-16 | H1 | MERGED |
 | BL-02 | H1 | READY |
-| S6b | H1 | ACCEPTED |
+| S6b | H1 | DONE_ARCHIVED |
 | BL-17 | H1 | READY |
 | BL-19 | H1 | READY |
 | S1-R51 | H1 | READY |
 | SETUP-H2 | H2 (marketing@) | ACCEPTED |
-| BL-03 | H2 | ACCEPTED |
+| BL-03 | H2 | DONE_ARCHIVED |
 | BL-04 | H2 | FIX |
-| BL-20 | H2 | ACCEPTED |
+| BL-20 | H2 | DONE_ARCHIVED |
 | BL-27 | H2 | READY |
 | BL-22 | H2 | READY |
 | BL-18 | EXECUTOR (done) | MERGED |
@@ -36,7 +36,7 @@
 | OPS-06 | MASTER | DONE_ARCHIVED |
 | OPS-07 | MASTER | DONE_ARCHIVED |
 | OPS-08 | MASTER | DONE |
-| OPS-09 | MASTER | ACCEPTED |
+| OPS-09 | MASTER | DONE_ARCHIVED |
 | API-500 | LANE | PLANNED_NOT_AUTHORIZED |
 <!-- AUTO:STATUS END -->
 
