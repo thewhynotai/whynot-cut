@@ -622,6 +622,7 @@ def line_requirements(paths: Paths, kind: str, index: dict, cs: tuple | None = N
     check and the write see one plan). Each line: event_id, text, evidence, start_s, end_s, detected, extra, required,
     suggested. `ai_assets` lists every event that shows an AI-generated file, with or without on-screen words (`line`
     false: no review-flags row can name it today; the disclosure check covers it, M1-T2/M1-T4)."""
+    from .review_flags import APPROVAL_ONLY
     cs = client_set() if cs is None else cs
     mode = detect_mode() if mode is None else mode
     events = _plan_events(paths, kind)
@@ -644,10 +645,12 @@ def line_requirements(paths: Paths, kind: str, index: dict, cs: tuple | None = N
                 detected.setdefault("ai", []).append({"rule": "ai-generated-asset", "match": f, "in": "asset"})
         detected = {d: detected[d] for d in sorted(detected)}
         extra = sorted(set(detected) - set(cs))
+        # review_flags.write requires a domain with an approval-only hit under suggest too (review 62265cb P1-1)
+        need = [d for d in extra if mode == "review" or any(h["rule"] in APPROVAL_ONLY.get(d, ()) for h in detected[d])]
         lines.append({"event_id": eid, "text": line["text"], "evidence": ev, "start_s": line["start_s"],
                       "end_s": line["end_s"], "detected": detected, "extra": extra,
-                      "required": sorted(set(cs) | set(extra if mode == "review" else [])),
-                      "suggested": extra if mode == "suggest" else []})
+                      "required": sorted(set(cs) | set(need)),
+                      "suggested": [d for d in extra if d not in need] if mode == "suggest" else []})
     texts = {x["event_id"] for x in lines}
     assets = [{"event_id": eid, "file": f, "line": eid in texts} for eid, fs in ai_files.items() for f in fs]
     return lines, assets

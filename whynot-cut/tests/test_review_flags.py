@@ -1906,14 +1906,17 @@ class TestImpliedNeverStored(_Review, Base):
         self.assertIn("G2 has not been reviewed for medical (its words trigger it: 500 mg)", e.error)
 
     def test_a_citation_found_after_review_detect_is_switched_on(self):
+        """Review 62265cb P1-1: under `suggest` a detected citation already needs its own religious row (a medical row
+        never implies it there), so switching to `review` asks nothing more on that line."""
         put_timeline(self.p, hadith_spec())
         self.prof(domain="religious", review_detect="suggest")
-        RF.write(self.p, table(("G01", "medical", "ok", ""), ("G02", "medical", "ok", ""), ("G03", "medical", "ok", "")))
+        e = self.refused(table(("G01", "medical", "ok", ""), ("G02", "medical", "ok", ""), ("G03", "medical", "ok", "")))
+        self.assertIn("G02 has not been reviewed for religious (its words trigger it: ", e.error)
+        RF.write(self.p, table(("G01", "medical", "ok", ""), ("G02", "medical", "ok", ""),
+                               ("G02", "religious", "needs-approval", "h"), ("G03", "medical", "ok", "")))
         self.assertEqual(self.ok_flags(), {"G01": MED, "G02": MED, "G03": MED})
         self.prof(domain="religious")
-        self.assertIsNone(RF.load(self.p))
-        e = self.refused(table())
-        self.assertIn("G02 has not been reviewed for religious (its words trigger it: ", e.error)
+        self.assertIsNotNone(RF.load(self.p))
 
     def test_a_carried_older_row_is_never_restamped_as_named(self):
         self.prof(domain="religious", review_detect="off")
@@ -1955,6 +1958,118 @@ class TestImpliedNeverStored(_Review, Base):
         self.assertIsNone(RF._previous(self.p, "timeline", key)[3])
         self.file.write_text("{broken", encoding="utf-8")
         self.assertIsNone(RF._previous(self.p, "timeline", key)[3])
+
+
+SUGGEST_PROFILES = (("religious client", {"domain": "religious"}),
+                    ("medical client with religious", {"domain": "medical", "review_domains": ["religious"]}),
+                    ("general client", {}))
+
+
+class TestRound6(_Review, Base):
+    """Review 62265cb P1-1: under review_detect `suggest` a detected religious citation, verse or ruling is triggered
+    on its line, as under `review`: a `medical: ok` row never implies religious there, so the write is refused, a file
+    holding it is not current and autopilot holds it, for a religious client, a medical client whose review set adds
+    religious and a general client; an earlier ok re-implied after a lexicon update no longer counts either. The plan
+    is the Task 53 eval's planted hadith plan, read from its fixture."""
+
+    DOMAIN = None
+
+    def setUp(self):
+        super().setUp()
+        put_timeline(self.p, hadith_spec())
+
+    def pending(self) -> list:
+        from lib import autopilot as AP
+        return AP._pending(self.p, read_json(self.p.p("01_analysis/timeline-spec.json"))["events"])
+
+    MED_ONLY = (("G01", "medical", "ok", ""), ("G02", "medical", "ok", ""), ("G03", "medical", "ok", ""))
+
+    def test_a_medical_ok_row_never_clears_a_detected_citation_under_suggest(self):
+        for label, prof in SUGGEST_PROFILES:
+            with self.subTest(label):
+                self.file.unlink(missing_ok=True)
+                self.prof(**prof, review_detect="suggest")
+                e = self.refused(table(*self.MED_ONLY))
+                self.assertIn("G02 has not been reviewed for religious (its words trigger it: ", e.error)
+                self.assertNotIn("G01", e.error)
+                self.assertNotIn("G03", e.error)
+                e = self.refused(table(*self.MED_ONLY, ("G02", "religious", "ok", "")))
+                self.assertIn("G02 shows or cites a religious citation, verse or ruling (its words: ", e.error)
+                self.assertIn("never ok", e.how)
+                r = RF.write(self.p, table(*self.MED_ONLY, ("G02", "religious", "needs-approval", "h")))
+                self.assertEqual([(i["event_id"], i["flag"]) for i in r["items"]], [("G02", "religious")])
+                self.assertEqual(RF.load(self.p), filed(r))
+                self.assertIn({"event_id": "G02", "kind": "religious"}, self.pending())
+                self.assertNotIn(None, [n["event_id"] for n in self.pending()])
+
+    def test_a_file_holding_the_medical_only_table_is_not_current_under_suggest(self):
+        for label, prof in SUGGEST_PROFILES:
+            with self.subTest(label):
+                self.file.unlink(missing_ok=True)
+                self.prof(**prof, review_detect="off")             # off detects nothing: the same table is written
+                RF.write(self.p, table(*self.MED_ONLY))
+                self.assertIsNotNone(RF.load(self.p))
+                self.prof(**prof, review_detect="suggest")
+                self.assertIsNone(RF.load(self.p))
+                held = RF.held()[0]
+                self.assertIn({"event_id": None, "kind": held, "review": "missing or not current"}, self.pending())
+                e = self.refused(table())
+                self.assertIn("G02 has not been reviewed for religious (its words trigger it: ", e.error)
+
+    def test_an_earlier_ok_reimplied_after_a_lexicon_update_no_longer_counts_under_suggest(self):
+        from unittest import mock
+        from lib import review_domains as RD
+        real = RD.matchers
+        older = lambda: [m for m in real() if m[0] != "religious"]   # noqa: E731  the lexicon before the update
+        for label, prof in SUGGEST_PROFILES:
+            with self.subTest(label):
+                self.file.unlink(missing_ok=True)
+                self.prof(**prof, review_detect="suggest")
+                key = RF._domain()
+                g02 = [("G02", "religious", "ok", "")] if "religious" in key.split("+") else []
+                with mock.patch.object(RD, "matchers", older):
+                    RF.write(self.p, table(*self.MED_ONLY, *g02))
+                    self.assertIsNotNone(RF.load(self.p))
+                self.assertEqual(self.ok_flags()["G02"], ["medical", "religious"] if g02 else MED)
+                self.assertIsNone(RF.load(self.p))                 # the updated lexicon detects the citation
+                self.assertIn({"event_id": None, "kind": RF.held()[0], "review": "missing or not current"},
+                              self.pending())
+                e = self.refused(table())
+                if g02:
+                    self.assertIn("G02 shows or cites a religious citation, verse or ruling (its words: ", e.error)
+                    self.assertIn("its earlier ok no longer counts", e.error)
+                else:
+                    self.assertIn("G02 has not been reviewed for religious (its words trigger it: ", e.error)
+
+    def test_review_scan_requires_religious_on_a_detected_citation_under_suggest(self):
+        from lib import review_domains as RD
+        for label, prof in SUGGEST_PROFILES:
+            with self.subTest(label):
+                self.prof(**prof, review_detect="suggest")
+                g02 = {x["event_id"]: x for x in RD.scan(self.p)["lines"]}["G02"]
+                self.assertIn("religious", g02["required"])
+                self.assertNotIn("religious", g02["suggested"])
+
+    def test_under_review_the_refusal_names_every_religious_word_not_only_the_citation(self):
+        """Under `review` the hint of a medical-only table's refusal lists every religious word of the line (a faith
+        word and a citation), never only its approval-only words: the suggest-only merge stays out of `review` (r6
+        mutant «detected: merge under review too»). Placeholder text; the words are read from the shipped lexicon."""
+        from lib import review_domains as RD
+        terms = {r["id"]: r["terms"] for r in RD.lexicon("religious")["rules"]}
+        faith = next(t for t in terms["faith"] if t.isascii())
+        cite = next(t for t in terms["citation"] if t == "hadith")
+        g1 = event("G1", 1000, 3500, text=f"Lorem {faith} ipsum {cite} dolor")
+        put_timeline(self.p, dict(timeline_spec(), events=[g1]))
+        for label, prof in SUGGEST_PROFILES:
+            with self.subTest(label):
+                self.file.unlink(missing_ok=True)
+                self.prof(**prof, review_detect="review")
+                (x,) = RD.scan(self.p)["lines"]
+                self.assertEqual(set(x["detected"]), {"religious"})
+                self.assertEqual([h["rule"] for h in x["detected"]["religious"]], ["faith", "citation"])
+                e = self.refused(table(("G1", "medical", "ok", "")))
+                self.assertIn(f"G1 has not been reviewed for religious (its words trigger it: {faith}, {cite}) "
+                              f"(this client's checks: {RF._domain()})", e.error)
 
 
 if __name__ == "__main__":

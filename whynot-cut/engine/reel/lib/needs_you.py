@@ -471,7 +471,7 @@ def _verses(c: _Collector, spec: dict, vid: str, src: str):
 
 
 APPROVER = {"medical": ("the doctor's approval", "موافقة طبية"),
-            "religious": ("the speaker's approval", "موافقة صاحب المحتوى")}
+            "religious": ("the content owner's approval", "موافقة صاحب المحتوى")}
 NEVER_AUTO = {"medical": ("Health claims on screen are never approved automatically.",
                           "الكلام الطبي اللي على الشاشة عمره ما بيتوافق عليه تلقائي."),
               "religious": ("Religious content on screen is never approved automatically.",
@@ -524,8 +524,12 @@ HOLD_WHY = {("medical",): NEVER_AUTO["medical"],
                                        "الكلام الطبي والمحتوى الديني اللي على الشاشة عمرهم ما بيتوافق عليهم تلقائي.")}
 
 
-def _approvals(c: _Collector, cfg: _Config, p: Paths, item: str, spec: dict | None, plan_src: str | None = None,
-               has_words: bool = False):
+def _approvals(c: _Collector, cfg: _Config, p: Paths, item: str, spec: dict | None, plan_src: str | None = None):
+    """The review's rows that are not `ok`, the not-current hold (words on screen: review_flags.has_lines, as
+    autopilot) and the approval_required graphics. A religious item never quotes the words on screen (the id and
+    timecode only, as _verses), nor does any item on a line with a religious row, nor an approval_required graphic of
+    a client with religious checks (review 62265cb P3-3)."""
+    from . import review_flags
     rf = p.p("review-flags.json")
     flagged_events = set()
     current = False
@@ -535,20 +539,25 @@ def _approvals(c: _Collector, cfg: _Config, p: Paths, item: str, spec: dict | No
             read_json(rf)                                  # unreadable -> named in `unread` (and not current below)
             rows = _review_rows(p)
             current = rows is not None
+            religious = {it["event_id"] for it in rows or [] if it["flag"] == "religious"}
             for it in rows or []:
                 kind, (who_en, who_ar), unknown = _review_kind(it["flag"])
                 gid, tc, words = it["event_id"], _tc(round(float(it.get("start_s") or 0) * 1000)), it.get("text", "")
                 flagged_events.add(gid)
+                q = gid not in religious                # quote the words on screen: never on a line with religious
                 v = it.get("verdict")
                 if v == "reword-to-match":
-                    en = f"{item}: graphic {gid} at {tc} does not match what was said: approve new wording for «{words}»"
-                    ar = f"{item}: الجرافيك {gid} عند {tc} مش مطابق للكلام: وافق على صياغة جديدة بدل «{words}»"
+                    en = f"{item}: graphic {gid} at {tc} does not match what was said: approve new wording"
+                    ar = f"{item}: الجرافيك {gid} عند {tc} مش مطابق للكلام: وافق على صياغة جديدة"
+                    en, ar = (en + f" for «{words}»", ar + f" بدل «{words}»") if q else (en, ar)
                 elif v == "remove":
-                    en = f"{item}: the review advises removing graphic {gid} at {tc} («{words}»): confirm"
-                    ar = f"{item}: المراجعة بتنصح بشيل الجرافيك {gid} عند {tc} («{words}»): أكّد"
+                    w = f" («{words}»)" if q else ""
+                    en = f"{item}: the review advises removing graphic {gid} at {tc}{w}: confirm"
+                    ar = f"{item}: المراجعة بتنصح بشيل الجرافيك {gid} عند {tc}{w}: أكّد"
                 else:
-                    en = f"{item}: graphic {gid} at {tc} needs {who_en}: «{words}»"
-                    ar = f"{item}: الجرافيك {gid} عند {tc} محتاج {who_ar}: «{words}»"
+                    w = f": «{words}»" if q else ""
+                    en = f"{item}: graphic {gid} at {tc} needs {who_en}{w}"
+                    ar = f"{item}: الجرافيك {gid} عند {tc} محتاج {who_ar}{w}"
                 reason = clean(it.get("reason") or "")
                 why_en, why_ar = NEVER_AUTO[kind]
                 if unknown:
@@ -558,7 +567,7 @@ def _approvals(c: _Collector, cfg: _Config, p: Paths, item: str, spec: dict | No
                     why_ar += f" المراجعة استخدمت نوع مراجعة WhyNot Cut ما يعرفوش ({f})، فمحتاج أشد موافقة."
                 c.add(kind, en, ar, why_en + (f" Review note: {reason}" if reason else ""),
                       why_ar + (f" ملاحظة المراجعة: {reason}" if reason else ""), gid, item, src)
-    if cfg.hold and has_words and plan_src and not current:
+    if cfg.hold and plan_src and not current and review_flags.has_lines(p):
         en, ar = NOT_CURRENT[cfg.hold_checks]
         c.add(cfg.hold, f"{item}: {en}", f"{item}: {ar}", *HOLD_WHY[cfg.hold_checks], c.rel(rf), item, plan_src)
     if spec is not None:
@@ -569,8 +578,9 @@ def _approvals(c: _Collector, cfg: _Config, p: Paths, item: str, spec: dict | No
                 if not isinstance(e, dict) or not e.get("approval_required") or e.get("event_id") in flagged_events:
                     continue
                 gid, tc, words = str(e.get("event_id")), _tc(e.get("start_ms")), _event_words(e.get("params"))
-                c.add(kind, f"{item}: graphic {gid} at {tc} needs {who_en}: «{words}»",
-                      f"{item}: الجرافيك {gid} عند {tc} محتاج {who_ar}: «{words}»", *NEVER_AUTO[kind], gid, item, src)
+                q = f": «{words}»" if "religious" not in cfg.graphic_kinds else ""
+                c.add(kind, f"{item}: graphic {gid} at {tc} needs {who_en}{q}",
+                      f"{item}: الجرافيك {gid} عند {tc} محتاج {who_ar}{q}", *NEVER_AUTO[kind], gid, item, src)
 
 
 def _numbers(c: _Collector, plan: dict, item: str, src: str):
@@ -610,7 +620,7 @@ def _project(c: _Collector, cfg: _Config, vid: str, episode_words: set):
     for rel in PROJECT_PRODUCERS:
         if c.producer(p.p(rel), vid):
             owned |= PRODUCER_OWNS.get(rel, set())
-    spec, plan_src, has_words = None, None, False
+    spec, plan_src = None, None
     if motion:
         mf = p.p("01_analysis/motion-plan.json")
         if mf.exists():
@@ -620,9 +630,6 @@ def _project(c: _Collector, cfg: _Config, vid: str, episode_words: set):
                 if not isinstance(plan, dict):
                     raise TypeError("the motion plan is not an object")
                 plan_src = src
-                has_words = any(isinstance(e, dict) and isinstance(e.get("text"), str) and e["text"].strip()
-                                for sc in plan.get("scenes") or [] if isinstance(sc, dict)
-                                for e in sc.get("elements") or [])
                 _numbers(c, plan, vid, src)
                 if "music" not in owned and not (plan.get("audio") or {}).get("music"):
                     c.add("music", f"{vid}: add a licensed music track in After Effects",
@@ -639,7 +646,6 @@ def _project(c: _Collector, cfg: _Config, vid: str, episode_words: set):
                     spec = None
                     raise TypeError("the timeline spec has the wrong shape")
                 plan_src = src
-                has_words = any(isinstance(e, dict) and _event_words(e.get("params")) for e in spec.get("events") or [])
                 _verses(c, spec, vid, src)
                 music = spec.get("music") if isinstance(spec.get("music"), dict) else {}
                 if music.get("status") != "PLACED" and not cfg.no_music and "music" not in owned:
@@ -647,7 +653,7 @@ def _project(c: _Collector, cfg: _Config, vid: str, episode_words: set):
                           f"{vid}: ضيف موسيقى مرخّصة (في علامات على التايملاين لمكانها)",
                           "WhyNot Cut never adds music without a licence.",
                           "WhyNot Cut عمره ما بيحط موسيقى من غير ترخيص.", "data/Music", vid, src)
-    _approvals(c, cfg, p, vid, spec, plan_src, has_words)
+    _approvals(c, cfg, p, vid, spec, plan_src)
     if status in FINAL_STATUSES:
         ho = p.p("09_handoff/README.md")
         ref = c.rel(ho) if ho.exists() else f"output/projects/{vid}"

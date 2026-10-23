@@ -47,7 +47,8 @@ from a file before 4, where implied flags were stored as named) keeps them with 
 named. In a file of a key with religious, an ok row's medical and religious count only on a line whose words do not
 trigger them when the file's `coverage` is not exactly 4 (missing, older, newer, not an int); on every key, a row
 without `flags` (older: it counts as its file's key) or marked implied names no medical or religious its line
-triggers. The approval-only rule holds under review_detect `review` and `suggest` (the engine still detects there);
+triggers. The approval-only rule holds under review_detect `review` and `suggest` (the engine still detects there,
+and under `suggest` too such a line needs its own row for that domain: nothing implies it there, review 62265cb P1-1);
 only `off` leaves a citation to the reviewer alone. `counts()` gives the per-domain numbers from verdict rows
 plus ok flags, with the same implied coverage.
 
@@ -510,8 +511,9 @@ def _previous(paths: Paths, kind: str, key: str):
 def _detected(paths: Paths, kind: str, index: dict, key_flags: tuple) -> tuple:
     """(event id -> {domain: matched words}, event id -> {domain: matched words of its APPROVAL_ONLY hits}) for every
     domain a line's words (or the AI-generated files it shows) trigger. A triggered domain is required on that line
-    and needs its own row (never implied) under review_detect `review` (the default; `suggest` requires nothing); an
-    approval-only hit makes that row a non-ok verdict under `review` and `suggest` alike (the engine still detects
+    and needs its own row (never implied) under review_detect `review` (the default); under `suggest` only a domain
+    with an approval-only hit is (review 62265cb P1-1: a medical row never implies religious on a detected citation).
+    An approval-only hit makes that row a non-ok verdict under `review` and `suggest` alike (the engine still detects
     there). `off` detects nothing. A pointer, never a filter."""
     from .review_domains import detect_mode, line_requirements
     mode = detect_mode()
@@ -536,6 +538,9 @@ def _detected(paths: Paths, kind: str, index: dict, key_flags: tuple) -> tuple:
             only = words(h for h in hits if h.get("rule") in APPROVAL_ONLY.get(d, ()))
             if only:
                 approve.setdefault(x["event_id"], {})[d] = only
+    if mode == "suggest":
+        for eid, doms in approve.items():
+            found.setdefault(eid, {}).update(doms)
     return found, approve
 
 
@@ -759,8 +764,9 @@ def held() -> tuple:
     current, from the same review key as write() and load(). Every client is held: medical is in every review key
     (Addendum M §M7, review 0aa6e4d P2-1). kind: `religious` for a religious client or a client whose key adds religious
     (unless its profile `domain` is medical), else `medical`. checks: the key's medical and religious, so the wording
-    names every check that may be missing. graphic kinds: who approves an approval_required graphic (a medical client
-    whose key adds religious: the doctor AND the content owner). Anything unreadable holds for both (fail closed)."""
+    names every check that may be missing. graphic kinds: who approves an approval_required graphic (a key with
+    religious: the doctor AND the content owner, review 62265cb P3-5). Anything unreadable holds for both (fail
+    closed)."""
     try:
         from .common import content_domain
         d = content_domain()
@@ -769,8 +775,8 @@ def held() -> tuple:
         return "medical", LEGACY, LEGACY
     rel = "religious" in parts or d == "religious"
     kind = "religious" if rel and d != "medical" else "medical"
-    graphics = ("religious",) if d == "religious" else (LEGACY if rel else ("medical",))
-    return kind, (LEGACY if rel else ("medical",)), graphics
+    checks = LEGACY if rel else ("medical",)
+    return kind, checks, checks
 
 
 def has_lines(paths: Paths) -> bool:

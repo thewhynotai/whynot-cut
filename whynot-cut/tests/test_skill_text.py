@@ -552,7 +552,9 @@ class TestReligiousApprovalGate(unittest.TestCase):
                 flat = " ".join(s.split())
                 self.assertRegex(flat, r"religious citation, verse or ruling[^.]{0,200}never `ok`")
                 self.assertRegex(flat, r"`review_detect`")
-                self.assertRegex(flat, r"`suggest`[^.]{0,200}still[^.]{0,120}citation")
+                # review 62265cb P1-1: under suggest a detected citation needs its own religious row, never implied
+                self.assertRegex(flat, r"`suggest`[^.]{0,200}citation[^.]{0,120}its own `religious` row")
+                self.assertNotRegex(flat, r"`suggest`[^.]{0,200}still refuses an `ok`")
                 self.assertRegex(flat, r"`off`[^.]{0,200}(reviewer|you) alone")
 
 

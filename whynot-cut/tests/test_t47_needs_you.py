@@ -278,7 +278,8 @@ class TestInputs(Base):
     def test_C5_unknown_kind_skipped(self):
         put_motion(self.p, needs=[need(kind="approve"), need(kind="music2"), need()])
         doc = self.collect()
-        self.assertEqual([i["kind"] for i in doc["items"]], ["music"])
+        hold = f"output/projects/{VID}/review-flags.json"       # this bare plan cannot be read for words: held (P3-1)
+        self.assertEqual([i["kind"] for i in doc["items"] if i["ref"] != hold], ["music"])
         whys = " ".join(s["why"] for s in doc["skipped"])
         self.assertIn("approve", whys)
         self.assertIn("music2", whys)
@@ -309,7 +310,8 @@ class TestInputs(Base):
                                   need(ref=str(out / "x.wav")), need(ref=str(self.root / "data" / "Raw")),
                                   need(ref="data\\Raw\\b.wav"), need(kind="words", ref="S3")])
         doc = self.collect()
-        got = {i["ref"]: i.get("ref_exists") for i in doc["items"]}
+        hold = f"output/projects/{VID}/review-flags.json"       # this bare plan cannot be read for words: held (P3-1)
+        got = {i["ref"]: i.get("ref_exists") for i in doc["items"] if i["ref"] != hold}
         self.assertEqual(got, {"data/Music/gone.wav": False, "data/Raw": True, "data/Raw/b.wav": False, "S3": None})
         self.assertNotIn("ref_exists", next(i for i in doc["items"] if i["ref"] == "S3"))
         self.assertEqual(len(doc["skipped"]), 2)
@@ -665,8 +667,9 @@ class TestAutoApprove(Base):
         profile(self.root, "profile.json", {"domain": "religious"})
         RF.write(self.p, {"items": [{"event_id": i, "flag": f, "verdict": "ok", "reason": ""}   # G2 is a dose: its
                                     for i, f in (("G1", "religious"), ("G2", "religious"), ("G2", "medical"))]})  # own medical row
-        rec = AP().approve(self.p)
-        self.assertEqual(rec["not_covered"], [{"event_id": "G2", "kind": "religious"}])
+        rec = AP().approve(self.p)                              # review 62265cb P3-5: the doctor too
+        self.assertEqual(rec["not_covered"], [{"event_id": "G2", "kind": "medical"},
+                                              {"event_id": "G2", "kind": "religious"}])
         self.assertEqual([i["ref"] for i in by_kind(self.collect(), "religious")], ["G2"])
         rf = self.p.p("review-flags.json")                     # religious rows alone on the dose line: held
         doc = read_json(rf)                                     # (review 9a4fdc7 P3-6)
@@ -793,6 +796,102 @@ class TestAutoApprove(Base):
         put_spec(self.p, events=[cut, event("G1", 1000, 3500, text="placeholder words")])
         self.assertEqual(AP().approve(self.p)["not_covered"],
                          [{"event_id": None, "kind": "medical", "review": "missing or not current"}])
+
+    def test_A18_words_only_in_body_or_lines_still_hold_in_needs_you(self):
+        """Review 62265cb P3-1: NEEDS-YOU decides "words on screen" as autopilot does (review_flags.has_lines), so a
+        plan held for a missing review always has its NEEDS-YOU line, also when the words are only in `body` or
+        `lines`."""
+        prefs(self.root, approval="auto")
+        rf_ref = f"output/projects/{VID}/review-flags.json"
+        cut = event("G3", 7250, 7350)
+        cut["template"] = "flash_transition"
+        put_spec(self.p, events=[cut])                           # no words on screen: neither holds
+        self.assertEqual(AP().approve(self.p)["not_covered"], [])
+        self.assertEqual([i for i in self.collect()["items"] if i["ref"] == rf_ref], [])
+        for params in ({"body": "placeholder words"}, {"lines": ["placeholder words"]}, {"items": ["placeholder words"]}):
+            with self.subTest(params):
+                self.p.p("01_analysis/plan-approval.json").unlink(missing_ok=True)
+                put_spec(self.p, events=[event("G5", 1000, 3500, **params)])
+                self.assertIn({"event_id": None, "kind": "medical", "review": "missing or not current"},
+                              AP().approve(self.p)["not_covered"])
+                got = [i for i in self.collect()["items"] if i["ref"] == rf_ref]
+                self.assertEqual(len(got), 1)
+                self.assertIn("missing or not current", got[0]["text"])
+
+    def test_A19_a_religious_item_never_quotes_the_words_on_screen(self):
+        """Review 62265cb P3-3/P3-4: a religious item gives the graphic's id and timecode only, never its words (as
+        `_verses` does); a medical item on the same line does not quote them either. The approver is the content
+        owner in English too. The plan is the Task 53 eval's planted hadith plan, read from its fixture."""
+        plant = SK / "evals" / "review-religious-hadith-attribution" / "plant" / "timeline-spec.json"
+        spec = json.loads(plant.read_text(encoding="utf-8"))
+        write_json(self.p.p("01_analysis/timeline-spec.json"), spec)
+        profile(self.root, "profile.json", {"domain": "religious"})
+        (g02,) = [e for e in spec["events"] if e["event_id"] == "G02"]
+        shown = [s for s in RF._strings(g02["params"]) if s.strip()]
+        self.assertTrue(shown)
+        for verdict in ("needs-approval", "reword-to-match", "remove"):
+            with self.subTest(verdict):
+                RF.write(self.p, {"items": [
+                    {"event_id": "G01", "flag": "medical", "verdict": "ok", "reason": ""},
+                    {"event_id": "G02", "flag": "religious", "verdict": verdict, "reason": "x"},
+                    {"event_id": "G02", "flag": "medical", "verdict": "needs-doctor-approval", "reason": "x"},
+                    {"event_id": "G03", "flag": "medical", "verdict": "ok", "reason": ""}]})
+                got = [i for i in self.collect()["items"] if i["ref"] == "G02"]
+                self.assertEqual(sorted(i["kind"] for i in got), ["medical", "religious"])
+                for it in got:
+                    self.assertIn("G02", it["text"])
+                    for s in shown:
+                        self.assertNotIn(s, it["text"])
+                        self.assertNotIn(s, it["text_ar"])
+                    self.assertNotIn("«", it["text"])
+                    self.assertNotIn("«", it["text_ar"])
+                NY().write(self.root)
+                md = (self.root / "output/NEEDS-YOU.md").read_text(encoding="utf-8")
+                for s in shown:
+                    self.assertNotIn(s, md)
+        (rel,) = [i for i in self.collect()["items"] if i["ref"] == "G02" and i["kind"] == "religious"]
+        self.assertIn("graphic G02 at ", rel["text"])
+        RF.write(self.p, {"items": [{"event_id": "G02", "flag": "religious", "verdict": "needs-approval", "reason": "x"},
+                                    {"event_id": "G02", "flag": "medical", "verdict": "ok", "reason": ""}]})
+        (rel,) = [i for i in self.collect()["items"] if i["ref"] == "G02"]
+        self.assertIn("needs the content owner's approval", rel["text"])
+        self.assertNotIn("speaker", rel["text"])
+        self.assertIn("موافقة صاحب المحتوى", rel["text_ar"])
+
+    def test_A20_a_religious_clients_graphic_goes_to_the_content_owner_and_the_doctor(self):
+        """Review 62265cb P3-5: medical is in every review key, so a religious client's approval_required graphic is
+        listed for the doctor AND the content owner, in autopilot's not_covered and in NEEDS-YOU, without its words."""
+        prefs(self.root, approval="auto")
+        profile(self.root, "profile.json", {"domain": "religious"})
+        self.assertEqual(RF.held(), ("religious", ("medical", "religious"), ("medical", "religious")))
+        RF.write(self.p, {"items": [{"event_id": i, "flag": f, "verdict": "ok", "reason": ""}
+                                    for i, f in (("G1", "religious"), ("G2", "religious"), ("G2", "medical"))]})
+        self.assertEqual(AP().approve(self.p)["not_covered"], [{"event_id": "G2", "kind": "medical"},
+                                                               {"event_id": "G2", "kind": "religious"}])
+        doc = self.collect()
+        for kind in ("medical", "religious"):
+            (it,) = [i for i in by_kind(doc, kind) if i["ref"] == "G2"]
+            self.assertNotIn("Take 500 mg daily", it["text"])
+            self.assertNotIn("«", it["text_ar"])
+        profile(self.root, "profile.json", {"domain": "medical"})   # a medical client's graphic: the doctor, quoted
+        self.p.p("review-flags.json").unlink()
+        full_review(self.p)
+        (it,) = [i for i in by_kind(self.collect(), "medical") if i["ref"] == "G2"]
+        self.assertIn("«Take 500 mg daily»", it["text"])
+        self.assertEqual(by_kind(self.collect(), "religious"), [])
+
+    def test_A21_a_medical_item_still_quotes_its_words(self):
+        """Review 62265cb P3-3 keeps a medical item as it was: on a line without a religious row it quotes the words
+        on screen, for every verdict."""
+        for verdict, en in (("needs-doctor-approval", "needs the doctor's approval: «Take 500 mg daily»"),
+                            ("reword-to-match", "approve new wording for «Take 500 mg daily»"),
+                            ("remove", "graphic G2 at 0:04 («Take 500 mg daily»): confirm")):
+            with self.subTest(verdict):
+                RF.write(self.p, {"items": [{"event_id": "G1", "flag": "medical", "verdict": "ok", "reason": ""},
+                                            {"event_id": "G2", "flag": "medical", "verdict": verdict, "reason": "x"}]})
+                (it,) = [i for i in by_kind(self.collect(), "medical") if i["ref"] == "G2"]
+                self.assertIn(en, it["text"])
+                self.assertIn("«Take 500 mg daily»", it["text_ar"])
 
     def test_A9_failed_replan_is_refused(self):
         prefs(self.root, approval="auto")

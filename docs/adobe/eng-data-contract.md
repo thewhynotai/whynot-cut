@@ -511,9 +511,11 @@ to the item or client folder, no links, cached by mtime and inode. "NEW file" me
      it says `"implied": true`. Such a line is "not current" until it gets its own row (the panel shows it as not
      reviewed, never as ok). A line whose words hold a religious citation, verse or ruling is never `ok` for
      religious: it carries a `needs-approval`, `reword-to-match` or `remove` row for the content owner. That rule holds
-     under the profile's `review_detect` `review` and `suggest` (the engine still detects there); `off` detects nothing.
-   - While a plan with words on screen has no current review (missing, stale, or a triggered line without its own row),
-     NEEDS-YOU lists it and autopilot holds it, for every client (medical is in every review key).
+     under the profile's `review_detect` `review` and `suggest` (the engine still detects there, and under `suggest`
+     too that line needs its own religious row: another row never implies religious on it); `off` detects nothing.
+   - While a plan with words on screen (graphic or scene text; captions are not part of this review) has no current
+     review (missing, stale, or a triggered line without its own row), NEEDS-YOU lists it and autopilot holds it, for
+     every client (medical is in every review key). A plan with no graphic or scene text is not held.
    - ok row shape: `{"event_id", "text", "flags", "implied"?: true}`.
    - The file stores EVERY reviewed line. `items` are the flagged lines: `{"event_id", "flag", "verdict", "text",
      "start_s", "end_s", "reason", "carried"?}`. `flag` is any registry domain (medical, religious, business, ai) and
