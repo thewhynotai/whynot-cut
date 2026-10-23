@@ -651,8 +651,11 @@ def _same_copy(rec: dict, out: Path) -> bool:
     name, by a restore or a sync of that one file, is made again, never reused): the same size, and the same time
     (within COPY_MTIME_SLACK_S) or, when only the time changed (a re-sync, a copy tool that does not keep times, a FAT
     time shift), the same full sha256 (`out_sha256`; r5, review e4ff6cc P3-3: no encode for a time-only change). A
-    record without these values (written before) never matches, so that copy is made again once. Limit: a copy
-    swapped for other bytes with the same size and time is reused; nothing cheap tells them apart."""
+    record without these values (written before) never matches, so that copy is made again once. A copy that can't be
+    read for its hash is made again, never reused unchecked. After a time-only reuse the sidecar keeps the old
+    `out_mtime`, so each later call for this copy hashes it again (safe; it costs a read only while a record is being
+    remade). Limit: a copy swapped for other bytes with the same size and time is reused; nothing cheap tells them
+    apart."""
     try:
         st = os.lstat(out)
     except OSError:

@@ -1717,6 +1717,27 @@ class TestT26R4CopyFile(_Out):
         self.assertFalse(r2["reused"])
 
 
+class TestT26R6CopyUnreadable(_Out):
+    """Task 26 r6 (review 6d7433c P3-3, M19): a copy whose time changed and that can't be read for its hash (a scanner
+    holds it, a share dropped) is made again, never reused unchecked."""
+
+    def test_a_copy_that_cannot_be_hashed_is_made_again(self):
+        m, r1 = self.conform("tag60_real30")
+        out = Path(r1["path"])
+        t = out.stat().st_mtime + 3600
+        os.utime(out, (t, t))
+        real = MN._sha256
+
+        def held(path):
+            if Path(path) == out:
+                raise PermissionError(13, "held by a scanner")
+            return real(path)
+        with mock.patch.object(MN, "_sha256", held):
+            self.assertFalse(MN._same_copy(json.loads(Path(r1["sidecar"]).read_text(encoding="utf-8")), out))
+        m, r2 = self.conform("tag60_real30")
+        self.assertTrue(r2["reused"])                                                 # the control: readable
+
+
 class TestT26R5CopyTimeOnly(_Out):
     """Task 26 r5 (review e4ff6cc P3-3): a copy whose time changed but not its bytes (a re-sync, a copy tool that does
     not keep times, a FAT time shift) is checked against the sidecar's full sha256 and reused, never encoded again."""

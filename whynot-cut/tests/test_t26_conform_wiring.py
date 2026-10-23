@@ -2047,8 +2047,8 @@ class TestR5Gaps(_R3):
     def beat(self, cp, me, wrap):
         """Run the heartbeat on `cp` with json.loads / json.dumps wrapped by `wrap`; returns after ~10 beats."""
         stop = threading.Event()
-        with mock.patch.object(media, "HEARTBEAT_S", 0.05), wrap:
-            t = threading.Thread(target=media._heartbeat, args=(cp, me, stop))
+        with mock.patch.object(media, "HEARTBEAT_S", 0.05), mock.patch.object(media, "BEAT_RETRY_S", 0.05), wrap:
+            t = threading.Thread(target=media._heartbeat, args=(cp, me, stop))   # r6: the retry is its own delay
             t.start()
             time.sleep(0.6)
             stop.set()
@@ -2112,6 +2112,267 @@ class TestR5Gaps(_R3):
             stop.set()
             t.join(10)
         self.assertEqual(cp.read_text(encoding="utf-8"), '{"pid": ')
+
+
+# --------------------------------------------------------------------------- fix round 6 (review 6d7433c)
+class TestR6NothingWaiting(_R3):
+    """P3-1: "nothing was waiting" means exactly what `reel conform --wait` would not remake (the rule _refresh
+    uses): a failed record, a not_needed one whose source changed, or a measured file without a record is waiting.
+    The line holds when no copy exists (every file ready, or needing no copy)."""
+
+    def refused(self, p, read_only=False):
+        """`--wait` with the claim refused (and preflight.json read-only: nothing can be recorded)."""
+        import stat as st_
+        from lib import writer_lock as WL
+        pf = p.p("00_inputs/preflight.json")
+        if read_only:
+            os.chmod(pf, st_.S_IREAD)
+            self.addCleanup(os.chmod, pf, st_.S_IREAD | st_.S_IWRITE)
+        with mock.patch.object(WL, "_create", side_effect=PermissionError(13, "Access is denied")), \
+                mock.patch.object(media, "CLAIM_CREATE_S", 0.3):
+            return self.wait(p)
+
+    def test_a_failed_record_is_waiting(self):
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        with mock.patch.object(MN, "_engine_ffmpeg", lambda: None):
+            self.assertEqual(self.job(p)["state"], "failed")
+        res = self.refused(p, read_only=True)
+        self.assertEqual((res["job"], res["state"]), ("failed", "failed"))
+        self.assertNotEqual(res["lines"], _lines_of(media._NOT_STARTED))
+        self.assertIn("original", res["lines"]["en"][0])
+        self.assertEqual(self.imp(p, f)["use"], "original")
+
+    def test_a_not_needed_file_replaced_by_one_that_needs_a_copy_is_waiting(self):
+        p, f = self.clip("cfr30", fname="clip.mp4")
+        self.preflight(p, f)
+        self.assertEqual(self.rec(p)["state"], "not_needed")
+        shutil.copyfile(FX / "tag60_real30.mp4", f)                             # a VFR re-export, same name
+        res = self.refused(p, read_only=True)
+        self.assertEqual((res["job"], res["state"]), ("failed", "failed"))
+        self.assertNotEqual(res["lines"], _lines_of(media._NOT_STARTED))
+
+    def test_a_measured_file_without_a_record_is_waiting(self):
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        doc = self.doc(p)
+        doc["files"][0]["normalise"].pop("conform")
+        write_json(p.p("00_inputs/preflight.json"), doc)
+        res = self.refused(p, read_only=True)
+        self.assertEqual(res["job"], "failed")
+        self.assertNotEqual(res["lines"], _lines_of(media._NOT_STARTED))
+
+    def test_an_item_that_needs_no_copy_gets_a_true_line(self):
+        p, f = self.clip("cfr30")
+        self.preflight(p, f)
+        res = self.refused(p)
+        self.assertEqual((res["job"], res["state"]), ("failed", "not_needed"))
+        self.assertEqual(res["lines"], _lines_of(media._NOT_STARTED))
+        self.assertIn("needs no copy", media._NOT_STARTED[0])
+        self.assertNotIn("every evenly timed / SDR copy of this clip is ready", media._NOT_STARTED[0])
+
+    def test_a_reel_whose_parts_are_ready(self):                                 # M21: the reel's own windows
+        from lib import writer_lock as WL
+        ep = make_vfr(self.root / "data" / "Episodes" / "EP3.mp4", seconds=4)
+        p = Paths(self.root, "EP3_R01")
+        p.ensure_project()
+        write_json(p.p("00_inputs/source.json"), {"footage": "data/Episodes/EP3.mp4", "in_ms": 2500, "out_ms": 5000,
+                                                  "kind": "episode_reel", "episode_id": "EP3", "reel_id": "R01"})
+        self.preflight(p, ep)
+        self.assertEqual(self.job(p)["state"], "ready")
+        with mock.patch.object(WL, "_create", side_effect=PermissionError(13, "Access is denied")), \
+                mock.patch.object(media, "CLAIM_CREATE_S", 0.3):
+            res = self.job(p, wait_s=5)
+        self.assertEqual((res["job"], res["state"]), ("failed", "ready"))
+        self.assertEqual(res["lines"], _lines_of(media._NOT_STARTED))
+
+    def test_the_same_rule_as_the_refresh(self):
+        """_waiting asks _next_record, the one rule _refresh applies; they can't drift apart."""
+        import inspect
+        self.assertIn("_next_record(", inspect.getsource(media._refresh))
+        self.assertIn("_next_record(", inspect.getsource(media._waiting))
+
+
+class TestR6LiveL9(_R3):
+    """The review's live L9, again: a failed item, a real deny-create ACE on its 00_inputs, the real CLI
+    `reel conform --wait`. It must say the original is used, never "nothing was waiting"."""
+
+    def deny_create(self, folder):
+        return TestR4FolderCannotBeWritten.deny_create(self, folder)
+
+    def test_l9_a_failed_item_on_a_folder_that_cannot_be_written(self):
+        p, f = self.clip("tag60_real30")
+        self.preflight(p, f)
+        with mock.patch.object(MN, "_engine_ffmpeg", lambda: None):
+            self.assertEqual(self.job(p)["state"], "failed")
+        undo = self.deny_create(p.p("00_inputs"))
+        rc, doc, out = reel(self.root, "conform", "--wait", video_id="V1")
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("Traceback", out)
+        self.assertEqual((doc["job"], doc["state"]), ("failed", "failed"), doc)
+        self.assertNotEqual(doc["lines"], _lines_of(media._NOT_STARTED))
+        self.assertIn("original", doc["lines"]["en"][0])
+        self.assertTrue(ARABIC.search(doc["lines"]["ar"][0]))
+        self.assertEqual(self.imp(p, f)["use"], "original")
+        undo()
+        self.assertEqual(self.wait(p)["state"], "ready")
+
+
+class TestR6TornClaim(_R3):
+    """P3-2: the repair writes only the file this job wrote (the same file id, and not empty), at once (BEAT_RETRY_S),
+    never another job's claim that replaced it in the meantime."""
+
+    def claim(self):
+        return TestR5Gaps.claim(self)
+
+    def broken_once(self, cp, then=None):
+        real, n, broke = json.dumps, [], threading.Event()
+
+        def torn(obj, *a, **k):
+            n.append(1)
+            if len(n) == 1:                                                     # the write breaks half-way
+                with open(cp, "r+", encoding="utf-8") as g:
+                    g.write('{"pid": ')
+                    g.truncate()
+                if then:
+                    then()
+                broke.set()
+                raise OSError(28, "No space left on device")
+            return real(obj, *a, **k)
+        return mock.patch("json.dumps", torn), broke
+
+    def test_another_jobs_new_claim_is_never_written_over(self):
+        cp, me = self.claim()
+        wrap, broke = self.broken_once(cp)
+        stop = threading.Event()
+        with mock.patch.object(media, "HEARTBEAT_S", 0.05), mock.patch.object(media, "BEAT_RETRY_S", 0.3), wrap:
+            t = threading.Thread(target=media._heartbeat, args=(cp, me, stop))
+            t.start()
+            self.assertTrue(broke.wait(10))
+            tmp = cp.with_name("other.tmp")
+            tmp.write_text("", encoding="utf-8")                                # another job's O_EXCL create,
+            for _ in range(200):                                                # its json.dump not yet written
+                try:
+                    os.replace(tmp, cp)
+                    break
+                except PermissionError:
+                    time.sleep(0.005)
+            time.sleep(0.8)
+            stop.set()
+            t.join(10)
+        self.assertEqual(cp.read_text(encoding="utf-8"), "")
+
+    def test_its_own_torn_write_is_repaired_at_once(self):
+        cp, me = self.claim()
+        wrap, broke = self.broken_once(cp, then=lambda: setattr(media, "HEARTBEAT_S", 5.0))   # the next regular
+        stop = threading.Event()                                                               # beat is far off
+        with mock.patch.object(media, "HEARTBEAT_S", 0.05), mock.patch.object(media, "BEAT_RETRY_S", 0.05), wrap:
+            t = threading.Thread(target=media._heartbeat, args=(cp, me, stop))
+            t.start()
+            self.assertTrue(broke.wait(10))
+            time.sleep(0.5)
+            got = json.loads(cp.read_text(encoding="utf-8"))
+            stop.set()
+            t.join(10)
+        self.assertIn("beat_at", got)
+        self.assertEqual(got, me)
+
+    def test_an_empty_claim_is_never_written(self):
+        cp, me = self.claim()
+        real, n, broke = json.dumps, [], threading.Event()
+
+        def emptied(obj, *a, **k):
+            n.append(1)
+            if len(n) == 1:                                                     # the write broke with nothing in
+                with open(cp, "r+", encoding="utf-8") as g:
+                    g.truncate()
+                broke.set()
+                raise OSError(28, "No space left on device")
+            return real(obj, *a, **k)
+        stop = threading.Event()
+        with mock.patch.object(media, "HEARTBEAT_S", 0.05), mock.patch.object(media, "BEAT_RETRY_S", 0.05), \
+                mock.patch("json.dumps", emptied):
+            t = threading.Thread(target=media._heartbeat, args=(cp, me, stop))
+            t.start()
+            self.assertTrue(broke.wait(10))
+            time.sleep(0.5)
+            stop.set()
+            t.join(10)
+        self.assertEqual(cp.read_text(encoding="utf-8"), "")                    # left: it may be a new job's
+
+    def test_the_retry_is_well_inside_the_unreadable_bound(self):
+        self.assertLess(media.BEAT_RETRY_S * 3, media.CLAIM_WRITING_S)
+
+
+class TestR6bMutantGaps(_R3):
+    """r6 mutants W03, T01 and T04 survived; these pin the behaviour each one broke."""
+
+    def claim(self):
+        return TestR5Gaps.claim(self)
+
+    def broken_once(self, cp, then=None):
+        return TestR6TornClaim.broken_once(self, cp, then)
+
+    def test_a_measured_file_that_needs_no_copy_and_has_no_record_gets_one(self):   # W03
+        p, f = self.clip("cfr30")
+        self.preflight(p, f)
+        self.assertEqual(self.rec(p)["state"], "not_needed")
+        doc = self.doc(p)
+        doc["files"][0]["normalise"].pop("conform")
+        write_json(p.p("00_inputs/preflight.json"), doc)
+        self.wait(p)
+        rec = self.rec(p)
+        self.assertEqual(rec["state"], "not_needed", rec)
+        self.assertTrue(rec.get("source_tag"), rec)
+        self.assertEqual(self.imp(p, f)["state"], "not_needed")
+
+    def test_another_jobs_half_written_claim_is_never_written_over(self):           # T01
+        cp, me = self.claim()
+        wrap, broke = self.broken_once(cp)
+        stop = threading.Event()
+        half = '{"pid": 4242, "started_'                                        # another job's json.dump, mid-way
+        with mock.patch.object(media, "HEARTBEAT_S", 0.05), mock.patch.object(media, "BEAT_RETRY_S", 0.3), wrap:
+            t = threading.Thread(target=media._heartbeat, args=(cp, me, stop))
+            t.start()
+            self.assertTrue(broke.wait(10))
+            tmp = cp.with_name("other.tmp")
+            tmp.write_text(half, encoding="utf-8")                             # a new file: another file id
+            for _ in range(200):
+                try:
+                    os.replace(tmp, cp)
+                    break
+                except PermissionError:
+                    time.sleep(0.005)
+            time.sleep(0.8)
+            stop.set()
+            t.join(10)
+        self.assertEqual(cp.read_text(encoding="utf-8"), half)
+
+    def test_after_the_repair_the_beat_goes_back_to_its_own_pace(self):             # T04
+        cp, me = self.claim()
+        real, n, broke = json.dumps, [], threading.Event()
+
+        def torn(obj, *a, **k):                                                 # counts every beat's write
+            n.append(1)
+            if len(n) == 1:                                                     # the write breaks half-way
+                with open(cp, "r+", encoding="utf-8") as g:
+                    g.write('{"pid": ')
+                    g.truncate()
+                media.HEARTBEAT_S = 5.0                                         # the next regular beat is far off
+                broke.set()
+                raise OSError(28, "No space left on device")
+            return real(obj, *a, **k)
+        stop = threading.Event()
+        with mock.patch.object(media, "HEARTBEAT_S", 0.05), mock.patch.object(media, "BEAT_RETRY_S", 0.05), \
+                mock.patch("json.dumps", torn):
+            t = threading.Thread(target=media._heartbeat, args=(cp, me, stop))
+            t.start()
+            self.assertTrue(broke.wait(10))
+            time.sleep(1.0)
+            stop.set()
+            t.join(10)
+        self.assertIn("beat_at", json.loads(cp.read_text(encoding="utf-8")))
+        self.assertEqual(len(n), 2, n)                                          # the broken write and the repair only
 
 
 if __name__ == "__main__":

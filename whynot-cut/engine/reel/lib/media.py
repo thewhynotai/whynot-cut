@@ -454,6 +454,8 @@ JOB_REL = "00_inputs/conform-job"       # its OS lock file is conform-job.lock (
 CLAIM_REL = "00_inputs/conform-job.claim"   # the running job's own record (O_EXCL: pid, process start, computer): the
                                         # exclusion where the volume takes no OS locks (macOS SMB/AFP, cloud drives)
 HEARTBEAT_S = 60.0                      # the running job rewrites its claim (beat_at) this often
+BEAT_RETRY_S = 1.0                      # a beat whose own write broke half-way is tried again this soon (not a full
+                                        # HEARTBEAT_S later): a torn claim counts as gone after CLAIM_WRITING_S
 CLAIM_STALE_S = 600.0                   # another computer's claim whose file is older than this is gone (crashed or
                                         # asleep): ten beats, room for a cloud folder's sync delay
 CLAIM_WRITING_S = 10.0                  # an unreadable claim younger than this is still being written
@@ -500,10 +502,10 @@ _NO_WRITE = ("This clip's 00_inputs folder (or its preflight.json) can't be writ
              "فولدر 00_inputs بتاع الفيديو ده (أو ملف preflight.json اللي فيه) مش مسموح الكتابة فيه، فالنسخة المظبوطة "
              "مش هتتعمل ولا هتتسجل: هنستخدم الأصلي. ادّي اليوزر ده صلاحية الكتابة على فولدر العميل (أو اقفل البرنامج "
              "اللي ماسكه)، وبعدين شغّل reel conform --wait.")
-_NOT_STARTED = ("The background job could not start, but nothing was waiting for it: every evenly timed / SDR copy of "
-                "this clip is ready and still matches its source.",
-                "الشغل اللي في الخلفية ماقدرش يبدأ، بس مكانش فيه حاجة مستنياه: كل النسخ المظبوطة للفيديو ده جاهزة "
-                "ولسه مطابقة للأصل.")
+_NOT_STARTED = ("The background job could not start, but nothing was waiting for it: every file of this clip either "
+                "has its evenly timed / SDR copy ready or needs no copy, and still matches its source.",
+                "الشغل اللي في الخلفية ماقدرش يبدأ، بس مكانش فيه حاجة مستنياه: كل ملف في الفيديو ده يا إما نسخته "
+                "المظبوطة جاهزة يا إما مش محتاج نسخة، ولسه مطابق للأصل.")
 # Why a `ready` copy can't be used (conform_current, _copy_problem): code -> (English, Arabic). The English text is the
 # record's / result's `reason`; the Arabic one goes into the Arabic build line (review 17729fc P3-4).
 _WHY = {
@@ -786,38 +788,45 @@ def _measured(doc) -> list:
             and isinstance(x.get("normalise"), dict) and isinstance(x["normalise"].get("decision"), dict)]
 
 
+def _next_record(paths: Paths, fr: dict, retry_failed: bool):
+    """The one rule for what a measured file's conform record becomes before a job (pure: nothing is written): the
+    record itself when it stays as it is, else the new one. A stale `ready` (or a not_needed whose source changed)
+    -> pending, a missing record -> pending or not_needed, a `failed` one -> pending when `retry_failed`. _refresh
+    applies it; _waiting asks it (review 6d7433c P3-1: the two can't drift apart)."""
+    nz, src = fr["normalise"], fr["path"]
+    dec, rec = nz["decision"], nz.get("conform")
+    state = rec.get("state") if isinstance(rec, dict) else None
+    if not dec.get("actions"):
+        f = _facts(paths, src)
+        if state == "not_needed" and f and (f["tag"], f["size"]) == (rec.get("source_tag"), rec.get("source_size")):
+            return rec
+        if state is None:
+            return _record(paths, src, "not_needed")
+        if state != "pending":
+            return _pending(paths, src, dec, "the source changed: it is measured again")
+        return rec
+    if state == "ready":
+        why = conform_current(paths, src, rec, dec, conform_windows(paths, src))
+        return _pending(paths, src, dec, f"the copy is stale ({why}): it is made again") if why else rec
+    if state == "failed" and not retry_failed:
+        return rec
+    if state != "pending":
+        return _pending(paths, src, dec, "queued: the copy is made again" if state == "failed" else
+                        "queued: the copy is made after the preflight")
+    return rec
+
+
 def _refresh(paths: Paths, retry_failed: bool) -> list:
-    """Under preflight.json's lock: a stale `ready` (or a not_needed whose source changed) -> pending, a missing
-    record -> pending or not_needed, a `failed` one -> pending when `retry_failed`. Writes only when something changed.
-    Returns the sources still to make (pending)."""
+    """Under preflight.json's lock: each measured file's record as _next_record says. Writes only when something
+    changed. Returns the sources still to make (pending)."""
     pf = paths.p("00_inputs/preflight.json")
     todo = []
     with file_locked(pf):
         doc = _read_doc(pf)
         changed = False
         for fr in _measured(doc):
-            nz, src = fr["normalise"], fr["path"]
-            dec, rec = nz["decision"], nz.get("conform")
-            state = rec.get("state") if isinstance(rec, dict) else None
-            new = rec
-            if not dec.get("actions"):
-                f = _facts(paths, src)
-                if state == "not_needed" and f and (f["tag"], f["size"]) == (rec.get("source_tag"),
-                                                                             rec.get("source_size")):
-                    continue
-                if state is None:
-                    new = _record(paths, src, "not_needed")
-                elif state != "pending":
-                    new = _pending(paths, src, dec, "the source changed: it is measured again")
-            elif state == "ready":
-                why = conform_current(paths, src, rec, dec, conform_windows(paths, src))
-                if why:
-                    new = _pending(paths, src, dec, f"the copy is stale ({why}): it is made again")
-            elif state == "failed" and not retry_failed:
-                continue
-            elif state != "pending":
-                new = _pending(paths, src, dec, "queued: the copy is made again" if state == "failed" else
-                               "queued: the copy is made after the preflight")
+            nz, src, rec = fr["normalise"], fr["path"], fr["normalise"].get("conform")
+            new = _next_record(paths, fr, retry_failed)
             if new is not rec:
                 nz["conform"] = new
                 changed = True
@@ -966,27 +975,34 @@ def _heartbeat(cp: Path, me: dict, stop) -> None:
     takeover's move-aside compare still sees it) with a new `beat_at`. Its file time stays fresh, and a cloud folder
     syncs the change. Only while the claim is still ours: another job's claim is never written over, and the beat
     stops once the claim is gone. `me` follows each write, so the end-of-job check still knows the claim as ours. A
-    beat that fails (a held file, a torn read) is tried again at the next one; when this beat's own write broke
-    half-way, the next beat writes the claim whole again (review e4ff6cc note), never a torn claim it did not write."""
+    beat that fails (a held file, a torn read) is tried again at the next one. When this beat's own write broke
+    half-way, it is tried again after BEAT_RETRY_S, and only on the file it wrote: the same file id (st_dev, st_ino)
+    as at that write, and not empty (review 6d7433c P3-2). A claim that replaced it (another job's takeover, even
+    one still empty) is never written over. Limits: until the repair, other computers see an unreadable claim, which
+    counts as live for CLAIM_WRITING_S and as gone after that; on a volume that gives no file id (st_ino 0) a torn
+    claim is never repaired, so it is gone after CLAIM_WRITING_S (another job may take the item over)."""
     import json
-    torn = False                                            # this beat's own write broke after it began
-    while not stop.wait(HEARTBEAT_S):
+    import os
+    torn = None                                             # the file id of our own write that broke after it began
+    while not stop.wait(BEAT_RETRY_S if torn else HEARTBEAT_S):
         try:
             with open(cp, "r+", encoding="utf-8") as f:
+                st = os.fstat(f.fileno())
+                ident = (st.st_dev, st.st_ino) if st.st_ino else None
                 try:
                     cur = json.loads(f.read())
                 except ValueError:
-                    if not torn:
+                    if not torn or ident != torn or st.st_size <= 0:
                         continue                            # someone else's, being written: the next beat looks again
-                    cur = me                                # our own broken write: written whole below
+                    cur = me                                # our own broken write, in our own file: written whole
                 if cur != me:
                     return                                  # not ours any more
                 new = dict(me, beat_at=now_iso())
                 f.seek(0)
-                torn = True
+                torn = ident or False
                 f.write(json.dumps(new, ensure_ascii=False))
                 f.truncate()
-                torn = False
+                torn = None
             me.clear()
             me.update(new)
         except FileNotFoundError:
@@ -1073,14 +1089,15 @@ def _job_running(paths: Paths) -> bool:
 
 
 def _waiting(paths: Paths) -> bool:
-    """Is anything of this item still to be made: a pending record, or a `ready` one that is no longer current?
-    True when it can't be told (the safe answer: the caller then says the original is used)."""
+    """Is anything of this item still to be made: any record that `reel conform --wait`'s refresh would leave or
+    make `pending` (_next_record with retry_failed, as start_conform runs it): a pending one, a stale `ready`, a
+    `failed` one, a not_needed one whose source changed, a measured file without a record. Only "ready and current"
+    and "not_needed and unchanged" are nothing. True when it can't be told (the safe answer: the caller then says the
+    original is used)."""
     try:
         for fr in _measured(_read_doc(paths.p("00_inputs/preflight.json"))):
-            rec = fr["normalise"].get("conform")
-            state = rec.get("state") if isinstance(rec, dict) else None
-            if state == "pending" or (state == "ready" and conform_current(
-                    paths, fr["path"], rec, fr["normalise"]["decision"], conform_windows(paths, fr["path"])) is not None):
+            new = _next_record(paths, fr, retry_failed=True)
+            if isinstance(new, dict) and new.get("state") == "pending":
                 return True
     except Exception:  # noqa: BLE001
         return True
