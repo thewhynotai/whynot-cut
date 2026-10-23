@@ -1,5 +1,7 @@
 # S6b — Gate 4 eval cases for the Phase 4 skills
 
+**Archived:** DONE_ARCHIVED 2026-10-23 05:50 (master). Merged on release/3.0 as f3995f9; origin = abdece5 (verified ls-remote).
+
 - **Assigned:** H1    **Model:** Opus 5.5 high    **Size:** M    **Status:** ACCEPTED (2026-10-23 03:05; peer h2 PASS-WITH-MINORS on d6f9a3b, no P1/P2; → MERGE-QUEUE)
 - **Tier:** LIGHT (eval cases: dev workflow; they test the product, they don't change it)
 - **Stage / gate:** Gate 4 (`WhyNotCut/PROGRESS.md` line "Evals": "Add cases for the Phase 4 skills (rules/T4.3,

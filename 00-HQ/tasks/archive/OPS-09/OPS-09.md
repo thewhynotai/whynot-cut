@@ -1,5 +1,7 @@
 # OPS-09 — Parallel full suite: `tools/test.sh --parallel N`, failure re-run that only labels, per-commit cache
 
+**Archived:** DONE_ARCHIVED 2026-10-23 05:50 (master). Merged on release/3.0 as b81baaa; origin = abdece5 (verified ls-remote).
+
 - **Assigned:** MASTER (built by a fresh executor sub-agent in its own worktree; reviewed by a separate fresh sub-agent)
   **Size:** M    **Status:** ACCEPTED (2026-10-23 03:00, master; equivalence run 4 on 302df0d; see "Verdict" below)
 - **Tier:** LIGHT (dev tooling: it decides nothing an editor or a client sees). But it is the runner every gate trusts,
