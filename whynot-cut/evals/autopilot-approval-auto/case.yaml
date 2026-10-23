@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: autopilot-approval-auto
+description: 'T4.7 autopilot, positive: with approval: auto the plans are recorded with reel auto-approve (or, since no fixture sets approval: auto and the default is ask, with reel approve-plan --by delegated), open medical sign-offs (C0238 G03) stay under Needs you (reel needs-you --write), and a clip with open ones stops at QC. approval: auto is stated in the prompt only: no fixture writes a preferences file (as approval: ask in autopilot-new-clips).'
+tags: [autopilot, batch, approval-auto, positive]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

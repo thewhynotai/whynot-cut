@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: claims-check-scan-first
+description: 'Edit stage 7, positive: the claims check runs reel review-scan first, hands its lines to the medical-reviewer, and records the reviewer''s table with reel review-flags.'
+tags: [edit, claims, review-scan, positive]
+runs: 3
+context:
+  scaffold_script: scaffold.sh

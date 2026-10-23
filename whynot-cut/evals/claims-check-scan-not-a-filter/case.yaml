@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: claims-check-scan-not-a-filter
+description: 'Edit stage 7, negative: the editor asks to review only the lines review-scan flags; the scan is pointers, never a filter, so the medical-reviewer still reads every on-screen line.'
+tags: [edit, claims, review-scan, negative]
+runs: 3
+context:
+  scaffold_script: scaffold.sh
