@@ -45,8 +45,10 @@ on a line that does not trigger it, so a line that starts triggering later (a le
 to review) asks for its own row (`coverage` 4, COVERAGE). A row whose medical/religious may have been implied (carried
 from a file before 4, where implied flags were stored as named) keeps them with `"implied": true`, never re-stamped as
 named. In a file of a key with religious, an ok row's medical and religious count only on a line whose words do not
-trigger them when the file's `coverage` is not exactly 4 (missing, older, newer, not an int), the row has no `flags`
-(older: it counts as its file's key) or is marked implied. `counts()` gives the per-domain numbers from verdict rows
+trigger them when the file's `coverage` is not exactly 4 (missing, older, newer, not an int); on every key, a row
+without `flags` (older: it counts as its file's key) or marked implied names no medical or religious its line
+triggers. The approval-only rule holds under review_detect `review` and `suggest` (the engine still detects there);
+only `off` leaves a citation to the reviewer alone. `counts()` gives the per-domain numbers from verdict rows
 plus ok flags, with the same implied coverage.
 
 Coverage: a write is refused (nothing written) unless EVERY plan line with on-screen text is covered. A line is covered
@@ -385,13 +387,21 @@ def _sure(row: dict, coverage) -> bool:
     return type(coverage) is int and coverage == COVERAGE and "flags" in row and row.get("implied") is not True
 
 
+def _untrusted(row: dict, key, coverage) -> bool:
+    """An ok row whose medical/religious may not have been named: one without `flags` or marked implied (any key), or,
+    for a key with religious, one that is not _sure."""
+    if "flags" not in row or row.get("implied") is True:
+        return True
+    return isinstance(key, str) and "religious" in key.split("+") and not _sure(row, coverage)
+
+
 def _named_ok(row: dict, key, triggered=(), coverage=COVERAGE) -> set:
     """What an ok row names for coverage: its `flags`; an older row without them, its key minus ai (the always-on ai
-    was implied there, so an AI hint that appears later on the line still asks for its own ai row). For a key with
-    religious, a row that is not _sure names no medical or religious its line's words trigger: there it may have been
-    only implied (religious by a medical row, medical by a religious row)."""
+    was implied there, so an AI hint that appears later on the line still asks for its own ai row). An _untrusted row
+    names no medical or religious its line's words trigger: there it may have been only implied (religious by a
+    medical row, medical by a religious row) or never named. A named ai, business or later flag always counts."""
     named = set(_ok_flags(row, key)) - ({"ai"} if "flags" not in row else set())
-    if not _sure(row, coverage) and isinstance(key, str) and "religious" in key.split("+"):
+    if _untrusted(row, key, coverage):
         named -= set(LEGACY) & set(triggered)
     return named
 
@@ -499,12 +509,13 @@ def _previous(paths: Paths, kind: str, key: str):
 
 def _detected(paths: Paths, kind: str, index: dict, key_flags: tuple) -> tuple:
     """(event id -> {domain: matched words}, event id -> {domain: matched words of its APPROVAL_ONLY hits}) for every
-    domain a line's words (or the AI-generated files it shows) trigger, under review_detect `review` (the default;
-    `suggest` and `off` require nothing). A triggered domain is required on that line and needs its own row (never
-    implied); an approval-only hit makes that row a non-ok verdict. A pointer, never a filter."""
+    domain a line's words (or the AI-generated files it shows) trigger. A triggered domain is required on that line
+    and needs its own row (never implied) under review_detect `review` (the default; `suggest` requires nothing); an
+    approval-only hit makes that row a non-ok verdict under `review` and `suggest` alike (the engine still detects
+    there). `off` detects nothing. A pointer, never a filter."""
     from .review_domains import detect_mode, line_requirements
     mode = detect_mode()
-    if mode != "review":
+    if mode == "off":
         return {}, {}
     try:
         lines, _assets = line_requirements(paths, kind, index, key_flags, mode)
@@ -517,7 +528,8 @@ def _detected(paths: Paths, kind: str, index: dict, key_flags: tuple) -> tuple:
     def words(hits) -> list:
         return list(dict.fromkeys(str(h.get("match")) for h in hits))
 
-    found = {x["event_id"]: {d: words(hits) for d, hits in x["detected"].items()} for x in lines if x["detected"]}
+    found = {x["event_id"]: {d: words(hits) for d, hits in x["detected"].items()} for x in lines
+             if x["detected"] and mode == "review"}
     approve: dict = {}
     for x in lines:
         for d, hits in x["detected"].items():
@@ -546,7 +558,6 @@ def write(paths: Paths, findings: dict, *, by: str = "lead") -> dict:
     lines = [i for i, v in index.items() if v["text"]]
     detected, approve = _detected(paths, kind, index, key_flags)
     unusable, old_flagged, old_ok, was_coverage = _previous(paths, kind, key)
-    religious_key = "religious" in key.split("+")
 
     def current(eid):                     # a plan line with words; an id whose words were all removed counts as gone
         v = index.get(eid)
@@ -577,12 +588,16 @@ def write(paths: Paths, findings: dict, *, by: str = "lead") -> dict:
     # row never counts for a domain whose approval-only words the line shows.
     explicit: dict = {}
     unsure: dict = {}
+    stripped: dict = {}                 # an earlier ok on a line whose approval-only words now show: it never counts
     for r in rows + carried:
         explicit.setdefault(r["event_id"], set()).add(r["flag"])
     for o in ok_carried:
         eid = o["event_id"]
-        got = _named_ok(o, key, detected.get(eid, {}), was_coverage) - set(approve.get(eid, {}))
-        doubt = got & set(LEGACY) if religious_key and not _sure(o, was_coverage) else set()
+        named_ok = _named_ok(o, key, detected.get(eid, {}), was_coverage)
+        got = named_ok - set(approve.get(eid, {}))
+        if named_ok - got:
+            stripped[eid] = named_ok - got
+        doubt = got & set(LEGACY) if _untrusted(o, key, was_coverage) else set()
         explicit.setdefault(eid, set()).update(got - doubt)
         unsure.setdefault(eid, set()).update(doubt)
     named = {i: explicit.get(i, set()) | unsure.get(i, set()) for i in set(explicit) | set(unsure)}
@@ -597,14 +612,17 @@ def write(paths: Paths, findings: dict, *, by: str = "lead") -> dict:
     before = {(o["event_id"], o["text"]) for o in old_flagged + old_ok}
     fresh = [c for c in lines if (c, index[c]["text"]) not in before]
     problems, dropped, cleared = [], [], []
+    def cite(eid, flag, earlier=False) -> str:
+        from .review_domains import registry
+        who = registry()[flag]["approver"]["en"]
+        return (f"{eid} shows or cites a {flag} citation, verse or ruling (its words: "
+                f"{', '.join(approve[eid][flag][:3])}): {'its earlier ok no longer counts; ' if earlier else ''}"
+                f"it needs {who}'s approval ({', '.join(v for v in _verdicts(flag) if v != 'ok')}), never ok")
+
     for r in rows:
-        only = approve.get(r["event_id"], {}).get(r["flag"])
-        if r["verdict"] == "ok" and only:
-            from .review_domains import registry
-            who = registry()[r["flag"]]["approver"]["en"]
-            problems.append(f"{r['event_id']} shows a {r['flag']} citation, verse or ruling (its words: "
-                            f"{', '.join(only[:3])}): it needs {who}'s approval "
-                            f"({', '.join(v for v in _verdicts(r['flag']) if v != 'ok')}), never ok")
+        if r["verdict"] == "ok" and approve.get(r["event_id"], {}).get(r["flag"]):
+            problems.append(cite(r["event_id"], r["flag"]))
+    cites = len(problems)
     for it in old_flagged:
         eid, flag = it["event_id"], it["flag"]
         now = current(eid)
@@ -633,6 +651,13 @@ def write(paths: Paths, findings: dict, *, by: str = "lead") -> dict:
             ids = ", ".join(rest)
             problems.append(f"{ids} {'is' if len(rest) == 1 else 'are'} new or changed since {eid}'s {flag} flag: "
                             f"review {ids} for {flag}")
+    for i in sorted(stripped, key=lines.index):
+        gone = sorted(stripped[i] - cov.get(i, set()))
+        problems += [cite(i, f, earlier=True) for f in gone]
+        cites += len(gone)
+        if i in uncovered:
+            uncovered.remove(i)                           # the cite line says what it needs
+        short = [(j, [f for f in m if f not in gone]) if j == i else (j, m) for j, m in short]
     if uncovered:
         problems.append(f"{', '.join(uncovered)} {'has' if len(uncovered) == 1 else 'have'} not been reviewed: list "
                         f"{'it' if len(uncovered) == 1 else 'them'} (ok or a flag)")
@@ -645,9 +670,13 @@ def write(paths: Paths, findings: dict, *, by: str = "lead") -> dict:
             problems.append(f"{i} has not been reviewed for {'; '.join(why)} (this client's checks: {key}): list {i} "
                             f"for {', '.join(missing)}")
     if problems:
-        raise Guidance("; ".join(problems),
-                       "Add those lines to the table (an `ok` row once the wording is fine, or a flag with its verdict, "
-                       "under the check named), then send it again. Nothing was written", where=str(path(paths)))
+        how = ("Add those lines to the table (an `ok` row once the wording is fine, or a flag with its verdict, under "
+               "the check named), then send it again. Nothing was written")
+        if cites:
+            how = ("Send each line named as a citation, verse or ruling under its check with needs-approval (the "
+                   "approver's sign-off), reword-to-match or remove: never ok. Send every other line named under the "
+                   "check named, then send the table again. Nothing was written")
+        raise Guidance("; ".join(problems), how, where=str(path(paths)))
     flagged_on: dict = {}
     for it in items + carried:
         flagged_on.setdefault(it["event_id"], set()).add(it["flag"])
@@ -726,17 +755,29 @@ def load(paths: Paths) -> dict | None:
 
 
 def held() -> tuple:
-    """(kind, checks) for NEEDS-YOU and autopilot when this client's review of a plan is missing or not current, from
-    the same review key as write() and load(): kind `medical` for a medical client (profile `domain`), `religious` for a
-    religious one or any client whose key has religious (`review_domains`), None for a client neither holds; `checks`
-    are the key's medical and religious, so the wording names every check that may be missing. A review set that
-    cannot be read holds (fail closed)."""
-    from .common import content_domain
-    d = content_domain()
+    """(kind, checks, graphic kinds) for NEEDS-YOU and autopilot when this client's review of a plan is missing or not
+    current, from the same review key as write() and load(). Every client is held: medical is in every review key
+    (Addendum M §M7, review 0aa6e4d P2-1). kind: `religious` for a religious client or a client whose key adds religious
+    (unless its profile `domain` is medical), else `medical`. checks: the key's medical and religious, so the wording
+    names every check that may be missing. graphic kinds: who approves an approval_required graphic (a medical client
+    whose key adds religious: the doctor AND the content owner). Anything unreadable holds for both (fail closed)."""
     try:
+        from .common import content_domain
+        d = content_domain()
         parts = _domain().split("+")
-    except Exception:  # noqa: BLE001 — an unknown review domain in the profile: hold, never approve
-        parts = None
-    rel = parts is None or "religious" in parts or d == "religious"
-    kind = d if d in LEGACY else ("religious" if rel else None)
-    return kind, (("medical", "religious") if rel else ("medical",))
+    except Exception:  # noqa: BLE001 — an unreadable profile or an unknown review domain: hold, never approve
+        return "medical", LEGACY, LEGACY
+    rel = "religious" in parts or d == "religious"
+    kind = "religious" if rel and d != "medical" else "medical"
+    graphics = ("religious",) if d == "religious" else (LEGACY if rel else ("medical",))
+    return kind, (LEGACY if rel else ("medical",)), graphics
+
+
+def has_lines(paths: Paths) -> bool:
+    """Whether the compiled plan has a line with on-screen words (a review applies to it); True when it cannot be read
+    (fail closed)."""
+    try:
+        _kind, index, _fp = _current(paths)
+    except Exception:  # noqa: BLE001
+        return True
+    return any(v["text"] for v in index.values())

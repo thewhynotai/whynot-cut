@@ -340,6 +340,7 @@ class TestInputs(Base):
         put_spec(self.p, events=[event("G1", 1000, 3500, text="مقدمة")], music="PLACED")   # re-plan: approved, music in
         inventory(self.root, [inv_file(self.root, "assets/Logo/logo.png", "logo", "image"),
                               inv_file(self.root, "assets/Fonts/Brand.otf", "font", "font")])
+        RF.write(self.p, {"items": [{"event_id": "G1", "flag": "medical", "verdict": "ok", "reason": ""}]})  # reviewed
         r = NY().write(self.root)
         self.assertFalse(r["unchanged"])
         self.assertEqual(read_json(self.root / "output/needs-you.json")["items"], [])
@@ -498,15 +499,17 @@ class TestSources(Base):
 
     def test_K2_medical(self):
         put_spec(self.p)
-        med = by_kind(self.collect(), "medical")
+        med = by_kind(self.collect(), "medical")                     # the graphic, and the review not yet done
         self.assertEqual([(i["ref"], i["source"]) for i in med],
-                         [("G2", f"output/projects/{VID}/01_analysis/timeline-spec.json")])
-        self.assertIn("Take 500 mg daily", med[0]["text"])
+                         [(f"output/projects/{VID}/review-flags.json", f"output/projects/{VID}/01_analysis/timeline-spec.json"),
+                          ("G2", f"output/projects/{VID}/01_analysis/timeline-spec.json")])
+        self.assertIn("Take 500 mg daily", med[1]["text"])
         RF.write(self.p, {"items": [{"event_id": "G1", "flag": "medical", "verdict": "reword-to-match", "reason": "r"},
                                     {"event_id": "G2", "flag": "medical", "verdict": "ok", "reason": ""}]})
         self.assertEqual([i["ref"] for i in by_kind(self.collect(), "medical")], ["G1", "G2"])
         put_spec(self.p, events=[event("G1", 1000, 3600, text="مقدمة جديدة")])   # re-plan: the review is stale
-        self.assertEqual(by_kind(self.collect(), "medical"), [])
+        self.assertEqual([i["ref"] for i in by_kind(self.collect(), "medical")],        # and held (review 0aa6e4d P2-1)
+                         [f"output/projects/{VID}/review-flags.json"])
 
     def test_K3_music(self):
         put_spec(self.p)
@@ -553,7 +556,8 @@ class TestSources(Base):
 
     def test_K7_review_not_current_never_vanishes(self):
         put_spec(self.p)
-        self.assertEqual([i["ref"] for i in by_kind(self.collect(), "medical")], ["G2"])   # general client: no line
+        self.assertEqual([i["ref"] for i in by_kind(self.collect(), "medical")],              # general client: held
+                         [f"output/projects/{VID}/review-flags.json", "G2"])
         rf_ref = f"output/projects/{VID}/review-flags.json"
         for domain in ("medical", "religious"):
             profile(self.root, "profile.json", {"domain": domain})
@@ -654,9 +658,10 @@ class TestAutoApprove(Base):
 
     def test_A5_medical_religious_never_auto(self):
         prefs(self.root, approval="auto")
-        rec = AP().approve(self.p)
-        self.assertEqual(rec["not_covered"], [{"event_id": "G2", "kind": "medical"}])
-        self.assertEqual([i["ref"] for i in by_kind(self.collect(), "medical")], ["G2"])
+        rec = AP().approve(self.p)                              # a general client: its review is missing, so held too
+        self.assertEqual(rec["not_covered"], [{"event_id": None, "kind": "medical", "review": "missing or not current"},
+                                              {"event_id": "G2", "kind": "medical"}])
+        self.assertEqual([i["ref"] for i in by_kind(self.collect(), "medical")], [f"output/projects/{VID}/review-flags.json", "G2"])
         profile(self.root, "profile.json", {"domain": "religious"})
         RF.write(self.p, {"items": [{"event_id": i, "flag": f, "verdict": "ok", "reason": ""}   # G2 is a dose: its
                                     for i, f in (("G1", "religious"), ("G2", "religious"), ("G2", "medical"))]})  # own medical row
@@ -684,9 +689,10 @@ class TestAutoApprove(Base):
         full_review(self.p)
         self.assertNotIn(None, [n["event_id"] for n in AP().approve(self.p)["not_covered"]])
         self.assertEqual([i for i in self.collect()["items"] if i["ref"] == rf_ref], [])
-        profile(self.root, "profile.json", {"review_domains": ["business"]})   # no medical or religious subject area
+        profile(self.root, "profile.json", {"review_domains": ["business"]})   # held for its always-on medical check
         self.p.p("review-flags.json").unlink()
-        self.assertNotIn(None, [n["event_id"] for n in AP().approve(self.p)["not_covered"]])
+        self.assertIn({"event_id": None, "kind": "medical", "review": "missing or not current"},
+                      AP().approve(self.p)["not_covered"])
         profile(self.root, "profile.json", {"review_domains": ["no-such-check"]})   # unreadable review set: held
         self.assertIn(None, [n["event_id"] for n in AP().approve(self.p)["not_covered"]])
 
@@ -708,6 +714,86 @@ class TestAutoApprove(Base):
         self.assertEqual(len(got), 1)
         self.assertIn("موافقة صاحب المحتوى", got[0]["text_ar"])
 
+    def test_A13_every_client_is_held_while_its_review_is_missing_or_not_current(self):
+        """Review 0aa6e4d P2-1 (coordinator ruling: hold every client; medical is in every review key, Addendum M
+        §M7): a general client's flagged dose stays listed after an unrelated re-plan, as a review that is not
+        current, in NEEDS-YOU and in autopilot's not_covered; a missing review is held too."""
+        prefs(self.root, approval="auto")
+        rf_ref = f"output/projects/{VID}/review-flags.json"
+        rec = AP().approve(self.p)                              # a general client, no review yet
+        self.assertIn({"event_id": None, "kind": "medical", "review": "missing or not current"}, rec["not_covered"])
+        RF.write(self.p, {"items": [{"event_id": "G1", "flag": "medical", "verdict": "ok", "reason": ""},
+                                    {"event_id": "G2", "flag": "medical", "verdict": "needs-doctor-approval",
+                                     "reason": "dose"}]})
+        self.assertEqual(AP().approve(self.p)["not_covered"], [{"event_id": "G2", "kind": "medical"}])
+        put_spec(self.p, events=[event("G1", 1000, 3500, text="مقدمة جديدة"),      # an unrelated re-plan
+                                 event("G2", 4000, 7250, approval=True, headline="Take 500 mg daily")])
+        rec = AP().approve(self.p)
+        self.assertIn({"event_id": None, "kind": "medical", "review": "missing or not current"}, rec["not_covered"])
+        got = [i for i in by_kind(self.collect(), "medical") if i["ref"] == rf_ref]
+        self.assertEqual(len(got), 1)
+        self.assertIn("the medical review of the words on screen is missing or not current", got[0]["text"])
+
+    def test_A14_a_damaged_profile_file_never_hides_the_hold(self):
+        """Review 0aa6e4d P3-1: a broken reel-profile/style.json must not drop the hold from NEEDS-YOU."""
+        profile(self.root, "profile.json", {"domain": "religious"})
+        (self.root / "output/client_database/reel-profile" / "style.json").write_text("{broken", encoding="utf-8")
+        rf_ref = f"output/projects/{VID}/review-flags.json"
+        got = [i for i in self.collect()["items"] if i["ref"] == rf_ref]
+        self.assertEqual([i["kind"] for i in got], ["religious"])
+
+    def test_A15_a_medical_client_with_religious_checks_sends_graphics_to_both_approvers(self):
+        """Review 0aa6e4d P3-3: a medical client whose review set adds religious: its approval_required graphics go to
+        the doctor AND the content owner, and the not-current line names both checks."""
+        prefs(self.root, approval="auto")
+        profile(self.root, "profile.json", {"domain": "medical", "review_domains": ["religious"]})
+        rec = AP().approve(self.p)
+        self.assertIn({"event_id": None, "kind": "medical", "review": "missing or not current"}, rec["not_covered"])
+        self.assertIn({"event_id": "G2", "kind": "medical"}, rec["not_covered"])
+        self.assertIn({"event_id": "G2", "kind": "religious"}, rec["not_covered"])
+        doc = self.collect()
+        self.assertIn("G2", [i["ref"] for i in by_kind(doc, "medical")])
+        self.assertIn("G2", [i["ref"] for i in by_kind(doc, "religious")])
+        rf_ref = f"output/projects/{VID}/review-flags.json"
+        (line,) = [i for i in doc["items"] if i["ref"] == rf_ref]
+        self.assertIn("the medical and religious review", line["text"])
+        self.assertIn("religious", line["why"].lower())
+
+    def test_A16_an_unreadable_profile_is_held_for_both_checks(self):
+        """r5 (mutant "held: unreadable not held"): a profile.json that cannot be read holds, fail closed: the missing
+        review is held as medical, naming both checks, and an approval_required graphic goes to the doctor AND the
+        content owner, in autopilot's not_covered and in NEEDS-YOU."""
+        prefs(self.root, approval="auto")
+        (self.root / common.CLIENT_PROFILE_REL / "profile.json").parent.mkdir(parents=True, exist_ok=True)
+        (self.root / common.CLIENT_PROFILE_REL / "profile.json").write_text("{broken", encoding="utf-8")
+        self.assertEqual(RF.held(), ("medical", ("medical", "religious"), ("medical", "religious")))
+        rec = AP().approve(self.p)
+        self.assertEqual(rec["not_covered"], [{"event_id": None, "kind": "medical", "review": "missing or not current"},
+                                              {"event_id": "G2", "kind": "medical"},
+                                              {"event_id": "G2", "kind": "religious"}])
+        doc = self.collect()
+        rf_ref = f"output/projects/{VID}/review-flags.json"
+        (line,) = [i for i in doc["items"] if i["ref"] == rf_ref]
+        self.assertEqual(line["kind"], "medical")
+        self.assertIn("the medical and religious review", line["text"])
+        self.assertIn("G2", [i["ref"] for i in by_kind(doc, "medical")])
+        self.assertIn("G2", [i["ref"] for i in by_kind(doc, "religious")])
+
+    def test_A17_a_plan_without_words_on_screen_needs_no_review(self):
+        """r5 (mutants "has_lines: always", "autopilot: held whatever the words"): with no review on disk, a plan
+        that has no line with words on screen is not held (there is nothing to review); one word on screen holds."""
+        prefs(self.root, approval="auto")
+        cut = event("G3", 7250, 7350)
+        cut["template"] = "flash_transition"
+        put_spec(self.p, events=[cut])
+        self.assertFalse(self.p.p("review-flags.json").exists())
+        rec = AP().approve(self.p)
+        self.assertEqual((rec["approved"], rec["not_covered"]), (True, []))
+        self.p.p("01_analysis/plan-approval.json").unlink()
+        put_spec(self.p, events=[cut, event("G1", 1000, 3500, text="placeholder words")])
+        self.assertEqual(AP().approve(self.p)["not_covered"],
+                         [{"event_id": None, "kind": "medical", "review": "missing or not current"}])
+
     def test_A9_failed_replan_is_refused(self):
         prefs(self.root, approval="auto")
         write_json(self.p.p("01_analysis/plan-validation.json"), {"ok": False, "errors": ["G2: bad"], "warnings": []})
@@ -728,9 +814,10 @@ class TestAutoApprove(Base):
             full_review(self.p, flag="medical")
             rec = AP().approve(self.p)
             self.assertNotIn(None, [n["event_id"] for n in rec["not_covered"]], domain)
-        profile(self.root, "profile.json", {"domain": "general"})
+        profile(self.root, "profile.json", {"domain": "general"})               # every client (review 0aa6e4d P2-1)
         self.p.p("review-flags.json").unlink()
-        self.assertNotIn(None, [n["event_id"] for n in AP().approve(self.p)["not_covered"]])
+        self.assertIn({"event_id": None, "kind": "medical", "review": "missing or not current"},
+                      AP().approve(self.p)["not_covered"])
 
     def test_A6_distinct_from_editor(self):
         prefs(self.root, approval="auto")

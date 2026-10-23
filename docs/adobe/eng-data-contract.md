@@ -499,9 +499,10 @@ to the item or client folder, no links, cached by mtime and inode. "NEW file" me
 4. **Week:** starts on Sunday.
 5. **Plan versions:** they live with `reel plan` / `reel motion-plan`. `plan.diff` is always against the last APPROVED plan.
 6. **Flags:** `reel review-flags` (Phase 4, T4.13) writes `<item>/review-flags.json` (item folder root, next to `poster.jpg`).
-   - Shape: `{"schema": 1, "plan_kind": "timeline"|"motion", "plan_fingerprint", "domain": "medical"|"religious"|"general",
+   - Shape: `{"schema": 1, "plan_kind": "timeline"|"motion", "plan_fingerprint", "domain": "<review key: ai+medical, ai+medical+religious, …>",
      "coverage", "written_at", "by", "checked", "lines_total", "items": [...], "ok": [{"event_id", "text", "flags", "implied"?: true}]}`. `domain` is the client's
-     profile domain the review was done for.
+     review key (review_domains: the profile's `review_domains` ∪ its `domain` ∪ the always-on medical and ai) the review
+     was done for.
    - `coverage` is the rule the file was written under (4 since 0aa6e4d). From 4, an ok row's `flags` lists only the
      checks that line was named for in the review (never one its flags carry, never one implied by another row); a row
      carried from an earlier file whose medical/religious may have been implied keeps them with `"implied": true`.
@@ -509,12 +510,14 @@ to the item or client folder, no links, cached by mtime and inode. "NEW file" me
      the file's `coverage` is not exactly 4 (missing, older, newer or not a whole number), the row has no `flags`, or
      it says `"implied": true`. Such a line is "not current" until it gets its own row (the panel shows it as not
      reviewed, never as ok). A line whose words hold a religious citation, verse or ruling is never `ok` for
-     religious: it carries a `needs-approval`, `reword-to-match` or `remove` row for the content owner.
+     religious: it carries a `needs-approval`, `reword-to-match` or `remove` row for the content owner. That rule holds
+     under the profile's `review_detect` `review` and `suggest` (the engine still detects there); `off` detects nothing.
+   - While a plan with words on screen has no current review (missing, stale, or a triggered line without its own row),
+     NEEDS-YOU lists it and autopilot holds it, for every client (medical is in every review key).
    - ok row shape: `{"event_id", "text", "flags", "implied"?: true}`.
-   - The file stores EVERY reviewed line. `items` are the flagged lines: `{"event_id", "flag", "verdict":
-     "needs-doctor-approval"|"reword-to-match"|"remove", "text", "start_s", "end_s", "reason", "carried"?}`. `flag` is one the
-     client's domain checks: `medical` for a medical or general client, `religious` or `medical` for a religious client (a
-     later domain adds its own entry). `ok` lists the lines reviewed and found fine (`event_id` and the plan's `text`); a line
+   - The file stores EVERY reviewed line. `items` are the flagged lines: `{"event_id", "flag", "verdict", "text",
+     "start_s", "end_s", "reason", "carried"?}`. `flag` is any registry domain (medical, religious, business, ai) and
+     `verdict` one of that flag's registry verdicts, never `ok`. `ok` lists the lines reviewed and found fine (`event_id` and the plan's `text`); a line
      that has a flag is not repeated there. `event_id` is the plan event id (a clip: `events[].event_id` of
      `timeline-spec.json`; a motion video: the scene id of `motion-plan.json`), always a line WITH on-screen text. `text`,
      `start_s` and `end_s` come from the compiled plan (never from the reviewer), seconds with 3 decimals, `reason` at most

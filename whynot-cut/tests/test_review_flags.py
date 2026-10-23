@@ -1535,7 +1535,7 @@ class TestReligiousNeverImplied(_Review, Base):
             with self.subTest(extra=extra):
                 e = self.refused(table(("G01", "medical", "ok", ""), ("G02", "religious", "ok", ""), *extra,
                                        ("G03", "medical", "ok", "")))
-                self.assertIn("G02 shows a religious citation, verse or ruling (its words: ", e.error)
+                self.assertIn("G02 shows or cites a religious citation, verse or ruling (its words: ", e.error)
                 self.assertIn("it needs the content owner's approval (reword-to-match, needs-approval, remove), never ok",
                               e.error)
                 self.assertNotIn("G01", e.error)
@@ -1550,7 +1550,7 @@ class TestReligiousNeverImplied(_Review, Base):
         self.file.unlink()
         e = self.refused(table(("G01", "medical", "ok", ""), ("G02", "medical", "ok", ""), ("G02", "religious", "ok", ""),
                                ("G03", "medical", "ok", "")))
-        self.assertIn("G02 shows a religious citation", e.error)
+        self.assertIn("G02 shows or cites a religious citation", e.error)
 
     def test_a_citation_goes_to_the_content_owner_and_ok_rows_store_only_what_was_named(self):
         r = RF.write(self.p, table(("G01", "medical", "ok", ""), ("G02", "religious", "needs-approval", "hadith"),
@@ -1735,7 +1735,7 @@ class TestApprovalOnlyRules(_Review, Base):
                 self.line(self.term(rule, has))
                 self.assertEqual(self.rules_on_g1(), {rule})
                 e = self.refused(table(("G1", "religious", "ok", ""), ("G1", "medical", "ok", "")))
-                self.assertIn("G1 shows a religious citation, verse or ruling", e.error)
+                self.assertIn("G1 shows or cites a religious citation, verse or ruling", e.error)
                 RF.write(self.p, table(("G1", "religious", "needs-approval", "x"), ("G1", "medical", "ok", "")))
                 self.assertIsNotNone(RF.load(self.p))
         self.file.unlink()
@@ -1756,7 +1756,116 @@ class TestApprovalOnlyRules(_Review, Base):
         write_json(self.file, moved)
         self.assertIsNone(RF.load(self.p))
         e = self.refused(table())
-        self.assertIn("G02 has not been reviewed for religious", e.error)
+        self.assertIn("G02 shows or cites a religious citation", e.error)
+        self.assertIn("its earlier ok no longer counts", e.error)
+
+
+class TestRound4(_Review, Base):
+    """Review 0aa6e4d: a detected citation is never ok under `review_detect: suggest` either (P2-2); the refusal never
+    invites an ok and says "shows or cites" (P3-2); a flagless row is untrusted on every key (P3-4); an older file's
+    named ai row still counts on an AI-asset line (P3-6)."""
+
+    DOMAIN = None
+
+    def test_suggest_still_sends_a_detected_citation_to_the_content_owner(self):
+        put_timeline(self.p, hadith_spec())
+        self.prof(domain="religious", review_detect="suggest")
+        rows = [("G01", "medical", "ok", ""), ("G02", "religious", "ok", ""), ("G03", "medical", "ok", "")]
+        e = self.refused(table(*rows))
+        self.assertIn("G02 shows or cites a religious citation, verse or ruling (its words: ", e.error)
+        RF.write(self.p, table(rows[0], ("G02", "religious", "needs-approval", "h"), rows[2]))
+        self.assertIsNotNone(RF.load(self.p))
+        self.file.unlink()
+        self.prof(domain="religious", review_detect="off")       # off: nothing is detected, the reviewer alone decides
+        RF.write(self.p, table(*rows))
+        self.assertIsNotNone(RF.load(self.p))
+        self.prof(domain="religious", review_detect="suggest")   # suggest again: that ok never counts
+        self.assertIsNone(RF.load(self.p))
+
+    def test_the_citation_refusal_never_invites_an_ok(self):
+        put_timeline(self.p, hadith_spec())
+        self.prof(domain="religious")
+        e = self.refused(table(("G01", "medical", "ok", ""), ("G02", "religious", "ok", ""), ("G03", "medical", "ok", "")))
+        self.assertIn("never ok", e.how)
+        self.assertNotIn("an `ok` row once the wording is fine", e.how)
+
+    def test_an_earlier_ok_on_a_line_that_now_holds_a_citation_asks_for_the_content_owner(self):
+        put_timeline(self.p, hadith_spec())
+        self.prof(domain="religious")
+        good = filed(RF.write(self.p, table(("G01", "medical", "ok", ""), ("G02", "religious", "needs-approval", "h"),
+                                            ("G02", "medical", "ok", ""), ("G03", "medical", "ok", ""))))
+        for flags in (["medical", "religious"], ["religious"]):
+            with self.subTest(flags):
+                write_json(self.file, dict(good, items=[], ok=[dict(o, flags=flags) if o["event_id"] == "G02" else o
+                                                               for o in good["ok"]]))
+                self.assertIsNone(RF.load(self.p))
+                e = self.refused(table())
+                self.assertIn("G02 shows or cites a religious citation, verse or ruling (its words: ", e.error)
+                self.assertIn("its earlier ok no longer counts", e.error)
+                self.assertNotIn("G02 has not been reviewed", e.error)
+                self.assertIn("never ok", e.how)
+
+    def test_a_citation_only_in_the_speech_is_said_so(self):
+        from lib import review_domains as RD
+        r = next(r for r in RD.lexicon("religious")["rules"] if r["id"] == "citation")
+        cited = next(t for t in r["terms"] if "رسول" in t).replace("*", "")
+        g1 = dict(event("G1", 1000, 3500, text="مقدمة"), evidence=cited)
+        put_timeline(self.p, dict(timeline_spec(), events=[g1]))
+        self.prof(domain="religious")
+        (x,) = RD.scan(self.p)["lines"]
+        self.assertEqual({h["in"] for h in x["detected"]["religious"]}, {"speech"})
+        e = self.refused(table(("G1", "religious", "ok", ""), ("G1", "medical", "ok", "")))
+        self.assertIn("G1 shows or cites a religious citation, verse or ruling", e.error)
+
+    def test_a_flagless_row_is_untrusted_on_every_key(self):
+        put_timeline(self.p)                                     # G2 a dose
+        for prof in ({"review_domains": ["business"]}, {}):
+            with self.subTest(prof):
+                self.file.unlink(missing_ok=True)
+                self.prof(**prof)
+                key = RF._domain()
+                rows = [(i, f, "ok", "") for i in ("G1", "G2") for f in key.split("+") if f != "ai"]
+                good = filed(RF.write(self.p, table(*rows)))
+                self.assertIsNotNone(RF.load(self.p))
+                write_json(self.file, dict(good, ok=[{"event_id": o["event_id"], "text": o["text"]} for o in good["ok"]]))
+                self.assertIsNone(RF.load(self.p))               # the dose line's medical is not trusted
+                e = self.refused(table())
+                self.assertIn("G2 has not been reviewed", e.error)
+                self.assertNotIn("G1", e.error)
+
+    def test_a_row_marked_implied_is_untrusted_on_every_key(self):
+        """r5 (mutant "untrusted: the implied marker ignored"): `implied: true` makes a row untrusted on a key without
+        religious too, not only the missing `flags`: its medical never clears a line whose words trigger medical."""
+        put_timeline(self.p)                                     # G2 a dose
+        for prof in ({"review_domains": ["business"]}, {}):
+            with self.subTest(prof):
+                self.file.unlink(missing_ok=True)
+                self.prof(**prof)
+                key = RF._domain()
+                self.assertNotIn("religious", key.split("+"))
+                rows = [(i, f, "ok", "") for i in ("G1", "G2") for f in key.split("+") if f != "ai"]
+                good = filed(RF.write(self.p, table(*rows)))
+                self.assertIsNotNone(RF.load(self.p))
+                write_json(self.file, dict(good, ok=[dict(o, implied=True) for o in good["ok"]]))   # flags kept
+                self.assertIsNone(RF.load(self.p))               # the dose line's medical is not trusted
+                e = self.refused(table())
+                self.assertIn("G2 has not been reviewed", e.error)
+                self.assertNotIn("G1", e.error)
+
+    def test_an_older_files_named_ai_row_still_counts_on_an_ai_asset_line(self):
+        self.prof(domain="religious")
+        write_json(self.p.client_db / "asset-manifest.json", {"assets": [{"rel": "data/Broll/gen.png",
+                                                                          "ai_generated": True}]})
+        put_timeline(self.p, dict(timeline_spec(), events=[timeline_spec()["events"][0],
+                                                           event("G4", 7400, 8600, text="صورة توضيحية",
+                                                                 image="data/Broll/gen.png")]))
+        good = filed(RF.write(self.p, table(("G1", "medical", "ok", ""), ("G4", "ai", "ok", ""),
+                                            ("G4", "medical", "ok", ""))))
+        self.assertEqual(self.ok_flags(), {"G1": MED, "G4": ["ai", "medical"]})
+        for label, cov in UNTRUSTED:
+            with self.subTest(label):
+                write_json(self.file, with_coverage(good, cov))
+                self.assertIsNotNone(RF.load(self.p))           # ai is never implied: a named ai row is always named
 
 
 class TestImpliedNeverStored(_Review, Base):

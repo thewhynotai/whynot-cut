@@ -542,6 +542,19 @@ class TestReligiousApprovalGate(unittest.TestCase):
         self.assertRegex(flat, r"WhyNot Cut never writes Quran text \(owner decision 2026-10-18\)")
         self.assertRegex(flat, r"A graphic that shows a verse is `remove`")
 
+    def test_the_lead_and_the_reviewer_know_the_citation_rule_and_review_detect(self):
+        """Review 0aa6e4d P2-2 / P3-5: the edit skill (the lead) and the medical-reviewer say, in plain words, that a
+        detected religious citation, verse or ruling is never `ok` (the engine refuses it), and what profile.json
+        `review_detect` suggest / off change."""
+        for name, s in (("edit", text("edit")), ("medical-reviewer",
+                                                 (SK / "agents" / "medical-reviewer.md").read_text(encoding="utf-8"))):
+            with self.subTest(name):
+                flat = " ".join(s.split())
+                self.assertRegex(flat, r"religious citation, verse or ruling[^.]{0,200}never `ok`")
+                self.assertRegex(flat, r"`review_detect`")
+                self.assertRegex(flat, r"`suggest`[^.]{0,200}still[^.]{0,120}citation")
+                self.assertRegex(flat, r"`off`[^.]{0,200}(reviewer|you) alone")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -123,6 +123,12 @@ put it through `reel review-flags --root "<CLIENT>" --video-id <ID> --from -` wi
 `{"items": [{"event_id": "<the graphic id from its table>", "flag": "medical" or "religious", "verdict": "ok",
 "needs-doctor-approval", "reword-to-match" or "remove", "reason": "<its reason>"}]}`. It takes only the flags the client's
 domain checks: `medical` (a client whose profile `domain` is `religious`: `religious` and `medical`).
+A religious citation, verse or ruling on screen (a hadith the speaker cites, a ruling) is never `ok`: send it under
+`religious` with `needs-approval` (the content owner signs it off), `reword-to-match` or `remove`; the engine refuses an
+`ok` there. The profile's `review_detect` sets how much the engine checks the words itself: `review` (the default)
+needs a row for every domain the words trigger; `suggest` only lists the extra domains, but it still refuses an `ok` on
+a citation it detects; `off` detects nothing, so the reviewer alone catches a citation (keep `off` only when the editor
+asked for it).
 **The first review sends the reviewer's FULL table**: one row for every graphic with words on screen, the `ok` ones too;
 a graphic with no words on screen is left out (a row for it is refused).
 The command writes `output/projects/<ID>/review-flags.json` with each line's words and times taken from the compiled plan

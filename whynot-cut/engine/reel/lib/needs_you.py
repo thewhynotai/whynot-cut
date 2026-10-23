@@ -312,22 +312,20 @@ class _Config:
     def __init__(self, c: _Collector):
         from .common import content_domain, load_config
         self.threshold, self.no_music, self.domain = 0.5, False, "general"
-        self.hold, self.hold_checks = None, ("medical",)          # as the general default above, until read
+        self.hold, self.hold_checks, self.graphic_kinds = "medical", ("medical", "religious"), ("medical", "religious")
         self.verse = {"religious": False, "phrases": [], "warnings": []}
+        with c.source("output/client_database/reel-profile", None):   # first and alone: a damaged style.json or
+            from . import review_flags                                  # transcription.json never hides the hold
+            self.hold, self.hold_checks, self.graphic_kinds = review_flags.held()
         with c.source("output/client_database/reel-profile", None):
             t = load_config("transcription.json").get("low_confidence_threshold", 0.5)
             self.threshold = float(t) if isinstance(t, (int, float)) and not isinstance(t, bool) else 0.5
             m = load_config("style.json").get("music")
             self.no_music = isinstance(m, str) and m.strip().lower().startswith("none")
             self.domain = content_domain()
-            from . import review_flags
-            self.hold, self.hold_checks = review_flags.held()    # the review key's checks, as review_flags uses them
             from . import manual_verse
             self.verse = manual_verse.config(load_config("profile.json"))
 
-    @property
-    def approval_kind(self) -> str:
-        return "religious" if self.hold == "religious" else "medical"
 
 
 def _words(c: _Collector, cfg: _Config, p: Paths, item: str, label: tuple[str, str]) -> bool:
@@ -521,6 +519,9 @@ NOT_CURRENT = {("medical",): ("the medical review of the words on screen is miss
                                           "current: Claude reviews them again before you approve anything",
                                           "مراجعة الكلام الطبي والديني اللي على الشاشة مش موجودة أو مش محدّثة: Claude "
                                           "يراجعه تاني قبل ما توافق على أي حاجة")}
+HOLD_WHY = {("medical",): NEVER_AUTO["medical"],
+            ("medical", "religious"): ("Health claims and religious content on screen are never approved automatically.",
+                                       "الكلام الطبي والمحتوى الديني اللي على الشاشة عمرهم ما بيتوافق عليهم تلقائي.")}
 
 
 def _approvals(c: _Collector, cfg: _Config, p: Paths, item: str, spec: dict | None, plan_src: str | None = None,
@@ -559,17 +560,17 @@ def _approvals(c: _Collector, cfg: _Config, p: Paths, item: str, spec: dict | No
                       why_ar + (f" ملاحظة المراجعة: {reason}" if reason else ""), gid, item, src)
     if cfg.hold and has_words and plan_src and not current:
         en, ar = NOT_CURRENT[cfg.hold_checks]
-        c.add(cfg.hold, f"{item}: {en}", f"{item}: {ar}", *NEVER_AUTO[cfg.hold], c.rel(rf), item, plan_src)
+        c.add(cfg.hold, f"{item}: {en}", f"{item}: {ar}", *HOLD_WHY[cfg.hold_checks], c.rel(rf), item, plan_src)
     if spec is not None:
         src = c.rel(p.p("01_analysis/timeline-spec.json"))
-        kind = cfg.approval_kind
-        who_en, who_ar = APPROVER[kind]
-        for e in spec.get("events") or []:
-            if not isinstance(e, dict) or not e.get("approval_required") or e.get("event_id") in flagged_events:
-                continue
-            gid, tc, words = str(e.get("event_id")), _tc(e.get("start_ms")), _event_words(e.get("params"))
-            c.add(kind, f"{item}: graphic {gid} at {tc} needs {who_en}: «{words}»",
-                  f"{item}: الجرافيك {gid} عند {tc} محتاج {who_ar}: «{words}»", *NEVER_AUTO[kind], gid, item, src)
+        for kind in cfg.graphic_kinds:
+            who_en, who_ar = APPROVER[kind]
+            for e in spec.get("events") or []:
+                if not isinstance(e, dict) or not e.get("approval_required") or e.get("event_id") in flagged_events:
+                    continue
+                gid, tc, words = str(e.get("event_id")), _tc(e.get("start_ms")), _event_words(e.get("params"))
+                c.add(kind, f"{item}: graphic {gid} at {tc} needs {who_en}: «{words}»",
+                      f"{item}: الجرافيك {gid} عند {tc} محتاج {who_ar}: «{words}»", *NEVER_AUTO[kind], gid, item, src)
 
 
 def _numbers(c: _Collector, plan: dict, item: str, src: str):

@@ -844,6 +844,11 @@ class TestBoundDatabaseFiles(Base):
         one, it is kept with the sealed reason, never rewritten (a rewrite breaks the seal)."""
         from lib import rules_loop as RL
         from lib.common import Context, use_context
+        real = RL.weakens_safety                  # the safety screen reads the editor's words, never the temp folder's
+        screen = lambda text="", intent=None: real(str(text).replace(str(self.tmp), "<folder>"), intent)  # noqa: E731
+        patch = mock.patch.object(RL, "weakens_safety", screen)
+        patch.start()
+        self.addCleanup(patch.stop)
         logo = str(self.src / "assets" / "Brand" / "logo.png")
         up = {"knob": "caption_size_px", "direction": "up"}
         (self.src / "output/projects/R02").mkdir(parents=True)
