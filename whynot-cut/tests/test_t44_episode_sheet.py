@@ -179,9 +179,31 @@ class TestTemplate(Base):
         self.assertEqual(ES.sheet_people(parse_sheet(self.template_text()))[0], [])   # untouched: nobody
         people, issues = ES.sheet_people(parse_sheet("---\nguest: [Karim Test, Nour Placeholder]\n---\n"))
         self.assertEqual(people, [])                                   # never "['Karim Test', 'Nour Placeholder']"
-        self.assertTrue(any("lists 2 people" in i for i in issues), issues)
-        one, _ = ES.sheet_people(parse_sheet("---\nguest:\n- Karim Test\n---\n"))
-        self.assertEqual([p["name"] for p in one], ["Karim Test"])
+        self.assertTrue(any("guest in the episode sheet is a list" in i for i in issues), issues)
+        # review c963132 P2-1 (executor ruling): a name is one value written as text; a one-item list is a list too
+        one, issues = ES.sheet_people(parse_sheet("---\nguest:\n- Karim Test\n---\n"))
+        self.assertEqual(one, [])
+        self.assertTrue(any("guest in the episode sheet is a list" in i for i in issues), issues)
+
+    def test_name_problems_accepts_only_text(self):
+        """Review c963132 P2-1: host, guest, guest_2 … guest_9 and show must each be one name written as text; an
+        empty or absent value is "not given". Every other value gets one plain line (English and Arabic) that never
+        shows the value's Python form."""
+        ok = {"host": "Nour Placeholder", "guest": "", "guest_9": "Karim Test — مهندس", "show": "My Show",
+              "topics": ["a", "b"], "episode": 12, "guest_10": ["not a sheet person"]}
+        self.assertEqual(ES.name_problems(ok), [])
+        self.assertEqual(ES.name_problems({}), [])
+        for key, val in (("host", ["Nour"]), ("guest", ["A", "B"]), ("guest_2", {"name": "X"}), ("guest_9", 123),
+                         ("show", True), ("host", None), ("show", 1.5)):
+            bad = ES.name_problems({key: val})
+            self.assertEqual(len(bad), 1, (key, val))
+            self.assertTrue(bad[0].startswith(f"{key} in the episode sheet "), bad)
+            self.assertIn(f"`{key}: ", bad[0])
+            self.assertIn("في شيت الحلقة", bad[0])
+            for part in ("['", "{'", "123", "True", "None", "1.5"):
+                self.assertNotIn(part, bad[0], (key, val))
+            self.assertEqual(ES.sheet_text(val), "")
+        self.assertEqual(ES.sheet_text("  Nour  "), "Nour")
 
     def template_text(self) -> str:
         return ES.render("EP12", "data/Episodes/EP12.mp4", "data/Episodes/EP12.md")

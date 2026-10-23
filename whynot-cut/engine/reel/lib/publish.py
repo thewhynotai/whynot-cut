@@ -481,7 +481,8 @@ def check(ep) -> dict:
     for h in tags_:
         if not re.fullmatch(r"#[^\s#]+", str(h)):
             errors.append(f"hashtag {h!r} must start with # and contain no spaces (use _)")
-    guest = str((info.get("sheet") or {}).get("guest") or "")
+    from .episode_sheet import sheet_text
+    guest = sheet_text((info.get("sheet") or {}).get("guest"))     # review c963132 P2-1: never a list's Python form
     gname = re.split(r"\s+[—–-]\s+", guest)[0].strip()
     if gname and gname not in " ".join(str(d.get(k) or "") for k in ("hook", "summary", "guest")):
         warnings.append(f"the guest's name from the sheet ({gname}) is not in the description")
@@ -524,7 +525,7 @@ def check(ep) -> dict:
             mplan, edited = compiled_plan(Paths(ep.root, rid))     # review 1c98076 P3-4: the plan motion-plan wrote
             if edited:
                 errors.append(f"{rid}: {edited['why']} (the CC-BY attribution check reads that plan)")
-            mplan = mplan or {}
+            mplan = {} if edited else (mplan or {})   # review c963132 P3-1: never a plan that was not checked
             posted = "\n".join([cap, tcap, str(sh.get("description") or "")])
             for a in mplan.get("assets") or []:
                 if a.get("license") == "CC-BY-4.0" and a.get("attribution") and a["attribution"] not in posted:

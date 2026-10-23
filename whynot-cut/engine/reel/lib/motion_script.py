@@ -164,13 +164,17 @@ def check_editorial(text: str, window_digits: set[str]) -> list[str]:
     return probs
 
 
-def person_name(value: str) -> str:
-    return re.split(r"\s+[—–-]\s+", str(value or ""))[0].strip()
+def person_name(value) -> str:
+    """The name part of a sheet person value («<name> — <title>»); "" for anything that is not text (review c963132
+    P2-1: a list or a number never reaches the screen as its Python form)."""
+    from .episode_sheet import sheet_text
+    return re.split(r"\s+[—–-]\s+", sheet_text(value))[0].strip()
 
 
 def fill_placeholders(text: str, sheet: dict) -> tuple[str, list[str]]:
+    from .episode_sheet import sheet_text
     vals = {"host": person_name(sheet.get("host")), "guest": person_name(sheet.get("guest")),
-            "show": str(sheet.get("show") or "").strip()}
+            "show": sheet_text(sheet.get("show"))}
     missing = []
 
     def sub(m):

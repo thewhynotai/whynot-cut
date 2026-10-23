@@ -1350,6 +1350,17 @@ class TestPublish(unittest.TestCase):
         write_json(self.ep.p("publish/reels/EP12_R01.json"), reel or good_reel())
         return check(self.ep)
 
+    def test_a_guest_that_is_not_text_is_never_shown_as_its_python_form(self):
+        """Review c963132 P2-1: an episode.json whose sheet guest is a list (written before episode-prep checked it)
+        never puts ['Sara ...'] in a publish line."""
+        info_p = self.ep.p("00_inputs/episode.json")
+        info = read_json(info_p)
+        write_json(info_p, dict(info, sheet=dict(info["sheet"], guest=["Kareem Placeholder"])))
+        r = self.run_check()
+        self.assertNotIn("Kareem", json.dumps(r, ensure_ascii=False))
+        write_json(info_p, dict(info, sheet=dict(info["sheet"], guest="Kareem Placeholder")))
+        self.assertTrue(any("(Kareem Placeholder) is not in the description" in w for w in self.run_check()["warnings"]))
+
     def test_valid_package_renders_files(self):
         r = self.run_check()
         self.assertTrue(r["ok"], r["errors"])

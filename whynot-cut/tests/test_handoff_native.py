@@ -388,6 +388,8 @@ class TestMotionHandoff(unittest.TestCase):
                         "elements": [{"font_ps": "Arial-BoldMT"}]}],
             "assets": [{"ref": "people/doctor", "license": "CC-BY-4.0", "attribution": "People by X (CC BY 4.0)"}],
             "audio": {"music": None}, "approvals": ["doctor to approve the statistic on S02"]})
+        from lib.motion_plan import plan_sha1      # review c963132 P3-1: the README reads only a checked plan
+        write_json(self.p.p("01_analysis/motion-validation.json"), {"ok": True, "plan_sha1": plan_sha1(self.p)})
 
     def test_motion_golden(self):
         md = motion_readme(self.p).read_text(encoding="utf-8")

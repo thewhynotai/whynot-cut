@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from .common import fmt_ts, ms_to_frame, now_iso, read_json, seq_fps, set_status, write_json, write_text
-from .episode_sheet import SHEET_PEOPLE
+from .episode_sheet import SHEET_PEOPLE, name_problems, sheet_text
 from .motion_config import direction_for, format_spec, motion_cfg, source as msource
 from .motion_layout import contrast, fit, pick_text_color, place, role_of, theme_colors
 from .motion_script import (REPLAYS_SPEECH, SCENE_TYPES, check_editorial, check_fields, check_number, digit_runs,
@@ -67,6 +67,20 @@ def episode_sheet(paths, src: dict) -> dict:
     return {k: sheet[k] for k in SHEET_SHOWN if k in sheet}
 
 
+def badge_speakers(paths) -> dict:
+    """The reel's 00_inputs/speakers.json as the speaker badge reads it ({} when there is none). Review c963132 p10: a
+    file whose top level is not an object (a list, text, a number, null) raises errors.FileFormatError naming the file
+    with a plain line in English and Arabic, never an AttributeError."""
+    from .errors import FileFormatError
+    f = paths.p("00_inputs/speakers.json")
+    sp = read_json(f, {})
+    if not isinstance(sp, dict):
+        raise FileFormatError(f, 1, 1, "its top level is not an object {…} with people and turns, as `reel "
+                                       "reels-select` writes it (speakers.json لازم يبدأ بـ { … } فيه people و turns، "
+                                       "مش قائمة ولا قيمة لوحدها)")
+    return sp
+
+
 def badge_turns(rm: dict, sp: dict) -> list | None:
     """The speaker turns the speaker badge shows from 00_inputs/speakers.json `sp` (each named by its `speaker` role,
     the name itself from the episode sheet only); None when the recipe's `speaker_badge` (`rm`, the recipe's motion
@@ -110,7 +124,7 @@ def fingerprint(paths) -> str:
     rm = (src.get("recipe") or {}).get("motion") or {}
     turns = None
     if rm.get("speaker_badge", True):               # review 1c98076 P3-3: badge off, speakers.json is never read
-        turns = badge_turns(rm, read_json(paths.p("00_inputs/speakers.json"), {}) or {})
+        turns = badge_turns(rm, badge_speakers(paths))
     if turns:                                       # what the badge shows: who speaks when (names: the sheet only)
         h.update(b"speakers" + json.dumps(turns, sort_keys=True, ensure_ascii=True).encode())
     cues = shown_cues(paths, script, src)       # BL-21: no captions shown (or no file): as before BL-21
@@ -161,6 +175,7 @@ class _Compiler:
         self.tmap = TimeMap(pz.get("keep_ms") or [[0, self.total_ms]])
         self.fps = seq_fps()
         self.sheet = episode_sheet(paths, self.src)         # only what fingerprint() binds (BL-20)
+        self.errors += name_problems(self.sheet)            # review c963132 P2-1: a list, number ... is never a name
         self.names = []                                     # review 1c98076 P2-1: every name shown, for motion-plan.md
         self.window_digits = set().union(*(digit_runs(w["word"]) for w in self.words)) if self.words else set()
         self.brand = Brand(paths.client_db)
@@ -551,7 +566,7 @@ class _Compiler:
 
     def _person(self, sid, sc, theme, els):
         who = sc.get("who")
-        raw = str(self.sheet.get(who) or "") if who in ("host", "guest") else ""
+        raw = sheet_text(self.sheet.get(who)) if who in ("host", "guest") else ""
         name = person_name(raw)
         if not name:
             self.err(f"{sid}: person_card {who!r} has no name in the episode sheet")
@@ -614,7 +629,7 @@ class _Compiler:
         e = self.text_el(sid, 1, "outro", "cta", self.editorial_text(sid, "cta", sc["cta"]), theme)
         if e:
             els.append(e)
-        show = str(self.sheet.get("show") or "").strip()
+        show = sheet_text(self.sheet.get("show"))
         if show and sc.get("show_name", True) and (not e or show not in " ".join(e.get("lines") or [])):
             self.shown_name(f"{sid} outro", "show", show)
             e = self.text_el(sid, 1, "outro", "show", show, theme)
@@ -655,7 +670,7 @@ class _Compiler:
     def badge(self, theme: str) -> dict | None:
         if not self.rm.get("speaker_badge", True):
             return None
-        sp = read_json(self.paths.p("00_inputs/speakers.json"), {}) or {}
+        sp = badge_speakers(self.paths)
         turns = badge_turns(self.rm, sp)
         if not turns:
             return None
@@ -902,6 +917,13 @@ PLAN_OLD = {"en": "This motion plan was made by an older WhyNot Cut. It is made 
                   "nothing you approved changes.",
             "ar": "خطة الموشن دي اتعملت بنسخة أقدم من WhyNot Cut. هتتعمل تاني قبل ما أي حاجة تتبني، ومفيش حاجة من "
                   "اللي وافقت عليه هتتغير."}
+# review c963132 P3-1: the last `reel motion-plan` run failed (or never finished): no plan on disk is a checked one
+PLAN_FAILED = {"en": "The last run that makes the motion plan had errors, so there is no checked plan to use. Fix the "
+                     "errors listed in motion-plan.md and make the plan again.",
+               "ar": "آخر مرة اتعملت فيها خطة الموشن كان فيها أخطاء، فمفيش خطة متراجعة نستخدمها. صلّح الأخطاء اللي في "
+                     "motion-plan.md واعمل الخطة تاني."}
+PLAN_FAILED_WHY = ("the last `reel motion-plan` run has errors (or 01_analysis/motion-validation.json is missing): fix "
+                   "them (01_analysis/motion-plan.md) and run `reel motion-plan` again")
 PLAN_OLD_WHY = ("01_analysis/motion-plan.json was compiled by an older WhyNot Cut (motion-validation.json has no "
                 "plan_sha1): run `reel motion-plan` again; the approval holds if nothing else changed")
 
@@ -936,7 +958,9 @@ def plan_edited(paths, raw: bytes | None = None) -> dict | None:
 def compiled_plan(paths) -> tuple[dict | None, dict | None]:
     """Review 1c98076 P3-4/P3-5: the compiled plan read ONCE: (plan, problem). `problem` is plan_edited() of exactly
     those bytes, and `plan` is parsed from them (stamps.check applied, as read_compiled does), so what is built,
-    rendered or reported is what was checked. (None, None) when there is no compiled plan."""
+    rendered or reported is what was checked. (None, None) when there is no compiled plan. Review c963132 P3-1: when
+    the last motion-plan run failed (validation missing or not ok), the problem is PLAN_FAILED: no plan on disk is a
+    checked one (plan_edited itself never judges a failed run, so it never reads as an older engine)."""
     from .errors import FileFormatError, decode_position
     from .stamps import check
     f = paths.p("01_analysis/motion-plan.json")
@@ -944,7 +968,11 @@ def compiled_plan(paths) -> tuple[dict | None, dict | None]:
         raw = f.read_bytes()
     except FileNotFoundError:
         return None, None
-    problem = plan_edited(paths, raw)
+    val = read_json(paths.p("01_analysis/motion-validation.json"), {})
+    if not isinstance(val, dict) or not val.get("ok"):
+        problem = {"why": PLAN_FAILED_WHY, "editor_message": dict(PLAN_FAILED)}
+    else:
+        problem = plan_edited(paths, raw)
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError as e:
@@ -962,7 +990,7 @@ def compiled_plan(paths) -> tuple[dict | None, dict | None]:
 def checked_plan(paths) -> dict | None:
     """compiled_plan() for the steps after the build (motion-render, motion-frames, the handoff README): the plan, or
     a plain refusal (Guidance, exit 1, the editor's line in English and Arabic) when it is not the one `reel
-    motion-plan` wrote."""
+    motion-plan` wrote, or that run failed (review c963132 P3-1)."""
     plan, problem = compiled_plan(paths)
     if problem:
         from .errors import Guidance

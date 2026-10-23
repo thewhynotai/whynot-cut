@@ -37,8 +37,38 @@ PERSON_KEYS = ("name", "role", "gender", "honorific_ar", "honorific_en")
 SHEET_PEOPLE = ("host", "guest") + tuple(f"guest_{n}" for n in range(2, 10))
 
 
+SHEET_NAMES = SHEET_PEOPLE + ("show",)
+
+
 def _one_line(v) -> str:
     return " ".join(str(v or "").split())
+
+
+def sheet_text(value) -> str:
+    """Review c963132 P2-1: a sheet name (SHEET_NAMES) as it may be shown: plain text only. Anything else (a list, a
+    mapping, a number, true/false, null) is "" here, never its Python form on screen; name_problems() says why."""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def name_problems(sheet: dict) -> list[str]:
+    """Review c963132 P2-1 (executor ruling): one plain line (English and Arabic) for each host, guest, guest_2 …
+    guest_9 or show value that is given but is not one name written as text. An empty value is "not given"."""
+    out = []
+    for k in SHEET_NAMES:
+        if not isinstance(sheet, dict) or k not in sheet or isinstance(sheet[k], str):
+            continue
+        eg = "My Show" if k == "show" else "Ahmed"
+        v = sheet[k]
+        if isinstance(v, list):
+            out.append(f"{k} in the episode sheet is a list, not one name: it must be one name written as text, "
+                       f"e.g. `{k}: {eg}`; each guest has its own field (guest, guest_2 … guest_9) "
+                       f"({k} في شيت الحلقة مكتوب كقائمة: لازم يكون اسم واحد مكتوب كنص، زي `{k}: {eg}`؛ وكل ضيف "
+                       "في خانة لوحده)")
+        else:
+            out.append(f"{k} in the episode sheet must be one name written as text, e.g. `{k}: {eg}` (a name made of "
+                       f"digits goes in quotes) ({k} في شيت الحلقة لازم يكون اسم واحد مكتوب كنص، زي `{k}: {eg}`؛ "
+                       "ولو الاسم أرقام حطه بين علامتين تنصيص)")
+    return out
 
 
 def _context(paths: Paths, ctx) -> Context:
@@ -65,15 +95,11 @@ def sheet_people(sheet: dict) -> tuple[list[dict], list[str]]:
     from .people import load_people
     entries = []
     for role in SHEET_PEOPLE:
-        val = sheet.get(role)
-        if isinstance(val, list):                   # `host: [a, b]` or a `- item` list: one person per item, and a
-            val = val[0] if len(val) == 1 else val  # gender/honorific cannot be told apart for several: reported
-        if isinstance(val, list):
-            issues_pre = [f"the sheet's {role} lists {len(val)} people: give each its own field ({role}, guest_2, "
-                          f"guest_3 ...) so each has its own gender and honorifics"]
-            entries.append({"name": "", "role": role, "_issues": issues_pre})
+        bad = name_problems({role: sheet.get(role)}) if role in sheet else []
+        if bad:                                     # review c963132 P2-1: a list, number ... is never a name
+            entries.append({"name": "", "role": role, "_issues": bad})
             continue
-        name = re.split(r"\s+[—–-]\s+", _one_line(val))[0].strip()
+        name = re.split(r"\s+[—–-]\s+", _one_line(sheet_text(sheet.get(role))))[0].strip()
         if not name:
             continue
         entries.append({"name": name, "role": role, "gender": _one_line(sheet.get(f"{role}_gender")) or "unknown",

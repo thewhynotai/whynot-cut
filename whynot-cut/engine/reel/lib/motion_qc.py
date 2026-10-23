@@ -224,10 +224,13 @@ def motion_next(paths) -> dict:
     def newer(a, *ups):
         return tm.get(a) is not None and any(tm.get(u) is not None and tm[u] > tm[a] + 1 for u in ups)
     stale = []
-    from .motion_plan import plan_edited
+    from .motion_plan import PLAN_OLD, plan_edited
+    edited = plan_edited(paths)
     if val and fp and val.get("fingerprint") != fp:    # review 91b6b44 P3-3: compile again first, then approve
         stale.append("motion-plan (its inputs changed after it was compiled)")
-    elif plan_edited(paths):                            # review 91b6b44 P2-1
+    elif edited and edited["editor_message"] == PLAN_OLD:   # review c963132 P3-2: an older engine, never "by hand"
+        stale.append(f"motion-plan ({PLAN_OLD['en']})")
+    elif edited:                                        # review 91b6b44 P2-1
         stale.append("motion-plan (01_analysis/motion-plan.json was edited by hand: compile it again)")
     elif newer("plan", "script", "pauses"):
         stale.append("motion-plan (older than motion-script.json or pauses.json)")

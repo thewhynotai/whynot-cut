@@ -1193,6 +1193,12 @@ class TestFinalsUntouched(_Home):
         aep.parent.mkdir(parents=True, exist_ok=True)
         aep.write_bytes(b"aep")
         plan = {"reel_id": "R01", "fps": 25, "duration_frames": 50, "w": 1080, "h": 1920, "scenes": [{"hero_frame": 10}]}
+        # review 1c98076 P3-4 / c963132 P3-1: motion-render reads only a checked plan (one motion-plan wrote, sealed
+        # by motion-validation.json's plan_sha1), as `reel motion-plan` leaves it, and approved
+        from lib.motion_plan import plan_sha1
+        write_json(paths.p("01_analysis/motion-plan.json"), plan)
+        write_json(paths.p("01_analysis/motion-validation.json"), {"ok": True, "plan_sha1": plan_sha1(paths)})
+        write_json(paths.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor"})
         seen = []
 
         def run(cmd, **kw):

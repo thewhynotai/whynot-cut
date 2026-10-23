@@ -246,6 +246,12 @@ def prep(ep: EpisodePaths) -> dict:
     if hit.get("sheet"):
         sheet_text = (ep.root / hit["sheet"]).read_text(encoding="utf-8", errors="replace")
         sheet = {k: val for k, val in parse_sheet(sheet_text).items() if k != "_text"}
+        from .episode_sheet import name_problems
+        bad = name_problems(sheet)              # review c963132 P2-1: a list, number ... is never a name on screen
+        if bad:
+            from .errors import Guidance
+            raise Guidance("; ".join(bad), f"Fix {hit['sheet']}, then run `reel episode-prep --episode "
+                                           f"{ep.episode_id}` again (nothing was written)", where=hit["sheet"])
     warnings = []
     media = hit.get("media", "video")          # an audio podcast (audio file): no picture, motion mode only
     if pr["errors"] or (media == "video" and not v):
