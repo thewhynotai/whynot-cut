@@ -1651,6 +1651,38 @@ class TestEpisodeSheetBinding(unittest.TestCase):
         sp.write_bytes(good)
         self.motion_plan()                                  # the file as reels-select wrote it: it compiles again
 
+    def test_a_speakers_json_that_is_not_an_object_gives_the_real_remedy(self):
+        """Review a8a74fd P3-1: the line for a speakers.json whose top level is not an object names the file and the
+        real remedy, in English and Arabic (put the file back as `reel reels-select` wrote it, or, for no speaker
+        badge, write {"people": {}, "turns": []} in it or delete it), never the JSON-syntax advice ("a missing comma
+        ... line 1"); it stays refused (exit 1), and each no-badge remedy really compiles, with no badge."""
+        sp = self.reel.p("00_inputs/speakers.json")
+        write_json(sp, {"people": {}, "turns": [{"start_ms": 0, "end_ms": 6000, "speaker": "host"},
+                                                {"start_ms": 6000, "end_ms": 12000, "speaker": "guest"}]})
+        self.motion_plan()
+        self.assertIsNotNone(self.badge())                  # two speakers: a badge, so "no badge" below is a change
+        for root in ([], None, "Ahmed"):
+            write_json(sp, root)
+            code, doc, err = self.reel_cli("motion-plan", "--video-id", "EP12_R01_MO")
+            how = doc.get("how", "")
+            self.assertEqual(code, 1, (root, doc, err))
+            self.assertIn("speakers.json", doc.get("error", ""), (root, doc))
+            self.assertIn(str(sp), how, (root, doc))
+            self.assertIn("reels-select", how, root)
+            self.assertIn('{"people": {}, "turns": []}', how, root)
+            self.assertIn("or delete it", how, root)
+            self.assertIn("رجّع الملف", how, root)             # the Arabic half of the remedy
+            self.assertIn("امسحه", how, root)
+            self.assertNotIn("missing comma", how, root)
+            self.assertNotIn("line 1", doc["error"] + how, root)
+            self.assertNotIn("Traceback", err, root)
+        write_json(sp, {"people": {}, "turns": []})          # remedy 1: the empty object
+        self.motion_plan()
+        self.assertIsNone(self.badge())
+        sp.unlink()                                         # remedy 2: no file
+        self.motion_plan()
+        self.assertIsNone(self.badge())
+
     def test_a_speaker_with_no_name_never_reaches_the_screen(self):
         """A badge speaker named neither in the sheet nor in speakers.json fails closed: the plan does not compile, a
         plain line names the speaker and the sheet, and no raw key such as "guest_2" is in the plan."""
@@ -2122,6 +2154,75 @@ class TestCompiledPlanBinding(unittest.TestCase):
         self.reel.p("01_analysis/motion-validation.json").unlink()      # no record at all: the same
         with self.assertRaises(Guidance):
             checked_plan(self.reel)
+
+    def test_the_animatic_previews_only_a_checked_plan(self):
+        """Review a8a74fd P3-2: `reel motion-animatic`, the preview shown to the editor for approval, reads the plan
+        through the same check as render and frames: a plan edited by hand, a failed run or a missing check is refused
+        (exit 1) with the editor's line in English and Arabic, and no animatic is written."""
+        from lib.errors import Guidance
+        from lib.motion_animatic import render
+        from lib.motion_plan import PLAN_EDITED, PLAN_FAILED
+        self.motion_plan()
+        pf = self.reel.p("01_analysis/motion-plan.json")
+        anim = self.reel.p("08_quality_control/animatic")
+        plan = read_json(pf)
+        plan["scenes"][0]["id"] = "HANDEDITED"
+        write_json(pf, plan)
+        code, doc, err = self.reel_cli("motion-animatic", "--video-id", "EP12_R01_MO")
+        self.assertEqual(code, 1, (doc, err))
+        self.assertIn("edited by hand", doc.get("error", ""), doc)
+        self.assertIn(PLAN_EDITED["en"], doc.get("how", ""), doc)
+        self.assertIn(PLAN_EDITED["ar"], doc["how"], doc)
+        self.assertNotIn("Traceback", err)
+        self.assertFalse(anim.exists() and any(anim.iterdir()), list(anim.iterdir()) if anim.exists() else None)
+        sf = self.reel.p("01_analysis/motion-script.json")              # a failed run
+        s = read_json(sf)
+        s["scenes"][0]["type"] = "no_such_scene"
+        write_json(sf, s)
+        code, doc, err = self.reel_cli("motion-plan", "--video-id", "EP12_R01_MO")
+        self.assertEqual(code, 1, (doc, err))
+        common.set_context(self.root)
+        with self.assertRaises(Guidance) as cm:
+            render(self.reel)
+        self.assertIn(PLAN_FAILED["en"], cm.exception.how)
+        self.assertIn(PLAN_FAILED["ar"], cm.exception.how)
+        self.reel.p("01_analysis/motion-validation.json").unlink()      # no check at all
+        with self.assertRaises(Guidance):
+            render(self.reel)
+        self.assertFalse(anim.exists() and any(anim.iterdir()), list(anim.iterdir()) if anim.exists() else None)
+
+    def test_a_missing_check_is_not_called_a_failed_run(self):
+        """Review a8a74fd P3-4: the editor's line tells a missing (or unreadable as a record) motion-validation.json,
+        PLAN_UNCHECKED, from a last run that had errors, PLAN_FAILED; neither Arabic line says «متراجعة» (which can
+        read as "retreated"): the house word is «اتراجعت» (was checked)."""
+        from lib.errors import Guidance
+        from lib.motion_plan import PLAN_FAILED, PLAN_UNCHECKED, checked_plan, compiled_plan
+        self.motion_plan()
+        vf = self.reel.p("01_analysis/motion-validation.json")
+        common.set_context(self.root)
+        for bad in (None, [], "ok", {}):                    # None: the file is gone
+            if bad is None:
+                vf.unlink()
+            else:
+                write_json(vf, bad)
+            self.assertEqual(compiled_plan(self.reel)[1]["editor_message"], PLAN_UNCHECKED, bad)
+            with self.assertRaises(Guidance) as cm:
+                checked_plan(self.reel)
+            self.assertIn("motion-validation.json is missing", cm.exception.error, bad)
+            self.assertNotIn("has errors", cm.exception.error, bad)
+            self.assertIn(PLAN_UNCHECKED["en"], cm.exception.how, bad)
+            self.assertIn(PLAN_UNCHECKED["ar"], cm.exception.how, bad)
+            self.assertNotIn(PLAN_FAILED["en"], cm.exception.how, bad)
+        self.motion_plan()
+        write_json(vf, dict(read_json(vf), ok=False))       # a run with errors
+        problem = compiled_plan(self.reel)[1]
+        self.assertEqual(problem["editor_message"], PLAN_FAILED)
+        self.assertIn("the last `reel motion-plan` run has errors", problem["why"])
+        self.assertNotIn("missing", problem["why"])
+        self.assertNotIn("had errors", PLAN_UNCHECKED["en"])
+        for m in (PLAN_FAILED, PLAN_UNCHECKED):
+            self.assertNotIn("متراجعة", m["ar"])
+            self.assertIn("اتراجعت", m["ar"])
 
     def test_the_check_hashes_the_bytes_it_was_given(self):
         """Review c963132 R19: plan_edited judges the bytes it is handed, never a fresh read of the file."""

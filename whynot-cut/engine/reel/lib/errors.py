@@ -39,10 +39,11 @@ class Guidance(Exception):
 
 
 class FileFormatError(ValueError):
-    """A text file that cannot be read: not valid JSON, or not UTF-8. Names the file and the line (1-based)."""
+    """A text file that cannot be read: not valid JSON, or not UTF-8. Names the file and the line (1-based). `how`
+    (review a8a74fd P3-1): a file that parses but has the wrong shape gives its own remedy instead of the syntax one."""
 
-    def __init__(self, path, line: int, column: int, reason: str):
-        self.path, self.line, self.column, self.reason = str(path), int(line), int(column), reason
+    def __init__(self, path, line: int, column: int, reason: str, how: str | None = None):
+        self.path, self.line, self.column, self.reason, self.how = str(path), int(line), int(column), reason, how
         super().__init__(f"{self.path}: line {self.line} column {self.column}: {reason}")
 
 
@@ -118,6 +119,9 @@ def describe(exc: BaseException) -> dict:
             doc["blocked"] = exc.error
         return doc
     if isinstance(exc, FileFormatError):
+        if exc.how:                     # valid JSON of the wrong shape: no line, column or syntax advice
+            return {"ok": False, "error": f"{Path(exc.path).name} cannot be used: {exc.reason}", "where": exc.path,
+                    "how": exc.how}
         return {"ok": False, "error": f"{Path(exc.path).name} cannot be read: {exc.reason} (line {exc.line}, "
                                       f"column {exc.column})",
                 "where": f"{exc.path}:{exc.line}",

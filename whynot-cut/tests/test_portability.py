@@ -285,12 +285,15 @@ class TestFfmpegPipelinesNeverHang(_Tmp, _Hang):
 
     def test_motion_animatic_encoder(self):
         from PIL import Image
-        from lib import media_util as mu, motion_animatic, motion_audio, previews, stamps
+        from lib import media_util as mu, motion_animatic, motion_audio, previews
+        from lib.motion_plan import plan_sha1
         plan = {"fps": 25, "duration_frames": 250, "scenes": [{"id": "S1", "type": "kinetic", "start_frame": 0}]}
         p = Paths(self.tmp / "C", "V1_MO")
+        # review a8a74fd P3-2: the animatic reads only a checked plan, sealed as `reel motion-plan` leaves it
+        common.write_json(p.p("01_analysis/motion-plan.json"), plan)
+        common.write_json(p.p("01_analysis/motion-validation.json"), {"ok": True, "plan_sha1": plan_sha1(p)})
         st, argvs = self.hang()
-        with st, mock.patch.object(stamps, "read_compiled", return_value=plan), \
-                mock.patch.object(previews, "Brand"), \
+        with st, mock.patch.object(previews, "Brand"), \
                 mock.patch.object(motion_audio, "mix", return_value=self.tmp / "mix.wav"), \
                 mock.patch.object(mu, "contact_sheet", return_value=self.tmp / "sheet.jpg"), \
                 mock.patch.object(motion_animatic, "scene_still", return_value=Image.new("RGB", (540, 960))):

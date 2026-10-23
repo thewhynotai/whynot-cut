@@ -1184,7 +1184,7 @@ class TestAnimaticEncode(_Home):
 # --------------------------------------------------------------------------- finals stay libx264
 class TestFinalsUntouched(_Home):
     def test_motion_render_final_is_always_libx264(self):
-        from lib import ae_render, audio_clean, motion_build, stamps
+        from lib import ae_render, audio_clean, motion_build
         from lib import motion_render as MR
         root = self.tmp / AR_DIR
         paths = Paths(root, "EP1_R01_MO")
@@ -1194,11 +1194,11 @@ class TestFinalsUntouched(_Home):
         aep.write_bytes(b"aep")
         plan = {"reel_id": "R01", "fps": 25, "duration_frames": 50, "w": 1080, "h": 1920, "scenes": [{"hero_frame": 10}]}
         # review 1c98076 P3-4 / c963132 P3-1: motion-render reads only a checked plan (one motion-plan wrote, sealed
-        # by motion-validation.json's plan_sha1), as `reel motion-plan` leaves it, and approved
+        # by motion-validation.json's plan_sha1), as `reel motion-plan` leaves it; review a8a74fd P3-3: it reads that
+        # file itself (no stamps.read_compiled mock) and no approval record
         from lib.motion_plan import plan_sha1
         write_json(paths.p("01_analysis/motion-plan.json"), plan)
         write_json(paths.p("01_analysis/motion-validation.json"), {"ok": True, "plan_sha1": plan_sha1(paths)})
-        write_json(paths.p("01_analysis/plan-approval.json"), {"approved": True, "by": "editor"})
         seen = []
 
         def run(cmd, **kw):
@@ -1207,7 +1207,6 @@ class TestFinalsUntouched(_Home):
             Path(cmd[-1]).write_bytes(b"mp4")
             return cp(cmd, 0)
         with detect_as(CUDA), use_context(Context(root, home=self.home)), \
-                mock.patch.object(stamps, "read_compiled", return_value=plan), \
                 mock.patch.object(motion_build, "aep_path", return_value=aep), \
                 mock.patch.object(motion_build, "render_path", return_value=paths.p("04_after_effects/render/m.mov")), \
                 mock.patch.object(MR, "_templates", return_value=("Best Settings", "High Quality")), \

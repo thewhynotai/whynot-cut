@@ -192,8 +192,8 @@ def _encode(build, lane: str, frames, errf: Path, log_to=None, release=None) -> 
 def render(paths, width: int = 540) -> dict:
     from .motion_audio import mix
     from .previews import Brand
-    from .stamps import read_compiled
-    plan = read_compiled(paths.p("01_analysis/motion-plan.json"))
+    from .motion_plan import checked_plan
+    plan = checked_plan(paths)      # review a8a74fd P3-2: the editor approves only a checked plan's preview
     if not plan:
         raise SystemExit("01_analysis/motion-plan.json missing — run `reel motion-plan` first")
     brand = Brand(paths.client_db)

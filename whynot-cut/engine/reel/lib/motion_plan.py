@@ -70,14 +70,21 @@ def episode_sheet(paths, src: dict) -> dict:
 def badge_speakers(paths) -> dict:
     """The reel's 00_inputs/speakers.json as the speaker badge reads it ({} when there is none). Review c963132 p10: a
     file whose top level is not an object (a list, text, a number, null) raises errors.FileFormatError naming the file
-    with a plain line in English and Arabic, never an AttributeError."""
+    with a plain line in English and Arabic, never an AttributeError. Review a8a74fd P3-1: with its own remedy, never
+    the JSON-syntax advice (a re-pick of the same reel does not rewrite the file: reels.py keeps it "unchanged")."""
     from .errors import FileFormatError
     f = paths.p("00_inputs/speakers.json")
     sp = read_json(f, {})
     if not isinstance(sp, dict):
         raise FileFormatError(f, 1, 1, "its top level is not an object {…} with people and turns, as `reel "
                                        "reels-select` writes it (speakers.json لازم يبدأ بـ { … } فيه people و turns، "
-                                       "مش قائمة ولا قيمة لوحدها)")
+                                       "مش قائمة ولا قيمة لوحدها)",
+                              how=f"Put {f} back as `reel reels-select` wrote it (undo the edit: picking the same reel "
+                                  "again does not rewrite it), or, for no speaker badge, write "
+                                  "{\"people\": {}, \"turns\": []} in it or delete it; then run the command again. / "
+                                  "رجّع الملف زي ما `reel reels-select` كتبه (الغي التعديل: اختيار نفس الريل تاني مش "
+                                  "بيكتبه من جديد)، أو لو مش عايز البادج (اسم المتكلّم) اكتب فيه "
+                                  "{\"people\": {}, \"turns\": []} أو امسحه، وبعدين شغّل الأمر تاني.")
     return sp
 
 
@@ -917,13 +924,21 @@ PLAN_OLD = {"en": "This motion plan was made by an older WhyNot Cut. It is made 
                   "nothing you approved changes.",
             "ar": "خطة الموشن دي اتعملت بنسخة أقدم من WhyNot Cut. هتتعمل تاني قبل ما أي حاجة تتبني، ومفيش حاجة من "
                   "اللي وافقت عليه هتتغير."}
-# review c963132 P3-1: the last `reel motion-plan` run failed (or never finished): no plan on disk is a checked one
+# review c963132 P3-1: the last `reel motion-plan` run failed: no plan on disk is a checked one
 PLAN_FAILED = {"en": "The last run that makes the motion plan had errors, so there is no checked plan to use. Fix the "
                      "errors listed in motion-plan.md and make the plan again.",
-               "ar": "آخر مرة اتعملت فيها خطة الموشن كان فيها أخطاء، فمفيش خطة متراجعة نستخدمها. صلّح الأخطاء اللي في "
+               "ar": "آخر مرة اتعملت فيها خطة الموشن كان فيها أخطاء، فمفيش خطة اتراجعت نستخدمها. صلّح الأخطاء اللي في "
                      "motion-plan.md واعمل الخطة تاني."}
-PLAN_FAILED_WHY = ("the last `reel motion-plan` run has errors (or 01_analysis/motion-validation.json is missing): fix "
-                   "them (01_analysis/motion-plan.md) and run `reel motion-plan` again")
+PLAN_FAILED_WHY = ("the last `reel motion-plan` run has errors: fix them (01_analysis/motion-plan.md) and run "
+                   "`reel motion-plan` again")
+# review a8a74fd P3-4: no record of the check at all is not "the last run had errors"
+PLAN_UNCHECKED = {"en": "The motion plan has no record that it was checked (the last run did not finish, or the record "
+                        "was removed), so there is no checked plan to use. Make the plan again.",
+                  "ar": "خطة الموشن مالهاش سجل إنها اتراجعت (آخر مرة اتعملت ماكملتش، أو السجل اتمسح)، فمفيش خطة "
+                        "اتراجعت نستخدمها. اعمل الخطة تاني."}
+PLAN_UNCHECKED_WHY = ("01_analysis/motion-validation.json is missing or is not a check record (the last `reel "
+                      "motion-plan` run did not finish, or the file was removed or changed): run `reel motion-plan` "
+                      "again")
 PLAN_OLD_WHY = ("01_analysis/motion-plan.json was compiled by an older WhyNot Cut (motion-validation.json has no "
                 "plan_sha1): run `reel motion-plan` again; the approval holds if nothing else changed")
 
@@ -959,8 +974,9 @@ def compiled_plan(paths) -> tuple[dict | None, dict | None]:
     """Review 1c98076 P3-4/P3-5: the compiled plan read ONCE: (plan, problem). `problem` is plan_edited() of exactly
     those bytes, and `plan` is parsed from them (stamps.check applied, as read_compiled does), so what is built,
     rendered or reported is what was checked. (None, None) when there is no compiled plan. Review c963132 P3-1: when
-    the last motion-plan run failed (validation missing or not ok), the problem is PLAN_FAILED: no plan on disk is a
-    checked one (plan_edited itself never judges a failed run, so it never reads as an older engine)."""
+    the last motion-plan run failed (validation not ok), the problem is PLAN_FAILED: no plan on disk is a
+    checked one (plan_edited itself never judges a failed run, so it never reads as an older engine). Review a8a74fd
+    P3-4: a validation that is missing or not a record ({…} with "ok") is PLAN_UNCHECKED, not PLAN_FAILED."""
     from .errors import FileFormatError, decode_position
     from .stamps import check
     f = paths.p("01_analysis/motion-plan.json")
@@ -968,8 +984,10 @@ def compiled_plan(paths) -> tuple[dict | None, dict | None]:
         raw = f.read_bytes()
     except FileNotFoundError:
         return None, None
-    val = read_json(paths.p("01_analysis/motion-validation.json"), {})
-    if not isinstance(val, dict) or not val.get("ok"):
+    val = read_json(paths.p("01_analysis/motion-validation.json"))
+    if not isinstance(val, dict) or "ok" not in val:
+        problem = {"why": PLAN_UNCHECKED_WHY, "editor_message": dict(PLAN_UNCHECKED)}
+    elif not val["ok"]:
         problem = {"why": PLAN_FAILED_WHY, "editor_message": dict(PLAN_FAILED)}
     else:
         problem = plan_edited(paths, raw)
