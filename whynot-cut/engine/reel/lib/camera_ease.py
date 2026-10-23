@@ -302,13 +302,14 @@ def _frame(v):
     return int(f) if math.isfinite(f) else None
 
 
-def verse_spans(verse) -> list:
-    """[(start_frame, end_frame)) half-open sequence-frame spans of the spec's manual_verse records. Every record
-    blocks, a `check` span too (round 7 P3-4 ruling: audio that might be a recitation is treated as one); an entry
-    that is not a dict or has no usable frames is skipped, never a crash (P3-3)."""
+def verse_spans(verse, held: bool = False) -> list:
+    """[(start_frame, end_frame)) half-open sequence-frame spans of the records plan.apply_ease passes: the spec's
+    manual_verse, and the caption runs held after one (verse_hold, marked `held: True`; round 9). `held` False: the
+    unmarked records (a recited verse), True: the marked ones (the verse may go on). An entry that is not a dict or
+    has no usable frames is skipped, never a crash (P3-3)."""
     out = []
     for v in verse if isinstance(verse, list) else []:
-        if not isinstance(v, dict):
+        if not isinstance(v, dict) or (v.get("held") is True) != held:
             continue
         a, b = _frame(v.get("start_frame")), _frame(v.get("end_frame"))
         if a is not None and b is not None and b > a:
@@ -322,54 +323,68 @@ def _mmss(ms: float) -> str:
 
 
 def outside_verse(runs: list, segments: list, verse: list | None, fps=None) -> tuple[list, list, list, list[str]]:
-    """No camera motion during a recited verse (round 7 P3-2 ruling, religious content: the conservative choice). An
-    ease whose window OVERLAPS a span is dropped and that side stays hard; a slow_push whose piece overlaps a span is
-    not pushed. The ease-in window is [start, start + frames] (its last key sits AT start + frames, round 8 P3-1), the
-    ease-out window [end - frames, end); spans are half-open sequence frames. The ease-out's last key sits ON the
+    """No camera motion during a recited verse (round 7 P3-2 ruling, religious content: the conservative choice), nor
+    during a caption run held after one (a `verse` record marked `held: True`: the verse may go on; round 9, the
+    round-7 P3-4 ruling: audio that might be a recitation is treated as one). An ease whose window OVERLAPS a span is
+    dropped and that side stays hard; a slow_push whose piece overlaps a span is not pushed. The ease-in window is
+    [start, start + frames] (its last key sits AT start + frames, round 8 P3-1), the ease-out window [end - frames, end); spans are half-open sequence frames. The ease-out's last key sits ON the
     out point, the next piece's first frame, so a verse starting exactly there meets a cut, not motion: that ease is
     kept, since dropping it would make the same cut a full hard step (round 8 review P3-1). The runs stay as the build contract
     knows them (round 8 P2-1): a dropped side of a run that keeps its other ease goes to `verse_dropped` (decision,
     camera, side, start_ms), a move left with no ease to `verse_hard` (decision, camera, sides, start_ms); start_ms is
-    the time of the side that was dropped (round 8 P3-4). One warning per move, at that time, in plain English and
-    Egyptian Arabic. Returns (runs, verse_dropped, verse_hard, warnings)."""
-    spans = verse_spans(verse)
-    if not spans:
+    the time of the side that was dropped (round 8 P3-4). A side lost ONLY to a held run is marked `held: True` (its
+    words say "the verse may go on", never that a verse is recited). One warning per move (round 9 P3-2: the runs of a
+    move split by a cutaway share it), at the time of its first side lost to a verse, else to a held run, in plain
+    English and Egyptian Arabic. Returns (runs, verse_dropped, verse_hard, warnings)."""
+    spans, maybe = verse_spans(verse), verse_spans(verse, held=True)
+    if not spans and not maybe:
         return runs, [], [], []
     rate = float(fps) if fps else 24.0
 
     def hits(a, b):
-        return any(a < z and r < b for r, z in spans)
-    out, dropped, hard, warns = [], [], [], []
+        """"verse" when frames [a, b) overlap a recited span, "held" when only a held run, else None."""
+        return next((k for k, ss in (("verse", spans), ("held", maybe)) if any(a < z and r < b for r, z in ss)), None)
+    out, dropped, hard, per = [], [], [], {}
     for r in runs:
         r = dict(r)
-        ein, eout, sides = r.get("ease_in"), r.get("ease_out"), {}
+        ein, eout, sides, kinds = r.get("ease_in"), r.get("ease_out"), {}, {}
         if ein:
             sg = segments[ein["piece"]]
             a = int(sg["start_frame"])
             b = int(sg["end_frame"]) if r.get("camera") in PUSH_MOVES else a + int(ein["frames"]) + 1
-            if hits(a, b):
+            kinds["in"] = hits(a, b)
+            if kinds["in"]:
                 r["ease_in"] = None
                 sides["in"] = a * 1000 / rate
         if eout:
             sg = segments[eout["piece"]]
             b = int(sg["end_frame"])
-            if hits(b - int(eout["frames"]), b):
+            kinds["out"] = hits(b - int(eout["frames"]), b)
+            if kinds["out"]:
                 r["ease_out"] = None
                 sides["out"] = (b - int(eout["frames"])) * 1000 / rate
         if not sides:
             out.append(r)
             continue
-        at_ms = min(sides.values())
-        warns.append(f"{r.get('decision_id')} at {_mmss(at_ms)}: no smooth zoom while a verse is recited, so the "
-                     f"move stays hard there / مفيش زوم ناعم وقت الآية عند {_mmss(at_ms)}، "
-                     "الحركة فضلت من غير نعومة هناك")
+        at = per.setdefault(r.get("decision_id"), {})
+        for side, ms in sides.items():
+            at[kinds[side]] = min(ms, at.get(kinds[side], ms))
         if r.get("ease_in") or r.get("ease_out"):
             out.append(r)
             dropped += [{"decision_id": r.get("decision_id"), "camera": r.get("camera"), "side": side,
-                         "start_ms": int(round(ms))} for side, ms in sides.items()]
+                         "start_ms": int(round(ms)), **({"held": True} if kinds[side] == "held" else {})}
+                        for side, ms in sides.items()]
         else:
             hard.append({"decision_id": r.get("decision_id"), "camera": r.get("camera"), "sides": list(sides),
-                         "start_ms": int(round(at_ms))})
+                         "start_ms": int(round(min(sides.values()))),
+                         **({} if "verse" in kinds.values() else {"held": True})})
+    warns = []
+    for did, at in per.items():
+        t = _mmss(at.get("verse", at.get("held")))
+        warns.append(f"{did} at {t}: no smooth zoom while a verse is recited, so the move stays hard there / مفيش زوم "
+                     f"ناعم وقت الآية عند {t}، الحركة فضلت من غير نعومة هناك" if "verse" in at else
+                     f"{did} at {t}: no smooth zoom where the verse may go on (held captions), so the move stays hard "
+                     f"there / مفيش زوم ناعم في وقت ممكن الآية تكون مكمّلة عند {t}، الحركة فضلت من غير نعومة هناك")
     return out, dropped, hard, warns
 
 
@@ -378,8 +393,8 @@ def spec_fields(segments: list, style: dict | None, fps, duration_ms, camera: li
     """What `reel plan` adds to the timeline spec, and its warnings: {"camera_ease": {ease_ms, curve, runs}} always
     (round 3 item 2: the plan records the value it was written with; an empty `runs` does not change the Gate 1
     fingerprint, plan.spec_fingerprint), plus {"fades": {...}} when a fade is on. `camera`: the plan's camera layer,
-    for the shot each story move sits on (with_shots). `verse`: the plan's manual_verse spans (no camera motion
-    during one: outside_verse)."""
+    for the shot each story move sits on (with_shots). `verse`: the plan's manual_verse spans and the caption runs
+    held after one, marked `held: True` (no camera motion during either: outside_verse)."""
     out, warns = {}, []
     ms, w = ease_settings(style)
     warns += w

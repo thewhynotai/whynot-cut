@@ -238,6 +238,65 @@ class TestCompile(unittest.TestCase):
         self.assertIn("جوه آية", next(x for x in md.splitlines() if "زوم ناعم" in x))
         self.assertEqual(sum(1 for w in r["warnings"] if "EDIT_001" in w and "verse" in w), 1)
 
+    # ---- round 9: the edit plan names a side lost to a held run ("the verse may go on") without claiming a verse
+    def edit_plan_lines(self, ce):
+        from lib.plan import write_edit_plan
+        from lib.stamps import stamp
+        _, spec, _ = self.compile(decisions())
+        spec["camera_ease"] = ce(spec["camera_ease"]["runs"][0])
+        write_json(self.p.p("01_analysis/timeline-spec.json"), stamp(spec))
+        with common.use_context(common.Context(root=self.root)):
+            md = write_edit_plan(self.p).read_text(encoding="utf-8")
+        return (next(x for x in md.splitlines() if x.startswith("Smooth zoom")),
+                next(x for x in md.splitlines() if "زوم ناعم" in x))
+
+    def test_r9_p3_4_the_ms_suffix_when_the_only_one_sided_moves_are_verse_ones(self):
+        """Round 8 review P3-4 (M8): a punch-in eased on one side only because of a verse still names ease_ms."""
+        ed = decisions()
+        ed["manual_verse"] = [{"start_ms": "00:00:00.900", "end_ms": "00:00:01.500"}]
+        self.compile(ed)
+        md = self.p.p("01_analysis/edit-plan.md").read_text(encoding="utf-8")
+        en = next(x for x in md.splitlines() if x.startswith("Smooth zoom"))
+        self.assertTrue(en.startswith("Smooth zoom (250 ms): 1 punch-in eases on one side only (the other side is "
+                                      "inside a recited verse)"), en)
+        self.assertIn("زوم ناعم (250 ms):", next(x for x in md.splitlines() if "زوم ناعم" in x))
+
+    def test_r9_a_side_lost_to_a_held_run_says_the_verse_may_go_on(self):
+        en, ar = self.edit_plan_lines(lambda r: {"ease_ms": 250, "curve": "bezier", "runs": [dict(r, ease_in=None)],
+                                                 "verse_dropped": [{"decision_id": "EDIT_001", "camera": "punch_in",
+                                                                    "side": "in", "start_ms": 1000, "held": True}]})
+        self.assertIn("Smooth zoom (250 ms): 1 punch-in eases on one side only (the other side is where the verse may "
+                      "go on)", en)
+        self.assertNotIn("recited", en)
+        self.assertNotIn("on a cut or another shot", en)
+        self.assertIn("زوم ناعم (250 ms): 1 punch-in بنعومة من ناحية واحدة بس (الناحية التانية في وقت ممكن الآية تكون "
+                      "مكمّلة)", ar)
+        self.assertNotIn("جوه آية", ar)
+        self.assertNotIn("على قطع", ar)
+
+    def test_r9_a_move_kept_hard_by_a_held_run_says_the_verse_may_go_on(self):
+        hard = {"decision_id": "EDIT_001", "camera": "punch_in", "sides": ["in", "out"], "start_ms": 1000, "held": True}
+        en, ar = self.edit_plan_lines(lambda r: {"ease_ms": 250, "curve": "bezier", "runs": [], "verse_hard": [hard]})
+        self.assertEqual(en, "Smooth zoom: 1 move stays hard where the verse may go on.")
+        self.assertEqual(ar, "زوم ناعم: 1 حركة فضلت من غير زوم ناعم في وقت ممكن الآية تكون مكمّلة.")
+        two = [dict(hard, decision_id="A"), dict(hard, decision_id="B")]
+        en, ar = self.edit_plan_lines(lambda r: {"ease_ms": 250, "curve": "bezier", "runs": [], "verse_hard": two})
+        self.assertIn("2 moves stay hard where the verse may go on", en)
+        self.assertIn("حركتين فضلوا من غير زوم ناعم في وقت ممكن الآية تكون مكمّلة", ar)
+
+    def test_r9_a_move_hit_by_a_verse_and_a_held_run_names_the_verse(self):
+        held = {"decision_id": "EDIT_001", "camera": "punch_in", "sides": ["in"], "start_ms": 1000, "held": True}
+        verse = dict(held, sides=["out"], start_ms=2750)
+        verse.pop("held")
+        en, ar = self.edit_plan_lines(lambda r: {"ease_ms": 250, "curve": "bezier", "runs": [],
+                                                 "verse_hard": [held, verse]})
+        self.assertEqual(en, "Smooth zoom: 1 move stays hard inside a recited verse.")
+        self.assertIn("جوه آية", ar)
+        en, _ = self.edit_plan_lines(lambda r: {"ease_ms": 250, "curve": "bezier", "runs": [dict(r, ease_in=None)],
+                                                "verse_dropped": [dict(held, side="in"), dict(verse, side="out")]})
+        self.assertIn("(the other side is inside a recited verse)", en)
+        self.assertNotIn("may go on", en)
+
     def test_c11_ease_zero_is_recorded_with_hard_punches(self):
         self.style({"camera": {"ease_ms": 0}})
         _, spec, _ = self.compile(decisions())
@@ -430,6 +489,120 @@ class TestCutawaySplitVerse(unittest.TestCase):
         self.assertNotIn("على قطع", ar)
         self.assertNotIn("stays hard", en)                  # round 8 review P3-2 (M9): a move with an ease left is
         self.assertNotIn("فضل", ar)                         # never also counted hard
+
+
+class TestHeldRunGuard(unittest.TestCase):
+    """Round 9 P2-1 (executor: the round-7 P3-4 ruling, fail safe): the caption run held after a span that ends on a
+    pause (spec verse_hold, marker «تحقق: الآية ممكن تكون مكمّلة») is possible recitation, so no camera motion there
+    either until the editor releases it. The fixture verse is a placeholder (tests/fixtures/manual_verse)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.addCleanup(common.set_context, None)
+
+    def compile(self, ed_extra=None, glob=None, n=0):
+        from lib.common import read_json
+        from lib.plan import compile_plan
+        from test_manual_verse import SC, build_words, verse_project
+        d = {"decision_id": "EDIT_001", "segment_id": "S1", "evidence": "اهلا بيكم", "start": 200, "end": 10200,
+             "semantic_intent": "hook", "visual_treatment": "hook", "confidence": "high",       # the held run is
+             "camera": {"type": "punch_in", "at": 7000, "until": 9000, "scale_factor": 1.3}}   # 6.25-10.2 s
+        _root, p = verse_project(self.tmp / str(n), build_words(SC["recited"]), decisions=[d], glob=glob,
+                                 extra=ed_extra)
+        r = compile_plan(p)
+        self.assertTrue(r["ok"], r["errors"])
+        md = p.p("01_analysis/edit-plan.md").read_text(encoding="utf-8")
+        return r, read_json(p.p("01_analysis/timeline-spec.json")), md
+
+    def test_a_punch_in_inside_a_held_run_stays_hard_until_released(self):
+        r, spec, md = self.compile()
+        hold = spec["verse_hold"][0]
+        self.assertEqual((hold["src_start_ms"], hold["src_end_ms"], hold["released"]), (6250, 10200, False))
+        self.assertFalse(spec.get("manual_verse") and any(m["src_end_ms"] > 6000 for m in spec["manual_verse"]))
+        ce_ = spec["camera_ease"]
+        self.assertEqual(ce_["runs"], [])
+        self.assertEqual(ce_["verse_hard"], [{"decision_id": "EDIT_001", "camera": "punch_in", "sides": ["in", "out"],
+                                              "start_ms": 7000, "held": True}])
+        ws = [w for w in r["warnings"] if w.startswith("EDIT_001 at")]
+        self.assertEqual(len(ws), 1, r["warnings"])
+        self.assertIn("00:07", ws[0])
+        self.assertIn("may go on", ws[0])
+        self.assertNotIn("is recited", ws[0])
+        en = next(x for x in md.splitlines() if x.startswith("Smooth zoom"))
+        ar = next(x for x in md.splitlines() if "زوم ناعم" in x)
+        self.assertIn("1 move stays hard where the verse may go on", en)
+        self.assertNotIn("recited", en)
+        self.assertIn("في وقت ممكن الآية تكون مكمّلة", ar)
+        self.assertNotIn("جوه آية", ar)
+        # the editor listened and released it: the punch-in eases again, nothing recorded
+        _r, spec, _md = self.compile({"manual_verse_release": [{"start_ms": 6250, "end_ms": 10200}]}, n=1)
+        self.assertEqual([x["released"] for x in spec["verse_hold"]], [True])
+        self.assertEqual(set(spec["camera_ease"]), {"ease_ms", "curve", "runs"})
+        self.assertEqual([(x["ease_in"]["frames"], x["ease_out"]["frames"]) for x in spec["camera_ease"]["runs"]],
+                         [(6, 6)])
+
+    def test_the_held_run_is_on_the_reels_frame_clock(self):
+        """Pre-mortem risk 1: with a word cut before it (time map), the held run's frames are on the same clock as the
+        main segments and as a manual_verse span over the same source time."""
+        cut = {"cut_words": [{"word_ids": [2], "reason": "x"}]}
+        _r, spec, _md = self.compile(glob=cut)
+        hold = spec["verse_hold"][0]
+        punch = next(m for m in spec["main_segments"] if m.get("decision_id") == "EDIT_001")
+        self.assertLess(punch["start_frame"], 168)                                   # the cut moved it earlier
+        fps = spec["fps"]
+        self.assertEqual(hold["start_frame"], punch["start_frame"] - round((punch["src_in_ms"] - 6250) * fps / 1000))
+        self.assertEqual([h["held"] for h in spec["camera_ease"]["verse_hard"]], [True])
+        # the same source time as an editor's span (the hold released): same frames, same guard
+        ed = {"manual_verse": [{"start_ms": 6250, "end_ms": 10200}],
+              "manual_verse_release": [{"start_ms": 6250, "end_ms": 10200}]}
+        _r, spec2, _md = self.compile(ed, glob=cut, n=1)
+        mv = next(m for m in spec2["manual_verse"] if m["src_start_ms"] == 6250)
+        self.assertEqual((mv["start_frame"], mv["end_frame"]), (hold["start_frame"], hold["end_frame"]))
+        self.assertEqual(spec2["camera_ease"]["verse_hard"],
+                         [{k: v for k, v in h.items() if k != "held"} for h in spec["camera_ease"]["verse_hard"]])
+
+
+class TestApplyEaseSelection(unittest.TestCase):
+    """Round 9 P2-1: which verse_hold records guard the eases, chosen as previews.render_captions chooses them: not
+    released and not cut away (synthetic spec frames, so a cut-away record with a range still shows the rule)."""
+
+    def apply(self, **spec_extra):
+        from types import SimpleNamespace
+        from lib.plan import apply_ease
+
+        def sg(a, b, cam="hold", sf=1.0, did=None):
+            return {"start_frame": a, "end_frame": b, "camera": cam, "scale_factor": sf, "offset_x": 0.0,
+                    "offset_y": 0.0, "decision_id": did, "src_in_ms": a * 1000 / 24, "src_out_ms": b * 1000 / 24}
+        spec = {"main_segments": [sg(0, 24), sg(24, 72, "punch_in", 1.1, "P"), sg(72, 120)], "duration_ms": 5000,
+                **spec_extra}
+        out, errs, warns = apply_ease(SimpleNamespace(ctx=None, style={}, fps=24), spec, [])
+        self.assertEqual(errs, [])
+        return out["camera_ease"], warns
+
+    def test_an_unreleased_held_run_guards(self):
+        ce_, w = self.apply(verse_hold=[{"id": "MV01H", "start_frame": 27, "end_frame": 40, "released": False}])
+        self.assertEqual([(d["side"], d.get("held")) for d in ce_["verse_dropped"]], [("in", True)])
+        self.assertEqual(len(w), 1)
+
+    def test_released_or_cut_away_runs_do_not(self):
+        for rec in ({"released": True}, {"released": False, "cut": True}, {"released": True, "cut": True}):
+            with self.subTest(rec=rec):
+                ce_, w = self.apply(verse_hold=[dict(rec, id="MV01H", start_frame=20, end_frame=80)])
+                self.assertEqual(set(ce_), {"ease_ms", "curve", "runs"})
+                self.assertEqual(w, [])
+
+    def test_held_runs_and_verses_together_and_bad_entries(self):
+        ce_, w = self.apply(manual_verse=[{"id": "MV01", "start_frame": 68, "end_frame": 70}],
+                            verse_hold=["x", None, {"id": "MV01H", "start_frame": 26, "end_frame": 27}])
+        self.assertEqual(ce_["verse_hard"], [{"decision_id": "P", "camera": "punch_in", "sides": ["in", "out"],
+                                              "start_ms": 1000}])
+        self.assertEqual(len(w), 1)
+
+    def test_no_verse_and_no_hold_adds_nothing(self):
+        ce_, w = self.apply()
+        self.assertEqual(set(ce_), {"ease_ms", "curve", "runs"})
+        self.assertEqual(w, [])
 
 
 class TestReapprovalWording(tpa.ApprovalFixture):
