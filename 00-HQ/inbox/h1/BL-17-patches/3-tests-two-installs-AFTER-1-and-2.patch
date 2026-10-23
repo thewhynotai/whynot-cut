@@ -1,0 +1,158 @@
+diff --git a/whynot-cut/tests/test_install_pointers_two.py b/whynot-cut/tests/test_install_pointers_two.py
+new file mode 100644
+index 0000000..fa6fdf2
+--- /dev/null
++++ b/whynot-cut/tests/test_install_pointers_two.py
+@@ -0,0 +1,152 @@
++"""BL-17: two Claude Code installs of the plugin on one account, end to end (needs the hooks and wrappers patches:
++00-HQ/inbox/h1/BL-17-patches 1 and 2). Each SessionStart writes its own pointer files (and the shared ones, the last
++session's); each install's wrappers and engine then find their own engine home. The engine half is in
++test_install_pointers.py; the real ~/.whynot-cut check is shared with it (tearDownModule).
++Run:
++    bash tools/test.sh -p test_install_pointers_two.py
++"""
++import sys as _sys
++_sys.dont_write_bytecode = True  # keep the plugin folder free of __pycache__
++import _isolation  # noqa: F401,E402  G79: sandbox the engine home first (tests/_isolation.py)
++import json
++import os
++import subprocess
++import sys
++import unittest
++from pathlib import Path
++
++from test_install_pointers import (IS_WIN, OPTION_KEYS, SK, Case, cache_root, plat, pointer,  # noqa: E402
++                                   tearDownModule)  # noqa: F401  the real-home check runs for this module too
++
++
++def git_bash():
++    import shutil
++    for b in (os.environ.get("GIT_BASH"), r"C:\Program Files\Git\bin\bash.exe", shutil.which("bash")):
++        if b and Path(b).exists() and "system32" not in b.lower():
++            return b
++    return None
++
++
++def make_engine(home: Path) -> Path:
++    """A real (tiny) venv at <home>/venv, enough for the engine's stdlib-only argv echo (tests/test_wrappers.py)."""
++    import venv
++    venv.EnvBuilder(with_pip=False, symlinks=not IS_WIN).create(str(home / "venv"))
++    return home
++
++
++def norm(p: str) -> str:
++    return os.path.normcase(os.path.realpath(plat.native_path(p)))
++
++
++class TestTwoInstallsOnOneAccount(Case):
++    """Two Claude Code installs of the plugin (the real marketplace and a try one) on one account, each a copy of this
++    plugin's hooks, wrappers and engine in Claude Code's cache layout: each SessionStart writes its own pointer files
++    (and the shared ones, the last session's); each install's wrappers and engine then find their own engine home."""
++
++    def setUp(self):
++        super().setUp()
++        import shutil
++        skip = shutil.ignore_patterns("__pycache__", "*.pyc")
++        self.roots = {}
++        for m in ("thewhynot-ai", "wnc-try"):
++            root = cache_root(self.user, m)
++            for rel in ("hooks", "engine/reel/lib"):
++                shutil.copytree(SK / rel, root / rel, ignore=skip)
++            for rel in ("engine/reel/cli.py", "bin/reel", "bin/reel.cmd", ".claude-plugin/plugin.json"):
++                (root / rel).parent.mkdir(parents=True, exist_ok=True)
++                shutil.copy2(SK / rel, root / rel)
++            self.roots[m] = root
++        self.eng = {m: make_engine(self.t / f"engine {m}") for m in self.roots}
++
++    def child_env(self, **extra) -> dict:
++        env = {k: v for k, v in os.environ.items() if k not in OPTION_KEYS and not k.startswith("CLAUDE_PLUGIN_OPTION_")}
++        env.update(HOME=str(self.user), USERPROFILE=str(self.user), CLAUDE_CONFIG_DIR=str(self.user / ".claude"),
++                   PYTHONUTF8="1")
++        env.update({k: str(v) for k, v in extra.items()})
++        return env
++
++    def session_start(self, m: str):
++        root = self.roots[m]
++        env = self.child_env(CLAUDE_PLUGIN_ROOT=root, CLAUDE_ENV_FILE=self.t / f"env-{m}.sh",
++                             CLAUDE_PLUGIN_DATA=self.t / f"data-{m}", CLAUDE_PLUGIN_OPTION_ENGINE_HOME=self.eng[m])
++        r = subprocess.run([sys.executable, "-B", str(root / "hooks" / "session_context.py")],
++                           input=json.dumps({"hook_event_name": "SessionStart", "source": "startup", "cwd": str(self.t)}),
++                           capture_output=True, text=True, encoding="utf-8", env=env, timeout=120)
++        self.assertEqual(r.returncode, 0, r.stderr)
++
++    def wrappers(self, m: str) -> list:
++        root, out = self.roots[m], []
++        if IS_WIN:
++            out.append(("reel.cmd", lambda env: subprocess.run(
++                f'cmd /d /s /c ""{root / "bin" / "reel.cmd"}" "status""', capture_output=True, env=env, timeout=120)))
++        if git_bash():
++            out.append(("bin/reel", lambda env: subprocess.run(
++                [git_bash(), str(root / "bin" / "reel"), "status"], capture_output=True, env=env, timeout=120)))
++        if not out:
++            self.skipTest("no shell for either wrapper")
++        return out
++
++    def found_home(self, m: str) -> dict:
++        """{reader: the engine home it found} for install m, with nothing in the environment (a PowerShell command)."""
++        got = {}
++        for name, run in self.wrappers(m):
++            r = run(self.child_env(WHYNOT_TEST_ECHO_ARGV="1"))
++            self.assertEqual(r.returncode, 0, (name, r.stdout, r.stderr))
++            got[name] = norm(json.loads(r.stdout.decode("utf-8").strip().splitlines()[-1])["whynot_home"])
++        r = subprocess.run([sys.executable, "-B", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import plat; "
++                            "print(plat.engine_home())", str(self.roots[m] / "engine/reel/lib")],
++                           capture_output=True, text=True, encoding="utf-8", env=self.child_env())
++        self.assertEqual(r.returncode, 0, r.stderr)
++        got["plat"] = norm(r.stdout.strip())
++        return got
++
++    def test_each_session_start_keeps_to_its_own_pointer(self):
++        self.session_start("thewhynot-ai")
++        own_a = self.home / "plugin-options.thewhynot-ai.json"
++        root_a = self.home / "plugin-root.thewhynot-ai.json"
++        before = (own_a.read_bytes(), root_a.read_bytes())
++        self.session_start("wnc-try")                                   # the second install starts a session
++        self.assertEqual((own_a.read_bytes(), root_a.read_bytes()), before)
++        self.assertEqual(json.loads(own_a.read_text(encoding="utf-8"))["engine_home"], str(self.eng["thewhynot-ai"]))
++        self.assertEqual(json.loads(root_a.read_text(encoding="utf-8"))["root"], str(self.roots["thewhynot-ai"]))
++        own_b = json.loads((self.home / "plugin-options.wnc-try.json").read_text(encoding="utf-8"))
++        self.assertEqual(own_b["engine_home"], str(self.eng["wnc-try"]))
++        root_b = json.loads((self.home / "plugin-root.wnc-try.json").read_text(encoding="utf-8"))
++        self.assertEqual(root_b["root"], str(self.roots["wnc-try"]))
++        shared = json.loads((self.home / "plugin-options.json").read_text(encoding="utf-8"))
++        self.assertEqual(shared["engine_home"], str(self.eng["wnc-try"]))        # the shared one: the last session's
++        shared_root = json.loads((self.home / "plugin-root.json").read_text(encoding="utf-8"))
++        self.assertEqual(shared_root["root"], str(self.roots["wnc-try"]))
++
++    def test_the_other_installs_wrappers_still_find_their_own_engine(self):
++        self.session_start("thewhynot-ai")
++        self.session_start("wnc-try")
++        for m in self.roots:
++            for reader, home in self.found_home(m).items():
++                with self.subTest(install=m, reader=reader):
++                    self.assertEqual(home, norm(str(self.eng[m])))
++
++    def test_upgrade_reads_the_old_shared_pointer_once(self):
++        """Before the first SessionStart of this release only the shared file exists (an earlier release's hook or
++        the installer wrote it): every reader still finds the engine home there."""
++        pointer(self.home / "plugin-options.json", engine_home=str(self.eng["wnc-try"]))
++        for reader, home in self.found_home("thewhynot-ai").items():
++            with self.subTest(reader=reader):
++                self.assertEqual(home, norm(str(self.eng["wnc-try"])))
++        self.session_start("thewhynot-ai")                              # its own pointer now wins
++        for reader, home in self.found_home("thewhynot-ai").items():
++            with self.subTest(reader=reader, after="session start"):
++                self.assertEqual(home, norm(str(self.eng["thewhynot-ai"])))
++
++    def test_own_pointer_with_no_engine_home_is_authoritative(self):
++        """Its own valid pointer with engine_home "" means "not set": the shared file's value is not used."""
++        make_engine(self.home)
++        pointer(self.home / "plugin-options.thewhynot-ai.json", engine_home="")
++        pointer(self.home / "plugin-options.json", engine_home=str(self.eng["wnc-try"]))
++        for reader, home in self.found_home("thewhynot-ai").items():
++            with self.subTest(reader=reader):
++                self.assertEqual(home, norm(str(self.home)))
++
++
++if __name__ == "__main__":
++    unittest.main()

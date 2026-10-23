@@ -1,0 +1,107 @@
+diff --git a/whynot-cut/hooks/README.md b/whynot-cut/hooks/README.md
+index 23da5f7..a4edf8f 100644
+--- a/whynot-cut/hooks/README.md
++++ b/whynot-cut/hooks/README.md
+@@ -9,7 +9,7 @@ exit 0, except the guard, which blocks a guarded call it cannot check.
+ | PreToolUse `Bash\|PowerShell` | `guard.py` | Client sources read-only, Premiere-first, role limits (rules in the guard's docstring). Also hands Claude a waiting CwdChanged context (see below). |
+ | PreToolUse `Write\|Edit\|NotebookEdit` | `guard.py`, behind `if` | One handler per tool and path pattern (`session_context.FILE_IF_PATTERNS`): `assets/` and `data/` at any depth and any case, `*.whynot-*` (marker, writer lock), After Effects preferences, the lead-step tokens (`run/lead-tokens`, also by its 8.3 short name) and Claude Code's session transcripts (`projects/**/*.jsonl`, BL-15). Any other write starts **no process** (measured: the guard costs ~260 ms per call on Windows). |
+ | PreToolUse `MultiEdit` | `guard.py` | Always (older CLIs; no `if`, so never unguarded). |
+-| SessionStart `startup\|resume\|clear\|compact\|fork` | `session_context.py` | The context for a client folder / the clients folder; panel approvals and change requests; pending updates; busy clients (writer leases; the clients folder's busy and panel lists share one ~1 s budget, then say "(scan cut short …)"); after `/clear` or `/resume`, re-keys the lease its own Claude Code process still holds (`writer_lock.rekey`: the only takeover of a live lease); the first-run nudge once; writes `~/.whynot-cut/plugin-root.json`; starts the panel link (`serve --ensure`, detached). |
++| SessionStart `startup\|resume\|clear\|compact\|fork` | `session_context.py` | The context for a client folder / the clients folder; panel approvals and change requests; pending updates; busy clients (writer leases; the clients folder's busy and panel lists share one ~1 s budget, then say "(scan cut short …)"); after `/clear` or `/resume`, re-keys the lease its own Claude Code process still holds (`writer_lock.rekey`: the only takeover of a live lease); the first-run nudge once; writes this install's `~/.whynot-cut/plugin-root.<marketplace>.json` and `plugin-options.<marketplace>.json` plus the shared `plugin-root.json` / `plugin-options.json` (the last session's; BL-17); starts the panel link (`serve --ensure`, detached). |
+ | PostToolUse `Read`, behind `if` (`Read(//**/[Oo][Uu][Tt][Pp][Uu][Tt]/**)`) | `read_once.py` | The read-once reminder (BL-01, M5-T6): a second FULL read (no `offset`, `limit` or `pages`) of the same unchanged file of 20 KB or more by the same session and agent adds one line of context (use what you read, or a ranged read / grep / `reel brief`). Never blocks. State: one file per session and agent under `<engine home>/run/read-once/`, updated under a short lock file (written through `lib/linksafe`, never through a link; files older than 2 days are swept; no lock within 3 s means no reminder). A read outside a client's `output/` starts no process. A missing engine home means silence. |
+ | SessionStart `compact` | `read_once.py` | Clears the lead's read-once records (the lead's compaction drops what it had read). Subagents' records are untouched. |
+ | SessionEnd | `read_once.py` | Removes every read-once state file of the ending session. |
+diff --git a/whynot-cut/hooks/session_context.py b/whynot-cut/hooks/session_context.py
+index 534fe9e..a897df8 100755
+--- a/whynot-cut/hooks/session_context.py
++++ b/whynot-cut/hooks/session_context.py
+@@ -604,24 +604,25 @@ def first_run() -> bool:
+
+
+ def plugin_root_file() -> Path:
+-    """~/.whynot-cut/plugin-root.json, next to the options pointer (WHYNOT_OPTIONS_FILE moves both)."""
++    """~/.whynot-cut/plugin-root.json, next to the options pointer (WHYNOT_OPTIONS_FILE moves both): the shared record
++    (the last session's), for readers that cannot know which install they belong to (the subagent status line's
++    fallback, the panel). This install's own is plat.install_root_file(PLUGIN) (BL-17)."""
+     return plat.options_file().with_name("plugin-root.json")
+
+
+ def write_plugin_root():
+     """Addendum C §3.2: {root, version, at} for the daemon shim and the panel, which must not depend on PATH or the
+     versioned plugin cache path. Written by a real SessionStart only (CLAUDE_PLUGIN_ROOT, CLAUDE_ENV_FILE and
+-    CLAUDE_PLUGIN_DATA set, the rule of export_options: a bare run never creates ~/.whynot-cut) and only when the root
+-    or version changed."""
++    CLAUDE_PLUGIN_DATA set, the rule of export_options: a bare run never creates ~/.whynot-cut), into this install's
++    own file and the shared one (BL-17), each only when the root or version changed."""
+     if not all(os.environ.get(k) for k in ("CLAUDE_PLUGIN_ROOT", "CLAUDE_ENV_FILE", "CLAUDE_PLUGIN_DATA")):
+         return
+     version = str((_read_json(PLUGIN / ".claude-plugin" / "plugin.json") or {}).get("version") or "")
+-    f = plugin_root_file()
+-    old = _read_json(f)
+-    if isinstance(old, dict) and old.get("root") == str(PLUGIN) and old.get("version") == version:
+-        return
+     body = {"root": str(PLUGIN), "version": version, "at": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+-    _write(f, json.dumps(body, ensure_ascii=False, indent=1) + "\n")
++    for f in dict.fromkeys((plat.install_root_file(PLUGIN), plugin_root_file())):
++        old = _read_json(f)
++        if not (isinstance(old, dict) and old.get("root") == str(PLUGIN) and old.get("version") == version):
++            _write(f, json.dumps(body, ensure_ascii=False, indent=1) + "\n")
+
+
+ def continue_lease(root: Path):
+@@ -689,6 +690,9 @@ def export_options():
+       * CLAUDE_ENV_FILE (Bash tool): `export WHYNOT_HOME='…'`, shell-quoted so Arabic paths stay literal;
+       * the pointer file ~/.whynot-cut/plugin-options.json (plat.options_file()): PowerShell commands never receive
+         a path-valued variable from the env file, so plat and both wrappers read the options from it (3.0 T1.9).
++        Written twice (BL-17): this install's own plugin-options.<id>.json (plat.install_options_file), which plat
++        and both wrappers read first, so a second install on the account never changes this one's options; and the
++        shared file, the last session's, for the installer and earlier releases.
+         Written only by a real SessionStart of the installed plugin (CLAUDE_ENV_FILE and CLAUDE_PLUGIN_DATA both set:
+         a bare run, e.g. a test, never touches ~/.whynot-cut) and only when the options changed; one key per line,
+         UTF-8, so reel.cmd can read it without Python."""
+@@ -710,28 +714,28 @@ def export_options():
+
+
+ def write_pointer(opts: dict):
+-    f = plat.options_file()
+-    try:
+-        old = json.loads(f.read_text(encoding="utf-8"))
+-        if all(old.get(k) == v for k, v in opts.items()):
+-            return
+-    except (OSError, ValueError, AttributeError):
+-        pass
+-    f.parent.mkdir(parents=True, exist_ok=True)
+     body = {"clients_root": opts["clients_root"], "engine_home": opts["engine_home"],
+             **{k: v for k, v in opts.items() if k not in ("clients_root", "engine_home")},
+             "updated": time.strftime("%Y-%m-%dT%H:%M:%S%z")}
+-    tmp = f.with_name(f.name + f".{os.getpid()}.tmp")
+-    try:
+-        with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+-            fh.write(json.dumps(body, ensure_ascii=False, indent=1) + "\n")
+-        os.replace(tmp, f)
+-    except OSError:
++    for f in dict.fromkeys((plat.install_options_file(PLUGIN), plat.options_file())):
+         try:
+-            tmp.unlink()
+-        except OSError:
++            old = json.loads(f.read_text(encoding="utf-8"))
++            if all(old.get(k) == v for k, v in opts.items()):
++                continue
++        except (OSError, ValueError, AttributeError):
+             pass
+-        raise
++        f.parent.mkdir(parents=True, exist_ok=True)
++        tmp = f.with_name(f.name + f".{os.getpid()}.tmp")
++        try:
++            with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
++                fh.write(json.dumps(body, ensure_ascii=False, indent=1) + "\n")
++            os.replace(tmp, f)
++        except OSError:
++            try:
++                tmp.unlink()
++            except OSError:
++                pass
++            raise
+
+
+ def main():

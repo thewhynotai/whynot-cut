@@ -1,0 +1,40 @@
+diff --git a/whynot-cut/skills/setup/references/platform-setup.md b/whynot-cut/skills/setup/references/platform-setup.md
+index d903f6f..22d59c2 100644
+--- a/whynot-cut/skills/setup/references/platform-setup.md
++++ b/whynot-cut/skills/setup/references/platform-setup.md
+@@ -30,7 +30,7 @@ Claude Code); on macOS export it in your shell profile (`~/.zshrc`).
+ |---|---|---|
+ | `WHYNOT_HOME` | The engine home: runtime, models, queue, logs. Same as the plugin option `engine_home`. Use an ASCII-only folder when your user name is not ASCII: for example `D:\WhyNotCut` (the root of a fixed local NTFS drive, a non-system one when there is one; never a network drive, a removable drive (a USB stick or card) or a FAT/exFAT drive; it holds the engine only, never client folders). `reel doctor` names one for this PC; `reel setup` creates it and locks it to your account, and `reel doctor` warns when other accounts may change files in the engine home | `~/.whynot-cut` |
+ | `WHYNOT_CLIENTS_ROOT` | The folder that holds your client folders, so `--root` can be a bare client name. Same as the plugin option `clients_root` (the option wins over the preferences file) | `clients_root` from your preferences file; none if not set |
+-| `WHYNOT_OPTIONS_FILE` | Where the plugin options record is read from (the SessionStart hook writes it; the wrappers read it because PowerShell does not receive path variables) | `~/.whynot-cut/plugin-options.json` |
++| `WHYNOT_OPTIONS_FILE` | Where the plugin options record is read from (the SessionStart hook writes it; the wrappers read it because PowerShell does not receive path variables). Set, it is the only file read and written | This install's `~/.whynot-cut/plugin-options.<marketplace>.json`, then the shared `~/.whynot-cut/plugin-options.json` |
+ | `WHYNOT_PREMIERE_APP` | Premiere Pro to use: the `.app` / `.exe` or its folder. A wrong value is reported by `reel doctor` with this name | Newest release install found (registry / Spotlight / standard folders) |
+ | `WHYNOT_AE_APP` | After Effects to use: the `.app` / `.exe` or its folder | Newest release install found |
+ | `WHYNOT_AERENDER` | The `aerender` executable (`aerender.exe` on Windows, in the After Effects folder) | The one beside the newest After Effects that has one |
+@@ -39,6 +39,26 @@ Claude Code); on macOS export it in your shell profile (`~/.zshrc`).
+ | `WHYNOT_DEBUG` | `1` also prints the full Python traceback of an unexpected error on screen (it is always saved to the log). For developers and bug reports | off |
+ | `WHYNOT_HF_XET` | `1` turns Hugging Face "Xet" transfers back on for model downloads. They are off by default because they failed on some Windows machines; leave it unset unless a download is too slow | off |
+
++## Two WhyNot Cut installs on one account
++
++For example a dev or try marketplace beside the real one, or 3.0 beside 2.2.1.
++
++- Each install keeps its own options record, `~/.whynot-cut/plugin-options.<marketplace>.json`, and its own
++  `plugin-root.<marketplace>.json`. Its SessionStart writes them, and its `reel` reads its own record first. A
++  `--plugin-dir` checkout counts as the marketplace `inline`.
++- The shared `plugin-options.json` and `plugin-root.json` hold the last session's values, for the installer and
++  for earlier releases. 2.2.1 reads only the shared files, so its options follow whichever session started last.
++- To keep a test or try install fully apart, set `WHYNOT_OPTIONS_FILE` and `WHYNOT_HOME` to its own folder. It then
++  reads and writes only that file.
++- `reel doctor` from a second engine home does not offer `--fix --all-clients` for a clients folder it did not set,
++  for example one from the shared preferences file. Set that install's own `clients_root` first.
++- Claude Code adds each enabled plugin's `bin/` to the END of `PATH`. In a session where another install's `bin/`
++  comes first (2.2.1's, or the other marketplace's), a bare `reel` runs that install.
++  - `reel --version` names the install that ran.
++  - `reel doctor` → `reel_command` lists every `reel` on PATH and flags a wrong one first.
++  - To fix it, disable the other install in `/plugin` and restart Claude Code. Or call this install's wrapper by its
++    full path: `"${CLAUDE_PLUGIN_ROOT}/bin/reel"` in bash, `& "${CLAUDE_PLUGIN_ROOT}/bin/reel.cmd"` in PowerShell.
++
+ ## Running your own Python against the engine
+
+ Run engine-side Python with `reel py`: `reel py <script.py> [args]`, `reel py -m <module> [args]` or

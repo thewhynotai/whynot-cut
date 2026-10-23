@@ -95,6 +95,11 @@ is ≈ 1.4 s slower. Keep routine prompts narrow. If a routine misbehaves, open 
 (e.g. `D:\ClaudeData\routines`) and file a card.
 
 ## 6. Incidents
+- 2026-10-23 06:20: the report routine `whynot-cut-primary-report-2` was found `enabled: false` (last run 10-22
+  18:03Z), so the 09:00 report would not have fired. The restart handoff lists it ON, and nobody recorded turning it
+  off. The master re-enabled it. It also disabled `whynot-infra-resume-watch` (C4): Phase 8 is DONE and the handoff
+  lists C4 as retired. **Rule:** at each master nudge, check `list_scheduled_tasks` against the expected set
+  (C1 intake, C2 report, C3 watchdog = enabled).
 - 2026-10-22 21:09–21:35: **watchdog re-enabled too early in the restart, then off again (owner).** The Phase 8 master
   (Command Center, Phases 2–8 session) re-enabled `whynot-cut-auto-resume-2` at 21:09 + Run now 21:11 as
   RECOVERY_PROCEDURE R8 step 4 (recorded in the tracker row 8; `primary-report-2` had been re-enabled ~18:48, its
