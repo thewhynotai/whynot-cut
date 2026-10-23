@@ -89,3 +89,4 @@ channel state is `NOT_CONFIGURED`, and messages stay `FILED`.
 | R-2026-10-23-1855 | 2026-10-23 18:55 | hq_status | PRIMARY | FILED | تقرير حالة: 0 تغيير | `reports/2026-10-23-1855.md` |
 | R-2026-10-23-2012 | 2026-10-23 20:12 | hq_status | PRIMARY | FILED | تقرير حالة: 0 تغيير | `reports/2026-10-23-2012.md` |
 | R-2026-10-23-2103 | 2026-10-23 21:03 | hq_status | PRIMARY | SENT (session local_fec055c9-cf51-42cb-84c5-416a8f8acf5c) | تقرير الليل: 0 تغيير | `reports/2026-10-23-2103.md` |
+| R-2026-10-23-2125 | 2026-10-23 21:25 | hq_status | PRIMARY | FILED | تقرير الليل: 0 تغيير | `reports/2026-10-23-2125.md` |
