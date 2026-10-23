@@ -618,9 +618,11 @@ class TestTheList(Base):
         self.assertEqual(tree(c.root), before)
 
     def test_c9b_an_output_discovery_that_links_into_assets_is_refused(self):
+        # BL-25: no discovery run first. Its writes make an outside file filter on Windows drop short-lived
+        # <NAME>.tmp files at their path in output/discovery a moment later, and the empty folder that CreateJunction
+        # makes there then failed with WinError 145 (also when the folder was renamed away instead of deleted).
+        # Discovery writes only under output/discovery, which was removed before linking: the tree is the same.
         c = self.client().branded()
-        c.discover()
-        shutil.rmtree(c.root / "output/discovery")
         _junction(c.root / "output/discovery", c.root / "assets")
         self.addCleanup(_unlink_dir, c.root / "output/discovery")
         before = tree(c.root)
