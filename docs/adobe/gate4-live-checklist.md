@@ -13,12 +13,19 @@ claimed as verified until the Result and Evidence cells are filled in.
 - **Engine:** the 3.0 dev engine (`WhyNotCut/whynot-cut/bin/reel`, release/3.0) with the usual `WHYNOT_HOME`
   (`~/.whynot-cut` → `D:\Claude\whynot-cut-home`). Before the run and after each group, take a listing of
   `~/.whynot-cut` and diff it against the baseline.
-- **Bridge:** the INSTALLED legacy CEP bridge 3.1.1. The engine syncs its libraries to `ppro-scripts/` (`ae-scripts/`
-  for AE) and sends them as `script=`.
+- **Bridge:** the INSTALLED CEP bundle PREVIEW 3.0.0, protocol 4, from build `322d8a5` (the real installer, 21 Oct).
+  Checked on 23 Oct in `%APPDATA%\Adobe\CEP\extensions\ai.thewhynot.cut.bridge\build.json`; `…bridge.prev` is 3.0.0
+  too. Its bundled libraries are 322d8a5's, and the dev tree's differ (`wnc_ppro_lib.jsx` sha256 2b1167… installed vs
+  129ef7… at HEAD abdece5). So without the dev loop the engine refuses every job ("from another build").
+  - Run every `reel` command of this checklist with `WHYNOT_BRIDGE_DEV=1` set for the engine process only
+    (cep_queue `job_mode`: a bundle of another build gets the synced library by path). The engine then syncs its
+    libraries to `ppro-scripts/` (`ae-scripts/` for AE) and sends them as `script=`.
+  - Pass check: the first job's result runs the dev library, not 322d8a5's bundled one. A refusal naming "another
+    build" means the variable is missing.
   - No installs. No `cep_bundle` re-bundle. Do not change PlayerDebugMode or any Adobe preference.
   - Do not start `reel serve`: its discovery pointer is a write to the engine home.
-- **UXP baseline:** two UXP plugins sit in `%APPDATA%\Adobe\UXP\Plugins\External` (spike 0.1.9 and dev 3.0.0, left over
-  from 13 Oct). They load in Premiere and write `~/.whynot-cut/uxp-spike/lifecycle.json`. That write is baseline, not a
+- **UXP baseline:** two UXP plugins sit in `%APPDATA%\Adobe\UXP\Plugins\External`: spike 0.1.9 (left over
+  from 13 Oct) and dev 3.0.0 (the PREVIEW 3.0.0 panel, 322d8a5, installed 21 Oct). They load in Premiere and write `~/.whynot-cut/uxp-spike/lifecycle.json`. That write is baseline, not a
   leak. Do not use them as a check tool.
 - **Machine:**
   - RAM below 85% before each heavy step;
@@ -53,7 +60,7 @@ claimed as verified until the Result and Evidence cells are filled in.
 | A12 | Emphasis punch-ins and endings (Task 29: no builder yet, executor raising an owner; confirm) | phase-4 Task 29; PROGRESS | plan and build after Task 29 lands | the punch-ins keep the face in frame, keep the minimum spacing and follow the endings order | exported frames | | |
 | A13 | Cut markers (Task 25; verb `cut-proposals` lands with lane2 hooks\K-T7, sha to follow, confirm; run LAST in A) | PROGRESS "cut markers"; phase-4 Task 25 | build after the proposals are written (`01_analysis/cut-proposals.json`) | one marker per proposal, coloured by kind, named kind + reason; a pause removed whole has no marker; nothing is cut without approval | MANUAL (executor-accepted for Gate 4): Markers panel screenshot + each marker's name and time written in the row | | |
 | A14 | Manual verse marker | executor (manual verse slot); PROGRESS | add `manual_verse: [{start_ms, end_ms}]` to the copy's edit-decisions.json (the story-editor override; no Quran text); plan, approve, build; confirm the ppro_build marker hunk has landed | marker «آية: يضيفها المونتير يدويًا» (red, comment = timecodes + cue); no caption text over the span; one NEEDS-YOU line (`reel needs-you`) | MANUAL (executor-accepted): Markers panel screenshot with name and time, plus the exported frame at the span. Pass = the marker sits at the span and no caption or graphic text is over it | | |
-| A15 | Task 26: VFR clip conformed to CFR | executor; CONTRACT.md (`hooks\t26`) | put a VFR phone clip (a real phone clip, else `tests/fixtures/media_normalise/vfr.mp4`) in the copy, after the Task 26 engine commit and my ppro_build hunk (shas to follow); `reel inbox` (the conform runs inside intake), then `reel conform --root C --video-id <id> --wait`; plan, approve, build | `output/<item>/00_inputs/preflight.json` → `files[i].normalise.conform.state` = "ready", with a relative path under output/; the Premiere project item's media path is that conform path; the sidecar names the copy | read-back JSON, the Premiere item's media path, and exported frames at 3 word times in sync with the transcript | | |
+| A15 | Task 26: VFR clip conformed to CFR | executor; CONTRACT.md (`hooks\t26`) | put a VFR phone clip (a real phone clip, else `tests/fixtures/media_normalise/vfr.mp4`) in the copy, after the Task 26 engine commit and my ppro_build hunk (shas to follow); `reel preflight` (it starts the conform in the background; the engine half is 99f6357), then `reel conform --root C --video-id <id> --wait` (before any preflight it returns "none"); plan, approve, build | `output/<item>/00_inputs/preflight.json` → `files[i].normalise.conform.state` = "ready", with a relative path under output/; the Premiere project item's media path is that conform path; the sidecar names the copy | read-back JSON, the Premiere item's media path, and exported frames at 3 word times in sync with the transcript | | |
 | **B** | **AE motion build with a licensed track** (`--video-id EP02TEST_R02_MO`) | | | | | | |
 | B1 | Pick a licensed track | T46 §5 steps 2–4; PROGRESS "AE music" | make the 45 s synthetic bed `C/data/Music/Live/tense_dark_bed.wav` (pinned ffmpeg, lavfi); add `licence.json` (`"license":"client"`, `"files":"*"`); `reel motion-plan`; `reel motion-animatic` | `audio.music.rel` = that file; keyframes present; `needs_you` = []; the bed dips under each phrase and rises in long pauses | read-back JSON, plus listening to the animatic | | |
 | B2 | Build and read-back | T46 §5 step 6; R-L5 | `reel approve-plan --by delegated`, then `reel motion-build` | `PROJECT_ASSEMBLED`; `readback.audio` has one DIALOGUE, one MUSIC (out_frame = end_frame, keys equal to the plan's within 0.01 dB on both channels) and one SFX_* per cue; `comparison.ok` | `04_after_effects/motion-build-result.json` | | |
@@ -76,8 +83,8 @@ claimed as verified until the Result and Evidence cells are filled in.
    - Expected for group B: `ae-queue/`, `ae-scripts/` and `tmp/ae-run/`. These are the engine's normal AE paths; the
      Adobe track rules this, not a plan-session question.
    - Always allowed: the baseline `uxp-spike/lifecycle.json`.
-2. Any item that would need the 3.0 bridge or the UXP panel INSTALLED → mark it NEEDS-INSTALL, do not run it, and
-   report it to the plan session.
+2. Any item that would need a bridge or UXP panel build newer than the installed PREVIEW 3.0.0 (322d8a5), that is a
+   re-install → mark it NEEDS-INSTALL, do not run it, and report it to the plan session.
 3. A client project is open → do not touch it.
 4. Also stop if `FREEZE` is set, if RAM is at 85% or more (wait), or at an AE modal you may not answer (leave it for
    Yunus).
@@ -89,10 +96,15 @@ claimed as verified until the Result and Evidence cells are filled in.
 - **R-L4** (QE `remove()`): **Gate 6, not run here.**
 - **R-L6 r4 / T41 #14** (Volume Level found by match name): needs a Premiere in another language, which means a
   language install or preference change. Gate 6 or Mac.
-- **T41 #1, interpolation read through the UXP adapter (K6): not run, needs the install go** (the 3.0 UXP panel). A4
-  uses the Effect Controls graph instead (executor-accepted).
-- **The re-bundled bridge (PROGRESS: "re-bundled (`cep_bundle`)"): NEEDS-INSTALL.** This run uses the installed
-  3.1.1 bridge with the synced libraries.
+- **T41 #1, interpolation read through the UXP adapter (K6): not run, NEEDS-INSTALL.** The 3.0 UXP panel is
+  installed now (PREVIEW 322d8a5). Its adapter has no interpolation read, though; only the spike's probe has one
+  (`adobe/premiere-uxp/spike/src/probes.ts`). So it needs a newer panel build. A4 uses the Effect Controls graph
+  instead (executor-accepted).
+- **The re-bundled bridge (PROGRESS: "re-bundled (`cep_bundle`)"): partly live now.**
+  - The installed bundle is a `cep_bundle` 3.0.0 build (322d8a5, protocol 4), so its daemon, queue, heartbeat and
+    version check run live in this checklist.
+  - Its `lib` mode, with this build's own libraries, is still NEEDS-INSTALL: the bundled libraries are 322d8a5's, so
+    this run uses the dev loop (`WHYNOT_BRIDGE_DEV=1`, synced libraries as `script=`; see Setup).
 - **The signed 3.0.0 ZXP, and M1-T4/T6 through the panel:** Gate 6.
 - **Live Mac checks:** Phase 12 (H18).
 - **T4.14 CPU 60 s:** a separate overnight gate item. It also needs Yunus's verified 60 s transcript.
