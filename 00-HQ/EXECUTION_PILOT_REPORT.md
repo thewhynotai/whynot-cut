@@ -5,8 +5,8 @@ Roles (owner-approved in chat ~11:50): **H2** (marketing@) builds, **H1** (mayar
 **master** (this Command Center session, info@) accepts; the **executor** merges into `release/3.0`.
 Status words: **DONE** = proven with the evidence cited; **PENDING** = waiting on a named step.
 
-**Result (2026-10-23 04:54): PASS.** 19 of 20 steps DONE. Step 18 (archive after MERGED) waits for the executor's
-merge, which is the system's normal next step. One full FIX loop ran unattended between the master's two verdicts.
+**Result (2026-10-23 04:54): PASS.** 19 of 20 steps DONE at 04:54; step 18's merge landed 05:02 (`032ff99`, checked 2026-10-23 05:30), so 20 of 20. Only the card's
+archive remains; the hourly intake does that as its normal next step. One full FIX loop ran unattended between the master's two verdicts.
 Open beyond the pilot: Mac CI on push (owner's push decision).
 
 ## 1. The 20 workflow steps of the brief
@@ -30,7 +30,7 @@ Open beyond the pilot: Mac CI on push (owner's push decision).
 | 15 | Commit | `6852610` on `h2/BL-20` | `git log` | DONE |
 | 16 | Version / release record | none (dev-only tool, not in the plugin zip: `tools/release.py` packages `whynot-cut/` only) | H2 report "Dev-only" | DONE (n/a) |
 | 17 | Close only when every criterion is met | **master verdict ACCEPTED 2026-10-23 04:54** (`tasks/BL-20.md` "Verdict": valid peer review, fence re-checked, P3-1/P3-2 as known limits, P3-3 decided: the gate text becomes "read the list and justify machine skips in the gate record", no code change). Still open: **Mac CI green on push** — runs only when the executor pushes `release/3.0` after the merge (owner's push decision) | `tasks/BL-20.md`; `.github/workflows/macos.yml:8-10` | DONE (Mac CI open) |
-| 18 | Archive with evidence + git refs | `MERGE-QUEUE.md` line (h2/BL-20 @ 71a1a65); intake marks the card MERGED when the sha is on release/3.0 (MASTER-INTAKE §4), then it is archived | `MERGE-QUEUE.md`; ledger 04:54 | PENDING (executor merge) |
+| 18 | Archive with evidence + git refs | `MERGE-QUEUE.md` line (h2/BL-20 @ 71a1a65); intake marks the card MERGED when the sha is on release/3.0 (MASTER-INTAKE §4), then it is archived | `MERGE-QUEUE.md`; ledger 04:54; merge `032ff99` on `release/3.0` (pushed 05:02) | DONE for the merge (05:02); the intake's archive step follows |
 | 19 | Next READY task + owner | H2's loop moved on by itself to its next card (BL-04 FIX round 1, run 3 from 02:32); H1 now has BL-17, BL-19, S1-R51 READY (restored 03:02) | `h2\auto\auto.log`; BOARD | DONE |
 | 20 | A new session resumes from saved state | Phase 6 test passed (`D:\ClaudeData\setup-phase6\reconstruct.jsonl`); re-run at Phase 8 close 05:02 passed (`AUTOMATION_TEST_REPORT.md` B4) | `D:\ClaudeData\setup-phase8\reconstruct.jsonl` | DONE |
 

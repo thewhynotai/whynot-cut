@@ -1,6 +1,25 @@
 # STATUS (edited by the MASTER only)
 
-- **Last intake:** 2026-10-20 16:40 (Cairo). Two DONE reports: BL-03 (H2, 13:46) and BL-02-r2 (H1, 14:09). Both are awaiting-peer: no peer review yet, both under 4 h. The master reviews them itself from 17:46 / 18:09 if no valid peer review lands. Nothing to merge.
+## Now: 2026-10-23 05:30 Cairo (Phase 9 master session `local_263cabbf`, evidence-checked)
+- **Milestone:** M1 = Gate 4 → tag `v3.0.0-p4` (target Tue 27 Oct; about 55%). M0 (AI-infra restart, Phases 0–8)
+  closed 05:00 and was re-audited read-only at 05:17: 7 of 10 areas VERIFIED; 3 PARTIAL, all of them stale text, not broken work.
+- **Git:** `release/3.0` = `abdece5` = origin (pushed 05:02). Merged since 22 Oct: OPS-09 `b81baaa`, BL-20 `032ff99`,
+  S6b `f3995f9`, BL-03 `abdece5`. `ops/hq` = `f2ddaa2` = origin.
+- **Seats:** H1 (mayar@) run 9 on BL-17 since 04:52. H2 (marketing@) run 3 on the BL-04 FIX round 1 since 02:32, now in
+  its suite. Its worktree is on a detached HEAD at `b7e2190` with 10 changed files, to be checked at its DONE report.
+  MAIN (info@) is the master plus the executor (Gate 4 rounds).
+- **Automation:** C1 intake hourly :37, C2 reports 09/13/17/21, C3 watchdog, helper keepalive. WNC-Queue (C10) stays
+  disabled: its queue is empty and all suites run through heavy.sh, so nothing waits on it.
+- **Money:** the $500 API plan is PREPARED / NOT AUTHORIZED (owner word «نفذ خطة الـ API»). Reviews use subscription subagents.
+- **Next READY:** S1-R51 (H1 after BL-17), BL-22 (H2 after BL-04), BL-02 (intake: finish the r2 review).
+- **Latest Premiere build seen live:** PREVIEW `322d8a5` installed 21 Oct (CEP bridge 3.0.0 / protocol 4, UXP 3.0.0).
+  The panel loaded and authenticated in Premiere 26.5.2 4 times; no build or feature call was made. The last full live
+  round trip is 14–15 Oct (`docs/adobe/live-roundtrip-2026-10-14.md`). No Gate 4 feature has run live yet
+  (`gate4-live-checklist.md` rows A1–C5 are empty).
+
+## History (before 2026-10-23)
+
+- **Last intake (old):** 2026-10-20 16:40 (Cairo). Two DONE reports: BL-03 (H2, 13:46) and BL-02-r2 (H1, 14:09). Both are awaiting-peer: no peer review yet, both under 4 h. The master reviews them itself from 17:46 / 18:09 if no valid peer review lands. Nothing to merge.
 - **10:10:** API lane 1 is stopped (owner budget ruling 10:03).
   - BL-16 → H1 (Mayar) and BL-04 → H2 (marketing@), as cards with claims reserved. If not started by 25 Oct, both
     fall back to the executor.
