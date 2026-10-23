@@ -57,6 +57,11 @@ CASES = {
     "slow60": ["-f", "lavfi", "-i", f"color=c=0x335577:size={SIZE}:rate=60:duration=3", "-t", "3", "-vf",
                "drawbox=x='20+t*12':y=60:w=40:h=40:color=white@1:t=fill", *X264],
     "sdr_ref": src("30", 2) + ["-t", "2", "-c:v", "libx264", "-crf", "0", "-pix_fmt", "yuv420p"],
+    # BL-26 r2: VFR at the NTSC rates (the copy's frame grid is not a whole number of ms), with sound
+    "vfr2997": src("30000/1001", 3) + AUDIO + ["-t", "3", "-vf", r"select='not(mod(n\,3))+between(n\,30\,55)'",
+                                               "-fps_mode", "vfr", *X264, "-c:a", "aac", "-shortest"],
+    "vfr5994": src("60000/1001", 3) + AUDIO + ["-t", "3", "-vf", r"select='not(mod(n\,3))+between(n\,60\,110)'",
+                                               "-fps_mode", "vfr", *X264, "-c:a", "aac", "-shortest"],
 }
 
 

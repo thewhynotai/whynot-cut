@@ -58,6 +58,7 @@ TRC = {16: "pq", 18: "hlg"}      # AVColorTransferCharacteristic: SMPTE ST 2084,
 BT2020 = 9
 
 _FILTER_CACHE: dict = {}
+_FF_ID_CACHE: dict = {}
 
 
 # --------------------------------------------------------------------------- small helpers
@@ -107,6 +108,28 @@ def filters_available(ff, runner=None) -> dict:
             names = set()
         _FILTER_CACHE[key] = {"zscale": "zscale" in names, "tonemap": "tonemap" in names}
     return dict(_FILTER_CACHE[key])
+
+
+def _ffmpeg_id(ff, runner=None) -> dict:
+    """{"version", "build"} of the ffmpeg binary ff (BL-26 r2): the version from `ffmpeg -version` (None when it can't
+    be read; a failed read is never kept) and the binary's sha256 as its build, so a rebuild under the same version
+    string counts. Cached per build (path, size, modification time). A conform copy records both and is made again
+    when either changes: FFmpeg 7.1 and 9.0.2 end a copy differently."""
+    st = os.stat(ff)
+    key = (str(ff), st.st_size, st.st_mtime_ns)
+    if key not in _FF_ID_CACHE:
+        try:
+            r = (runner or (lambda c: subprocess.run(c, capture_output=True, text=True, errors="replace", timeout=60)))(
+                [str(ff), "-hide_banner", "-version"])
+            words = (str(r.stdout or "").splitlines() or [""])[0].split()
+            version = words[2] if words[:2] == ["ffmpeg", "version"] and len(words) > 2 else None
+        except (OSError, subprocess.SubprocessError, ValueError):
+            version = None
+        found = {"version": version, "build": _sha256(Path(ff))}
+        if version is None:
+            return found
+        _FF_ID_CACHE[key] = found
+    return dict(_FF_ID_CACHE[key])
 
 
 # --------------------------------------------------------------------------- measure
@@ -729,6 +752,7 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
         px_rate = px * float(decision.get("cfr_fps") or decision.get("src_fps") or 30)
         if client_output(given, client_root) != out_dir:
             return refuse()                                # a link appeared while the source was hashed
+        fid = _ffmpeg_id(ff)                               # BL-26 r2: another FFmpeg version or build: made again
         anchor, within = _anchor(client_root)
         if _under(str(out_dir), os.path.realpath(os.path.join(anchor, within or ""))) != "":
             linksafe.makedirs(out_dir, anchor, within)     # each folder re-checked as it is made
@@ -736,7 +760,10 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
             tag = "" if not ranges else f".r{int(a * 1000)}-{int(b * 1000)}"
             out = out_dir / f"{stem}.conform{tag}.mp4"
             side = out.with_suffix(".json")
-            want = {"source_sha256": source_sha, "filters": filters, "from_s": a, "to_s": b, "crf": crf}
+            bound = round(b - a, 3)                        # BL-26: the copy ends with its span (0: length unknown)
+            want = {"source_sha256": source_sha, "filters": filters, "from_s": a, "to_s": b, "crf": crf,
+                    "bound_s": bound,                      # a copy made before the bound has no bound_s: made again
+                    "ffmpeg_version": fid["version"], "ffmpeg_build": fid["build"]}
             old = {}
             try:
                 old = json.loads(side.read_text(encoding="utf-8")) if _plain_file(side) else {}
@@ -765,7 +792,7 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
                     fail("in_use")
                     return res
                 _drop_record_tmps(side, anchor, within)    # a record write that failed in an earlier run
-                def build(ln, a=a, b=b, out=tmp):
+                def build(ln, a=a, b=b, out=tmp, bound=bound):
                     from . import accel
                     cmd = [ff, "-nostdin", "-y", "-v", "error", *accel.decode_args(ln)]
                     if ranges:
@@ -778,7 +805,9 @@ def conform(src, out_dir, decision: dict, *, ff=None, lane: str = "cpu", ranges=
                         cmd += ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"]
                     if decision.get("has_audio"):
                         cmd += ["-af", "aresample=async=1:first_pts=0", "-c:a", "aac", "-b:a", "192k"]
-                    return cmd + [str(out)]
+                    if bound > 0:                          # BL-26: FFmpeg 9 gives the last frame its full packet
+                        cmd += ["-t", f"{bound:.3f}"]      # duration past the mp4 edit list's end and the fps filter
+                    return cmd + [str(out)]                # filled it: the picture ran on past the sound
                 from . import accel
                 try:
                     r, used = accel.run_ff(build, lane, runner=runner or _runner_for(

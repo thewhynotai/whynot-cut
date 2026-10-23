@@ -1746,5 +1746,194 @@ class TestT26R5CopyTimeOnly(_Out):
         self.assertFalse(r3["reused"])                                                # no hash to check a new time
 
 
+class TestBL26CopyEndsWithItsSpan(_Out):
+    """BL-26: FFmpeg 9 (the installer's pin, setup/components.json) gives the last decoded frame its full packet
+    duration even where the mp4 edit list ends the track sooner, and the fps filter fills that time: the vfr fixture's
+    copy got two extra held frames (video 3.000 s, the source's video 2.933 s, audio 2.922 s; FFmpeg 7.1 gave 2.933 s).
+    Every copy and part is now bounded to its own span (an output -t), on every lane. Picture and sound were never
+    shifted (same frame times, audio lag 0): only the tail ran on. FINDINGS: hooks/BL-26/FINDINGS.md."""
+
+    def durs(self, path):
+        import av
+        with av.open(str(path)) as c:
+            v, a = c.streams.video[0], c.streams.audio[0]
+            return float(v.duration * v.time_base), float(a.duration * a.time_base)
+
+    def test_the_copy_never_runs_past_its_span(self):
+        for name, ranges in (("vfr", None), ("vfr", [(2.4, 2.45)]), ("vfr", [(0.5, 0.55)]),
+                             ("tag60_real30", None), ("tag60_real30", [(0.5, 0.55)])):
+            with self.subTest(name=name, ranges=ranges):
+                shutil.rmtree(self.out, ignore_errors=True)
+                m, r = self.conform(name, ranges=ranges)
+                self.assertTrue(r["ok"], r)
+                parts = r.get("parts") or [{"path": r["path"], "from_s": 0.0, "to_s": m["duration_s"]}]
+                for p in parts:
+                    vd, ad = self.durs(p["path"])
+                    frame = 1 / r["fps"]
+                    self.assertLess(vd - (p["to_s"] - p["from_s"]), frame, p)       # CFR rounding: under one frame
+                    self.assertGreaterEqual(vd, p["to_s"] - p["from_s"] - 0.001, p)  # never cut short (ms bound)
+                    self.assertLessEqual(abs(vd - ad), frame + 0.025, p)          # the c01 limit, per part
+
+    def test_every_lane_bounds_the_copy(self):
+        for ranges in (None, [(2.4, 2.45)]):
+            with self.subTest(ranges=ranges):
+                shutil.rmtree(self.out, ignore_errors=True)
+                cmds = []
+
+                def runner(cmd):
+                    cmds.append(cmd)
+                    if "-hwaccel" in cmd:
+                        return subprocess.CompletedProcess(cmd, 1, b"", "Cannot load nvcuda.dll")
+                    return subprocess.run(cmd, capture_output=True)
+                m, r = self.conform("tag60_real30", lane="cuda", runner=runner, ranges=ranges)
+                self.assertTrue(r["ok"], r)
+                span = (2.6 if ranges else m["duration_s"])               # 2.4-2.45 with 2 s handles: 0.4-3.0
+                self.assertEqual(len(cmds), 2)                            # the GPU try, then the CPU once
+                for cmd in cmds:
+                    self.assertEqual(cmd[-3:-1], ["-t", f"{span:.3f}"], cmd)
+
+    def test_an_unknown_length_encodes_the_whole_file(self):
+        m = MN.measure(fx("tag60_real30"))
+        d = dict(MN.decide(m), duration_s=None)
+        cmds = []
+
+        def runner(cmd):
+            cmds.append(cmd)
+            return subprocess.run(cmd, capture_output=True)
+        with quiet():
+            r = self.cf(fx("tag60_real30"), self.out, d, runner=runner)
+        self.assertTrue(r["ok"], r)
+        self.assertNotIn("-t", cmds[0])                                   # no bound to give: never `-t 0.000`
+        vd, ad = self.durs(r["path"])
+        self.assertAlmostEqual(vd, 3.0, delta=0.034)
+
+    def test_a_copy_made_before_the_bound_is_made_again(self):
+        m, r1 = self.conform("tag60_real30")
+        side = Path(r1["sidecar"])
+        rec = json.loads(side.read_text(encoding="utf-8"))
+        self.assertEqual(rec.get("bound_s"), round(m["duration_s"], 3))
+        side.write_text(json.dumps({k: v for k, v in rec.items() if k != "bound_s"}), encoding="utf-8")
+        m, r2 = self.conform("tag60_real30")
+        self.assertFalse(r2["reused"])                                    # it may hold the unbounded tail
+        m, r3 = self.conform("tag60_real30")
+        self.assertTrue(r3["reused"])                                     # the control: a bounded copy is reused
+
+
+def _decode(path):
+    """[(time, 64x36 grey picture)] of every video frame, the video stream's length, the decoded audio sample count and
+    the sample rate (PyAV: the mp4 edit lists are applied, as an NLE reads the file)."""
+    import av
+    with av.open(str(path)) as c:
+        v = c.streams.video[0]
+        frames = [(float(f.pts * f.time_base), f.to_ndarray(format="gray", width=64, height=36).astype(np.float32))
+                  for f in c.decode(v)]
+        vdur = float(v.duration * v.time_base)
+    with av.open(str(path)) as c:
+        a = c.streams.audio[0]
+        return frames, vdur, sum(f.samples for f in c.decode(a)), a.codec_context.sample_rate
+
+
+class TestBL26R2TheBoundCutsNothingReal(_Out):
+    """BL-26 r2 (plan session): the output -t bound never cuts a real frame or real sound, at 30, 29.97 and 59.94 fps
+    (the NTSC frame grids are not whole milliseconds), whole file and parts. Against the SOURCE: the copy is whole CFR
+    frames covering the source's picture in its span to within half a frame (the fps filter's own rounding), its last
+    picture is the source picture due at that slot (the last real frame is never dropped), and it holds exactly the
+    source's decoded audio samples of its span (none cut, none added). Before the bound, FFmpeg 9.0.2 gave the vfr2997
+    copy 90 frames for 88 frames of picture (vfr5994: 180 for 178), and 7.1 gave the 0-2.55 parts one frame too many."""
+
+    def test_the_copy_keeps_every_real_frame_and_sample(self):
+        for name in ("vfr2997", "vfr5994", "vfr", "tag60_real30"):
+            src_frames, src_vdur, src_n, sr = _decode(fx(name))
+            for ranges in (None, [(0.5, 0.55)], [(2.4, 2.45)]):
+                with self.subTest(name=name, ranges=ranges):
+                    shutil.rmtree(self.out, ignore_errors=True)
+                    m, r = self.conform(name, ranges=ranges)
+                    self.assertTrue(r["ok"], r)
+                    fps = r["fps"]
+                    for p in r.get("parts") or [{"path": r["path"], "from_s": 0.0, "to_s": m["duration_s"]}]:
+                        a, b = p["from_s"], p["to_s"]
+                        frames, vdur, n, _ = _decode(p["path"])
+                        picture = (min(b, src_vdur) - a) * fps                  # the source picture, in copy frames
+                        self.assertLessEqual(abs(len(frames) - picture), 0.5 + 1e-3, (p, len(frames), picture))
+                        self.assertAlmostEqual(vdur, len(frames) / fps, delta=1e-3)   # whole frames, evenly timed
+                        self.assertEqual(n, round((min(b, src_n / sr) - a) * sr), p)  # every real sample, no more
+                        due_t = a + (len(frames) - 0.5) / fps - 1e-6        # fps filter (round=near): the last slot
+                        k = max(i for i, (t, _) in enumerate(src_frames) if t <= due_t or i == 0)
+                        due = src_frames[k][1]
+                        other = next(img for _, img in reversed(src_frames[:k]) if np.abs(img - due).mean() > 0.5)
+                        last = frames[-1][1]
+                        self.assertLess(np.abs(last - due).mean(), np.abs(last - other).mean() / 4, p)
+
+
+class TestBL26R2FfmpegInTheRecord(_Out):
+    """BL-26 r2 (executor ruling): the copy's record names the FFmpeg version and build that made it, and a copy made
+    by another version or build is made again: FFmpeg 7.1 and 9.0.2 end a copy differently (FINDINGS), so a copy is
+    only reused from the same FFmpeg. `build` is the binary's sha256: a rebuild under the same version string counts."""
+
+    def test_the_record_names_the_ffmpeg_version_and_build(self):
+        m, r = self.conform("tag60_real30")
+        self.assertTrue(r["ok"], r)
+        rec = json.loads(Path(r["sidecar"]).read_text(encoding="utf-8"))
+        ff = MN._engine_ffmpeg()
+        first = subprocess.run([ff, "-version"], capture_output=True, text=True, errors="replace").stdout.split()
+        self.assertEqual(first[:2], ["ffmpeg", "version"])
+        self.assertEqual(rec["ffmpeg_version"], first[2])                 # e.g. 9.0.2-essentials_build-www.gyan.dev
+        self.assertEqual(rec["ffmpeg_build"], sha(ff))                    # the binary itself
+
+    def test_another_ffmpeg_version_or_build_makes_the_copy_again(self):
+        m, r = self.conform("tag60_real30")
+        side = Path(r["sidecar"])
+        for key, other in (("ffmpeg_version", "7.1-essentials_build-www.gyan.dev"), ("ffmpeg_build", "0" * 64)):
+            with self.subTest(key=key):
+                rec = json.loads(side.read_text(encoding="utf-8"))
+                side.write_text(json.dumps(dict(rec, **{key: other})), encoding="utf-8")
+                m, r2 = self.conform("tag60_real30")
+                self.assertTrue(r2["ok"], r2)
+                self.assertFalse(r2["reused"], key)                       # made by another FFmpeg: made again
+                m, r3 = self.conform("tag60_real30")
+                self.assertTrue(r3["reused"], key)                        # the control: the same FFmpeg reuses it
+        rec = json.loads(side.read_text(encoding="utf-8"))
+        side.write_text(json.dumps({k: v for k, v in rec.items() if not k.startswith("ffmpeg_")}), encoding="utf-8")
+        m, r4 = self.conform("tag60_real30")
+        self.assertFalse(r4["reused"])                                    # a record from before r2: made again once
+
+    def test_a_new_ffmpeg_at_the_same_path_makes_the_copy_again(self):
+        m, r = self.conform("tag60_real30")
+        real = MN._ffmpeg_id(MN._engine_ffmpeg())
+        with mock.patch.object(MN, "_ffmpeg_id", return_value=dict(real, build="1" * 64)):
+            m, r2 = self.conform("tag60_real30")                          # an update in place (reel setup)
+        self.assertFalse(r2["reused"])
+        self.assertEqual(json.loads(Path(r2["sidecar"]).read_text(encoding="utf-8"))["ffmpeg_build"], "1" * 64)
+
+    def test_the_id_follows_the_binary_file(self):
+        fake = self.tmp / "ffmpeg-fake.exe"
+        fake.write_bytes(b"one")
+        calls = []
+
+        def runner(cmd):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, f"ffmpeg version {len(calls)}.0-test (c)\nbuilt with x\n", "")
+        first = MN._ffmpeg_id(str(fake), runner=runner)
+        self.assertEqual(first, {"version": "1.0-test", "build": sha(fake)})
+        self.assertEqual(calls, [[str(fake), "-hide_banner", "-version"]])
+        self.assertEqual(MN._ffmpeg_id(str(fake), runner=runner), first)   # cached: one -version per build
+        self.assertEqual(len(calls), 1)
+        fake.write_bytes(b"two!")                                         # replaced at the same path
+        os.utime(fake, ns=(time.time_ns(), time.time_ns() + 10 ** 9))
+        self.assertEqual(MN._ffmpeg_id(str(fake), runner=runner), {"version": "2.0-test", "build": sha(fake)})
+
+    def test_an_unreadable_version_is_none_and_never_kept(self):
+        fake = self.tmp / "ffmpeg-fake.exe"
+        fake.write_bytes(b"three")
+
+        def broken(cmd):
+            raise OSError("not a program")
+        self.assertEqual(MN._ffmpeg_id(str(fake), runner=broken), {"version": None, "build": sha(fake)})
+        odd = MN._ffmpeg_id(str(fake), runner=lambda c: subprocess.CompletedProcess(c, 0, "something else\n", ""))
+        self.assertIsNone(odd["version"])
+        ok = MN._ffmpeg_id(str(fake), runner=lambda c: subprocess.CompletedProcess(c, 0, "ffmpeg version 8.1 x\n", ""))
+        self.assertEqual(ok["version"], "8.1")                            # a failed read is asked again, never kept
+
+
 if __name__ == "__main__":
     unittest.main()
