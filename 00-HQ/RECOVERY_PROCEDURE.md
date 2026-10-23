@@ -200,7 +200,9 @@ Order matters: queue and inputs first, then the AI routines.
    `schtasks /Change /TN "WNC-Queue" /ENABLE`. Check: `schtasks /query /tn "WNC-Queue"` = Ready.
 4. **Owner or attended Master:** switch on `whynot-cut-hq-intake`, `whynot-cut-primary-report-2`,
    `whynot-cut-auto-resume-2`. Leave `owner-update` and `lane-watch` off. Check: `nextRunAt` set for all three; then R2
-   step 1 happens at the first intake.
+   step 1 happens at the first intake. **`auto-resume-2` goes on LAST**, only when the heavy queue is short and RAM is
+   below 75 %: its first run wakes every Gate 4 track at once (incident 2026-10-22 21:09–21:35, `AUTOMATION_RUNBOOK.md`
+   §6).
 5. **Master:** re-queue the two ended suites (R5), one at a time.
 6. Verify the whole: next report row `SENT (session …)`; next intake reply in its Runs pane; both helpers `--alive`.
 

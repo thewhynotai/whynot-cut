@@ -1,11 +1,11 @@
 diff --git a/whynot-cut/engine/reel/cli.py b/whynot-cut/engine/reel/cli.py
-index 267e1b0..18eba75 100644
+index c26e8c4..f7e913f 100644
 --- a/whynot-cut/engine/reel/cli.py
 +++ b/whynot-cut/engine/reel/cli.py
-@@ -1177,6 +1177,13 @@ def cmd_next(a):
+@@ -1183,6 +1183,13 @@ def cmd_next(a):
      out(next_doc(P(a)), check=False)
-
-
+ 
+ 
 +def cmd_run_state(a):
 +    """BL-04 (M5-T7): `reel next` with the item's run state folded in (lib/run_state.py): where a session cut by a
 +    usage limit goes on, with no stage repeated and none left half done."""
@@ -16,7 +16,7 @@ index 267e1b0..18eba75 100644
  def next_doc(p: Paths) -> dict:
      """The `reel next` document of one clip, reel or motion project (also read by `reel board`, T3.10)."""
      from lib.motion_config import is_motion
-@@ -1214,6 +1221,11 @@ def next_doc(p: Paths) -> dict:
+@@ -1220,6 +1227,11 @@ def next_doc(p: Paths) -> dict:
      todo = [name for name, f in chk if f is None or not Path(f).exists()]
      stale = stale_steps(p, todo)
      todo = [s_ for s_ in stale] + [n for n in todo if n not in [s_.split(" (")[0] for s_ in stale]]
@@ -28,7 +28,7 @@ index 267e1b0..18eba75 100644
      status = load_status(p)["status"]
      from lib.common import DONE_STATUSES
      if stale and status in DONE_STATUSES:
-@@ -1260,7 +1272,7 @@ CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze"
+@@ -1266,7 +1278,7 @@ CORE_WRITES = {"scaffold", "client-init", "discover", "client-db", "ref-analyze"
  # doctor: --fix writes only the idempotent .whynot-client at client roots (outside output/), so it takes no lease
  # and works while another session holds the client (gate G2).
  CORE_READS = {"board", "serve", "perf-report", "setup", "clean", "py", "model-download", "gpu-enable", "bench", "profile", "ppro-install", "ppro-status", "ppro-probe",
@@ -37,7 +37,7 @@ index 267e1b0..18eba75 100644
  WRITES_IF = {
      "inbox": lambda a: not a.no_refresh or not (Path(a.root or ".").expanduser()
                                                  / "output/discovery/input-inventory.json").exists(),
-@@ -1884,6 +1896,7 @@ CORE_COMMANDS: dict[str, str] = {
+@@ -1890,6 +1902,7 @@ CORE_COMMANDS: dict[str, str] = {
               "project's JSON files); --json for the document",
      "board": "one table of every client in the clients folder: each video's state and next step (--json for the panel)",
      "next": "what the next step is (resumable workflow), with stale-input warnings",
@@ -45,9 +45,9 @@ index 267e1b0..18eba75 100644
      "lock": "one writer per client folder: show (--status) or release (--release, lead only) output/.whynot-lock",
      "mogrt-build": "build MOGRT templates (extra: needs --extras and an explicit editor request)",
      "ae-script": "write the After Effects script (extra: needs --extras)",
-@@ -2247,13 +2260,17 @@ def start(a):
-
-
+@@ -2253,13 +2266,17 @@ def start(a):
+ 
+ 
  def run(a):
 -    """Dispatch the parsed command (inside the client's writer lock when it writes)."""
 +    """Dispatch the parsed command (inside the client's writer lock when it writes). A stage verb of one item is
@@ -66,7 +66,7 @@ index 267e1b0..18eba75 100644
          return
      if not a.video_id and a.cmd not in NO_ID and not a.episode:
          inv = read_json(Path(a.root).expanduser() / "output/discovery/input-inventory.json")
-@@ -2267,7 +2284,8 @@ def run(a):
+@@ -2273,7 +2290,8 @@ def run(a):
      canonical_video_id(a)
      _RUN["a"] = a
      try:
@@ -75,4 +75,4 @@ index 267e1b0..18eba75 100644
 +            globals()["cmd_" + a.cmd.replace("-", "_")](a)
      finally:
          _RUN.pop("a", None)
-
+ 

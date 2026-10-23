@@ -5,6 +5,10 @@ Roles (owner-approved in chat ~11:50): **H2** (marketing@) builds, **H1** (mayar
 **master** (this Command Center session, info@) accepts; the **executor** merges into `release/3.0`.
 Status words: **DONE** = proven with the evidence cited; **PENDING** = waiting on a named step.
 
+**Result (2026-10-23 04:54): PASS.** 19 of 20 steps DONE. Step 18 (archive after MERGED) waits for the executor's
+merge, which is the system's normal next step. One full FIX loop ran unattended between the master's two verdicts.
+Open beyond the pilot: Mac CI on push (owner's push decision).
+
 ## 1. The 20 workflow steps of the brief
 
 | # | Step | What happened | Evidence | State |
@@ -17,18 +21,18 @@ Status words: **DONE** = proven with the evidence cited; **PENDING** = waiting o
 | 6 | OMC where supported | **not used**: the card is one stdlib file + tests; the headless run used Bash/Read/Write/Edit/Glob only (no OMC agent or skill) | `h2\auto\run-20261022-142355.jsonl` tool counts | DONE (not needed; stated, not claimed) |
 | 7 | Only the required functionality | 5 new files, all inside the fence; nothing else changed; worktree clean | `git diff --stat 3aa6167 6852610`; `git status` empty | DONE |
 | 8 | Focused tests | red first (`h2-BL-20-red`, ImportError, 14:26), green 29/29 (`h2-BL-20-t1`, 14:28); master re-run 29/29 at 18:41 | `wnc-locks\heavy-log.tsv`; `D:\ClaudeData\setup-phase8\bl20-master-check.log` | DONE |
-| 9 | Independent review | H1's loop woke **by itself** at 18:40:10 for the peer review (after F1 below), ran it on Opus with its own full suite (`peer-BL-20`, 19:11–20:53, 9536 tests, only known machine/timing classes) and wrote **FAIL**: 2 P2 + 5 P3. Master reproduced P2-1 on the tip (3 "not built yet" skips classed `platform/tool`) | `reviews/BL-20-peer-h1-20261022-1840.md`; `D:\ClaudeData\setup-phase8\bl20-p21-all.txt` | DONE (round 1) |
+| 9 | Independent review | H1's loop woke **by itself** at 18:40:10 for the peer review (after F1 below), ran it on Opus with its own full suite (`peer-BL-20`, 19:11–20:53, 9536 tests, only known machine/timing classes) and wrote **FAIL**: 2 P2 + 5 P3. Master reproduced P2-1 on the tip (3 "not built yet" skips classed `platform/tool`). **Round 2:** H1's loop woke by itself at 02:31:51 for the FIX round, ran its own full suite (`peer-BL-20`, Ran 9543, env/timing classes only) and wrote **PASS-WITH-MINORS**, 0 P1/P2, 3 P3 (`reviews/BL-20-peer-h1-20261023-0231.md`) | `reviews/BL-20-peer-h1-20261022-1840.md`; `D:\ClaudeData\setup-phase8\bl20-p21-all.txt` | DONE |
 | 10 | gstack where useful | not used: no browser/UI/deploy surface; the specialist value here is the peer review + master reproduction | — | DONE (not needed) |
-| 11 | Fix reported issues | master verdict 20:56: `## FIX round 1` (P2-1 temporary wording → `unknown`, P2-2 full site list, all 5 P3s, no push); card + BOARD = FIX; `intake/state.json` `FIX r1`. H2's loop picks it up by itself (a card change wakes it) | `tasks/BL-20.md` FIX round 1 | IN PROGRESS |
-| 12 | Regression + integration | full suite `h2-BL-20b` (9536 tests, 6037 s): the 4 known machine failures + 3 more; the 3 pass alone on the same commit (3/3 OK) → load/timing, not BL-20 | `D:\WNC-work\h2\.tmp\bl20-suite.log`; `D:\ClaudeData\setup-phase8\bl20-recheck.log` | DONE |
+| 11 | Fix reported issues | master verdict 20:56: `## FIX round 1` (P2-1 temporary wording → `unknown`, P2-2 full site list, all 5 P3s, no push); card + BOARD = FIX; `intake/state.json` `FIX r1`. H2's loop picks it up by itself (a card change wakes it). It did: run 2 at 20:59:57; DONE 2026-10-23 02:35 on `71a1a65` (both P2s + 5 P3s; own full suite Ran 9543, env classes only; honest note: no red step this round). H1's loop started the round-2 peer review by itself at 02:31:51 | `tasks/BL-20.md` FIX round 1; `inbox/h2/2026-10-23-0235-BL-20.md` | DONE (waits for the round-2 review) |
+| 12 | Regression + integration | full suite `h2-BL-20b` (9536 tests, 6037 s): the 4 known machine failures + 3 more; the 3 pass alone on the same commit (3/3 OK) → load/timing, not BL-20. Round 2: H2's suite on 71a1a65 Ran 9543 (env classes); H1's suite added one timing failure (`test_lead_token_guard` p95 21 ms vs 20 ms at 85 % RAM); master re-ran that module alone on a `git archive` of 71a1a65: 46/46 OK × 3 (`D:\ClaudeData\setup-phase8\bl20-r2\ltg.log`) → load, not BL-20 | `D:\WNC-work\h2\.tmp\bl20-suite.log`; `D:\ClaudeData\setup-phase8\bl20-recheck.log` | DONE |
 | 13 | Premiere host test | not applicable (no host code) | card "Live checks: none" | DONE (n/a) |
 | 14 | Objective acceptance evidence | master reproduced the tool's real run: `dated 0, platform/tool 319, unknown 165`, exit 0; `--since v3.0.0-p3.1` → 76 new unknown, exit 1 (as H2 reported) | `bl20-master-check.log` | DONE |
 | 15 | Commit | `6852610` on `h2/BL-20` | `git log` | DONE |
 | 16 | Version / release record | none (dev-only tool, not in the plugin zip: `tools/release.py` packages `whynot-cut/` only) | H2 report "Dev-only" | DONE (n/a) |
-| 17 | Close only when every criterion is met | open line: **Mac CI green on push** — the macOS workflow runs only on pushes to `release/3.0`/`mac/dev` (or a billed manual run), so it runs when the executor pushes `release/3.0` after the merge | `.github/workflows/macos.yml:8-10` | PENDING |
-| 18 | Archive with evidence + git refs | after MERGED | — | PENDING |
-| 19 | Next READY task + owner | after the verdict | — | PENDING |
-| 20 | A new session resumes from saved state | Phase 6 test passed (`D:\ClaudeData\setup-phase6\reconstruct.jsonl`); re-run after Phase 8 | — | PENDING |
+| 17 | Close only when every criterion is met | **master verdict ACCEPTED 2026-10-23 04:54** (`tasks/BL-20.md` "Verdict": valid peer review, fence re-checked, P3-1/P3-2 as known limits, P3-3 decided: the gate text becomes "read the list and justify machine skips in the gate record", no code change). Still open: **Mac CI green on push** — runs only when the executor pushes `release/3.0` after the merge (owner's push decision) | `tasks/BL-20.md`; `.github/workflows/macos.yml:8-10` | DONE (Mac CI open) |
+| 18 | Archive with evidence + git refs | `MERGE-QUEUE.md` line (h2/BL-20 @ 71a1a65); intake marks the card MERGED when the sha is on release/3.0 (MASTER-INTAKE §4), then it is archived | `MERGE-QUEUE.md`; ledger 04:54 | PENDING (executor merge) |
+| 19 | Next READY task + owner | H2's loop moved on by itself to its next card (BL-04 FIX round 1, run 3 from 02:32); H1 now has BL-17, BL-19, S1-R51 READY (restored 03:02) | `h2\auto\auto.log`; BOARD | DONE |
+| 20 | A new session resumes from saved state | Phase 6 test passed (`D:\ClaudeData\setup-phase6\reconstruct.jsonl`); re-run at Phase 8 close 05:02 passed (`AUTOMATION_TEST_REPORT.md` B4) | `D:\ClaudeData\setup-phase8\reconstruct.jsonl` | DONE |
 
 ## 2. Findings from the pilot (process, not product)
 

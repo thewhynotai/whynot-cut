@@ -381,6 +381,15 @@ class Phase8Fields(unittest.TestCase):
         self.assertNotIn("a-BL-20.md", blocks)
         self.assertIn("a-BL-04.md", blocks)
 
+    def test_a_null_or_spaced_verdict_does_not_break_the_report(self):
+        # state.json may hold "verdict": null; a leading space must not hide the FIX word
+        reps = {"BL-20": {"who": "h2", "file": "inbox/h2/a-BL-20.md", "status": "DONE", "mtime": 0},
+                "BL-04": {"who": "h2", "file": "inbox/h2/a-BL-04.md", "status": "DONE", "mtime": 0}}
+        verdicts = {"inbox/h2/a-BL-20.md": {"verdict": " FIX r1"}, "inbox/h2/a-BL-04.md": {"verdict": None}}
+        blocks = hs.render_report(dict(self.S, reports=reps, verdicts=verdicts), None, "t").split("## 5.")[1]
+        self.assertNotIn("a-BL-20.md", blocks)
+        self.assertIn("a-BL-04.md", blocks)
+
 
 if __name__ == "__main__":
     unittest.main()

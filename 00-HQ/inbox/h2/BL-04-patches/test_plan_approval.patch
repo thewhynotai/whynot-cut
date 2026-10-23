@@ -4,7 +4,7 @@ index ec6b751..b7ce925 100644
 +++ b/whynot-cut/tests/test_plan_approval.py
 @@ -159,6 +159,8 @@ class TestApprovalStaleness(ApprovalFixture):
          self.assertNotEqual(plan_fingerprint(self.p), fp)
-
+ 
      def test_e2_next_and_handoff_flag_a_stale_approval(self):
 +        # BL-04: a planned clip has its preflight (without one, `reel next` lists preflight first)
 +        write_json(self.p.p("00_inputs/preflight.json"), {"files": [{"path": str(self.root / "data/Raw/CLIP1.mp4")}]})

@@ -1,7 +1,7 @@
 # OPS-09 — Parallel full suite: `tools/test.sh --parallel N`, failure re-run that only labels, per-commit cache
 
 - **Assigned:** MASTER (built by a fresh executor sub-agent in its own worktree; reviewed by a separate fresh sub-agent)
-  **Size:** M    **Status:** IN PROGRESS (opened 2026-10-22 by the owner's explicit approval in chat)
+  **Size:** M    **Status:** ACCEPTED (2026-10-23 03:00, master; equivalence run 4 on 302df0d; see "Verdict" below)
 - **Tier:** LIGHT (dev tooling: it decides nothing an editor or a client sees). But it is the runner every gate trusts,
   so its acceptance below is strict: a parallel run must mean exactly what a serial run means.
 - **Owner words (chat, 2026-10-22):** «افتح كارت الـ parallel suite دلوقتي ونفّذه (tests + مراجعة مستقلة)، بالقاعدة
@@ -147,6 +147,57 @@ shards 12–25 min, one unbalanced shard 42.7 min, RAM peak 76 %, CPU ~40 %. Bal
   (`D:\ClaudeData\setup-phase8\ops09-r4\`). Review r4 and parallel run 3 (`ops09-parallel3`, expected Ran 9546) follow.
 - **Wall-time line:** run 1 met it (28.7 min); run 2 missed by 1.5 min because one module (`test_installer`, 31.3 min
   under 88 % RAM) is the floor. Not fixable inside the tool (module-level sharding); recorded under known limits.
+
+- **Run 3 (2026-10-22 20:53–21:21, `ops09-parallel3`, commit 79989c9, log
+  `D:\ClaudeData\setup-phase6\ops09\parallel-run3.log`):** Ran **9546** (as expected), wall 1693.9 s (28.2 min),
+  RAM peak 84 %. FAILED (failures=4, errors=1, **skipped=49**, expected failures=21, unexpected successes=2). The
+  round-4 lane worked (the wnc_queue timeout test passed in the serial lane). **Not equivalent yet:** (1) one extra
+  failure, OPS-09's own `test_test_parallel.Cache.test_git_takes_no_optional_index_lock` (`.git/index` of the test's
+  temp repo got a new mtime, same size, during the tool run; the tool labels it "load-sensitive (passed alone)");
+  (2) one extra skip (49 vs 48 serial); the tool does not list skipped ids, so it cannot be named from this log (a
+  free-RAM guard skip at 84 % is the likely class, unproven). Master check 21:25: `git maintenance --detach`
+  (spawned by every commit) does not write the index (trace2); a 40-run trace2 probe under the real load is queued
+  (`master-ops09-t2loop`). **Not accepted**: the strict rule allows no extra failure. Next: root cause from the probe,
+  then fix round 5 (and the skipped-ids gap: compare skip sets too).
+
+- **Root cause + fix round 5 (master, 22:28–22:45).** Probe `master-ops09-t2loop`: the test alone failed **20 of 40**
+  runs, so not load: luck. git trace2 per process (`<scratchpad>/t2loop/run1`): the only writer of `.git/index` during
+  the tool run is `git --no-optional-locks diff HEAD --binary …` (`do_write_index`), on a tracked file with a new
+  mtime and the same bytes (git 2.56.0.windows.2 ignores the flag there). A real contract bug (review r2 P3-1: never
+  write the index of a shared checkout). Fix `725b852`: `dirty_key` drops the `diff HEAD` bytes (status + raw bytes of
+  every listed path already cover it); the test forces the stale stat entry (`os.utime` +2 s): red 5/5 before, green
+  5/5 after, file 39/39. Review r5 (fresh) and equivalence run 4 (`ops09-parallel4`, expected Ran 9546, failing set =
+  the 4 baseline ids) follow. The extra skip (49 vs 48) is still unnamed: the tool prints no skipped ids.
+- **Review r5 (`reviews/OPS-09-r5.md`): PASS-WITH-MINORS** (0 P1/P2). Minors done in `302df0d`: the index test compares
+  the index bytes (red 3/3 on the old tool, green 3/3; file 39/39); docstring names the key's known limit (submodule
+  commit, mode-only bit, retargeted dir symlink: none in this repo). Run 4 runs on 302df0d (checkout moved before it
+  started).
+- **Run 4 (2026-10-23 02:30–02:58, `ops09-parallel4`, commit 302df0d, log
+  `D:\ClaudeData\setup-phase6\ops09\parallel-run4.log`): EQUIVALENT.** (The first queueing at 22:37 waited 172 min and
+  was dropped by an app restart at ~01:20 before it started; re-queued 01:26; it started at RAM 65 % with nothing else
+  heavy running.) Ran **9546** (= 9539 serial − 32 + 39, `test_test_parallel` only) ✓; FAILED (failures=3, errors=1,
+  **skipped=48**, expected failures=21, unexpected successes=2) = the serial line field by field ✓; failing set =
+  exactly the 4 baseline ids (gpu_accel libx264 ERROR, ae_extras + motion non-ASCII, media_normalise av-sync), each
+  labelled `fails alone too` ✓; no extra failure. Wall **1688 s (28.1 min)** ✓, RAM peak 73 %. The two fuzz modules'
+  logs were kept only for their known unexpected successes (1 + 1 = the serial 2). Run 3's extra skip (49) did not
+  recur; the tool still prints no skipped ids (known limit below).
+
+## Verdict (master, 2026-10-23 03:00): ACCEPTED
+- [x] Tests first: red 15 F + 5 E before the tool, green after (`inbox/master/2026-10-22-OPS-09-build.md`); now 39/39.
+- [x] heavy.sh `psuite`: heavy-test passed 81 / failed 0 (`2026-10-22-OPS-09-fix2.md`), backups dated next to it.
+- [x] Equivalence on the real repo: run 4 above against `serial.log` (same count rule, same skips, same failing set).
+- [x] Wall time ≤ 30 min: 28.1 min (run 4), RAM peak 73 %, nothing else heavy running.
+- [x] Serial `tools/test.sh` unchanged: only the 5 dispatch lines (build report; reviews r1–r5).
+- [ ] **Mac CI green on push: OPEN.** Needs the owner's push decision (release/3.0 holds 115+ unpushed commits). The
+      code is reviewed bash 3.2-safe; the macOS `vm_stat` RAM read has never run on a Mac (r1). Moves to the push.
+- [x] Independent reviews: r1–r5 (r3, r4, r5 PASS-WITH-MINORS, 0 P1/P2). Fix rounds 3–5 went beyond the LIGHT limit on
+      purpose (each was an equivalence blocker; owner's rule: quality first). P3s under Known limits.
+- **Merge:** release/3.0 moved one commit since the branch point (b7e2190, test_ae_extras + test_motion only); no
+  file overlap with OPS-09, so fast-forward is impossible but the merge is clean. Executor merges (merge commit, like
+  BL-16) per `MERGE-QUEUE.md`. After b7e2190 the two non-ASCII tests should pass, so the next baseline should be 2
+  failures; the first suite after the merge confirms it.
+- **Then:** the suite command switch (PLAYBOOK §2, MASTER-INTAKE 1B, helper_loop.py prompts, README) follows the merge
+  (the tool must be on release/3.0 before anyone is told to use it).
 
 ## Known limits (accepted at review r3; follow-up hardening, not blockers)
 - P3-1: a parent env that already holds `WHYNOT_TEST_SANDBOX` makes all workers share one sandbox (normal runs never

@@ -95,6 +95,16 @@ is ≈ 1.4 s slower. Keep routine prompts narrow. If a routine misbehaves, open 
 (e.g. `D:\ClaudeData\routines`) and file a card.
 
 ## 6. Incidents
+- 2026-10-22 21:09–21:35: **watchdog re-enabled too early in the restart, then off again (owner).** The Phase 8 master
+  (Command Center, Phases 2–8 session) re-enabled `whynot-cut-auto-resume-2` at 21:09 + Run now 21:11 as
+  RECOVERY_PROCEDURE R8 step 4 (recorded in the tracker row 8; `primary-report-2` had been re-enabled ~18:48, its
+  21:03 run = test B1/B8). The watchdog nudged the executor and Command Center (21:11) and Builder A (21:24 scheduled
+  run); their Gate 4 work filled the heavy queue (~15 jobs, RAM 83–85 %). **Owner decision 21:35** (relayed by the
+  infra-audit session, quoted: "switch whynot-cut-auto-resume-2 off again until Phase 8 is done … let the Gate 4
+  sessions finish only the step they're in"): that session disabled the routine; the master told the executor and
+  Builder A (21:4x) to finish only the step in flight, checkpoint, start no new heavy job and drop their other queued
+  jobs. **Lesson:** R8 step 4 re-enables the watchdog only as the LAST step of Phase 8 (it wakes every Gate 4 track
+  at once), with the queue and RAM checked first. `whynot-cut-hq-intake` stays off until then too.
 - 2026-10-22 04:15: **planned full stop (owner, AI-infra restart D1).** Routines auto-resume-2, hq-intake,
   primary-report-2 and the 10:00 one-time remeasure disabled; both helpers STOP + AUTO-ON removed; Windows tasks
   WNC-Queue and API-lanes keepalive disabled; running suites left to finish; Yunus restarts the Claude app. Record and

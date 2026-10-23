@@ -1,6 +1,6 @@
 # S6b — Gate 4 eval cases for the Phase 4 skills
 
-- **Assigned:** H1    **Model:** Opus 5.5 high    **Size:** M    **Status:** PARKED (AI-infra restart Phase 6–7 hold, 2026-10-22; restored in Phase 8 to: FIX (round 1, 2026-10-21 17:55))
+- **Assigned:** H1    **Model:** Opus 5.5 high    **Size:** M    **Status:** ACCEPTED (2026-10-23 03:05; peer h2 PASS-WITH-MINORS on d6f9a3b, no P1/P2; → MERGE-QUEUE)
 - **Tier:** LIGHT (eval cases: dev workflow; they test the product, they don't change it)
 - **Stage / gate:** Gate 4 (`WhyNotCut/PROGRESS.md` line "Evals": "Add cases for the Phase 4 skills (rules/T4.3,
   episode sheet, autopilot, music NEEDS-YOU): S6 work for a free builder")    **Depends on:** the executor naming
@@ -65,3 +65,20 @@ diff (not counted against you). A P2 blocks ACCEPTED, so:
    P3-5 make `episode-sheet-before-episode`'s Skill grader record-only, or hand the description gap to the executor.
 Then: focused `test_evals.py`, the full suite through the queue, a new report with the new sha and the suite line.
 LIGHT tier: this is round 1 of at most 2.
+
+## Accepted (2026-10-23 03:05)
+Master intake decision from the valid peer review `reviews/S6b-r3-peer-h2-20261022-1005.md` (h2, sha d6f9a3b = branch tip, report-mtime 1792626934,
+verdict PASS-WITH-MINORS, no P1/P2). The file name carries `S6b-r3` (the dispatch's name) instead of `S6b`: the helper
+id h2 matches the reviewer line and the reviewer is not the author, so it counts. Fence re-checked by the master: every
+path under `whynot-cut/evals/` or `whynot-cut/tests/test_evals.py`; all 4 commits "Mayar (WhyNot Helper 1)". Peer suite:
+Ran 9117, 5 F (ae_builder junction, identity_scan speed, isolation s1_reachable, media_normalise A/V sync, serve_jobs
+total order fixed on release/3.0 in dd52ae8): known env/timing classes, none in the diff, no worse than the baseline.
+
+## Accepted minors
+- P3-1: this round's graders (auto-approve-command, not-a-rule, tells-the-editor, scan-before-reviewer, hands-the-lines,
+  episode-sheet skill-fired min 0) were never run on the real judge: the Gate 4 eval run is their first measurement.
+- P3-2 (Known limit): no T4.4 case scores whether the podcast skill fires (`min: 0` in both episode-sheet cases); root
+  cause `podcast/SKILL.md:3` is the executor's. When the description widens, drop `min: 0` + the matching assert.
+- P3-3: `auto-approve-command.md:7` regex can pass a mention and miss `--by "delegated"` / a wrapped line (house style).
+- Note: `tests/test_evals.py:155` regex_issues is order-dependent (swap the alternation and it reports a false
+  `auto-approve --by`); for whoever next touches it.

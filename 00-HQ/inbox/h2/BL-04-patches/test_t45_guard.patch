@@ -8,5 +8,5 @@ index 820010d..0a3fcc7 100644
      ("lib/plan.py", "typography.json"),               # a list of the plan's input files (fingerprint), not a read
 +    ("lib/run_state.py", "reference-measurements.json"),   # a video's own 01_analysis copy: parses + hashes it, no path
  }
-
-
+ 
+ 

@@ -80,5 +80,5 @@ The list must stay identical to the deny list; change both together.
 ## 6. Seats
 
 Main seat (info@): gstack global + OMC project scope (this folder). Helper seats (H1/H2, own `CLAUDE_CONFIG_DIR`
-profiles): **neither plugin yet**. Phase 6 decides per seat after testing and adds a pointer to this file in their
-profile CLAUDE.md; until then they reach these rules through the project `CLAUDE.md` they already read.
+profiles): **neither plugin**. Phase 6–7 (closed 2026-10-23) did not need them: the BL-20 pilot ran on plain tools. They
+stay off until a card needs one; the seats reach these rules through the project `CLAUDE.md` they already read.

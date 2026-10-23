@@ -473,7 +473,7 @@ def render_report(s, prev, slot_title, sync=None):
     L += [f"- {r['id']}: حالة مش مفهومة على الـ BOARD «{r['status_note']}»" for r in s["rows"]
           if charter_status(r["status"]) == "UNKNOWN"]
     for k, v in s["reports"].items():
-        verdict = s["verdicts"].get(v["file"], {}).get("verdict", "")
+        verdict = (s["verdicts"].get(v["file"], {}).get("verdict") or "").strip()
         if v["status"] in ("DONE", "BLOCKED") and verdict.split(" ")[0] not in ("ACCEPTED", "FIX", "answered", "noted"):
             extra = f" (intake: {verdict})" if verdict else ""
             L.append(f"- تقرير {k} ({v['status']}) من {v['who'].upper()} مستني الاستلام{extra}: `{v['file']}`")

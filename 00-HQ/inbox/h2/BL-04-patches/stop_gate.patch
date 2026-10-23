@@ -1,0 +1,23 @@
+diff --git a/whynot-cut/hooks/stop_gate.py b/whynot-cut/hooks/stop_gate.py
+--- a/whynot-cut/hooks/stop_gate.py
++++ b/whynot-cut/hooks/stop_gate.py
+@@ -33,7 +33,7 @@ SEPARATORS = set(";&|()\n") | {"&&", "||", ";;", "|&"}
+ # commands that only look: alone they need no fresh proof, and they do not make an earlier proof stale
+ LOOK = {"status", "next", "lock", "doctor", "validate", "ppro-status", "ppro-probe", "ae-status", "ae-probe", "settings",
+         "inbox", "episodes", "episode-next", "music", "motion-icons", "motion-library", "serve", "setup", "py", "bench",
+-        "profile", "handoff", "publish-check", "ppro-frames", "range"} | PROOF
++        "profile", "handoff", "publish-check", "ppro-frames", "range", "run-state"} | PROOF
+
+
+ def _tokens(cmd: str) -> list:
+diff --git a/whynot-cut/tests/test_hooks_t34.py b/whynot-cut/tests/test_hooks_t34.py
+--- a/whynot-cut/tests/test_hooks_t34.py
++++ b/whynot-cut/tests/test_hooks_t34.py
+@@ -632,6 +632,7 @@ class TestEvidenceGate(unittest.TestCase):
+         built = ["reel ppro-build --video-id C0001", "reel qc --video-id C0001"]
+         self.assertIsNone(self.gate("Yes, it is ready.", session(built, ["reel status --video-id C0001"])))
+         self.assertIsNone(self.gate("Yes, it is ready.", session(built, ["reel next"])))
++        self.assertIsNone(self.gate("Yes, it is ready.", session(built, ["reel run-state --video-id C0001"])))   # BL-04
+         self.assertIsNotNone(self.gate("It is ready.", session(built, ["reel status --video-id C0002"])))   # other item
+         self.assertIsNotNone(self.gate("It is ready.", session(built, ["reel ppro-build --video-id C0001"])))  # rebuilt
+         self.assertIsNotNone(self.gate("It is ready.", session(built + ["reel plan --video-id C0001"],

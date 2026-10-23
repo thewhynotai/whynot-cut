@@ -25,7 +25,7 @@ index f753b8d..4abd0f2 100644
  reel client-brief --root "<CLIENT_FOLDER>"              # the client in <= 1,000 tokens (rebuilt only on a change)
  reel profile --root "<CLIENT_FOLDER>"                   # which profile applies and where its values come from
 diff --git a/whynot-cut/skills/motion/SKILL.md b/whynot-cut/skills/motion/SKILL.md
-index 183ddef..923e5b8 100644
+index b076fb6..2f34b37 100644
 --- a/whynot-cut/skills/motion/SKILL.md
 +++ b/whynot-cut/skills/motion/SKILL.md
 @@ -21,6 +21,7 @@ approve the plan.
