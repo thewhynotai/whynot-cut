@@ -11,6 +11,12 @@
 - **Automation:** C1 intake hourly :37, C2 reports 09/13/17/21, C3 watchdog, helper keepalive. WNC-Queue (C10) stays
   disabled: its queue is empty and all suites run through heavy.sh, so nothing waits on it.
 - **Money:** the $500 API plan is PREPARED / NOT AUTHORIZED (owner word «نفذ خطة الـ API»). Reviews use subscription subagents.
+- **Needs Yunus (intake 2026-10-23 06:21):** BL-02 — the GPLv3 §7 NVIDIA permission you approved covers only the NVIDIA
+  CUDA/cuDNN libraries inside the PyTorch packages. `reel gpu-enable` also installs cuBLAS 12, loaded in the same
+  process. Widen the text to "the NVIDIA CUDA libraries that WhyNot Cut installs or that ship inside the PyTorch
+  packages"? (yes/no; the executor's Opus review at the gate either way)
+- **Last intake:** 2026-10-23 06:21 (`local_acb772ae`). S6b ACCEPTED 03:05 (peer h2; merged since). BL-02 r2 reviewed (master
+  Opus + full suite 8830, no new failure) → FIX round 1 (2 P2). BL-20 new report: decided by the master session.
 - **Next READY:** S1-R51 (H1 after BL-17), BL-22 (H2 after BL-04), BL-02 (intake: finish the r2 review).
 - **Latest Premiere build seen live:** PREVIEW `322d8a5` installed 21 Oct (CEP bridge 3.0.0 / protocol 4, UXP 3.0.0).
   The panel loaded and authenticated in Premiere 26.5.2 4 times; no build or feature call was made. The last full live
