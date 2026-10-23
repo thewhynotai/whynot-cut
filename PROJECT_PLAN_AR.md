@@ -185,10 +185,10 @@ ENV-01، OPS-01، OPS-02، OPS-03، OPS-05، OPS-06، OPS-07، كل واحدة �
 
 ## 9. حالة الـ Build
 
-- `release/3.0` = `abdece5` (23 أكتوبر 05:02)، ومتطابق مع GitHub (اتعمله push). يعني الـ macOS CI بقى ممكن يشتغل.
-- آخر suite كاملة: 8,899 test OK من حساب H2 (20 أكتوبر). آخر suite على دفعة: 7,307 OK (18 أكتوبر).
-- اتجرّب النهارده على نسخة نضيفة: 296/296 panel، 389/389 UXP، build الـ UXP plugin، 135 test للـ engine، `validate --strict` ✔.
-- 42 ملف متعدّل ومش متعمله commit في فولدر الـ executor. ده شغل جولات Gate 4 اللي لسه شغالة.
+- `release/3.0` محلي = `e2a80716`، و GitHub = `a8a74fd0` (23 أكتوبر 20:11): المحلي سابق بـ 8 commits لسه ماتعملهاش push (جولات T4.1 و Task 26 و BL-20/21 و BL-25/26 و religious ok-row).
+- آخر suite كاملة: 9,586 test على `b7e21907` من H2 (23 أكتوبر 19:35): 4 فشل، 3 منهم من نوع الجهاز/التوقيت المعروف، والرابع اتصلّح وجرّبوا الملف بتاعه تاني (70 OK). قبلها: 8,899 OK (20 أكتوبر).
+- اتجرّب يوم 22 أكتوبر على نسخة نضيفة: 296/296 panel، 389/389 UXP، build الـ UXP plugin، 135 test للـ engine، `validate --strict` ✔.
+- 38 ملف متعدّل ومش متعمله commit في فولدر الـ executor (23 أكتوبر 20:11). ده شغل جولات Gate 4 اللي لسه شغالة.
 - **آخر build اتشاف جوه Premiere:** الـ PREVIEW `322d8a5` اتسطّب يوم 21 أكتوبر، والـ panel فتح واتصل جوه Premiere 26.5.2. بس محدش عمل بيه build ولا جرّب أي feature.
   - آخر تجربة live كاملة (build ← frames ← تعديل ← حفظ، ومعاها AE): 14–15 أكتوبر.
   - مفيش ولا feature من Gate 4 اتجرّبت live لسه. دي بتيجي في PODCAST-TEST قبل الـ tag.
@@ -226,8 +226,8 @@ ENV-01، OPS-01، OPS-02، OPS-03، OPS-05، OPS-06، OPS-07، كل واحدة �
 | الحساب | الحالة |
 |---|---|
 | **PRIMARY** = info@ | Command Center + executor. gstack و OMC شغالين عليه |
-| **H1** = mayar@ | الـ login شغال، والـ AUTO loop **شغال** (بيراجع شغل H2 وبياخد كروته: BL-17 دلوقتي) |
-| **H2** = marketing@ | الـ login شغال، والـ AUTO loop **شغال** (BL-04 FIX دلوقتي) |
+| **H1** = mayar@ | الـ login شغال، والـ AUTO loop **شغال**. BL-02 FIX: جولة 1 PARTIAL (23 أكتوبر 19:45)، ومستني دوره في طابور الـ heavy |
+| **H2** = marketing@ | الـ login شغال، والـ AUTO loop **شغال**. BL-04 FIX جولة 1 = DONE (23 أكتوبر 19:35)، ومستني مراجعة H1 والاستلام |
 
 ## 14. خطة الـ API بحد أقصى 500 دولار
 
