@@ -15,7 +15,7 @@
   CUDA/cuDNN libraries inside the PyTorch packages. `reel gpu-enable` also installs cuBLAS 12, loaded in the same
   process. Widen the text to "the NVIDIA CUDA libraries that WhyNot Cut installs or that ship inside the PyTorch
   packages"? (yes/no; the executor's Opus review at the gate either way)
-- **Last intake:** 2026-10-23 22:45 (`local_f2ec7e34`): BL-27 BLOCKED (H2 22:31: h2 profile refuses to run Python) → moved to the EXECUTOR now (fallback was 26 Oct); BL-04 FIX-1 still awaiting-peer (master Opus review from 23:35 if no h1 review; 2nd review anyway since HIGH); H2 queue topped up. Nothing to merge.
+- **Last intake:** 2026-10-23 23:30 (`local_f2ec7e34`): BL-27 (executor fallback, DONE 23:07) ACCEPTED, r1 PASS-WITH-MINORS (3 P3), read-only, nothing to merge. 13 STALE skips (patches landed, tests pass alone) and the NEW religious row `test_bl24_verse_guard.py:83` (motion verse tests are expectedFailure until the BL-24 motion_plan patch lands) are for the executor gate record. Earlier 22:45: BL-27 moved from H2; BL-04 awaiting-peer; H2 topped up (BL-29, S1-SA2).
 - **Previous intake:** 2026-10-23 06:21 (`local_acb772ae`). S6b ACCEPTED 03:05 (peer h2; merged since). BL-02 r2 reviewed (master
   Opus + full suite 8830, no new failure) → FIX round 1 (2 P2). BL-20 new report: decided by the master session.
 - **Next READY:** S1-R51 (H1 after BL-17), BL-22 (H2 after BL-04), BL-02 (intake: finish the r2 review).

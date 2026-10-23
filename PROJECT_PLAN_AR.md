@@ -21,7 +21,7 @@
 | BL-03 | H2 | DONE_ARCHIVED |
 | BL-04 | H2 | FIX |
 | BL-20 | H2 | DONE_ARCHIVED |
-| BL-27 | EXECUTOR | REVIEW |
+| BL-27 | EXECUTOR | ACCEPTED (23:30؛ اتأكدت تاني 23:45) |
 | BL-22 | H2 | READY |
 | BL-29 | H2 | READY |
 | S1-SA2 | H2 | READY |
