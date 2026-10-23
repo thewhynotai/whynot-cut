@@ -36,9 +36,8 @@ Self-tested first on a mirror tree (`D:\ClaudeData\Temp\archive-selftest`: apply
 
 Reviewed and **kept** in Phase 5 (classification in `setup/PROJECT_INVENTORY.md`): every file a live tool, role,
 routine or helper loop reads; the business docs at the root; `new plugin code/` (original Kalam/Hush/Tidy source drop,
-ported into the engine; kept as reference source); `خد دا كوبي` preview folders (release track); `omc-lab/` (retired,
-holds a `.git`, the tool moves plain files only; deletion needs the owner); `T4.14-راجع-التفريغ/` (46 MB, may hold
-client media; owner's call).
+ported into the engine; kept as reference source); `خد دا كوبي` preview folders (release track); `T4.14-راجع-التفريغ/` (46 MB;
+the owner says its task is finished, so it stays). `omc-lab/` was kept here at first and then archived in batch b3 below.
 
 ## Batch 2026-10-22-b3 (1 folder; owner chat 2026-10-22 «أرشف omc-lab»)
 
@@ -59,7 +58,7 @@ hash-verified identical after the move. Undo: rename `_archive/tools-2026-10/omc
 | ~~`PARKED-SESSIONS.md`~~ | **Archived in b2 (2026-10-22).** `TRACKS.md` lines 52/56 now point to `_archive/plans-2026-10/PARKED-SESSIONS.md` (old copy: `D:\ClaudeData\setup-phase5\TRACKS.md.before-b2`) |
 | `Start-Claude-API-lane.cmd` | The way Yunus re-logs the API lane at API-500 activation |
 | `كارت-جرّب-3.0.md` | Owner try card for the live preview (in use) |
-| `T4.14-راجع-التفريغ/` | Open owner task (Q-001) |
+| `T4.14-راجع-التفريغ/` | Owner: task finished (2026-10-22, D6); the folder stays where it is |
 | `new plugin code/` (Kalam/Hush/Tidy source + macOS `._` files) | Source reference for Addendum A / Stage 4; not referenced by name; decide at Stage 2 |
 | `خد دا كوبي للويندوز/` · `خد دا كوبي للماك/` | Live preview folders (rebuilt by the release-preview refresher) |
 | `WhyNot-Cut-3.0-Addendum/*` | Live feature detail the V1 spec links to |

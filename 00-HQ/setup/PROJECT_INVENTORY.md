@@ -30,8 +30,8 @@
 | `new plugin code/` (Kalam/Hush/Tidy source drop of 10-12, macOS `._*` files) | 217 files | HISTORICAL source (ported into `engine/reel/lib`) | KEEP (source is preserved; moving gains little) |
 | `خد دا كوبي للويندوز` / `للماك` | 2 folders | ACTIVE-stale (preview `322d8a5`) | KEEP (release track) |
 | `whynot-test/` | 2,596 files, 6.2 GB | ACTIVE test fixtures (client copies) | KEEP; not opened |
-| `T4.14-راجع-التفريغ/` | 3 files, 46 MB | UNKNOWN (transcript review handoff; may hold client media) | **ASK OWNER** before any move |
-| `omc-lab/` | 5 files + `.git` | OBSOLETE (retired in Phase 4, de-registered) | KEEP until the owner allows deletion |
+| `T4.14-راجع-التفريغ/` | 3 files, 46 MB | DECIDED (owner 2026-10-22, D6: the task is finished) | **Stays in place**; nothing to move |
+| `omc-lab/` | 5 files + `.git` | OBSOLETE (retired in Phase 4, de-registered) | **Archived** in batch b3 (2026-10-22, owner's word) to `_archive/tools-2026-10/omc-lab`, hash-verified |
 | `.claude/`, `.gstack/` (gstack browse audit log) | 4 | ACTIVE config / runtime state | KEEP |
 | `_private-profiles`, `_private-evidence` | 2 | CLIENT | not opened |
 

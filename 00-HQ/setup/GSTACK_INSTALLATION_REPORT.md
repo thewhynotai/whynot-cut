@@ -36,7 +36,7 @@ Kaspersky's root. Nothing was disabled and no exclusion was added. It was not ma
 
 | Setting | Value | Meaning |
 |---|---|---|
-| `telemetry` | **off** | no data sent, no local analytics |
+| `telemetry` | **off** | no data sent; the only local analytics are 2 `careful` hook events from the smoke test (see below) |
 | `codex_reviews` | **disabled** | outside-review binaries refuse (`consent_missing`); no code goes to Codex or another provider |
 | `skill_prefix` | **true** | every skill is `/gstack-<name>` (no clash with OMC `review`, `plan`, `qa`…) |
 | `artifacts_sync_mode` | **off** | no remote memory/artifact sync |
@@ -127,7 +127,8 @@ Karpathy guidelines, are unchanged.
 - **L10** The gstack checkout shows as `git status` dirty (rendered SKILL.md files). That is expected after setup, but
   upgrade only through `/gstack-upgrade` or `./setup`, never a plain `git pull`.
 - **L11** Setup reads `~/.codex/config.toml` to pick a Codex skill profile (a read only; nothing is installed for Codex).
-  `~/.gstack/analytics/` exists but is empty (telemetry off).
+  `~/.gstack/analytics/` holds only `skill-usage.jsonl` with 2 local `careful` hook events from the 10-22 smoke test
+  (pattern `git_reset_hard`, 02:00 UTC). It is local only and nothing is sent (telemetry off). Corrected 2026-10-23 by the master.
 
 ## 9. Rollback
 

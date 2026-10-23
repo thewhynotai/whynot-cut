@@ -40,7 +40,7 @@ General rules for every procedure:
    (it checks `auto\loop.lock`: PID is a python and the lock is newer than the last boot). Exit 1 with `AUTO-ON`
    present after 30 min → R3.
 6. **Anyone:** Windows tasks: `schtasks /query /tn "WhyNot Cut helpers keepalive"` = Ready; `WNC-Queue` = Ready
-   after Phase 8 (Disabled during the D1 stop). Check: `Next Run Time` is not N/A.
+   after Phase 8 (Disabled during the D1 stop; re-enabled 2026-10-23 05:43, checked Ready by the master). Check: `Next Run Time` is not N/A.
 7. **Master:** then follow R2 steps 1–5 (stale locks, slots, tickets) before anything resumes work.
 8. Resume order (PLAYBOOK §4): master first, then one work session at a time. The watchdog (C3) does this by itself
    once enabled (max 2 per run).

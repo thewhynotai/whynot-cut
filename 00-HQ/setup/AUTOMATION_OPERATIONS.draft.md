@@ -140,8 +140,10 @@ untouched by any component listed here.
 6. CPU/GPU are monitored on demand only; no alert reaches Yunus outside the dashboard and the 4 reports.
 7. Report delivery = visible in the app, no push notification; the report lacks the "current milestone" field.
 8. `PROJECT_PLAN_AR.md` hand-written sections are not refreshed by any routine.
-9. Old API-lane processes and Startup script still present (held, zero spend) — owner step to park them.
-10. WNC-Queue (C10) disabled: jobs queued through `wnc-queue` wait until it is re-enabled.
+9. ~~Old API-lane processes and Startup script still present (held, zero spend) — owner step to park them.~~ **Closed
+   2026-10-23 05:45:** the Startup file was parked (hash-verified) in `D:\ClaudeData\setup-phase1\parked\`, and no lane processes were running (`inbox/master/2026-10-23-restart-owner-steps.md`).
+10. ~~WNC-Queue (C10) disabled: jobs queued through `wnc-queue` wait until it is re-enabled.~~ **Closed 2026-10-23
+    05:43:** re-enabled, state Ready.
 11. Helper-side live rate-limit recovery is unverified (only unit-tested).
 12. Unattended routines run in Bypass mode (`AUTOMATION_RUNBOOK.md` §0), while `AGENT_ROUTING_RULES.md` §5 forbids
     bypass for headless runs; the routine prompts are the only fence. Record as a known limit or align in a card.

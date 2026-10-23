@@ -56,7 +56,7 @@ without an offset counts as "nudged just now" until rewritten.
    - executor / Builder A / adobe / plan: "Auto-resume (watchdog for Yunus): the usage limit / error has cleared or you
      have been idle. Decide and continue, don't ask Yunus. Resume from your last state: check git status and your
      ledger/PROGRESS.md first, touch only your own files, commit with explicit paths, continue the plan (Gate 4 toward
-     v3.0.0-p4 until the tag). Full suites: `bash tools/test.sh` through heavy.sh. If there is truly nothing to do,
+     v3.0.0-p4 until the tag). Full suites through heavy.sh: `psuite <label> -- … bash tools/test.sh --parallel 6` (serial `suite … bash tools/test.sh` on a tree without tools/test_parallel.py). If there is truly nothing to do,
      reply exactly 'idle: nothing to do'."
    - Command Center: "Auto-resume (watchdog for Yunus): continue the Command Center duties. Run
      `python -X utf8 <HQ>\tools\hq_status.py`, read the inbox and BOARD, unblock what is stuck (heavy queue orphans:
