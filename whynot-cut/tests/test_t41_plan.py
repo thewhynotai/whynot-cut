@@ -175,6 +175,68 @@ class TestCompile(unittest.TestCase):
         self.assertIsNone(run["ease_in"])
         self.assertIsNotNone(run["ease_out"])
         self.assertTrue(any("verse" in w and "EDIT_001" in w for w in r["warnings"]), r["warnings"])
+        # round 7 P2-1: edit-plan.md gives the true reason, in both languages
+        md = self.p.p("01_analysis/edit-plan.md").read_text(encoding="utf-8")
+        en = next(x for x in md.splitlines() if x.startswith("Smooth zoom"))
+        ar = next(x for x in md.splitlines() if "زوم ناعم" in x)
+        self.assertIn("inside a recited verse", en)
+        self.assertNotIn("on a cut or another shot", en)
+        self.assertIn("جوه آية", ar)
+        self.assertNotIn("على قطع", ar)
+
+    def test_r7_a_verse_cut_away_whole_does_not_block(self):
+        """Executor (round 7): a span cut out whole (`verse_cut`) and the word mask (`verse_mask`) have no timeline
+        range: they never block an ease; only spec["manual_verse"] does."""
+        ed = decisions(cut_words=[1])                                       # word 1 (0.20-0.86 s) is cut
+        ed["manual_verse"] = [{"start_ms": "00:00:00.300", "end_ms": "00:00:00.800"}]
+        r, spec, _ = self.compile(ed)
+        self.assertTrue(spec.get("verse_cut"), spec.keys())
+        self.assertFalse(spec.get("manual_verse"))
+        run = self.run_of(spec)
+        self.assertIsNotNone(run["ease_in"])
+        self.assertIsNotNone(run["ease_out"])
+        self.assertNotIn("verse_hard", spec["camera_ease"])
+
+    def test_r8_p3_5_arabic_plural_of_moves_kept_hard(self):
+        from lib.plan import write_edit_plan
+        from lib.stamps import stamp
+        _, spec, _ = self.compile(decisions())
+        for n, want in ((1, "1 حركة فضلت"), (2, "حركتين فضلوا"), (3, "3 حركات فضلوا"), (10, "10 حركات فضلوا"),
+                        (11, "11 حركة فضلوا")):
+            with self.subTest(n=n):
+                spec["camera_ease"]["runs"] = []
+                spec["camera_ease"]["verse_hard"] = [{"decision_id": f"D{i}", "camera": "punch_in", "sides": ["in"],
+                                                      "start_ms": 1000} for i in range(n)]
+                write_json(self.p.p("01_analysis/timeline-spec.json"), stamp(spec))
+                with common.use_context(common.Context(root=self.root)):
+                    md = write_edit_plan(self.p).read_text(encoding="utf-8")
+                ar = next(x for x in md.splitlines() if "زوم ناعم" in x)
+                self.assertIn(want, ar)
+
+    def test_r8_p2_1_a_verse_dropped_job_fits_the_build_contract(self):
+        """Round 8 P2-1: the runs sent to the bridge stay schema-clean; the verse drop lives in camera_ease.verse_dropped."""
+        from contract import validator as V
+        from lib.ppro_build import ease_job_fields
+        ed = decisions()
+        ed["manual_verse"] = [{"start_ms": "00:00:01.100", "end_ms": "00:00:01.200"}]       # inside the ease in
+        _, spec, _ = self.compile(ed)
+        self.assertEqual([d["side"] for d in spec["camera_ease"]["verse_dropped"]], ["in"])
+        job = ease_job_fields(spec)
+        self.assertTrue(job["camera_keys"])
+        for run_ in job["camera_keys"]:
+            self.assertEqual(V.validate(run_, "build_project#/$defs/ease_run"), [])
+
+    def test_r7_a_move_kept_hard_in_a_verse_is_named_in_the_edit_plan(self):
+        ed = decisions()
+        ed["manual_verse"] = [{"start_ms": "00:00:00.900", "end_ms": "00:00:03.000"}]     # both eases fall inside it
+        r, spec, _ = self.compile(ed)
+        self.assertEqual(spec["camera_ease"]["runs"], [])
+        self.assertEqual([h["decision_id"] for h in spec["camera_ease"]["verse_hard"]], ["EDIT_001"])
+        md = self.p.p("01_analysis/edit-plan.md").read_text(encoding="utf-8")
+        en = next(x for x in md.splitlines() if x.startswith("Smooth zoom"))
+        self.assertIn("1 move stays hard inside a recited verse", en)
+        self.assertIn("جوه آية", next(x for x in md.splitlines() if "زوم ناعم" in x))
+        self.assertEqual(sum(1 for w in r["warnings"] if "EDIT_001" in w and "verse" in w), 1)
 
     def test_c11_ease_zero_is_recorded_with_hard_punches(self):
         self.style({"camera": {"ease_ms": 0}})
@@ -329,6 +391,45 @@ class TestPodcastShotsInFrames(unittest.TestCase):
         self.assertTrue(spec.get("time_map"))
         self.assertIsNone(runs["EDIT_002"]["ease_in"])
         self.assertIsNotNone(runs["EDIT_002"]["ease_out"])
+
+
+class TestCutawaySplitVerse(unittest.TestCase):
+    """Round 8 P3-3 (real compile): a punch-in split by a source card shown whole (AUTO_CUTAWAY) is two runs of one
+    move; when the verse removes the second run's only ease, the edit plan still names the verse, not "a cut"."""
+
+    def setUp(self):
+        from lib.common import read_json
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.addCleanup(common.set_context, None)
+        self.root, self.reel, _ = tpod.reel_fixture(self.tmp, "storytelling", music=False)
+        pre = read_json(self.reel.p("00_inputs/preflight.json"))
+        pre["shots"] = {"window": {"offset_ms": 1000, "duration_ms": 10000}, "method": "test",
+                        "shots": [tpod.shot(0, 3000, 0.5), tpod.shot(3000, 8000), tpod.shot(8000, 10000, 0.5)]}
+        write_json(self.reel.p("00_inputs/preflight.json"), pre)
+
+    def test_r8_p3_3_the_edit_plan_names_the_verse(self):
+        from lib.plan import compile_plan
+        ed = {"global": {}, "decisions": [tpod.decision(
+            "EDIT_001", "00:00:01.000", "00:00:09.500", "كلمه2 كلمه3",
+            camera={"type": "punch_in", "at": "00:00:01.000", "until": "00:00:09.500", "scale_factor": 1.1})],
+            "manual_verse": [{"start_ms": "00:00:09.300", "end_ms": "00:00:09.500"}]}
+        write_json(self.reel.p("01_analysis/edit-decisions.json"), ed)
+        r = compile_plan(self.reel)
+        self.assertTrue(r["ok"], r["errors"])
+        spec = json.loads(self.reel.p("01_analysis/timeline-spec.json").read_text(encoding="utf-8"))
+        self.assertTrue(any(m.get("decision_id") == "AUTO_CUTAWAY" for m in spec["main_segments"]),
+                        spec["main_segments"])
+        ce_ = spec["camera_ease"]
+        self.assertTrue(ce_.get("verse_hard") or ce_.get("verse_dropped"), ce_)
+        md = self.reel.p("01_analysis/edit-plan.md").read_text(encoding="utf-8")
+        en = next(x for x in md.splitlines() if x.startswith("Smooth zoom"))
+        ar = next(x for x in md.splitlines() if "زوم ناعم" in x)
+        self.assertIn("inside a recited verse", en)
+        self.assertNotIn("on a cut or another shot", en)
+        self.assertNotIn("على قطع", ar)
+        self.assertNotIn("stays hard", en)                  # round 8 review P3-2 (M9): a move with an ease left is
+        self.assertNotIn("فضل", ar)                         # never also counted hard
 
 
 class TestReapprovalWording(tpa.ApprovalFixture):

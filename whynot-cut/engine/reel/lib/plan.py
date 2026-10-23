@@ -1278,7 +1278,7 @@ def apply_ease(inp: PlanInputs, spec: dict, camera: list):
     the spec's pieces never change for it (a podcast plan keeps its Gate 1 fingerprint)."""
     from .camera_ease import spec_fields
     fields, warns = spec_fields(spec["main_segments"], inp.style, inp.fps, spec["duration_ms"], camera=camera,
-                                verse=spec.get("manual_verse"))     # no ease starts inside a recited verse
+                                verse=spec.get("manual_verse"))     # no camera motion during a recited verse
     return dict(spec, **fields), [], warns
 
 
@@ -1609,16 +1609,23 @@ def _seq_frame(spec: dict, src_ms: float) -> int:
 
 def smooth_zoom_lines(ce_: dict) -> list:
     """T4.1 (round 4 M-7): the edit plan's smooth-zoom line, EN then AR, counted per move (a move split by a cut or
-    a cutaway counts once): punch-ins that ease in and out, slow pushes, punch-ins eased on one side only."""
+    a cutaway counts once): punch-ins that ease in and out, slow pushes, punch-ins eased on one side only (round 7:
+    the reason named, a cut / another shot or a recited verse), and moves kept hard inside a recited verse."""
     moves = {}
     for r_ in ce_.get("runs") or []:
-        m_ = moves.setdefault(r_.get("decision_id"), {"push": False, "in": False, "out": False})
+        m_ = moves.setdefault(r_.get("decision_id"), {"push": False, "in": False, "out": False, "verse": False})
         m_["push"] = m_["push"] or r_.get("camera") == "slow_push"
         m_["in"] = m_["in"] or bool(r_.get("ease_in"))
         m_["out"] = m_["out"] or bool(r_.get("ease_out"))
+    for v_ in (ce_.get("verse_dropped") or []) + (ce_.get("verse_hard") or []):
+        if v_.get("decision_id") in moves:                     # a side (or a run) of this move lost to a recited verse
+            moves[v_["decision_id"]]["verse"] = True
     push = sum(1 for m_ in moves.values() if m_["push"])
     both = sum(1 for m_ in moves.values() if not m_["push"] and m_["in"] and m_["out"])
-    one = sum(1 for m_ in moves.values() if not m_["push"] and not (m_["in"] and m_["out"]))
+    single = [m_ for m_ in moves.values() if not m_["push"] and not (m_["in"] and m_["out"])]
+    one = sum(1 for m_ in single if not m_["verse"])
+    one_v = sum(1 for m_ in single if m_["verse"])
+    hard = len({h_.get("decision_id") for h_ in ce_.get("verse_hard") or []} - set(moves))
     en, ar = [], []
     if both:
         en.append(f"{both} punch-in{'s' if both != 1 else ''} ease{'' if both != 1 else 's'} in and out")
@@ -1630,7 +1637,15 @@ def smooth_zoom_lines(ce_: dict) -> list:
         en.append(f"{one} punch-in{'s' if one != 1 else ''} ease{'' if one != 1 else 's'} on one side only "
                   "(the other side is on a cut or another shot)")
         ar.append(f"{one} punch-in بنعومة من ناحية واحدة بس (الناحية التانية على قطع أو لقطة تانية)")
-    ms_ = f" ({ce_.get('ease_ms')} ms)" if (both or one) else ""      # ease_ms is not a slow push's length
+    if one_v:
+        en.append(f"{one_v} punch-in{'s' if one_v != 1 else ''} ease{'' if one_v != 1 else 's'} on one side only "
+                  "(the other side is inside a recited verse)")
+        ar.append(f"{one_v} punch-in بنعومة من ناحية واحدة بس (الناحية التانية جوه آية)")
+    if hard:
+        en.append(f"{hard} move{'s' if hard != 1 else ''} stay{'' if hard != 1 else 's'} hard inside a recited verse")
+        ar.append((f"{hard} حركة فضلت" if hard == 1 else "حركتين فضلوا" if hard == 2 else
+                   f"{hard} حركات فضلوا" if hard <= 10 else f"{hard} حركة فضلوا") + " من غير زوم ناعم جوه آية")
+    ms_ = f" ({ce_.get('ease_ms')} ms)" if (both or one or one_v) else ""      # ease_ms is not a slow push's length
     return [f"Smooth zoom{ms_}: " + "; ".join(en) + ".", f"زوم ناعم{ms_}: " + "، ".join(ar) + "."]
 
 
@@ -1655,7 +1670,7 @@ def write_edit_plan(paths: Paths) -> Path:
          "Times are on the reel's timeline (after pause removal and word cuts).", "",
          f"Framing: {spec.get('framing', 'fit')}", ""]
     ce_ = spec.get("camera_ease") or {}
-    if ce_.get("runs"):                  # T4.1: the smooth zoom, in the editor's words (why a re-approval may be asked)
+    if ce_.get("runs") or ce_.get("verse_hard"):     # T4.1: the smooth zoom in the editor's words (why a re-approval)
         L += smooth_zoom_lines(ce_) + [""]
     fd_ = spec.get("fades") or {}
     if any(fd_.values()):
