@@ -291,34 +291,86 @@ def ease_keys(segments: list, fps, ease_ms: int) -> list[dict]:
     return runs
 
 
-def outside_verse(runs: list, segments: list, verse: list | None) -> tuple[list, list[str]]:
-    """Round 6 (executor): no ease may START inside a recited-verse span (manual verse slot: the editor adds the verse
-    there by hand). The ease that would is dropped (the move stays hard on that side; a slow_push is not pushed) and
-    the plan says so. `verse`: the spec's manual_verse records (sequence frames [start_frame, end_frame))."""
-    spans = [(int(v["start_frame"]), int(v["end_frame"])) for v in verse or []
-             if v.get("start_frame") is not None and v.get("end_frame") is not None]
-    if not spans:
-        return runs, []
+def _frame(v):
+    """An int frame from a manual_verse record value, or None (round 7 P3-3: a malformed entry is skipped)."""
+    if isinstance(v, bool) or v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return int(f) if math.isfinite(f) else None
 
-    def inside(f):
-        return any(a <= f < b for a, b in spans)
-    out, warns = [], []
+
+def verse_spans(verse) -> list:
+    """[(start_frame, end_frame)) half-open sequence-frame spans of the spec's manual_verse records. Every record
+    blocks, a `check` span too (round 7 P3-4 ruling: audio that might be a recitation is treated as one); an entry
+    that is not a dict or has no usable frames is skipped, never a crash (P3-3)."""
+    out = []
+    for v in verse if isinstance(verse, list) else []:
+        if not isinstance(v, dict):
+            continue
+        a, b = _frame(v.get("start_frame")), _frame(v.get("end_frame"))
+        if a is not None and b is not None and b > a:
+            out.append((a, b))
+    return out
+
+
+def _mmss(ms: float) -> str:
+    t = max(0, int(round(ms / 1000.0)))
+    return f"{t // 60:02d}:{t % 60:02d}"
+
+
+def outside_verse(runs: list, segments: list, verse: list | None, fps=None) -> tuple[list, list, list, list[str]]:
+    """No camera motion during a recited verse (round 7 P3-2 ruling, religious content: the conservative choice). An
+    ease whose window OVERLAPS a span is dropped and that side stays hard; a slow_push whose piece overlaps a span is
+    not pushed. The ease-in window is [start, start + frames] (its last key sits AT start + frames, round 8 P3-1), the
+    ease-out window [end - frames, end); spans are half-open sequence frames. The ease-out's last key sits ON the
+    out point, the next piece's first frame, so a verse starting exactly there meets a cut, not motion: that ease is
+    kept, since dropping it would make the same cut a full hard step (round 8 review P3-1). The runs stay as the build contract
+    knows them (round 8 P2-1): a dropped side of a run that keeps its other ease goes to `verse_dropped` (decision,
+    camera, side, start_ms), a move left with no ease to `verse_hard` (decision, camera, sides, start_ms); start_ms is
+    the time of the side that was dropped (round 8 P3-4). One warning per move, at that time, in plain English and
+    Egyptian Arabic. Returns (runs, verse_dropped, verse_hard, warnings)."""
+    spans = verse_spans(verse)
+    if not spans:
+        return runs, [], [], []
+    rate = float(fps) if fps else 24.0
+
+    def hits(a, b):
+        return any(a < z and r < b for r, z in spans)
+    out, dropped, hard, warns = [], [], [], []
     for r in runs:
         r = dict(r)
-        ein, eout = r.get("ease_in"), r.get("ease_out")
-        if ein and inside(int(segments[ein["piece"]]["start_frame"])):
-            r["ease_in"] = None
-            warns.append(f"{r.get('decision_id')}: no smooth zoom where it starts inside a recited verse "
-                         "(it stays a hard punch there)")
+        ein, eout, sides = r.get("ease_in"), r.get("ease_out"), {}
+        if ein:
+            sg = segments[ein["piece"]]
+            a = int(sg["start_frame"])
+            b = int(sg["end_frame"]) if r.get("camera") in PUSH_MOVES else a + int(ein["frames"]) + 1
+            if hits(a, b):
+                r["ease_in"] = None
+                sides["in"] = a * 1000 / rate
         if eout:
             sg = segments[eout["piece"]]
-            if inside(int(sg["end_frame"]) - int(eout["frames"])):
+            b = int(sg["end_frame"])
+            if hits(b - int(eout["frames"]), b):
                 r["ease_out"] = None
-                warns.append(f"{r.get('decision_id')}: no smooth zoom out where it starts inside a recited verse "
-                             "(it stays hard there)")
+                sides["out"] = (b - int(eout["frames"])) * 1000 / rate
+        if not sides:
+            out.append(r)
+            continue
+        at_ms = min(sides.values())
+        warns.append(f"{r.get('decision_id')} at {_mmss(at_ms)}: no smooth zoom while a verse is recited, so the "
+                     f"move stays hard there / مفيش زوم ناعم وقت الآية عند {_mmss(at_ms)}، "
+                     "الحركة فضلت من غير نعومة هناك")
         if r.get("ease_in") or r.get("ease_out"):
             out.append(r)
-    return out, warns
+            dropped += [{"decision_id": r.get("decision_id"), "camera": r.get("camera"), "side": side,
+                         "start_ms": int(round(ms))} for side, ms in sides.items()]
+        else:
+            hard.append({"decision_id": r.get("decision_id"), "camera": r.get("camera"), "sides": list(sides),
+                         "start_ms": int(round(at_ms))})
+    return out, dropped, hard, warns
 
 
 def spec_fields(segments: list, style: dict | None, fps, duration_ms, camera: list | None = None,
@@ -326,13 +378,15 @@ def spec_fields(segments: list, style: dict | None, fps, duration_ms, camera: li
     """What `reel plan` adds to the timeline spec, and its warnings: {"camera_ease": {ease_ms, curve, runs}} always
     (round 3 item 2: the plan records the value it was written with; an empty `runs` does not change the Gate 1
     fingerprint, plan.spec_fingerprint), plus {"fades": {...}} when a fade is on. `camera`: the plan's camera layer,
-    for the shot each story move sits on (with_shots). `verse`: the plan's manual_verse spans (no ease starts in one)."""
+    for the shot each story move sits on (with_shots). `verse`: the plan's manual_verse spans (no camera motion
+    during one: outside_verse)."""
     out, warns = {}, []
     ms, w = ease_settings(style)
     warns += w
-    runs, w = outside_verse(ease_keys(with_shots(segments, camera, fps), fps, ms), segments, verse)
+    runs, dropped, hard, w = outside_verse(ease_keys(with_shots(segments, camera, fps), fps, ms), segments, verse, fps)
     warns += w
-    out["camera_ease"] = {"ease_ms": ms, "curve": CURVE, "runs": runs}
+    out["camera_ease"] = {"ease_ms": ms, "curve": CURVE, "runs": runs, **({"verse_dropped": dropped} if dropped else {}),
+                          **({"verse_hard": hard} if hard else {})}
     fades, w = fade_settings(style, duration_ms, fps)
     warns += w
     if fades:

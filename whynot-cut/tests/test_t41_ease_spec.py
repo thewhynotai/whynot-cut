@@ -451,7 +451,7 @@ class TestEaseKeys(unittest.TestCase):
         r = ce().spec_fields(segs, {}, FPS, 5000, verse=verse)[0]["camera_ease"]["runs"][0]
         self.assertIsNotNone(r["ease_in"])
         self.assertIsNone(r["ease_out"])
-        verse = [{"id": "V3", "start_frame": 30, "end_frame": 60}]                 # inside the hold: nothing starts there
+        verse = [{"id": "V3", "start_frame": 31, "end_frame": 60}]                 # inside the hold (after the last ease-in key)
         r = ce().spec_fields(segs, {}, FPS, 5000, verse=verse)[0]["camera_ease"]["runs"][0]
         self.assertIsNotNone(r["ease_in"])
         self.assertIsNotNone(r["ease_out"])
@@ -461,6 +461,118 @@ class TestEaseKeys(unittest.TestCase):
         f, w = ce().spec_fields(segs, {}, FPS, 5000, verse=[{"id": "V1", "start_frame": 10, "end_frame": 40}])
         self.assertEqual(f["camera_ease"]["runs"], [])
         self.assertTrue(w)
+
+    # ---- round 7 (P3-2 ruling): no camera motion during a recited verse: an ease whose window OVERLAPS a span is
+    # dropped (that side stays hard); a slow_push whose piece overlaps one is not pushed. Half-open frame spans.
+    def verse_runs(self, verse, segs=None):
+        segs = segs or [seg(0, 24), seg(24, 72, "punch_in", 1.1, "P"), seg(72, 120)]
+        f, w = ce().spec_fields(segs, {}, FPS, 5000, verse=verse)
+        return f["camera_ease"], w
+
+    def test_r7_an_ease_that_starts_before_a_verse_and_runs_into_it_is_dropped(self):
+        ce_, w = self.verse_runs([{"id": "V1", "start_frame": 27, "end_frame": 40}])      # ease in = frames 24-29
+        r = ce_["runs"][0]
+        self.assertIsNone(r["ease_in"])
+        self.assertIsNotNone(r["ease_out"])
+        self.assertNotIn("dropped", r)                       # round 8 P2-1: the runs stay schema-clean
+        self.assertEqual(ce_["verse_dropped"], [{"decision_id": "P", "camera": "punch_in", "side": "in",
+                                                 "start_ms": 1000}])
+        ce_, _ = self.verse_runs([{"id": "V2", "start_frame": 60, "end_frame": 67}])      # ease out = frames 66-71
+        self.assertEqual([(d["side"], d["start_ms"]) for d in ce_["verse_dropped"]], [("out", 2750)])
+        self.assertIsNone(ce_["runs"][0]["ease_out"])
+
+    def test_r7_half_open_edges_do_not_touch(self):
+        ce_, w = self.verse_runs([{"id": "V1", "start_frame": 10, "end_frame": 24},          # ends where the ease starts
+                                  {"id": "V2", "start_frame": 31, "end_frame": 66},          # between the two eases
+                                  {"id": "V3", "start_frame": 72, "end_frame": 90}])         # starts where the move ends
+        r = ce_["runs"][0]
+        self.assertIsNotNone(r["ease_in"])
+        self.assertIsNotNone(r["ease_out"])
+        self.assertNotIn("dropped", r)
+        self.assertNotIn("verse_dropped", ce_)               # a verse touching no ease leaves camera_ease as it was
+        self.assertNotIn("verse_hard", ce_)
+        self.assertEqual(w, [])
+
+    # ---- round 8
+    def test_r8_p3_1_a_verse_on_the_last_ease_in_key_frame_drops_it(self):
+        """The last ease-in key sits AT frame start + frames (JSX tSelf, value_at): a verse starting there drops it."""
+        from lib.common import ms_to_frame
+        for fps in (24, 25, 30000 / 1001):
+            with self.subTest(fps=fps):
+                e = ce().ease_frames(250, fps)
+                a = 24
+                segs = [seg(0, a), seg(a, a + 48, "punch_in", 1.1, "P"), seg(a + 48, a + 96)]
+                ce_, _ = ce().spec_fields(segs, {}, fps, 10000, verse=[{"start_frame": a + e, "end_frame": a + e + 4}])
+                self.assertIsNone(ce_["camera_ease"]["runs"][0]["ease_in"])
+                ce_, _ = ce().spec_fields(segs, {}, fps, 10000,
+                                          verse=[{"start_frame": a + e + 1, "end_frame": a + e + 4}])
+                self.assertIsNotNone(ce_["camera_ease"]["runs"][0]["ease_in"])      # the frame after: kept
+                self.assertGreater(ms_to_frame(250, fps), 0)
+
+    def test_r8_p3_2_a_verse_strictly_inside_the_ease_out_window(self):
+        ce_, w = self.verse_runs([{"id": "V1", "start_frame": 68, "end_frame": 70}])      # ease out = 66-71
+        self.assertIsNone(ce_["runs"][0]["ease_out"])
+        self.assertIsNotNone(ce_["runs"][0]["ease_in"])
+        self.assertEqual([d["side"] for d in ce_["verse_dropped"]], ["out"])
+
+    def test_r8_p3_4_the_warning_names_the_time_of_the_dropped_side(self):
+        ce_, w = self.verse_runs([{"id": "V1", "start_frame": 68, "end_frame": 70}])      # ease out starts 66 = 2.75 s
+        self.assertEqual(len(w), 1)
+        self.assertIn("00:03", w[0])
+        self.assertNotIn("00:01", w[0])                       # not the punch's start
+        from lib.common import ms_to_frame
+        for fps in (25, 29.97):                               # round 8 review P3-2 (M15): the time uses the clip's fps
+            with self.subTest(fps=fps):
+                f, w = ce().spec_fields([seg(0, 24), seg(24, 72, "punch_in", 1.1, "P"), seg(72, 120)], {}, fps, 5000,
+                                        verse=[{"id": "V1", "start_frame": 68, "end_frame": 70}])
+                t = int(round((72 - ms_to_frame(250, fps)) / fps))
+                self.assertEqual(len(w), 1, w)
+                self.assertIn(f"00:{t:02d}", w[0])
+        self.assertEqual(int(round((72 - ms_to_frame(250, 29.97)) / 29.97)), 2)     # 29.97 differs from 24 fps
+
+    def test_r7_a_slow_push_across_a_verse_is_not_pushed(self):
+        segs = [seg(0, 24), seg(24, 72, "slow_push", 1.1, "S"), seg(72, 120)]
+        ce_, w = self.verse_runs([{"id": "V1", "start_frame": 40, "end_frame": 50}], segs)
+        self.assertEqual(ce_["runs"], [])
+        self.assertEqual([h["decision_id"] for h in ce_["verse_hard"]], ["S"])
+        self.assertEqual(len(w), 1)
+
+    def test_r7_both_sides_dropped_keeps_a_record_and_one_warning(self):
+        ce_, w = self.verse_runs([{"id": "V1", "start_frame": 20, "end_frame": 80}])
+        self.assertEqual(ce_["runs"], [])
+        self.assertEqual(ce_["verse_hard"], [{"decision_id": "P", "camera": "punch_in", "sides": ["in", "out"],
+                                              "start_ms": 1000}])
+        self.assertEqual(len(w), 1, w)                            # P3-1: one line per move
+        self.assertIn("00:01", w[0])                               # the move's time, mm:ss
+        self.assertIn("P", w[0])
+        self.assertTrue(any("\u0621" <= ch <= "\u064a" for ch in w[0]), w[0])     # and Egyptian Arabic
+
+    def test_r7_malformed_verse_entries_are_skipped(self):
+        bad = [None, "x", 7, {}, {"start_frame": 20}, {"start_frame": "a", "end_frame": 30},
+               {"start_frame": True, "end_frame": 30}, {"start_frame": [1], "end_frame": {}},
+               {"start_frame": 20, "end_frame": 20}]                               # zero length (review P3-2, M16)
+        ce_, w = self.verse_runs(bad)
+        r = ce_["runs"][0]
+        self.assertIsNotNone(r["ease_in"])
+        self.assertIsNotNone(r["ease_out"])
+        self.assertEqual(w, [])
+        ce_, _ = self.verse_runs(bad + [{"start_frame": "20", "end_frame": 30.0}])         # numbers as text / float
+        self.assertIsNone(ce_["runs"][0]["ease_in"])
+
+    def test_r7_a_head_shaped_manual_verse_record_blocks(self):
+        """Executor (round 7): spec["manual_verse"] is the source of truth, keyed on its frames; the full record shape
+        of 91cd197 (apply_manual_verse) is read as is."""
+        rec = {"id": "MV01", "src_start_ms": 900, "src_end_ms": 1400, "start_ms": 900, "end_ms": 1400,
+               "start_frame": 22, "end_frame": 34, "start_tc": "00:00:00:22", "end_tc": "00:00:01:10", "cue": "editor",
+               "cue_ar": "x", "cue_en": "x", "end": "editor", "guessed_end": False, "source": "editor"}
+        ce_, w = self.verse_runs([rec])
+        self.assertIsNone(ce_["runs"][0]["ease_in"])
+        self.assertEqual(len(w), 1)
+
+    def test_r7_a_check_span_blocks_too(self):
+        """P3-4 ruling: a span marked `check` (audio that might be a recitation) blocks camera motion the same way."""
+        ce_, _ = self.verse_runs([{"id": "V1", "start_frame": 20, "end_frame": 30, "check": True}])
+        self.assertIsNone(ce_["runs"][0]["ease_in"])
 
     # ---- round 4 I-2: a punch_in never eases out into another story decision
     def test_r4_i2_no_ease_out_into_a_story_reframe_or_punch_out(self):
