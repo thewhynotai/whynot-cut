@@ -1,6 +1,6 @@
 # STATUS (edited by the MASTER only)
 
-## Now: 2026-10-23 05:30 Cairo (Phase 9 master session `local_263cabbf`, evidence-checked)
+## Now: 2026-10-23 05:30 Cairo (evidence-checked by the plan chat `local_263cabbf`; **master from 05:40 = `local_a36b6974`**, D-013)
 - **Milestone:** M1 = Gate 4 → tag `v3.0.0-p4` (target Tue 27 Oct; about 55%). M0 (AI-infra restart, Phases 0–8)
   closed 05:00 and was re-audited read-only at 05:17: 7 of 10 areas VERIFIED; 3 PARTIAL, all of them stale text, not broken work.
 - **Git:** `release/3.0` = `abdece5` = origin (pushed 05:02). Merged since 22 Oct: OPS-09 `b81baaa`, BL-20 `032ff99`,

@@ -97,3 +97,14 @@ ACCEPTED · SUPERSEDED · PROPOSED.
   gstack Team Mode / `required` stay **off**: helper seats have no gstack, so `required` would block them (brief rule).
   Helper loops are started only by the owner (desktop shortcut / Control Center) or the keepalive; Claude does not start them.
 - **Trade-off:** brief names map to section names, recorded here and in ACCOUNT_STATUS.md.
+
+## D-013 · 2026-10-23 · The one master chat is «مراجعة المشروع وتأسيس نظام الإدارة» (`local_a36b6974`)
+- **Context:** Phase 9 (resume development) was started in the plan chat `local_263cabbf`. That chat also receives
+  every executor/builder report, so it was carrying two jobs at once.
+- **Chosen (owner, chat 2026-10-23 ~05:35):** the master role (BOARD, cards, STATUS, `PROJECT_PLAN_AR.md`, reports,
+  acceptance) belongs to `local_a36b6974`, renamed «WhyNot Cut — الماستر (Command Center)». The plan chat
+  `local_263cabbf` keeps execution: it follows the Gate 4 tracks (executor, Builder A, Adobe), whose reports already
+  come to it, and it drives them to the tag. It does not edit BOARD or STATUS. It sends what the master needs as
+  an inbox file. Handoff: `inbox/master/2026-10-23-phase9-master-handoff.md`.
+- **Trade-off:** two chats, so the boundary is written down: the master owns the files, and execution owns the
+  executor/builder conversations. This keeps D-001: still one master.

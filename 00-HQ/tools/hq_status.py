@@ -7,7 +7,7 @@ also mirrors 00-HQ to the branch ops/hq and verifies the remote SHA.
   python -X utf8 hq_status.py                      # print the Arabic report, write nothing
   python -X utf8 hq_status.py --write --sync       # what the scheduled report task runs
 """
-import argparse, ctypes, datetime, json, os, re, shutil, subprocess, sys
+import argparse, ctypes, datetime, json, os, re, shutil, subprocess, sys, time
 from pathlib import Path
 
 HQ = Path(__file__).resolve().parent.parent
@@ -100,14 +100,22 @@ def _git(cwd, *a, timeout=60):
     return r.stdout.strip() if r.returncode == 0 else None
 
 
+def _remote_tip(cwd, branch, pause=5):
+    """ls-remote, asked twice: this PC's DNS sometimes fails one lookup of github.com and answers the next
+    (2026-10-23 05:30: 'Could not resolve host' between two good calls), which painted REMOTE_UNREACHABLE."""
+    for attempt in (1, 2):
+        out = _git(cwd, "ls-remote", "origin", f"refs/heads/{branch}", timeout=90)
+        if out:
+            return out.split()[0]
+        if attempt == 1:
+            time.sleep(pause)
+    return None
+
+
 def git_state(repo, branch="release/3.0"):
     """Read-only: local tip, remote tip (ls-remote, live), ahead/behind against the last fetched origin ref."""
     local = _git(repo, "rev-parse", branch)
-    try:
-        out = _git(repo, "ls-remote", "origin", f"refs/heads/{branch}", timeout=90)
-    except subprocess.TimeoutExpired:
-        out = None
-    remote = out.split()[0] if out else None
+    remote = _remote_tip(repo, branch)
     ahead = behind = 0
     if local and remote:
         counts = _git(repo, "rev-list", "--left-right", "--count", f"{local}...{remote}")
@@ -371,8 +379,7 @@ def sync_mirror(worktree, files, message, branch="ops/hq"):
         if push.returncode != 0:
             res["error"] = push.stderr.strip()[-300:]
             return res
-        out = _git(wt, "ls-remote", "origin", f"refs/heads/{branch}", timeout=90)
-        res["remote"] = out.split()[0] if out else None
+        res["remote"] = _remote_tip(wt, branch)
         res["state"] = "SYNCED" if res["remote"] and res["remote"] == res["local"] else "PUSH_FAILED"
     except (subprocess.SubprocessError, OSError) as e:
         err = getattr(e, "stderr", b"") or b""

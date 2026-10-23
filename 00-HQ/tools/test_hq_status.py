@@ -173,6 +173,20 @@ class FixRound1(unittest.TestCase):
     def test_unfetched_remote_tip_is_not_given_a_count(self):
         self.assertEqual(hs.sync_label("a", "b", None, None), "REMOTE_MOVED (not fetched here)")
 
+    def test_remote_tip_survives_one_failed_lookup(self):
+        calls = []
+        saved = hs._git
+        try:
+            hs._git = lambda *a, **k: calls.append(a) or (None if len(calls) == 1 else "abc123\trefs/heads/x")
+            self.assertEqual(hs._remote_tip(".", "x", pause=0), "abc123")
+            self.assertEqual(len(calls), 2)
+            calls.clear()
+            hs._git = lambda *a, **k: calls.append(a) and None
+            self.assertIsNone(hs._remote_tip(".", "x", pause=0))  # two misses = really unreachable
+            self.assertEqual(len(calls), 2)
+        finally:
+            hs._git = saved
+
     def test_newlines_are_kept(self):
         with tempfile.TemporaryDirectory() as d:
             p = Path(d, "plan.md")
