@@ -1,0 +1,27 @@
+diff --git a/whynot-cut/engine/reel/lib/ae_builder.py b/whynot-cut/engine/reel/lib/ae_builder.py
+index 1e8d63ae..5ad2e0a3 100644
+--- a/whynot-cut/engine/reel/lib/ae_builder.py
++++ b/whynot-cut/engine/reel/lib/ae_builder.py
+@@ -186,11 +186,12 @@ def generate(paths: Paths) -> dict:
+     logo_v = logo.get("display_derivative") if logo and client_db.original_inside(paths.root, logo) else None
+     used = [("logo", logo_v, logo.get("rel"))] if logo else []
+     used += [("image", v, name) for v, name in images]
+-    shown = set()
++    shown, missing = set(), []
+     for role, v, name in used:
+         if client_db.inside_file(paths.root, v) or (role, v, name) in shown:
+             continue
+         shown.add((role, v, name))
++        missing.append((role, v or name))                                              # BL-22: NEEDS-YOU, below
+         rel = (client_db.rel_under(v, str(paths.root)) or Path(v).name) if v else name   # never an absolute path
+         en, ar = {"logo": ("logo", "اللوجو"), "image": ("image", "الصورة")}[role]
+         warnings.append(f"the {en} file is missing or outside the client folder, so After Effects leaves it out of the "
+@@ -198,6 +199,8 @@ def generate(paths: Paths) -> dict:
+                         "then build again)")
+         warnings.append(f"ملف {ar} مش موجود أو برّه فولدر العميل، فالأفتر إفكتس هيسيبه برّه الكومبس: {rel} (حط الملف "
+                         "نفسه جوّه فولدر العميل، مش لينك، وشغّل reel client-db، وبعدين اعمل build تاني)")
++    from . import ae_assets_needs
++    ae_assets_needs.write(paths, missing)         # BL-22: an empty list when nothing is missing, so the line clears
+     w, h = frame_size(paths)          # Gate 2 A1: comps at the profile's frame size (4:5 -> 1080x1350), not fixed 9:16
+     data = {"fps": fps, "w": w, "h": h, "brand": brand_controls(paths.client_db), "fonts": fonts_map(paths.client_db),
+             "templates": tpls, "events": events, "captions": caption_data(paths, spec, ed),

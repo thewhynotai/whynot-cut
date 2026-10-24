@@ -1,0 +1,54 @@
+diff --git a/whynot-cut/engine/reel/lib/needs_you.py b/whynot-cut/engine/reel/lib/needs_you.py
+index 592dcf93..06768df2 100644
+--- a/whynot-cut/engine/reel/lib/needs_you.py
++++ b/whynot-cut/engine/reel/lib/needs_you.py
+@@ -13,7 +13,8 @@ Never data/ or assets/ (an output/ that leads there through a link is refused, n
+ Two kinds of source:
+   * Producers (the T4.7 contract): a state file holding `needs_you: [{kind, text, text_ar?, why, ref}]`; an empty list
+     means nothing is needed, so the derived items that producer owns (PRODUCER_OWNS) are not added next to it.
+-    Registered: <project>/01_analysis/motion-plan.json (T4.6 music), output/from_website/current.json (Addendum J).
++    Registered: <project>/01_analysis/motion-plan.json (T4.6 music), <project>/04_after_effects/ae-assets.json (BL-22:
++    logo or image files an AE build left out), output/from_website/current.json (Addendum J).
+     A new producer is one line in PROJECT_PRODUCERS / CLIENT_PRODUCERS.
+   * Derived from the state that exists today:
+       pick      an episode with a validated reels plan and no reels picked yet (01_analysis/selection.json): picking
+@@ -55,8 +56,8 @@ from pathlib import Path
+
+ from .common import Context, Paths, check_project_id, fmt_ts, read_json, use_context
+
+-KINDS = ("moved", "pick", "words", "verse", "medical", "religious", "business", "ai", "music", "fonts", "logo", "website",
+-         "final")
++KINDS = ("moved", "pick", "words", "verse", "medical", "religious", "business", "ai", "music", "fonts", "logo", "assets",
++         "website", "final")
+ MD_REL = "output/NEEDS-YOU.md"
+ JSON_REL = "output/needs-you.json"
+ SCHEMA_VERSION = 1
+@@ -65,7 +66,7 @@ SHOWN_WORDS = 8
+ FINAL_STATUSES = ("QC_PASSED", "READY_FOR_HUMAN_EDITOR")
+ BY_EAR = {"editor"}                    # the only `transcript-verify --by` that is the editor's own ear (allow-list)
+ TOP_FOLDERS = {"assets", "data", "output"}
+-PROJECT_PRODUCERS = ("01_analysis/motion-plan.json",)           # T4.6
++PROJECT_PRODUCERS = ("01_analysis/motion-plan.json", "04_after_effects/ae-assets.json")   # T4.6; BL-22
+ CLIENT_PRODUCERS = ("output/from_website/current.json",)        # Addendum J (website run)
+ PRODUCER_OWNS = {"01_analysis/motion-plan.json": {"music"}}     # derived kinds the producer's key replaces
+ FSI, PDI = "⁨", "⁩"
+@@ -84,6 +85,7 @@ HEAD = {"pick": ("اختار الريلز", "Pick the reels"),
+         "music": ("الموسيقى", "Music"),
+         "fonts": ("الخطوط", "Fonts"),
+         "logo": ("اللوجو", "Logo"),
++        "assets": ("ملفات ناقصة في الأفتر إفكتس", "Files missing from After Effects"),
+         "website": ("من موقع العميل", "From the client's website"),
+         "final": ("المكس والرندر النهائي", "Final mix and render"),
+         "moved": ("موافقات تتعمل تاني بعد نقل العميل", "Approvals to give again after the client moved")}
+diff --git a/whynot-cut/schemas/needs-you.schema.json b/whynot-cut/schemas/needs-you.schema.json
+index 2935d8b0..1990628b 100644
+--- a/whynot-cut/schemas/needs-you.schema.json
++++ b/whynot-cut/schemas/needs-you.schema.json
+@@ -53,7 +53,7 @@
+       "properties": {
+         "id": {"type": "string", "pattern": "^[0-9a-f]{12}$", "description": "stable: from (source, kind, ref)"},
+         "kind": {"enum": ["moved", "pick", "words", "verse", "medical", "religious", "business", "ai", "music", "fonts", "logo",
+-                          "website", "final"],
++                          "assets", "website", "final"],
+                  "description": "every item is for the editor (this file lists what only the editor can do), so no `who` field; verse = a recited Quran verse the editor adds by hand (manual verse), never with its words; moved = an approval a client move voided on purpose (client_move.still_void)"},
+         "text": {"type": "string", "minLength": 1, "maxLength": 600, "description": "English, one sentence"},

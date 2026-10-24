@@ -115,6 +115,16 @@ is ≈ 1.4 s slower. Keep routine prompts narrow. If a routine misbehaves, open 
   Builder A (21:4x) to finish only the step in flight, checkpoint, start no new heavy job and drop their other queued
   jobs. **Lesson:** R8 step 4 re-enables the watchdog only as the LAST step of Phase 8 (it wakes every Gate 4 track
   at once), with the queue and RAM checked first. `whynot-cut-hq-intake` stays off until then too.
+- 2026-10-24 ~04:25: **owner pause (Yunus: «وقف شغل دلوقتي علي كل حاجه … احفظ كل حاجه قبل ما تقفل»).** Routines
+  auto-resume-2, hq-intake, primary-report-2 disabled (h11-reauth-reminder 10-26 11:00 left on; the TWN one-off is not
+  ours). Both helpers: STOP written, AUTO-ON removed (copy kept as `AUTO-ON.before-owner-pause-20261024`). Heavy queue:
+  FREEZE file, so no waiting ticket starts; the 2 running suites (review-BL-04, t29-rb2-suite) finish and keep logs.
+  The execution chat was told to have the executor, Builder A and Adobe write resume checkpoints and stop (its note:
+  `inbox/master/2026-10-24-pause-checkpoint-execution.md`). Nothing deleted, nothing half-done committed.
+  Undo (only on Yunus's word in the master chat): (1) delete `D:\ClaudeData\Temp\wnc-locks\FREEZE`;
+  (2) Yunus clicks the desktop **WhyNot - Helper 1 AUTO** and **Helper 2 AUTO** shortcuts (Claude does not start helper
+  loops; the STOP files are cleared by the loop start); (3) switch the 3 routines back on (auto-resume-2 LAST, after
+  the queue and RAM are checked); (4) the execution chat resumes the tracks from their checkpoints.
 - 2026-10-22 04:15: **planned full stop (owner, AI-infra restart D1).** Routines auto-resume-2, hq-intake,
   primary-report-2 and the 10:00 one-time remeasure disabled; both helpers STOP + AUTO-ON removed; Windows tasks
   WNC-Queue and API-lanes keepalive disabled; running suites left to finish; Yunus restarts the Claude app. Record and
