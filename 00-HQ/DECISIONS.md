@@ -108,3 +108,15 @@ ACCEPTED · SUPERSEDED · PROPOSED.
   an inbox file. Handoff: `inbox/master/2026-10-23-phase9-master-handoff.md`.
 - **Trade-off:** two chats, so the boundary is written down: the master owns the files, and execution owns the
   executor/builder conversations. This keeps D-001: still one master.
+
+## D-014 · 2026-10-24 · BL-02: the GPLv3 §7 NVIDIA permission stays narrow
+- **Context:** BL-02 r2 review P2-2: the owner-approved §7 text (2026-10-18) covers only the NVIDIA CUDA/cuDNN
+  libraries inside the PyTorch packages. Row B6, the cuBLAS 12 that `reel gpu-enable` fetches and ctranslate2 loads
+  into the same process, is outside it. The master asked Yunus whether to widen the text.
+- **Chosen (owner, master chat 2026-10-24 ~04:20):** «لأ، سيب نص §7 زي ما هو (PyTorch بس)». The text is not widened.
+- **Consequence:** B6 is an executor item for the Gate 4 licence review (Opus). The tag needs one of these, recorded
+  in the gate record: (a) GPU transcription loads only the NVIDIA libraries shipped inside the PyTorch packages
+  (P47: `torch/lib` already holds cuBLAS), so B6 is no longer fetched; or (b) B6 stays as a written known limit with
+  the reviewer's reasoning. A wider permission needs a new owner yes. BL-02's DRAFT records the decision as closed.
+- **Trade-off:** a smaller permission keeps the licence change minimal, as the owner asked on 2026-10-18 («بما لا
+  يضرنا باي شكل»); the cost is one more gate item for the executor.
