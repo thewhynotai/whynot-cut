@@ -1,11 +1,14 @@
 # STATUS (edited by the MASTER only)
 
-## PAUSED by the owner: 2026-10-24 ~04:25 Cairo
+## PAUSED by the owner: 2026-10-24 ~05:45 Cairo
 - Yunus stopped all work («وقف شغل دلوقتي علي كل حاجه»). Routines off, both helpers STOPPED, heavy queue FROZEN,
-  execution tracks told to checkpoint and stop. Undo steps: `AUTOMATION_RUNBOOK.md` incident 2026-10-24 ~04:25.
+  execution tracks told to checkpoint and stop. Undo steps: `AUTOMATION_RUNBOOK.md` incident 2026-10-24 ~05:45.
 - State at the pause: Gate 4 ≈ 60%; `release/3.0` local `85bc1d75`, 7 commits ahead of GitHub `56f946b0`, not pushed;
   37 uncommitted files in the executor tree (rounds in progress, kept on disk). BL-02 §7 decided (D-014).
   Running at the pause (left to finish): review-BL-04 and t29-rb2-suite. Waiting tickets stay queued behind FREEZE.
+  On resume, before lifting FREEZE: the helper tickets `peer-BL-04` and `h2-BL-22` were queued by helper runs the
+  STOP ended, so check their owners (RUNBOOK §5b) and drop orphans. Execution resume order:
+  `inbox/master/2026-10-24-pause-checkpoint-execution.md`.
 
 ## Now: 2026-10-23 05:30 Cairo (evidence-checked by the plan chat `local_263cabbf`; **master from 05:40 = `local_a36b6974`**, D-013)
 - **Milestone:** M1 = Gate 4 → tag `v3.0.0-p4` (target Tue 27 Oct; about 55%). M0 (AI-infra restart, Phases 0–8)
